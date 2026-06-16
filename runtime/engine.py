@@ -65,13 +65,16 @@ class AgentLoop:
         return bool(getattr(self.registry.get(call.name), "requires_approval", False))
 
     async def run(self, user_input):
-        self.state.append(Message.user(user_input))
+        # AgentStarted 先于任何写盘动作发出：它只需 session_id、不会失败，
+        # 从而即便入口持久化失败也能保住 AgentStarted→AgentEnded 闭合。
         yield ev.AgentStarted(self.state.session_id)
         reason = StopReason.MAX_TURNS
         error = None
         detail = None
         last_assistant_id = None
         try:
+            # 持久化用户消息纳入 try：转录写盘失败也收敛为 FATAL，不逃出生成器（§14.10）。
+            self.state.append(Message.user(user_input))
             for turn in range(self.max_turns):
                 # 安全点：仅在完整消息之间应用转向、暂停与中断。
                 if self.control:

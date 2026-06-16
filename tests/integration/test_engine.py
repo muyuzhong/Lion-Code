@@ -69,6 +69,10 @@ async def test_token_budget_stops_loop(tmp_path):
     assert events[-1].reason == "token_budget"
     assert events[-1].result.reason is StopReason.TOKEN_BUDGET
     assert events[-1].result.error is None and events[-1].result.detail is None
+    # 预算在轮次顶部命中：final_message_id 指向命中前已产出的最后一条 assistant
+    # 消息（messages[-1] 是 tool_results，role=user，不能用它断言）。
+    last_assistant = [m for m in loop.state.messages if m.role == "assistant"][-1]
+    assert events[-1].result.final_message_id == last_assistant.message_id
 
 
 async def test_max_turns(tmp_path):
@@ -77,6 +81,9 @@ async def test_max_turns(tmp_path):
     assert events[-1].reason == "max_turns"
     assert events[-1].result.reason is StopReason.MAX_TURNS
     assert events[-1].result.error is None and events[-1].result.detail is None
+    # 收尾时 messages[-1] 是 tool_results（role=user）；final_message_id 必须是最后一条 assistant。
+    last_assistant = [m for m in loop.state.messages if m.role == "assistant"][-1]
+    assert events[-1].result.final_message_id == last_assistant.message_id
 
 
 async def test_max_tokens_is_not_reported_as_completed(tmp_path):
@@ -86,6 +93,8 @@ async def test_max_tokens_is_not_reported_as_completed(tmp_path):
     assert events[-1].reason == "max_tokens"
     assert events[-1].result.reason is StopReason.MAX_TOKENS
     assert events[-1].result.error is None
+    # 截断仍产出了 assistant 消息：final_message_id 指向它，而非 None。
+    assert events[-1].result.final_message_id == [m for m in loop.state.messages if m.role == "assistant"][-1].message_id
 
 
 async def test_incomplete_provider_stream_is_not_reported_as_completed(tmp_path):
@@ -137,4 +146,21 @@ async def test_fatal_exception_does_not_escape_generator(tmp_path):
     result = events[-1].result
     assert result.reason is StopReason.FATAL
     assert result.error and "boom" in result.error
+    assert result.final_message_id is None
+
+
+async def test_entry_transcript_write_failure_converges_to_fatal(tmp_path):
+    # §14.10 不变量必须覆盖入口阶段：连「持久化用户消息」失败（转录写盘权限/
+    # 磁盘错误）时，run() 也要收敛为 AgentEnded(FATAL)，绝不让异常逃出内核生成器。
+    class FailingState(SessionState):
+        def append(self, message):
+            raise OSError("disk full")
+
+    loop, _ = make_loop(tmp_path, [MockProvider.text_turn("不会被触达")])
+    loop.state = FailingState(transcript_dir=str(tmp_path))
+    events = await collect(loop.run("hi"))  # 不外抛本身就是被测不变量
+    assert isinstance(events[-1], ev.AgentEnded)
+    result = events[-1].result
+    assert result.reason is StopReason.FATAL
+    assert result.error and "disk full" in result.error
     assert result.final_message_id is None
