@@ -15,6 +15,7 @@ from nanoagent.agent.events import (
     TurnEnd,
     TurnStart,
 )
+from nanoagent.agent.loop import AgentLoopConfig, agent_loop
 from nanoagent.agent.messages import (
     AgentMessage,
     ConvertToLlm,
@@ -56,4 +57,7 @@ __all__ = [
     "ToolExecutionStart",
     "ToolExecutionUpdate",
     "ToolExecutionEnd",
+    # loop
+    "AgentLoopConfig",
+    "agent_loop",
 ]
