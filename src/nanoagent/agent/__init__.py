@@ -1,5 +1,6 @@
 """nanoagent.agent — runtime: AgentMessage, loop, tools, control, Agent."""
 
+from nanoagent.agent.context import TransformContext, assemble_context
 from nanoagent.agent.control import AbortSignal, AllowAll, ControlSource
 from nanoagent.agent.events import (
     AgentEnd,
@@ -40,6 +41,9 @@ __all__ = [
     "AbortSignal",
     "ControlSource",
     "AllowAll",
+    # context
+    "assemble_context",
+    "TransformContext",
     # events
     "AgentEvent",
     "AgentStart",
