@@ -1,5 +1,6 @@
 """nanoagent.agent — runtime: AgentMessage, loop, tools, control, Agent."""
 
+from nanoagent.agent.control import AbortSignal, AllowAll, ControlSource
 from nanoagent.agent.events import (
     AgentEnd,
     AgentEvent,
@@ -35,6 +36,10 @@ __all__ = [
     "AgentTool",
     "AgentToolResult",
     "execute_tool_calls",
+    # control
+    "AbortSignal",
+    "ControlSource",
+    "AllowAll",
     # events
     "AgentEvent",
     "AgentStart",
