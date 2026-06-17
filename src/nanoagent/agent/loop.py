@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from nanoagent.ai import Model, StreamAccumulator, StreamOptions, stream
+from nanoagent.ai import StopReason as WireStopReason
 from nanoagent.agent.context import TransformContext, assemble_context
 from nanoagent.agent.control import ControlSource
 from nanoagent.agent.events import (
@@ -13,12 +14,14 @@ from nanoagent.agent.events import (
     MessageEnd,
     MessageStart,
     MessageUpdate,
+    ToolExecutionEnd,
+    ToolExecutionStart,
     TurnEnd,
     TurnStart,
 )
 from nanoagent.agent.messages import AgentMessage, ConvertToLlm, default_convert_to_llm
 from nanoagent.agent.result import RunResult, StopReason
-from nanoagent.agent.tools import AgentTool
+from nanoagent.agent.tools import AgentTool, execute_tool_calls
 
 
 @dataclass
@@ -45,6 +48,20 @@ def _options(config: AgentLoopConfig, signal: Any) -> StreamOptions:
     )
 
 
+async def _stream_one_turn(model, ctx, stream_fn, options):
+    acc = StreamAccumulator(model_id=model.id, provider=model.provider, api=model.api)
+    assistant = None
+    async for event in stream_fn(model, ctx, options):
+        acc.add(event)
+        if event.type == "start":
+            yield ("message_start", acc.message)
+        elif event.type in ("done", "error"):
+            assistant = event.message
+        else:
+            yield ("message_update", acc.message, event)
+    yield ("__assistant__", assistant)
+
+
 async def agent_loop(
     *,
     prompts: list[AgentMessage],
@@ -59,31 +76,82 @@ async def agent_loop(
     stream_fn = config.stream_fn or stream
 
     yield AgentStart()
-    yield TurnStart()
     for p in prompts:
         yield MessageStart(message=p)
         yield MessageEnd(message=p)
 
-    ctx = await assemble_context(
-        system_prompt, history, tools, config.convert_to_llm, config.transform_context, signal
-    )
-    acc = StreamAccumulator(
-        model_id=config.model.id, provider=config.model.provider, api=config.model.api
-    )
-    assistant = None
-    async for event in stream_fn(config.model, ctx, _options(config, signal)):
-        acc.add(event)
-        if event.type == "start":
-            yield MessageStart(message=acc.message)
-        elif event.type in ("done", "error"):
-            assistant = event.message
-        else:
-            yield MessageUpdate(message=acc.message, assistant_event=event)
-    assert assistant is not None
-    history.append(assistant)
-    produced.append(assistant)
-    yield MessageEnd(message=assistant)
-    yield TurnEnd(message=assistant, tool_results=[])
+    turn = 0
+    while True:
+        if signal is not None and signal.aborted:
+            last_id = produced[-1].id if produced else None
+            yield AgentEnd(
+                messages=produced,
+                result=RunResult(reason=StopReason.ABORTED, final_message_id=last_id),
+            )
+            return
+        if turn >= config.max_turns:
+            last_id = produced[-1].id if produced else None
+            yield AgentEnd(
+                messages=produced,
+                result=RunResult(reason=StopReason.MAX_TURNS, final_message_id=last_id),
+            )
+            return
+        turn += 1
+        yield TurnStart()
 
-    result = RunResult(reason=StopReason.COMPLETED, final_message_id=assistant.id)
-    yield AgentEnd(messages=produced, result=result)
+        ctx = await assemble_context(
+            system_prompt, history, tools, config.convert_to_llm, config.transform_context, signal
+        )
+        assistant = None
+        async for item in _stream_one_turn(config.model, ctx, stream_fn, _options(config, signal)):
+            if item[0] == "message_start":
+                yield MessageStart(message=item[1])
+            elif item[0] == "message_update":
+                yield MessageUpdate(message=item[1], assistant_event=item[2])
+            else:
+                assistant = item[1]
+        assert assistant is not None
+        history.append(assistant)
+        produced.append(assistant)
+        yield MessageEnd(message=assistant)
+
+        if assistant.stop_reason in (WireStopReason.ERROR, WireStopReason.ABORTED):
+            yield TurnEnd(message=assistant, tool_results=[])
+            reason = (
+                StopReason.ABORTED
+                if assistant.stop_reason == WireStopReason.ABORTED
+                else StopReason.ERROR
+            )
+            yield AgentEnd(
+                messages=produced,
+                result=RunResult(
+                    reason=reason, final_message_id=assistant.id, error=assistant.error_message
+                ),
+            )
+            return
+
+        tool_calls = [c for c in assistant.content if getattr(c, "type", None) == "toolCall"]
+        runnable = assistant.stop_reason in (WireStopReason.TOOL_USE, WireStopReason.STOP)
+        if not (runnable and tool_calls):
+            yield TurnEnd(message=assistant, tool_results=[])
+            yield AgentEnd(
+                messages=produced,
+                result=RunResult(reason=StopReason.COMPLETED, final_message_id=assistant.id),
+            )
+            return
+
+        for c in tool_calls:
+            yield ToolExecutionStart(tool_call_id=c.id, tool_name=c.name, args=c.arguments)
+        tool_results = await execute_tool_calls(
+            tool_calls, tools, signal=signal, before_tool_call=config.before_tool_call
+        )
+        for c, r in zip(tool_calls, tool_results):
+            yield ToolExecutionEnd(
+                tool_call_id=c.id, tool_name=c.name, result=r, is_error=r.is_error
+            )
+        for r in tool_results:
+            yield MessageStart(message=r)
+            history.append(r)
+            produced.append(r)
+            yield MessageEnd(message=r)
+        yield TurnEnd(message=assistant, tool_results=tool_results)
