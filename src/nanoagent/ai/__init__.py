@@ -33,6 +33,13 @@ from nanoagent.ai.messages import (
 )
 from nanoagent.ai.model import Model
 from nanoagent.ai.options import StreamOptions
+from nanoagent.ai.provider import (
+    Provider,
+    clear_providers,
+    get_provider,
+    register_provider,
+    stream,
+)
 from nanoagent.ai.stop_reason import StopReason
 from nanoagent.ai.tools import Tool
 
@@ -75,4 +82,10 @@ __all__ = [
     "Tool",
     "ProviderError",
     "StreamOptions",
+    # provider
+    "Provider",
+    "register_provider",
+    "get_provider",
+    "clear_providers",
+    "stream",
 ]
