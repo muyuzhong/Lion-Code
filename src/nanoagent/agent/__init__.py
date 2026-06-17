@@ -20,6 +20,7 @@ from nanoagent.agent.messages import (
     default_convert_to_llm,
 )
 from nanoagent.agent.result import RunResult, StopReason
+from nanoagent.agent.tools import AgentTool, AgentToolResult, execute_tool_calls
 
 __all__ = [
     # messages
@@ -30,6 +31,10 @@ __all__ = [
     # result
     "RunResult",
     "StopReason",
+    # tools
+    "AgentTool",
+    "AgentToolResult",
+    "execute_tool_calls",
     # events
     "AgentEvent",
     "AgentStart",
