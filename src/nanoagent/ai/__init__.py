@@ -16,6 +16,7 @@ from nanoagent.ai.events import (
     ToolCallEnd,
     ToolCallStart,
 )
+from nanoagent.ai.errors import ProviderError
 from nanoagent.ai.messages import (
     AssistantContent,
     AssistantMessage,
@@ -30,7 +31,10 @@ from nanoagent.ai.messages import (
     UserMessage,
     Usage,
 )
+from nanoagent.ai.model import Model
+from nanoagent.ai.options import StreamOptions
 from nanoagent.ai.stop_reason import StopReason
+from nanoagent.ai.tools import Tool
 
 __all__ = [
     # stop reason
@@ -66,4 +70,9 @@ __all__ = [
     # accumulator
     "StreamAccumulator",
     "accumulate",
+    # model / tool / errors / options
+    "Model",
+    "Tool",
+    "ProviderError",
+    "StreamOptions",
 ]
