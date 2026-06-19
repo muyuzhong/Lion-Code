@@ -66,6 +66,18 @@ class AssistantMessage:
     role: Literal["assistant"] = "assistant"
     id: str = field(default_factory=lambda: new_id("msg"))
 
+    @classmethod
+    def empty(cls, model: str, provider: str, api: str) -> AssistantMessage:
+        """Seed an in-progress assistant message (no content yet) for streaming."""
+        return cls(
+            content=[],
+            model=model,
+            provider=provider,
+            api=api,
+            usage=Usage(),
+            stop_reason=StopReason.STOP,
+        )
+
 
 @dataclass
 class ToolResultMessage:

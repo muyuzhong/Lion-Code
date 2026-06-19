@@ -48,6 +48,19 @@ def _options(config: AgentLoopConfig, signal: Any) -> StreamOptions:
     )
 
 
+def _finish(
+    produced: list[AgentMessage],
+    reason: StopReason,
+    final_message_id: str | None,
+    error: str | None = None,
+) -> AgentEnd:
+    """Build the single terminal event: every run ends with one AgentEnd + RunResult."""
+    return AgentEnd(
+        messages=produced,
+        result=RunResult(reason=reason, final_message_id=final_message_id, error=error),
+    )
+
+
 async def _stream_one_turn(model, ctx, stream_fn, options):
     acc = StreamAccumulator(model_id=model.id, provider=model.provider, api=model.api)
     assistant = None
@@ -98,6 +111,15 @@ async def agent_loop(
             return
         turn += 1
         yield TurnStart()
+
+        # Safety point: inject queued steering messages at the turn boundary
+        # (minimal version: turn start only) so they reach the model this turn.
+        if config.get_steering_messages is not None:
+            for steered in await config.get_steering_messages():
+                history.append(steered)
+                produced.append(steered)
+                yield MessageStart(message=steered)
+                yield MessageEnd(message=steered)
 
         ctx = await assemble_context(
             system_prompt, history, tools, config.convert_to_llm, config.transform_context, signal

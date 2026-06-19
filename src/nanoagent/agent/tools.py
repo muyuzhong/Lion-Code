@@ -23,13 +23,18 @@ class AgentTool(ABC):
     parameters: type[BaseModel]
     label: str = ""
     concurrency: Literal["shared", "exclusive"] = "shared"
+    _wire: Tool | None = None
 
     def to_wire(self) -> Tool:
-        return Tool(
-            name=self.name,
-            description=self.description,
-            parameters=self.parameters.model_json_schema(),
-        )
+        # Tool definition is static; model_json_schema() isn't free, so build
+        # the wire shape once and reuse it across turns/runs.
+        if self._wire is None:
+            self._wire = Tool(
+                name=self.name,
+                description=self.description,
+                parameters=self.parameters.model_json_schema(),
+            )
+        return self._wire
 
     @abstractmethod
     async def execute(

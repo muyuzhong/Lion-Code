@@ -17,7 +17,7 @@ from nanoagent.ai.events import (
     ToolCallStart,
 )
 from nanoagent.ai.errors import ProviderError
-from nanoagent.ai.messages import AssistantMessage, Context, Message, TextContent, ToolCall, Usage
+from nanoagent.ai.messages import AssistantMessage, Context, Message, TextContent, ToolCall
 from nanoagent.ai.model import Model
 from nanoagent.ai.options import StreamOptions
 from nanoagent.ai.provider import register_provider
@@ -110,14 +110,7 @@ class OpenAIProvider:
         if opts.api_key:
             headers["Authorization"] = f"Bearer {opts.api_key}"
         payload = encode_request(model, context, options)
-        msg = AssistantMessage(
-            content=[],
-            model=model.id,
-            provider=model.provider,
-            api=model.api,
-            usage=Usage(),
-            stop_reason=StopReason.STOP,
-        )
+        msg = AssistantMessage.empty(model.id, model.provider, model.api)
         yield StreamStart()
         text_parts: list[str] = []
         tool_acc: dict[int, dict] = {}

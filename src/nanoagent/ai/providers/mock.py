@@ -14,7 +14,7 @@ from nanoagent.ai.events import (
     ToolCallEnd,
     ToolCallStart,
 )
-from nanoagent.ai.messages import AssistantMessage, Context, TextContent, ToolCall, Usage
+from nanoagent.ai.messages import AssistantMessage, Context, TextContent, ToolCall
 from nanoagent.ai.model import Model
 from nanoagent.ai.options import StreamOptions
 from nanoagent.ai.provider import register_provider
@@ -54,14 +54,7 @@ class MockModel(Model):
     async def _run(self, context: Context) -> AsyncIterator[AssistantMessageEvent]:
         self.calls.append(context)
         resp = self._next_response(context)
-        msg = AssistantMessage(
-            content=[],
-            model=self.id,
-            provider=self.provider,
-            api=self.api,
-            usage=Usage(),
-            stop_reason=StopReason.STOP,
-        )
+        msg = AssistantMessage.empty(self.id, self.provider, self.api)
         yield StreamStart()
         for i, block in enumerate(resp.get("content", [])):
             if isinstance(block, str):

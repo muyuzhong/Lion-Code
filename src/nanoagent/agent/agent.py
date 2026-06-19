@@ -110,8 +110,7 @@ class Agent:
             ):
                 self._emit(event)
                 if isinstance(event, AgentEnd):
-                    for m in event.messages:
-                        self.state.messages.append(m)
+                    self.state.messages.extend(event.messages)
                     result = event.result
         finally:
             self.state.is_streaming = False

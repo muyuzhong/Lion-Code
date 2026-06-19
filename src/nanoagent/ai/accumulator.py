@@ -8,23 +8,14 @@ from nanoagent.ai.messages import (
     TextContent,
     ThinkingContent,
     ToolCall,
-    Usage,
 )
-from nanoagent.ai.stop_reason import StopReason
 
 
 class StreamAccumulator:
     """Fold incremental events into one AssistantMessage (consumer/UI helper)."""
 
     def __init__(self, model_id: str, provider: str, api: str):
-        self._msg = AssistantMessage(
-            content=[],
-            model=model_id,
-            provider=provider,
-            api=api,
-            usage=Usage(),
-            stop_reason=StopReason.STOP,
-        )
+        self._msg = AssistantMessage.empty(model_id, provider, api)
 
     @property
     def message(self) -> AssistantMessage:
