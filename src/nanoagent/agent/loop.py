@@ -93,6 +93,35 @@ async def agent_loop(
         yield MessageStart(message=p)
         yield MessageEnd(message=p)
 
+    try:
+        async for event in _run_turns(
+            history=history,
+            produced=produced,
+            system_prompt=system_prompt,
+            tools=tools,
+            config=config,
+            stream_fn=stream_fn,
+            signal=signal,
+        ):
+            yield event
+    except Exception as exc:
+        # Any runtime-hook failure (transform_context, convert_to_llm, stream_fn,
+        # request_approval, before_tool_call, ...) settles as one ERROR AgentEnd
+        # instead of letting the async generator crash.
+        last_id = produced[-1].id if produced else None
+        yield _finish(produced, StopReason.ERROR, last_id, error=str(exc))
+
+
+async def _run_turns(
+    *,
+    history: list[AgentMessage],
+    produced: list[AgentMessage],
+    system_prompt: list[str],
+    tools: list[AgentTool],
+    config: AgentLoopConfig,
+    stream_fn: Any,
+    signal: Any,
+) -> AsyncIterator[AgentEvent]:
     turn = 0
     while True:
         if signal is not None and signal.aborted:
@@ -136,6 +165,19 @@ async def agent_loop(
         history.append(assistant)
         produced.append(assistant)
         yield MessageEnd(message=assistant)
+
+        # Re-check the abort signal after streaming: a provider that does not
+        # cooperatively stop on options.signal will have streamed to completion
+        # with a normal stop reason even though the run was aborted mid-stream.
+        # Honor the abort here, before processing tool calls, so we never execute
+        # tools (or start another turn) after cancellation.
+        if signal is not None and signal.aborted:
+            yield TurnEnd(message=assistant, tool_results=[])
+            yield AgentEnd(
+                messages=produced,
+                result=RunResult(reason=StopReason.ABORTED, final_message_id=assistant.id),
+            )
+            return
 
         if assistant.stop_reason in (WireStopReason.ERROR, WireStopReason.ABORTED):
             yield TurnEnd(message=assistant, tool_results=[])
