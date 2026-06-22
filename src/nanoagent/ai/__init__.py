@@ -38,6 +38,7 @@ from nanoagent.ai.provider import (
     clear_providers,
     get_provider,
     register_provider,
+    registered_provider_apis,
     stream,
 )
 from nanoagent.ai.stop_reason import StopReason
@@ -85,6 +86,7 @@ __all__ = [
     # provider
     "Provider",
     "register_provider",
+    "registered_provider_apis",
     "get_provider",
     "clear_providers",
     "stream",

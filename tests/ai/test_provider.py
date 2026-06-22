@@ -18,3 +18,15 @@ def test_get_provider_unknown_raises():
     clear_providers()
     with pytest.raises(KeyError):
         get_provider("nope")
+
+
+def test_registered_provider_apis_returns_sorted_snapshot():
+    from nanoagent.ai import registered_provider_apis
+
+    clear_providers()
+    register_provider("z-api", object())
+    register_provider("a-api", object())
+
+    apis = registered_provider_apis()
+
+    assert apis == ("a-api", "z-api")

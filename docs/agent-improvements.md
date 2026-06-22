@@ -22,3 +22,14 @@
 - 验证：`pytest tests/ai/test_accumulator.py -q`，3 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest -q`，59 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
+
+## 2026-06-23 - ai provider 注册表只读查询
+
+- 模块：`nanoagent.ai`
+- 改动：新增 `registered_provider_apis()`，返回当前已注册 provider API 名称的稳定 tuple 快照，供 harness 或测试做机制层 introspection。
+- 约束：该函数只暴露注册键，不选择默认 provider，不处理 API key，也不引入产品策略。
+- 测试：先新增 `test_registered_provider_apis_returns_sorted_snapshot` 并确认因缺少导出失败，再做最小实现。
+- 验证：`pytest tests/ai/test_provider.py::test_registered_provider_apis_returns_sorted_snapshot -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/ai/test_provider.py -q`，3 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest -q`，60 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。

@@ -27,6 +27,10 @@ def get_provider(api: str) -> Provider:
     return _REGISTRY[api]
 
 
+def registered_provider_apis() -> tuple[str, ...]:
+    return tuple(sorted(_REGISTRY))
+
+
 def clear_providers() -> None:
     _REGISTRY.clear()
 
