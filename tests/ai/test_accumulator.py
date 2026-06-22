@@ -8,6 +8,8 @@ from nanoagent.ai import (
     TextDelta,
     TextEnd,
     TextStart,
+    ThinkingDelta,
+    ThinkingStart,
     Usage,
     accumulate,
 )
@@ -54,3 +56,16 @@ def test_stream_accumulator_exposes_text_delta_before_text_end():
     acc.add(TextDelta(content_index=0, delta="llo"))
 
     assert acc.message.content[0].text == "hello"
+
+
+def test_stream_accumulator_exposes_thinking_delta_before_thinking_end():
+    from nanoagent.ai.accumulator import StreamAccumulator
+
+    acc = StreamAccumulator(model_id="m", provider="mock", api="mock")
+
+    acc.add(StreamStart())
+    acc.add(ThinkingStart(content_index=0))
+    acc.add(ThinkingDelta(content_index=0, delta="plan "))
+    acc.add(ThinkingDelta(content_index=0, delta="step"))
+
+    assert acc.message.content[0].thinking == "plan step"

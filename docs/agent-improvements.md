@@ -66,3 +66,14 @@
 - 验证：`pytest tests/agent/test_tools.py -q`，5 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest -q`，64 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
+
+## 2026-06-23 - ai 流式 thinking 增量可见
+
+- 模块：`nanoagent.ai`
+- 改动：`StreamAccumulator` 现在会在收到 `ThinkingDelta` 时追加到当前 `ThinkingContent`，让中间累计消息在 `ThinkingEnd` 前也能反映已到达 thinking 内容。
+- 约束：`ThinkingEnd` 仍保留最终内容覆盖逻辑；不改 provider 输出格式，也不处理 tool-call 增量。
+- 测试：先新增 `test_stream_accumulator_exposes_thinking_delta_before_thinking_end` 并确认失败，再做最小实现。
+- 验证：`pytest tests/ai/test_accumulator.py::test_stream_accumulator_exposes_thinking_delta_before_thinking_end -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/ai/test_accumulator.py -q`，4 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest -q`，65 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
