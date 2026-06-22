@@ -33,3 +33,14 @@
 - 验证：`pytest tests/ai/test_provider.py -q`，3 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest -q`，60 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
+
+## 2026-06-23 - utils 根 logger 名称规范化
+
+- 模块：`nanoagent.utils`
+- 改动：`get_logger("")` 现在返回 `nanoagent` 根 logger，避免生成 `nanoagent.` 这种带尾点的名称。
+- 约束：普通子 logger 仍按 `nanoagent.<name>` 命名，不添加 handler，不引入 harness 日志策略。
+- 测试：先新增 `test_get_logger_returns_package_root_for_empty_name` 并确认失败，再做一行最小实现。
+- 验证：`pytest tests/utils/test_logging.py -q`，2 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/utils -q`，3 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest -q`，62 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
