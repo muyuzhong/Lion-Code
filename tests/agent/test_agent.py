@@ -3,7 +3,13 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from nanoagent.ai import TextContent, UserMessage
+from nanoagent.ai import (
+    AssistantMessage,
+    StopReason as WireStopReason,
+    TextContent,
+    Usage,
+    UserMessage,
+)
 from nanoagent.ai.provider import clear_providers
 from nanoagent.ai.providers.mock import create_mock_model, register_mock
 from nanoagent.agent.agent import Agent
@@ -165,6 +171,27 @@ async def test_pending_tool_calls_tracked_during_execution():
 
 
 @pytest.mark.asyncio
+async def test_hook_error_clears_in_flight_state():
+    clear_providers()
+    register_mock()
+    mock = create_mock_model(
+        responses=[{"content": [{"type": "toolCall", "name": "noop", "arguments": {}}]}]
+    )
+
+    class BoomControl:
+        async def request_approval(self, tool_call, tier):
+            raise RuntimeError("approval boom")
+
+    agent = Agent(model=mock, tools=[_NoopTool()], control=BoomControl())
+    result = await agent.prompt("go")
+
+    assert result.reason is StopReason.ERROR
+    assert agent.state.pending_tool_calls == {}
+    assert agent.state.streaming_message is None
+    assert agent.state.is_streaming is False
+
+
+@pytest.mark.asyncio
 async def test_wait_for_idle_waits_for_active_run():
     clear_providers()
     register_mock()
@@ -197,6 +224,33 @@ async def test_streaming_message_visible_from_assistant_message_start():
     agent.subscribe(listener)
     await agent.prompt("hello")
     assert seen == [True]
+
+
+@pytest.mark.asyncio
+async def test_assistant_prompt_is_not_exposed_as_streaming_output():
+    clear_providers()
+    register_mock()
+    mock = create_mock_model(responses=[{"content": ["generated"]}])
+    agent = Agent(model=mock)
+    injected = AssistantMessage(
+        content=[TextContent(text="history")],
+        model="injected",
+        provider="test",
+        api="test",
+        usage=Usage(),
+        stop_reason=WireStopReason.STOP,
+    )
+    observed: list[tuple[str, bool]] = []
+
+    def listener(e):
+        if e.type == "message_start" and e.message.role == "assistant":
+            observed.append((e.message.id, agent.state.streaming_message is e.message))
+
+    agent.subscribe(listener)
+    await agent.prompt(injected)
+
+    assert observed[0] == (injected.id, False)
+    assert observed[1][1] is True
 
 
 @pytest.mark.asyncio

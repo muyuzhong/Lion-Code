@@ -93,9 +93,7 @@ class Agent:
     def _reduce(self, event: AgentEvent) -> None:
         """Fold a single event into state so listeners observe up-to-date state."""
         if isinstance(event, MessageStart):
-            # The assistant message is observable as the streaming message from its
-            # start, not only once the first delta (message_update) arrives.
-            if getattr(event.message, "role", None) == "assistant":
+            if event.generated:
                 self.state.streaming_message = event.message
         elif isinstance(event, MessageEnd):
             self.state.messages.append(event.message)

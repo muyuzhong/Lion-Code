@@ -87,6 +87,10 @@ async def agent_loop(
     history: list[AgentMessage] = [*messages, *prompts]
     produced: list[AgentMessage] = [*prompts]
     stream_fn = config.stream_fn or stream
+    open_message: AgentMessage | None = None
+    open_turn = False
+    turn_message: AgentMessage | None = None
+    open_tools: dict[str, ToolExecutionStart] = {}
 
     yield AgentStart()
     for p in prompts:
@@ -103,11 +107,45 @@ async def agent_loop(
             stream_fn=stream_fn,
             signal=signal,
         ):
+            if isinstance(event, TurnStart):
+                open_turn = True
+                turn_message = None
+            elif isinstance(event, MessageStart):
+                open_message = event.message
+                if event.generated:
+                    turn_message = event.message
+            elif isinstance(event, MessageEnd):
+                if open_message is not None and open_message.id == event.message.id:
+                    open_message = None
+                if getattr(event.message, "role", None) == "assistant":
+                    turn_message = event.message
+            elif isinstance(event, ToolExecutionStart):
+                open_tools[event.tool_call_id] = event
+            elif isinstance(event, ToolExecutionEnd):
+                open_tools.pop(event.tool_call_id, None)
+            elif isinstance(event, TurnEnd):
+                open_turn = False
+                turn_message = None
             yield event
     except Exception as exc:
-        # Any runtime-hook failure (transform_context, convert_to_llm, stream_fn,
-        # request_approval, before_tool_call, ...) settles as one ERROR AgentEnd
-        # instead of letting the async generator crash.
+        # Unwind every lifecycle opened by _run_turns before settling the run.
+        # This also keeps Agent's event-derived state free of in-flight entries.
+        if open_message is not None:
+            if all(message.id != open_message.id for message in produced):
+                history.append(open_message)
+                produced.append(open_message)
+            if getattr(open_message, "role", None) == "assistant":
+                turn_message = open_message
+            yield MessageEnd(message=open_message)
+        for started in open_tools.values():
+            yield ToolExecutionEnd(
+                tool_call_id=started.tool_call_id,
+                tool_name=started.tool_name,
+                result=str(exc),
+                is_error=True,
+            )
+        if open_turn:
+            yield TurnEnd(message=turn_message, tool_results=[])
         last_id = produced[-1].id if produced else None
         yield _finish(produced, StopReason.ERROR, last_id, error=str(exc))
 
@@ -156,7 +194,7 @@ async def _run_turns(
         assistant = None
         async for item in _stream_one_turn(config.model, ctx, stream_fn, _options(config, signal)):
             if item[0] == "message_start":
-                yield MessageStart(message=item[1])
+                yield MessageStart(message=item[1], generated=True)
             elif item[0] == "message_update":
                 yield MessageUpdate(message=item[1], assistant_event=item[2])
             else:

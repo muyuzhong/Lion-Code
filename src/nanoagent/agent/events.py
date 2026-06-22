@@ -13,13 +13,17 @@ Canonical ordering::
         # per injected message s (steering; follow-up later):
         message_start(s) ; message_end(s)
         # assistant streaming:
-        message_start(assistant)
+        message_start(assistant, generated=True)
         message_update(assistant, ev)*        # assistant only
         message_end(assistant)
         # if terminal: turn_end(assistant, []) ; agent_end ; stop
         # else, tool execution phase (below)
         turn_end(assistant, tool_results)     # tool_results in source order
     agent_end(messages, result)               # exactly once, terminal
+
+If an exception interrupts an open scope, matching end events are emitted before
+``agent_end``. A ``turn_end`` may carry ``message=None`` when failure occurs
+before generated assistant output starts.
 
 Tool execution phase, for the tool calls in source order s1..sn:
   - ``tool_execution_start`` per call, in source order.
@@ -52,8 +56,9 @@ Guaranteed invariants (stable; locked by tests/agent/test_event_contract.py):
 
 Event-derived state (Agent reduces each event into AgentState before emitting,
 so subscribers observe up-to-date state):
-  - from message_start(assistant) through message_update*: ``streaming_message``
-    is the in-progress assistant message; ``is_streaming`` is True.
+  - from message_start(assistant, generated=True) through message_update*:
+    ``streaming_message`` is the in-progress assistant message;
+    ``is_streaming`` is True. Injected assistant-role messages are not streaming.
   - after message_end(m): m is in ``messages``; ``streaming_message`` is None.
   - between tool_execution_start(id) and tool_execution_end(id): id is in
     ``pending_tool_calls``.
@@ -89,7 +94,7 @@ class TurnStart:
 
 @dataclass
 class TurnEnd:
-    message: AgentMessage
+    message: AgentMessage | None
     tool_results: list[ToolResultMessage] = field(default_factory=list)
     type: str = "turn_end"
 
@@ -98,6 +103,7 @@ class TurnEnd:
 class MessageStart:
     message: AgentMessage
     type: str = "message_start"
+    generated: bool = False
 
 
 @dataclass

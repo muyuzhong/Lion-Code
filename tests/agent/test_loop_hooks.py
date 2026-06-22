@@ -1,7 +1,7 @@
 import pytest
 from pydantic import BaseModel
 
-from nanoagent.ai import TextContent, UserMessage
+from nanoagent.ai import StreamStart, TextContent, UserMessage
 from nanoagent.ai import stream as ai_stream
 from nanoagent.ai.provider import clear_providers
 from nanoagent.ai.providers.mock import create_mock_model, register_mock
@@ -36,6 +36,25 @@ async def _run(cfg, tools=None):
             config=cfg,
         )
     ]
+
+
+def _assert_balanced(events):
+    types = [event.type for event in events]
+    assert types.count("turn_start") == types.count("turn_end")
+
+    message_starts = {
+        event.message.id for event in events if event.type == "message_start"
+    }
+    message_ends = {event.message.id for event in events if event.type == "message_end"}
+    assert message_starts == message_ends
+
+    tool_starts = {
+        event.tool_call_id for event in events if event.type == "tool_execution_start"
+    }
+    tool_ends = {
+        event.tool_call_id for event in events if event.type == "tool_execution_end"
+    }
+    assert tool_starts == tool_ends
 
 
 @pytest.mark.asyncio
@@ -83,6 +102,28 @@ async def test_stream_fn_error_maps_to_run_error():
 
 
 @pytest.mark.asyncio
+async def test_stream_fn_error_after_start_closes_message_and_turn():
+    clear_providers()
+    register_mock()
+    mock = create_mock_model()
+
+    async def boom(model, ctx, options):
+        yield StreamStart()
+        raise RuntimeError("stream boom after start")
+
+    events = await _run(AgentLoopConfig(model=mock, stream_fn=boom))
+
+    _assert_balanced(events)
+    assert events[-1].result.reason is StopReason.ERROR
+    assistant_end = next(
+        event
+        for event in events
+        if event.type == "message_end" and event.message.role == "assistant"
+    )
+    assert events[-1].result.final_message_id == assistant_end.message.id
+
+
+@pytest.mark.asyncio
 async def test_request_approval_error_maps_to_run_error():
     clear_providers()
     register_mock()
@@ -97,6 +138,7 @@ async def test_request_approval_error_maps_to_run_error():
     events = await _run(AgentLoopConfig(model=mock, control=BoomControl()), tools=[_Tool()])
     assert events[-1].result.reason is StopReason.ERROR
     assert "approval boom" in (events[-1].result.error or "")
+    _assert_balanced(events)
 
 
 @pytest.mark.asyncio
@@ -113,6 +155,7 @@ async def test_before_tool_call_error_maps_to_run_error():
     events = await _run(AgentLoopConfig(model=mock, before_tool_call=boom), tools=[_Tool()])
     assert events[-1].result.reason is StopReason.ERROR
     assert "before boom" in (events[-1].result.error or "")
+    _assert_balanced(events)
 
 
 @pytest.mark.asyncio
