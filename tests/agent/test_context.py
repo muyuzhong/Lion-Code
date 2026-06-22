@@ -47,3 +47,22 @@ async def test_transform_context_runs_first():
         transform_context=drop_all,
     )
     assert ctx.messages == []
+
+
+@pytest.mark.asyncio
+async def test_transform_context_receives_message_list_snapshot():
+    original = [UserMessage(content="hi")]
+
+    async def clear_received(messages, signal=None):
+        messages.clear()
+        return []
+
+    await assemble_context(
+        system_prompt=[],
+        messages=original,
+        tools=[],
+        convert_to_llm=default_convert_to_llm,
+        transform_context=clear_received,
+    )
+
+    assert len(original) == 1

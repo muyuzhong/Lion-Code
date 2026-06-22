@@ -18,9 +18,9 @@ async def assemble_context(
     signal: Any = None,
 ) -> Context:
     """Assemble the wire Context. transform_context = compaction/pruning seam (no-op stub by default)."""
-    msgs = messages
+    msgs = list(messages)
     if transform_context is not None:
-        msgs = await transform_context(messages, signal)
+        msgs = await transform_context(msgs, signal)
     wire = convert_to_llm(msgs)
     return Context(
         system_prompt=list(system_prompt),

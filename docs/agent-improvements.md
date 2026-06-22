@@ -44,3 +44,14 @@
 - 验证：`pytest tests/utils -q`，3 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest -q`，62 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
+
+## 2026-06-23 - agent context hook 输入隔离
+
+- 模块：`nanoagent.agent`
+- 改动：`assemble_context` 传给 `transform_context` 的消息列表现在是浅拷贝，hook 对列表结构的改动不会回写到调用方持有的历史列表。
+- 约束：只隔离列表结构，不深拷贝消息对象；上下文压缩、裁剪等具体策略仍由 harness 或注入 hook 决定。
+- 测试：先新增 `test_transform_context_receives_message_list_snapshot` 并确认原列表被清空导致失败，再做最小实现。
+- 验证：`pytest tests/agent/test_context.py::test_transform_context_receives_message_list_snapshot -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/agent/test_context.py -q`，3 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest -q`，63 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
