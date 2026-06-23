@@ -20,6 +20,12 @@ def test_get_provider_unknown_raises():
         get_provider("nope")
 
 
+def test_register_provider_rejects_empty_api():
+    clear_providers()
+    with pytest.raises(ValueError, match="api must not be empty"):
+        register_provider("", object())
+
+
 def test_registered_provider_apis_returns_sorted_snapshot():
     from nanoagent.ai import registered_provider_apis
 

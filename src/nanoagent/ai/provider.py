@@ -18,6 +18,8 @@ _REGISTRY: dict[str, Provider] = {}
 
 
 def register_provider(api: str, provider: Provider) -> None:
+    if api == "":
+        raise ValueError("api must not be empty")
     _REGISTRY[api] = provider
 
 

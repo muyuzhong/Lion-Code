@@ -193,3 +193,15 @@
 - 验证：`pytest tests/agent -q`，43 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest -q`，75 passed，1 个 pytest cache 写入警告。
+
+## 2026-06-23 - ai provider registry 空 API 防护
+
+- 模块：`nanoagent.ai`
+- 改动：`register_provider` 现在拒绝空字符串 API 名，避免 provider registry 出现难以诊断的空 dispatch key。
+- 约束：不选择默认 provider，不处理 API key，也不改变已有非空 provider 注册和分发行为。
+- 测试：先新增 `test_register_provider_rejects_empty_api` 并确认当前实现未抛错导致失败，再做最小实现。
+- 验证：`pytest tests/ai/test_provider.py::test_register_provider_rejects_empty_api -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/ai/test_provider.py -q`，4 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/ai -q`，28 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest -q`，76 passed，1 个 pytest cache 写入警告。
