@@ -253,3 +253,14 @@
 - 验证：`pytest tests/ai -q`，31 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest -q`，80 passed，1 个 pytest cache 写入警告。
+
+## 2026-06-23 - utils logger 名称类型边界
+
+- 模块：`nanoagent.utils`
+- 改动：`get_logger` 现在拒绝非字符串 `name`，避免调用方意外生成 `nanoagent.None` 这类无意义 logger 名称。
+- 约束：不添加 handler、不设置日志级别、不引入 harness 日志策略；空字符串根 logger 和普通子 logger 行为保持不变。
+- 测试：先新增 `test_get_logger_rejects_non_string_name` 并确认当前实现未抛错导致失败，再做最小实现。
+- 验证：`pytest tests/utils/test_logging.py::test_get_logger_rejects_non_string_name -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/utils -q`，5 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest -q`，81 passed，1 个 pytest cache 写入警告。
