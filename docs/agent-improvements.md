@@ -133,3 +133,15 @@
 - 验证：`pytest tests/agent -q`，41 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest -q`，70 passed，1 个 pytest cache 写入警告。
+
+## 2026-06-23 - ai Context 输入列表隔离
+
+- 模块：`nanoagent.ai`
+- 改动：`Context` 构造时会浅拷贝 `system_prompt`、`messages` 和 `tools` 列表，避免调用方后续修改原列表污染已构造上下文。
+- 约束：只隔离列表结构，不深拷贝消息或工具对象；不改变 provider 选择、API key 或上下文裁剪策略。
+- 测试：先新增 `test_context_copies_input_lists` 并确认外部列表追加/清空会影响 `Context` 导致失败，再做最小实现。
+- 验证：`pytest tests/ai/test_messages.py::test_context_copies_input_lists -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/ai/test_messages.py -q`，5 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/ai -q`，25 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest -q`，71 passed，1 个 pytest cache 写入警告。

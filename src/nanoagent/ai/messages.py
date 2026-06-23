@@ -97,3 +97,8 @@ class Context:
     system_prompt: list[str] = field(default_factory=list)
     messages: list[Message] = field(default_factory=list)
     tools: list[Any] = field(default_factory=list)  # list[Tool]; Any avoids a back-dep on tools.py
+
+    def __post_init__(self) -> None:
+        self.system_prompt = list(self.system_prompt)
+        self.messages = list(self.messages)
+        self.tools = list(self.tools)

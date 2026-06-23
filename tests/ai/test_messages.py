@@ -38,3 +38,19 @@ def test_tool_result_message():
 def test_context_holds_messages():
     ctx = Context(system_prompt=["sys"], messages=[UserMessage(content="hi")])
     assert ctx.messages[0].role == "user" and ctx.tools == []
+
+
+def test_context_copies_input_lists():
+    message = UserMessage(content="hi")
+    system_prompt = ["sys"]
+    messages = [message]
+    tools = [object()]
+
+    ctx = Context(system_prompt=system_prompt, messages=messages, tools=tools)
+    system_prompt.append("later")
+    messages.clear()
+    tools.append(object())
+
+    assert ctx.system_prompt == ["sys"]
+    assert ctx.messages == [message]
+    assert len(ctx.tools) == 1
