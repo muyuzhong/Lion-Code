@@ -82,6 +82,8 @@ def encode_request(model: Model, context: Context, options: StreamOptions | None
             payload["temperature"] = options.temperature
         if options.max_tokens is not None:
             payload["max_tokens"] = options.max_tokens
+        if options.reasoning is not None:
+            payload["reasoning_effort"] = options.reasoning
     return payload
 
 

@@ -241,3 +241,15 @@
 - 验证：`pytest tests/agent -q`，44 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest -q`，79 passed，1 个 pytest cache 写入警告。
+
+## 2026-06-23 - openai reasoning 选项映射
+
+- 模块：`nanoagent.ai.providers.openai`
+- 改动：`encode_request` 现在会把显式 `StreamOptions.reasoning` 映射为 OpenAI payload 的 `reasoning_effort` 字段。
+- 约束：不设置默认 reasoning，不选择 provider、model 或 API key；只把已有抽象选项传递给 OpenAI adapter。
+- 测试：先新增 `test_encode_request_maps_reasoning_option` 并确认缺少 `reasoning_effort` 导致失败，再做最小实现。
+- 验证：`pytest tests/ai/test_openai.py::test_encode_request_maps_reasoning_option -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/ai/test_openai.py -q`，6 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/ai -q`，31 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest -q`，80 passed，1 个 pytest cache 写入警告。

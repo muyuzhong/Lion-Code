@@ -12,6 +12,7 @@ from nanoagent.ai import (
     ToolCall,
     UserMessage,
     Usage,
+    StreamOptions,
 )
 from nanoagent.ai.providers.openai import OpenAIProvider, encode_request, parse_sse_line
 
@@ -46,6 +47,16 @@ def test_encode_request_maps_assistant_tool_calls():
     )
     payload = encode_request(Model(id="m", api="openai-completions", provider="openai"), ctx, None)
     assert payload["messages"][0]["tool_calls"][0]["function"]["name"] == "echo"
+
+
+def test_encode_request_maps_reasoning_option():
+    payload = encode_request(
+        Model(id="gpt-x", api="openai-completions", provider="openai"),
+        Context(),
+        StreamOptions(reasoning="medium"),
+    )
+
+    assert payload["reasoning_effort"] == "medium"
 
 
 def test_parse_sse_line_done_and_data():
