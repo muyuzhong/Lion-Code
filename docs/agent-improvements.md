@@ -145,3 +145,15 @@
 - 验证：`pytest tests/ai -q`，25 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
 - 验证：`pytest -q`，71 passed，1 个 pytest cache 写入警告。
+
+## 2026-06-23 - agent 工具开始事件参数快照
+
+- 模块：`nanoagent.agent`
+- 改动：`ToolExecutionStart.args` 初始化时会深拷贝工具参数，避免事件消费者修改 start 事件后污染后续工具执行。
+- 约束：不改变工具审批、执行顺序、参数校验或并发策略；只隔离事件负载和内部 tool call 参数。
+- 测试：先新增 `test_tool_execution_start_args_are_event_snapshot` 并确认修改 `event.args` 会让工具收到变更后的参数导致失败，再做最小实现。
+- 验证：`pytest tests/agent/test_loop_tools.py::test_tool_execution_start_args_are_event_snapshot -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/agent/test_loop_tools.py -q`，2 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/agent -q`，42 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest tests/test_import_contract.py -q`，1 passed，1 个 pytest cache 写入警告。
+- 验证：`pytest -q`，72 passed，1 个 pytest cache 写入警告。

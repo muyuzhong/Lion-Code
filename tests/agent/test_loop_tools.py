@@ -52,3 +52,31 @@ async def test_tool_call_then_continue_completes():
     assert roles == ["user", "assistant", "toolResult", "assistant"]
     assert end.messages[2].content[0].text == "echo:yo"
     assert mock.calls and len(mock.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_start_args_are_event_snapshot():
+    clear_providers()
+    register_mock()
+    mock = create_mock_model(
+        responses=[
+            {"content": [{"type": "toolCall", "name": "echo", "arguments": {"text": "yo"}}]},
+            {"content": ["done"]},
+        ]
+    )
+    cfg = AgentLoopConfig(model=mock)
+    events = []
+
+    async for event in agent_loop(
+        prompts=[UserMessage(content="go")],
+        system_prompt=[],
+        messages=[],
+        tools=[EchoTool()],
+        config=cfg,
+    ):
+        events.append(event)
+        if event.type == "tool_execution_start":
+            event.args["text"] = "mutated"
+
+    end = events[-1]
+    assert end.messages[2].content[0].text == "echo:yo"

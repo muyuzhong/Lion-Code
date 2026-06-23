@@ -67,6 +67,7 @@ so subscribers observe up-to-date state):
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Union
 
@@ -125,6 +126,9 @@ class ToolExecutionStart:
     tool_name: str
     args: dict[str, Any]
     type: str = "tool_execution_start"
+
+    def __post_init__(self) -> None:
+        self.args = copy.deepcopy(self.args)
 
 
 @dataclass
