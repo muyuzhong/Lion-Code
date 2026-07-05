@@ -80,3 +80,33 @@ async def test_tool_execution_start_args_are_event_snapshot():
 
     end = events[-1]
     assert end.messages[2].content[0].text == "echo:yo"
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_start_exposes_tool_call_snapshot():
+    clear_providers()
+    register_mock()
+    mock = create_mock_model(
+        responses=[
+            {"content": [{"type": "toolCall", "name": "echo", "arguments": {"text": "yo"}}]},
+            {"content": ["done"]},
+        ]
+    )
+    events = [
+        e
+        async for e in agent_loop(
+            prompts=[UserMessage(content="go")],
+            system_prompt=[],
+            messages=[],
+            tools=[EchoTool()],
+            config=AgentLoopConfig(model=mock),
+        )
+    ]
+
+    start = next(e for e in events if e.type == "tool_execution_start")
+    start.tool_call.arguments["text"] = "mutated"
+
+    end = events[-1]
+    assert start.tool_call.id == start.tool_call_id
+    assert start.tool_call.name == "echo"
+    assert end.messages[2].content[0].text == "echo:yo"

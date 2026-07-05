@@ -6,10 +6,10 @@ from typing import Any
 
 @dataclass
 class StreamOptions:
-    """Injection port: harness decides key/base_url/sampling.
+    """模型流式调用的注入端口。
 
-    The framework never decides which provider or which key is used.
-    `signal` is duck-typed (only `.aborted` is read) so `ai` need not depend on `agent`.
+    harness 决定 key、base_url、采样参数和取消信号；框架不选择 provider 或密钥。
+    `signal` 采用 duck type（只读取 `.aborted`），避免 `ai` 反向依赖 `agent`。
     """
 
     api_key: str | None = None

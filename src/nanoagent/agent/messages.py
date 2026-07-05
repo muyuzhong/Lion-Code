@@ -1,36 +1,47 @@
+"""与 provider 无关的对话记录消息模型。"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Union
+from typing import Literal
 
-from nanoagent.ai import AssistantMessage, Message, ToolResultMessage, UserMessage
-from nanoagent.utils import new_id
+from pydantic import BaseModel, ConfigDict, Field
 
-_WIRE_MESSAGE_TYPES = (UserMessage, AssistantMessage, ToolResultMessage)
-
-
-@dataclass
-class CustomMessage:
-    """Base for app-defined messages (UI-only / notification / artifact ...).
-
-    Subclasses set `role` to a non-wire value; the harness's convert_to_llm
-    decides how to downgrade or drop them.
-    """
-
-    role: str = "custom"
-    id: str = field(default_factory=lambda: new_id("msg"))
+from nanoagent.agent.tools import ToolCall
+from nanoagent.agent.types import JSONValue
 
 
-AgentMessage = Union[Message, CustomMessage]
-ConvertToLlm = Callable[[list["AgentMessage"]], list[Message]]
+class UserMessage(BaseModel):
+    """用户输入消息。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user"] = "user"
+    content: str
 
 
-def default_convert_to_llm(messages: list[AgentMessage]) -> list[Message]:
-    """Framework default: keep wire roles, drop unknown custom (mechanism).
+class AssistantMessage(BaseModel):
+    """助手输出消息，可携带需要执行的工具调用。"""
 
-    Specific downgrade behavior is a harness policy supplied via convert_to_llm.
-    """
-    return [m for m in messages if isinstance(m, _WIRE_MESSAGE_TYPES)]
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["assistant"] = "assistant"
+    content: str = ""
+    tool_calls: list[ToolCall] = Field(default_factory=list)
 
 
-__all__ = ["AgentMessage", "ConvertToLlm", "CustomMessage", "default_convert_to_llm"]
+class ToolResultMessage(BaseModel):
+    """工具调用结果消息，用于把工具返回值写回对话记录。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["tool"] = "tool"
+    tool_call_id: str
+    name: str
+    content: str
+    ok: bool = True
+    data: dict[str, JSONValue] | None = None
+    details: dict[str, JSONValue] | None = None
+    error: str | None = None
+
+
+type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage

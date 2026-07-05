@@ -4,6 +4,8 @@ NanoAgent is a small Python agent framework for local development. For now it se
 
 The project is not a product layer yet. It currently contains the framework kernel: model/provider abstractions, wire messages, streaming events, tool execution, the agent loop, and a stateful `Agent` wrapper.
 
+The active roadmap now follows Hugging Face Tau's proven Pi-style Python coding-agent phase order: keep the reusable core small, then grow a harness/application layer for coding tools, print CLI, JSONL sessions, `CodingSession`, skills/prompts, renderers, TUI, provider config, context management, and extensions. See `docs/superpowers/specs/2026-06-24-architecture-refinement-and-roadmap.md`.
+
 ## Current Scope
 
 Implemented:
@@ -31,6 +33,12 @@ src/nanoagent/
   ai/         # Model/provider layer, wire messages, stream events.
   agent/      # Runtime loop, tools, context, control, stateful Agent.
 
+future harness/app packages may include:
+  cli/              # Print mode first, TUI later.
+  coding_agent/     # CodingSession, commands, provider setup, session orchestration.
+  workspace/        # Concrete read/search/edit/bash/git tools.
+  memory/           # Compaction, summaries, durable session/project memory.
+
 tests/
   utils/
   ai/
@@ -40,6 +48,7 @@ docs/
   superpowers/
     specs/    # Design notes from the planning process.
     plans/    # Implementation plans and task breakdowns.
+    archive/  # Historical plans/specs that should not drive current work.
 ```
 
 ## Architecture
@@ -57,6 +66,8 @@ agent -> ai -> utils
 `agent` owns runtime mechanics: context assembly, message conversion, tool execution, control hooks, multi-turn looping, terminal results, and the stateful `Agent` wrapper.
 
 Anything that chooses a concrete provider, API key, tool policy, permission rule, budget, UI, or session lifecycle belongs in a future harness/application layer.
+
+Roadmap order follows Tau; code boundaries follow NanoAgent. Concrete app capabilities should be added above `agent`, not smuggled into the core packages.
 
 ## Development Commands
 

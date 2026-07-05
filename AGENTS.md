@@ -1,110 +1,96 @@
 # AGENTS.md
 
-This repository is developed by the project owner and AI agents. Treat this file as the project-specific operating guide for future coding sessions.
+This repository is developed by the project owner with AI assistance. Treat this
+file as the local operating guide for future coding sessions.
 
-## Project Intent
+## Current Goal
 
-NanoAgent is a framework kernel, not a product. Keep the code focused on reusable agent runtime mechanisms:
+NanoAgent is being rebuilt quickly as an internship portfolio project. The
+current development direction is to closely replicate the Tau agent project first,
+then gradually rename, reorganize, and annotate the code into the owner's own
+project structure.
 
-- model/provider abstraction
-- wire messages and stream events
-- agent loop
-- tool execution
-- context assembly
-- control hooks
-- stateful `Agent`
-
-Harness/application concerns come later and should stay out of the framework core.
-
-## Layering Rules
-
-The most important point: find the simplest solution, and only add complexity when necessary. Don't architect for the sake of frameworks—frameworks only mask problems.
-
-The import direction is:
+The Tau project lives in the parent directory:
 
 ```text
-nanoagent.agent -> nanoagent.ai -> nanoagent.utils
+D:\harness agent\tau
 ```
 
-Follow these boundaries:
+When implementing a phase, inspect the corresponding Tau files first and keep the
+NanoAgent file placement, public models, and behavior aligned with Tau unless the
+owner explicitly asks for a local deviation.
 
-- `utils` must not import `ai` or `agent`.
-- `ai` must not import `agent`.
-- `agent` may depend on `ai` abstractions, but must not choose a provider, model, API key, or product policy.
-- Provider-specific code belongs under `nanoagent.ai.providers`.
-- Harness policy must not be smuggled into `agent.loop`, `agent.tools`, or `ai.provider`.
+## Active Phase Rule
 
-Keep `.importlinter` passing. Check it directly with:
+For the current Phase 1 work, Tau places the portable agent primitives under the
+agent layer, so NanoAgent should do the same:
 
-```bash
-lint-imports
+```text
+src/nanoagent/agent/types.py
+src/nanoagent/agent/messages.py
+src/nanoagent/agent/tools.py
+src/nanoagent/agent/events.py
 ```
 
-## Mechanism vs Policy
+Do not move these primitives into `nanoagent.ai` just to preserve an older local
+architecture. The current priority is faithful Tau-style reconstruction.
 
-Framework code provides mechanisms. Harness code will provide policy.
+## Python Version
 
-Allowed in the framework:
+Keep the project aligned with Tau's Python baseline:
 
-- hooks
-- protocols
-- abstract configuration
-- structured events
-- structured results
-- mock-driven tests
-
-Keep out of the framework:
-
-- concrete filesystem tools
-- approval rules such as "allow read but deny write"
-- API key discovery
-- default provider selection
-- token budget numbers
-- CLI lifecycle
-- UI behavior
-- business rules
-
-When a new requirement needs customization, prefer an injected hook, protocol, or wrapper. Add concrete policy only when building a harness layer.
-
-## Code Style
-
-- Keep modules small and responsibility-based.
-- Prefer existing dataclass and protocol patterns.
-- Use pydantic for tool argument validation.
-- Encode tool failures as `ToolResultMessage(is_error=True)` instead of letting tool exceptions escape the loop.
-- End every agent run with one `AgentEnd` carrying a `RunResult`.
-- Keep the two stop-reason levels distinct:
-  - `nanoagent.ai.StopReason`: provider/wire message stop reason.
-  - `nanoagent.agent.StopReason`: whole-run terminal reason.
-
-## Setup & Testing
-
-Install for local development (editable, with dev tools):
-
-```bash
-pip install -e ".[dev]"
+```text
+requires-python = ">=3.12"
 ```
 
-Before claiming work is complete, run:
+Python 3.12 syntax such as PEP 695 type aliases is allowed when matching Tau's
+implementation.
+
+## Development Style
+
+- Prefer fast, phase-sized reconstruction over broad architecture debates.
+- Keep commits small and believable: one file group or one phase slice per
+  commit.
+- Before changing a phase file, compare it with the Tau source file in the parent
+  repository.
+- When old NanoAgent runtime code conflicts with the Tau-style phase files, favor
+  the Tau-compatible direction and leave the old runtime breakage as the next
+  explicit refactor target.
+- Do not silently invent framework abstractions when Tau already has a concrete
+  shape for the same phase.
+
+## Chinese Comments Requirement
+
+Every code change must add or maintain clear, standard Chinese comments or
+docstrings where they help understanding.
+
+Follow these rules:
+
+- Public classes, protocols, dataclasses, Pydantic models, and important helper
+  functions should have concise Chinese docstrings or nearby comments.
+- Comments should explain intent, lifecycle, data flow, or non-obvious tradeoffs.
+- Do not add noisy comments that merely repeat the identifier name.
+- If migrating code from Tau, replace garbled or unclear comments with clean
+  Chinese explanations.
+- When modifying existing code, keep useful existing Chinese comments and update
+  them if behavior changes.
+
+## Verification
+
+For a narrow phase migration, run the focused tests for that phase first. If the
+old runtime is known to be mid-refactor, record the exact full-test failure rather
+than pretending the whole project is green.
+
+Useful commands:
 
 ```bash
+pytest tests/agent/test_tau_phase1.py -q
+python -m compileall -q src/nanoagent/agent
 pytest -q
 ```
 
-For changes that touch imports or module boundaries, also make sure:
+## Git Hygiene
 
-```bash
-pytest tests/test_import_contract.py -q
-```
+`AGENTS.md` is a local collaboration guide and should stay out of future commits
+unless the owner explicitly asks to publish it. Keep it listed in `.gitignore`.
 
-Use the mock provider for framework tests. Tests should not require real API keys or network access.
-
-## Current Known Gaps
-
-- No harness/application layer yet.
-- No CLI/TUI/web UI.
-- Provider adapters are minimal.
-- Streaming accumulation is intentionally small and may need richer delta behavior later.
-- Docs under `docs/superpowers` may contain process artifacts; README should remain the concise project map.
-
-Do not treat these gaps as reasons to add product policy to the framework. Add the missing seam first, then let harness code decide the behavior.

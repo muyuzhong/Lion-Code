@@ -2,9 +2,9 @@ from enum import Enum
 
 
 class StopReason(str, Enum):
-    """Wire-level stop reason (per assistant message).
+    """provider/wire 层的停止原因，作用于单条 assistant 消息。
 
-    Distinct from nanoagent.agent.StopReason (run-level loop termination).
+    与 nanoagent.agent.StopReason 不同；后者描述整个 run 的终止原因。
     """
 
     STOP = "stop"

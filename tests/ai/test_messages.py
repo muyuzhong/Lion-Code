@@ -42,6 +42,33 @@ def test_tool_result_message():
     assert r.role == "toolResult" and r.is_error is False
 
 
+def test_tool_result_message_carries_structured_result_fields():
+    r = ToolResultMessage(
+        tool_call_id="t1",
+        tool_name="echo",
+        content=[TextContent(text="1")],
+        data={"count": 1},
+        details={"source": "unit"},
+    )
+
+    assert r.ok is True
+    assert r.data == {"count": 1}
+    assert r.details == {"source": "unit"}
+
+
+def test_tool_result_message_error_sets_ok_false():
+    r = ToolResultMessage(
+        tool_call_id="t1",
+        tool_name="echo",
+        content=[TextContent(text="boom")],
+        is_error=True,
+        error="boom",
+    )
+
+    assert r.ok is False
+    assert r.error == "boom"
+
+
 def test_context_holds_messages():
     ctx = Context(system_prompt=["sys"], messages=[UserMessage(content="hi")])
     assert ctx.messages[0].role == "user" and ctx.tools == []

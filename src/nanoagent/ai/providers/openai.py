@@ -32,6 +32,8 @@ _FINISH_MAP = {
 
 
 def _encode_message(m: Message) -> dict:
+    """把 NanoAgent wire message 编码成 OpenAI Chat Completions 消息。"""
+
     if m.role == "user":
         text = (
             m.content
@@ -60,6 +62,11 @@ def _encode_message(m: Message) -> dict:
 
 
 def encode_request(model: Model, context: Context, options: StreamOptions | None) -> dict:
+    """生成 OpenAI Chat Completions 请求体。
+
+    这里只做抽象字段到 provider 字段的映射；默认模型、密钥和预算策略不在此决定。
+    """
+
     messages: list[dict] = []
     for sp in context.system_prompt:
         messages.append({"role": "system", "content": sp})
@@ -88,6 +95,8 @@ def encode_request(model: Model, context: Context, options: StreamOptions | None
 
 
 def parse_sse_line(line: str) -> dict | None:
+    """解析一行 SSE data，非数据行或非法 JSON 会被忽略。"""
+
     line = line.strip()
     if not line or line.startswith(":"):
         return None
@@ -103,10 +112,13 @@ def parse_sse_line(line: str) -> dict | None:
 
 
 class OpenAIProvider:
+    """OpenAI Chat Completions 兼容的 provider adapter。"""
+
     async def stream(
         self, model: Model, context: Context, options: StreamOptions | None
     ) -> AsyncIterator[AssistantMessageEvent]:
         opts = options or StreamOptions()
+        # base_url/api_key 来自显式 options 或 model 描述，不做环境变量发现。
         base = opts.base_url or model.base_url or "https://api.openai.com/v1"
         url = base.rstrip("/") + "/chat/completions"
         headers = {"Content-Type": "application/json"}
@@ -139,6 +151,7 @@ class OpenAIProvider:
                         for tc in delta.get("tool_calls", []):
                             idx = tc["index"]
                             if idx not in tool_acc:
+                                # 文本块如果存在占 content[0]；工具调用按 OpenAI index 映射到后续位置。
                                 tool_acc[idx] = {
                                     "id": "",
                                     "name": "",
@@ -176,6 +189,7 @@ class OpenAIProvider:
             yield TextEnd(content_index=0, text=full)
         for _, slot in sorted(tool_acc.items()):
             try:
+                # 参数增量结束后再解析 JSON；解析失败时保守给空参数，让工具校验报告错误。
                 args = json.loads(slot["args"]) if slot["args"] else {}
             except json.JSONDecodeError:
                 args = {}
@@ -187,4 +201,6 @@ class OpenAIProvider:
 
 
 def register_openai() -> None:
+    """注册 OpenAI Chat Completions 兼容 api。"""
+
     register_provider("openai-completions", OpenAIProvider())

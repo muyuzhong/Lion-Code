@@ -7,7 +7,10 @@ from nanoagent.ai import ToolCall
 
 
 class AbortSignal:
-    """Cooperative cancellation. Duck-compatible with ai.StreamOptions.signal (.aborted)."""
+    """协作式取消信号。
+
+    只暴露 provider 需要的 `.aborted` duck type；取消策略和触发时机由上层决定。
+    """
 
     def __init__(self):
         self._event = asyncio.Event()
@@ -29,11 +32,13 @@ class AbortSignal:
 
 
 class ControlSource(Protocol):
+    """工具执行前的控制入口，框架只询问结果，不内置审批策略。"""
+
     async def request_approval(self, tool_call: ToolCall, tier: str) -> bool: ...
 
 
 class AllowAll:
-    """Framework default: no approval gate (policy belongs to the harness)."""
+    """框架默认实现：不设审批门槛，具体权限策略属于 harness。"""
 
     async def request_approval(self, tool_call: ToolCall, tier: str) -> bool:
         return True

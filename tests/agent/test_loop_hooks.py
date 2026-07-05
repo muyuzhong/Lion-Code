@@ -156,6 +156,9 @@ async def test_before_tool_call_error_maps_to_run_error():
     assert events[-1].result.reason is StopReason.ERROR
     assert "before boom" in (events[-1].result.error or "")
     _assert_balanced(events)
+    tool_end = next(e for e in events if e.type == "tool_execution_end")
+    assert tool_end.result.ok is False
+    assert tool_end.result.error == "before boom"
 
 
 @pytest.mark.asyncio

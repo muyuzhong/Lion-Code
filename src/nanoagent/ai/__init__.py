@@ -43,6 +43,7 @@ from nanoagent.ai.provider import (
 )
 from nanoagent.ai.stop_reason import StopReason
 from nanoagent.ai.tools import Tool
+from nanoagent.ai.types import JSONObject, JSONPrimitive, JSONValue
 
 __all__ = [
     # stop reason
@@ -81,6 +82,9 @@ __all__ = [
     # model / tool / errors / options
     "Model",
     "Tool",
+    "JSONPrimitive",
+    "JSONValue",
+    "JSONObject",
     "ProviderError",
     "StreamOptions",
     # provider

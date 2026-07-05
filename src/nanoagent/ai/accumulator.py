@@ -12,7 +12,10 @@ from nanoagent.ai.messages import (
 
 
 class StreamAccumulator:
-    """Fold incremental events into one AssistantMessage (consumer/UI helper)."""
+    """把 provider 的增量事件折叠成一个 AssistantMessage。
+
+    这是 consumer/UI 友好的视图：同一条 assistant 消息在 start/update/end 之间保持稳定 id。
+    """
 
     def __init__(self, model_id: str, provider: str, api: str):
         self._msg = AssistantMessage.empty(model_id, provider, api)
@@ -22,6 +25,8 @@ class StreamAccumulator:
         return self._msg
 
     def add(self, event: AssistantMessageEvent) -> None:
+        """吸收一个流式事件，并更新当前累积消息。"""
+
         t = event.type
         if t == "text_start":
             self._msg.content.append(TextContent(text=""))
@@ -40,13 +45,13 @@ class StreamAccumulator:
         elif t == "thinking_end":
             self._msg.content[event.content_index] = ThinkingContent(thinking=event.thinking)
         elif t == "toolcall_start":
+            # tool call 的完整参数通常到 end 才能解析；先放占位块保持 content_index 稳定。
             self._msg.content.append(ToolCall(id="", name="", arguments={}))
         elif t == "toolcall_end":
             self._msg.content[event.content_index] = event.tool_call
         elif t in ("done", "error"):
-            # Adopt the provider's final message, but keep the streaming id so a
-            # consumer sees one stable message identity across message_start ->
-            # message_update -> message_end (see agent event contract G2).
+            # 采用 provider 给出的最终消息内容，但保留流式过程中的 id，
+            # 让消费者在 message_start -> message_update -> message_end 之间看到同一身份。
             event.message.id = self._msg.id
             self._msg = event.message
 

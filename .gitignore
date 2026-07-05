@@ -19,6 +19,9 @@ env/
 # Worktrees (native harness)
 .claude/worktrees/
 
+# Local AI collaboration guide
+AGENTS.md
+
 # OS
 .DS_Store
 Thumbs.db

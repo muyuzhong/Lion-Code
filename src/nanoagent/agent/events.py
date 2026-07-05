@@ -1,162 +1,162 @@
-"""Agent runtime events and their ordering contract.
-
-A *run* is the event sequence emitted by ``agent_loop(...)`` for one invocation.
-It opens with exactly one ``AgentStart`` and closes with exactly one ``AgentEnd``.
-
-Canonical ordering::
-
-    agent_start
-      # per prompt message m:
-      message_start(m) ; message_end(m)
-      # per turn:
-      turn_start
-        # per injected message s (steering; follow-up later):
-        message_start(s) ; message_end(s)
-        # assistant streaming:
-        message_start(assistant, generated=True)
-        message_update(assistant, ev)*        # assistant only
-        message_end(assistant)
-        # if terminal: turn_end(assistant, []) ; agent_end ; stop
-        # else, tool execution phase (below)
-        turn_end(assistant, tool_results)     # tool_results in source order
-    agent_end(messages, result)               # exactly once, terminal
-
-If an exception interrupts an open scope, matching end events are emitted before
-``agent_end``. A ``turn_end`` may carry ``message=None`` when failure occurs
-before generated assistant output starts.
-
-Tool execution phase, for the tool calls in source order s1..sn:
-  - ``tool_execution_start`` per call, in source order.
-  - ``tool_execution_update``* per call, between that call's start and end,
-    correlated by ``tool_call_id`` (emitted once tools stream progress; see the
-    tool-lifecycle spec).
-  - ``tool_execution_end`` per call, carrying ``result`` + ``is_error``.
-    Sequential execution emits ends in source order; parallel execution emits
-    ends in *completion* order -- consumers MUST correlate by ``tool_call_id``,
-    never by position.
-  - tool-result messages (``message_start``/``message_end`` for a
-    ``ToolResultMessage``) are emitted after all ends of the batch, in source
-    order, so transcript order is independent of completion order.
-
-Guaranteed invariants (stable; locked by tests/agent/test_event_contract.py):
-  G1  exactly one agent_start (first) and one agent_end (last).
-  G2  each message_start(m) has exactly one matching message_end with the same
-      ``message.id``; an assistant message keeps one id from start to end.
-  G3  message_update is emitted only for the current turn's assistant message,
-      strictly between its message_start and message_end.
-  G4  per turn, turn_start precedes turn_end; turns do not nest.
-  G5  per tool_call_id: start precedes any update precedes end; exactly one
-      start and one end per executed call (denied/unknown tools still get both).
-  G6  tool-result transcript messages come after all tool_execution_end of the
-      batch, in source order.
-  G7  agent_end.result.final_message_id is the last produced message id (or None).
-
-  Note: G5 constrains only per-id ordering, not the global order of ends, so a
-  later switch to completion-ordered parallel ends does not break this contract.
-
-Event-derived state (Agent reduces each event into AgentState before emitting,
-so subscribers observe up-to-date state):
-  - from message_start(assistant, generated=True) through message_update*:
-    ``streaming_message`` is the in-progress assistant message;
-    ``is_streaming`` is True. Injected assistant-role messages are not streaming.
-  - after message_end(m): m is in ``messages``; ``streaming_message`` is None.
-  - between tool_execution_start(id) and tool_execution_end(id): id is in
-    ``pending_tool_calls``.
-  - run start clears ``error_message``; after agent_end it is ``result.error``.
-"""
+"""NanoAgent agent 层对外发出的事件模型。"""
 
 from __future__ import annotations
 
-import copy
-from dataclasses import dataclass, field
-from typing import Any, Union
+from typing import Literal
 
-from nanoagent.ai import AssistantMessageEvent, ToolResultMessage
+from pydantic import BaseModel, ConfigDict
+
 from nanoagent.agent.messages import AgentMessage
-from nanoagent.agent.result import RunResult
+from nanoagent.agent.tools import AgentToolResult, ToolCall
+from nanoagent.agent.types import JSONValue
 
 
-@dataclass
-class AgentStart:
-    type: str = "agent_start"
+class AgentStartEvent(BaseModel):
+    """一次 agent run 开始。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["agent_start"] = "agent_start"
 
 
-@dataclass
-class AgentEnd:
-    messages: list[AgentMessage]
-    result: RunResult
-    type: str = "agent_end"
+class AgentEndEvent(BaseModel):
+    """一次 agent run 结束。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["agent_end"] = "agent_end"
 
 
-@dataclass
-class TurnStart:
-    type: str = "turn_start"
+class TurnStartEvent(BaseModel):
+    """一个模型交互回合开始。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["turn_start"] = "turn_start"
+    turn: int
 
 
-@dataclass
-class TurnEnd:
-    message: AgentMessage | None
-    tool_results: list[ToolResultMessage] = field(default_factory=list)
-    type: str = "turn_end"
+class TurnEndEvent(BaseModel):
+    """一个模型交互回合结束。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["turn_end"] = "turn_end"
+    turn: int
 
 
-@dataclass
-class MessageStart:
+class RetryEvent(BaseModel):
+    """发生可恢复错误后安排重试。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["retry"] = "retry"
+    attempt: int
+    max_attempts: int
+    delay_seconds: float
+    message: str
+    data: dict[str, JSONValue] | None = None
+
+
+class QueueUpdateEvent(BaseModel):
+    """转向消息或后续消息队列发生变化。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["queue_update"] = "queue_update"
+    steering: tuple[str, ...] = ()
+    follow_up: tuple[str, ...] = ()
+
+
+class MessageStartEvent(BaseModel):
+    """一条对话消息开始产生。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["message_start"] = "message_start"
+    message_role: Literal["user", "assistant", "tool"] = "assistant"
+
+
+class MessageDeltaEvent(BaseModel):
+    """当前助手消息产生一段文本增量。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["message_delta"] = "message_delta"
+    delta: str
+
+
+class ThinkingDeltaEvent(BaseModel):
+    """模型 reasoning/thinking 产生一段增量。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["thinking_delta"] = "thinking_delta"
+    delta: str
+
+
+class MessageEndEvent(BaseModel):
+    """一条对话消息已经完整产生。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["message_end"] = "message_end"
     message: AgentMessage
-    type: str = "message_start"
-    generated: bool = False
 
 
-@dataclass
-class MessageUpdate:
-    message: AgentMessage
-    assistant_event: AssistantMessageEvent
-    type: str = "message_update"
+class ToolExecutionStartEvent(BaseModel):
+    """一个工具调用开始执行。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["tool_execution_start"] = "tool_execution_start"
+    tool_call: ToolCall
 
 
-@dataclass
-class MessageEnd:
-    message: AgentMessage
-    type: str = "message_end"
+class ToolExecutionUpdateEvent(BaseModel):
+    """工具执行过程中产生中间状态更新。"""
 
+    model_config = ConfigDict(extra="forbid")
 
-@dataclass
-class ToolExecutionStart:
+    type: Literal["tool_execution_update"] = "tool_execution_update"
     tool_call_id: str
-    tool_name: str
-    args: dict[str, Any]
-    type: str = "tool_execution_start"
-
-    def __post_init__(self) -> None:
-        self.args = copy.deepcopy(self.args)
+    message: str
+    data: dict[str, JSONValue] | None = None
 
 
-@dataclass
-class ToolExecutionUpdate:
-    tool_call_id: str
-    tool_name: str
-    partial_result: Any
-    type: str = "tool_execution_update"
+class ToolExecutionEndEvent(BaseModel):
+    """一个工具调用执行结束。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["tool_execution_end"] = "tool_execution_end"
+    result: AgentToolResult
 
 
-@dataclass
-class ToolExecutionEnd:
-    tool_call_id: str
-    tool_name: str
-    result: Any
-    is_error: bool = False
-    type: str = "tool_execution_end"
+class ErrorEvent(BaseModel):
+    """agent 层报告的错误事件。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["error"] = "error"
+    message: str
+    recoverable: bool = False
+    data: dict[str, JSONValue] | None = None
 
 
-AgentEvent = Union[
-    AgentStart,
-    AgentEnd,
-    TurnStart,
-    TurnEnd,
-    MessageStart,
-    MessageUpdate,
-    MessageEnd,
-    ToolExecutionStart,
-    ToolExecutionUpdate,
-    ToolExecutionEnd,
-]
+type AgentEvent = (
+    AgentStartEvent
+    | AgentEndEvent
+    | TurnStartEvent
+    | TurnEndEvent
+    | QueueUpdateEvent
+    | RetryEvent
+    | MessageStartEvent
+    | MessageDeltaEvent
+    | ThinkingDeltaEvent
+    | MessageEndEvent
+    | ToolExecutionStartEvent
+    | ToolExecutionUpdateEvent
+    | ToolExecutionEndEvent
+    | ErrorEvent
+)

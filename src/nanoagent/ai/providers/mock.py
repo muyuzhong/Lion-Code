@@ -23,6 +23,11 @@ from nanoagent.ai.stop_reason import StopReason
 
 
 class MockModel(Model):
+    """测试用模型。
+
+    通过响应脚本或 handler 产出确定性的流事件，不依赖网络或真实 API key。
+    """
+
     def __init__(
         self,
         *,
@@ -44,6 +49,8 @@ class MockModel(Model):
         return self._run(context)
 
     def _next_response(self, context: Context) -> dict:
+        """按脚本顺序取响应；脚本耗尽后可交给 handler 动态生成。"""
+
         if self._idx < len(self._responses):
             r = self._responses[self._idx]
             self._idx += 1
@@ -53,6 +60,8 @@ class MockModel(Model):
         raise AssertionError(f"mock exhausted at call {len(self.calls)}")
 
     async def _run(self, context: Context) -> AsyncIterator[AssistantMessageEvent]:
+        """把 mock 响应字典编码成与真实 provider 形状相近的流事件。"""
+
         self.calls.append(context)
         resp = self._next_response(context)
         msg = AssistantMessage.empty(self.id, self.provider, self.api)
@@ -101,11 +110,13 @@ def create_mock_model(
     id: str = "mock-model",
     provider: str = "mock",
 ) -> MockModel:
+    """创建测试用 MockModel。"""
+
     return MockModel(id=id, provider=provider, responses=responses, handler=handler)
 
 
 def register_mock() -> None:
-    """Register the 'mock' api; dispatch to the MockModel's own stream."""
+    """注册 'mock' api；实际流式逻辑委派给 MockModel 实例自身。"""
 
     class _MockDispatch:
         def stream(self, model, context, options):

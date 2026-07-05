@@ -24,7 +24,7 @@ from nanoagent.agent.tools import AgentTool
 
 @dataclass
 class PendingToolCall:
-    """A tool call the loop has started but not yet finished executing."""
+    """loop 已经开始、但还没有结束的工具调用快照。"""
 
     tool_call_id: str
     tool_name: str
@@ -33,6 +33,11 @@ class PendingToolCall:
 
 @dataclass
 class AgentState:
+    """Agent 对外暴露的可观察状态。
+
+    状态完全由事件流归约而来，避免在 loop 外复制另一套运行时语义。
+    """
+
     system_prompt: list[str]
     model: Model
     tools: list[AgentTool] = field(default_factory=list)
@@ -51,7 +56,11 @@ Listener = Callable[[AgentEvent], Union[None, Awaitable[None]]]
 
 
 class Agent:
-    """Stateful wrapper around agent_loop: holds session, exposes prompt()."""
+    """围绕 agent_loop 的有状态包装器。
+
+    Agent 保存会话消息、归约事件、管理订阅者和取消信号；真正的回合推进仍由
+    agent_loop 完成，从而保持状态层与机制层边界清晰。
+    """
 
     def __init__(
         self,
@@ -78,20 +87,20 @@ class Agent:
         self._idle.set()  # no run in flight yet
 
     def subscribe(self, fn: Listener) -> Callable[[], None]:
-        """Register an event listener. Listeners may be sync or return an awaitable."""
+        """注册事件监听器；监听器可以同步返回，也可以返回 awaitable。"""
         self._listeners.add(fn)
         return lambda: self._listeners.discard(fn)
 
     async def _emit(self, event: AgentEvent) -> None:
-        # Await async listeners inline so prompt() (and wait_for_idle) does not
-        # return until every listener — especially the agent_end listener — has settled.
+        # 串行等待异步监听器，确保 prompt()/wait_for_idle 返回时，
+        # 包括 agent_end 处理在内的所有副作用都已经完成。
         for fn in list(self._listeners):
             result = fn(event)
             if inspect.isawaitable(result):
                 await result
 
     def _reduce(self, event: AgentEvent) -> None:
-        """Fold a single event into state so listeners observe up-to-date state."""
+        """把单个事件折叠进 state，让监听器总能观察到最新状态。"""
         if isinstance(event, MessageStart):
             if event.generated:
                 self.state.streaming_message = event.message
@@ -132,7 +141,7 @@ class Agent:
         return out
 
     async def wait_for_idle(self) -> None:
-        """Block until any in-flight run (and its listeners) has fully settled."""
+        """等待当前 run 及其监听器全部收敛。"""
         await self._idle.wait()
 
     async def prompt(self, input: str | AgentMessage | list[AgentMessage]) -> RunResult:
@@ -167,7 +176,7 @@ class Agent:
                 config=cfg,
                 signal=self._signal,
             ):
-                # Reduce before emitting so listeners see current state.
+                # 先归约再通知，订阅者读取 state 时不会落后一拍。
                 self._reduce(event)
                 await self._emit(event)
                 if isinstance(event, AgentEnd):

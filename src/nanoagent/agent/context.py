@@ -17,7 +17,12 @@ async def assemble_context(
     transform_context: TransformContext | None = None,
     signal: Any = None,
 ) -> Context:
-    """Assemble the wire Context. transform_context = compaction/pruning seam (no-op stub by default)."""
+    """装配 provider 可消费的 wire Context。
+
+    transform_context 是上下文压缩、裁剪或注入的机制入口；默认不做策略判断。
+    """
+
+    # 只复制列表结构，不深拷贝消息对象；hook 可以重排/替换列表，但不污染调用方持有的列表。
     msgs = list(messages)
     if transform_context is not None:
         msgs = await transform_context(msgs, signal)
