@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import json
+import os
+import signal
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +80,27 @@ def load_pre_tool_use_hooks() -> list[HookConfig]:
 
 
 async def _kill_and_reap(process: asyncio.subprocess.Process) -> None:
+    # Hook 通过 Shell 启动，超时时必须终止整棵进程树，否则子进程会继续持有管道。
+    if os.name == "nt":
+        try:
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/PID",
+                str(process.pid),
+                "/T",
+                "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await killer.communicate()
+        except OSError:
+            pass
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
     if process.returncode is None:
         try:
             process.kill()
@@ -94,6 +118,11 @@ def _decode_diagnostic(data: bytes) -> str:
 
 async def _run_command_hook(hook: HookConfig, payload: bytes, cwd: Path) -> str | None:
     label = hook["label"]
+    spawn_options = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        if os.name == "nt"
+        else {"start_new_session": True}
+    )
     try:
         process = await asyncio.create_subprocess_shell(
             hook["command"],
@@ -101,6 +130,7 @@ async def _run_command_hook(hook: HookConfig, payload: bytes, cwd: Path) -> str 
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(cwd),
+            **spawn_options,
         )
     except Exception as exc:
         return f"{label} failed to start: {exc}"
