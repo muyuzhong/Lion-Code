@@ -71,6 +71,7 @@ from .session import save_session
 from .prompt import build_system_prompt, build_static_system_prompt, build_dynamic_system_context, build_user_context_reminder, load_claude_md
 from .subagent import get_sub_agent_config
 from .mcp_client import McpManager
+from .hooks import load_pre_tool_use_hooks, run_pre_tool_use_hooks
 
 # ─── 指数退避重试 ───────────────────────────────────────────
 
@@ -201,6 +202,7 @@ class Agent:
         self.use_openai = bool(api_base)
         self.is_sub_agent = is_sub_agent
         self.tools = custom_tools or tool_definitions
+        self._pre_tool_use_hooks = load_pre_tool_use_hooks()
         self.max_cost_usd = max_cost_usd
         self.max_turns = max_turns
         self.confirm_fn = confirm_fn
@@ -1139,6 +1141,10 @@ class Agent:
     # ─── 工具路由（含 Agent、Skill 与 Plan 内部工具）────────
 
     async def _execute_tool_call(self, name: str, inp: dict) -> str:
+        denial = await run_pre_tool_use_hooks(self._pre_tool_use_hooks, name, inp)
+        if denial is not None:
+            return f"Action denied by PreToolUse hook: {denial}"
+
         if name in ("enter_plan_mode", "exit_plan_mode"):
             return await self._execute_plan_mode_tool(name)
         if name == "agent":
