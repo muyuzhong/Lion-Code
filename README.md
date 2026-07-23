@@ -87,24 +87,40 @@ Lion Code 支持以下权限模式：
 | Auto | `--auto` | 由两阶段 LLM 分类器判断操作，当前属于实验能力 |
 | Yolo | `--yolo` | 跳过人工确认，仅建议在隔离环境中使用 |
 
-PreToolUse Hook 可以调用任意命令行程序检查工具输入。Hook 超时、崩溃、非零退出、输出过大、非法 JSON 或未知 `action` 时，本次工具调用都会被拒绝，但 Agent 循环不会崩溃。
+PreToolUse Hook 可以调用命令行程序检查工具输入。Hook 超时、崩溃、非零退出、输出过大、非法 JSON 或未知 `action` 时，本次工具调用都会被拒绝，但 Agent 循环不会崩溃。用户级 Hook 默认受信任；项目级 Hook 首次匹配时必须由用户确认，即使使用 `--yolo` 也不会自动获得信任。
 
 <details>
 <summary>查看 PreToolUse Hook 最小配置</summary>
 
-项目级配置位于 `.claude/settings.json`，用户级配置位于 `~/.claude/settings.json`：
+项目级配置位于 `.claude/settings.json`，用户级配置位于 `~/.claude/settings.json`。每个 Hook 必须提供在当前配置文件内唯一的 `id`。默认 `command` 必须是参数数组，Lion Code 通过 `create_subprocess_exec` 直接启动程序，不经过 Shell：
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
       {
+        "id": "block-dangerous-shell",
         "matcher": "run_shell",
-        "command": "python .claude/hooks/pre_shell.py",
-        "timeout_ms": 5000
+        "command": [
+          "python",
+          ".claude/hooks/pre_shell.py"
+        ],
+        "timeout_ms": 5000,
+        "pass_env": ["POLICY_CONFIG_PATH"]
       }
     ]
   }
+}
+```
+
+只有需要管道、重定向或变量展开的兼容脚本才应显式启用 Shell。项目级 `shell: true` Hook 在信任确认中会显示额外风险警告：
+
+```json
+{
+  "id": "legacy-policy",
+  "matcher": "run_shell",
+  "shell": true,
+  "command": "python check.py | jq ."
 }
 ```
 
@@ -120,7 +136,12 @@ Hook 从 stdin 接收 UTF-8 JSON，并在 stdout 返回单个 JSON 对象：
 {"action": "deny", "reason": "当前项目禁止直接推送"}
 ```
 
-项目级 Hook 等同于执行仓库提供的代码，只应在受信任的工作区中启用。修改配置后需要重启 Lion Code。
+项目 Hook 的信任记录保存在 `~/.lion-code/trusted-hooks.json`。记录同时绑定规范化项目根目录、Hook `id`、完整配置哈希，以及命令中可解析的项目文件内容哈希。命令、配置、项目脚本内容或项目根目录变化后，原信任记录不再匹配；修改配置后需要重启 Lion Code，脚本内容则会在每次匹配执行前重新校验。
+
+Hook 子进程不会继承 Lion Code 的完整环境。默认只传递 `PATH`、`HOME`、`USERPROFILE`、`SYSTEMROOT`、`TEMP`、`TMP`，并注入 `LION_HOOK_EVENT`、`LION_PROJECT_ROOT`、`LION_HOOK_ID`。`pass_env` 可以声明额外变量，但 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GITHUB_TOKEN` 以及 `AWS_*`、`AZURE_*`、`GOOGLE_*` 会被拒绝。
+
+> [!WARNING]
+> 环境过滤不是操作系统沙箱。Hook 仍以当前用户身份在项目目录运行，可以访问该用户本来就能访问的文件和网络；只应信任已审阅的仓库代码。Shell Hook 中动态拼出的脚本路径也无法可靠纳入文件哈希，因此风险高于参数数组模式。
 
 </details>
 
@@ -306,7 +327,8 @@ Lion-Code/
 ~/.lion-code/
 ├── sessions/       # 会话记录
 ├── projects/       # 按项目隔离的 Memory
-└── tool-results/   # 超大工具结果全文
+├── tool-results/   # 超大工具结果全文
+└── trusted-hooks.json  # 项目 Hook 指纹信任记录
 ```
 
 ## 测试
