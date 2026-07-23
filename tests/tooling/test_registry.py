@@ -63,6 +63,45 @@ class TestToolRegistry(unittest.TestCase):
         with self.assertRaisesRegex(LookupError, "Unknown tool: missing"):
             ToolRegistry().resolve("missing")
 
+    def test_search_uses_name_and_description(self):
+        registry = ToolRegistry()
+        registry.register(_tool("read_file"))
+        described = LionTool(
+            name="fetch",
+            label="fetch",
+            description="Download a WEB page",
+            parameters={"type": "object", "properties": {}},
+            execute_fn=_execute,
+        )
+        registry.register(described)
+
+        self.assertEqual(
+            [tool.name for tool in registry.search("web")],
+            ["fetch"],
+        )
+
+    def test_temporary_tool_is_removed_after_scope(self):
+        registry = ToolRegistry()
+
+        with registry.temporary_tool(_tool("schedule_wakeup")):
+            self.assertTrue(registry.is_active("schedule_wakeup"))
+
+        with self.assertRaises(LookupError):
+            registry.resolve("schedule_wakeup")
+
+    def test_temporary_tool_restores_previous_definition_and_state(self):
+        registry = ToolRegistry()
+        previous = _tool("temporary", deferred=True)
+        replacement = _tool("temporary")
+        registry.register(previous)
+
+        with registry.temporary_tool(replacement):
+            self.assertIs(registry.resolve("temporary"), replacement)
+            self.assertTrue(registry.is_active("temporary"))
+
+        self.assertIs(registry.resolve("temporary"), previous)
+        self.assertFalse(registry.is_active("temporary"))
+
 
 if __name__ == "__main__":
     unittest.main()

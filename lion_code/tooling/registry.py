@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 from .types import LionTool
 
 
@@ -54,3 +57,52 @@ class ToolRegistry:
     def deactivate(self, name: str) -> None:
         """停用工具但保留注册定义。"""
         self._active.discard(name)
+
+    def unregister(self, name: str) -> None:
+        """移除工具定义及其激活状态。"""
+        self._tools.pop(name, None)
+        self._active.discard(name)
+
+    def is_active(self, name: str) -> bool:
+        """返回工具是否已注册且处于激活状态。"""
+        return name in self._tools and name in self._active
+
+    def all_tools(self) -> list[LionTool]:
+        """按注册顺序返回全部定义，包括尚未激活的延迟工具。"""
+        return list(self._tools.values())
+
+    def deferred_tool_names(self) -> list[str]:
+        """返回当前尚未激活的延迟工具名称。"""
+        return [
+            tool.name
+            for tool in self._tools.values()
+            if tool.capabilities.deferred and tool.name not in self._active
+        ]
+
+    def search(self, query: str) -> list[LionTool]:
+        """按名称和描述进行不区分大小写的子串搜索。"""
+        needle = query.casefold()
+        return [
+            tool
+            for tool in self._tools.values()
+            if needle in tool.name.casefold()
+            or needle in tool.description.casefold()
+        ]
+
+    @contextmanager
+    def temporary_tool(self, tool: LionTool) -> Iterator[LionTool]:
+        """在上下文内临时注册并激活工具，退出时精确恢复原状态。"""
+        previous = self._tools.get(tool.name)
+        previous_active = tool.name in self._active
+        self.register(tool, replace=True, activate=True)
+        try:
+            yield tool
+        finally:
+            if previous is None:
+                self.unregister(tool.name)
+            else:
+                self.register(
+                    previous,
+                    replace=True,
+                    activate=previous_active,
+                )
