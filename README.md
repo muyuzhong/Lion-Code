@@ -87,7 +87,7 @@ Lion Code 支持以下权限模式：
 | Auto | `--auto` | 由两阶段 LLM 分类器判断操作，当前属于实验能力 |
 | Yolo | `--yolo` | 跳过人工确认，仅建议在隔离环境中使用 |
 
-PreToolUse Hook 可以调用命令行程序检查工具输入。Hook 超时、崩溃、非零退出、输出过大、非法 JSON 或未知 `action` 时，本次工具调用都会被拒绝，但 Agent 循环不会崩溃。用户级 Hook 默认受信任；项目级 Hook 首次匹配时必须由用户确认，即使使用 `--yolo` 也不会自动获得信任。
+PreToolUse Hook 可以调用命令行程序检查工具输入。Hook 超时、崩溃、非零退出、输出过大、非法 JSON 或未知 `action` 时，本次工具调用都会 fail-closed，但会标记为 Hook 系统故障，不会伪装成用户策略拒绝。用户级 Hook 默认受信任；项目级 Hook 首次匹配时必须由用户确认，即使使用 `--yolo` 也不会自动获得信任。
 
 <details>
 <summary>查看 PreToolUse Hook 最小配置</summary>
@@ -137,6 +137,8 @@ Hook 从 stdin 接收 UTF-8 JSON，并在 stdout 返回单个 JSON 对象：
 ```
 
 单次 Hook 输入最多 256 KiB，stdout 最多 64 KiB，stderr 最多 16 KiB。stdin 写入、两条输出读取和进程等待共享同一执行超时；任一输出流超限时，Lion Code 会立即终止并回收整棵 Hook 进程树。
+
+Hook 链以结构化结果记录每个已执行 Hook 的耗时与终态：`allow` 继续执行下一个 Hook，`deny` 作为明确的策略拒绝立即停止，`error` 作为基础设施故障立即停止。Agent 会提示模型只根据 `deny` 调整动作；遇到 `error` 时不得把故障解释成用户意图。
 
 项目 Hook 的信任记录保存在 `~/.lion-code/trusted-hooks.json`。记录同时绑定规范化项目根目录、Hook `id`、完整配置哈希，以及命令中可解析的项目文件内容哈希。命令、配置、项目脚本内容或项目根目录变化后，原信任记录不再匹配；修改配置后需要重启 Lion Code，脚本内容则会在每次匹配执行前重新校验。
 
