@@ -327,7 +327,9 @@ class Agent:
         )
 
         # 根 Agent 拥有 MCP 生命周期；子 Agent 只接收共享环境的非拥有视图。
-        self.tool_environment = tool_environment or ToolEnvironment()
+        self.tool_environment = tool_environment or ToolEnvironment(
+            owns_mcp_manager=not is_sub_agent
+        )
         self._mcp_manager = self.tool_environment.mcp_manager
         self._mcp_initialized = False
 

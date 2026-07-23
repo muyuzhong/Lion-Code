@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
+from lion_code.agent import Agent
 from lion_code.tooling.environment import ToolEnvironment
 
 
@@ -38,6 +39,16 @@ class TestToolEnvironment(unittest.IsolatedAsyncioTestCase):
         await root.close()
 
         manager.disconnect_all.assert_awaited_once_with()
+
+    async def test_standalone_subagent_does_not_own_default_manager(self):
+        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
+            child = Agent(api_key="test-key", is_sub_agent=True)
+        child.tool_environment.mcp_manager.disconnect_all = AsyncMock()
+
+        await child.close()
+
+        self.assertFalse(child.tool_environment.owns_mcp_manager)
+        child.tool_environment.mcp_manager.disconnect_all.assert_not_awaited()
 
 
 if __name__ == "__main__":
