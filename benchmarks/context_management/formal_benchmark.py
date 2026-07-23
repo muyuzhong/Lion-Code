@@ -753,8 +753,22 @@ def pct(value: float) -> str:
     return f"{value * 100:.1f}%"
 
 
+def pct_ci(values: list[float], *, percentage_points: bool = False) -> str:
+    low, high = values
+    if percentage_points:
+        return f"[{low * 100:+.1f}, {high * 100:+.1f}] 个百分点"
+    return f"[{pct(low)}, {pct(high)}]"
+
+
 def render_report(payload: dict[str, Any]) -> str:
     meta = payload["metadata"]
+    aggregate = payload.get("aggregate", {})
+    completed_session_spend = sum(
+        float(item["total_cost_cny"]) for item in aggregate.values()
+    )
+    interrupted_spend = max(
+        0.0, float(meta["benchmark_spend_cny"]) - completed_session_spend
+    )
     lines = [
         "# Lion Code 上下文管理最小正式评测报告",
         "",
@@ -763,7 +777,11 @@ def render_report(payload: dict[str, Any]) -> str:
         f"- API：`{meta['base_url']}`（OpenAI 兼容格式）",
         f"- 任务：{meta['selected_task_count']} 项；计划/完成会话：{meta['planned_session_count']} / {meta['completed_session_count']}",
         f"- 每项任务重复：{meta['repeat_count']} 次；有效窗口：{meta['effective_window_tokens']:,} token",
-        f"- 实际计量费用：{meta['benchmark_spend_cny']:.4f} 元；硬上限：{meta['budget_limit_cny']:.2f} 元",
+        "- 负载档：60%～70%、75%～85%、85%～95%（按 `summary_only` 压缩前工作量构造）。",
+        f"- 实际 API 扣费：{meta['benchmark_spend_cny']:.4f} 元；"
+        f"预算保护阈值：{meta['budget_limit_cny']:.2f} 元",
+        f"- 完整会话费用：{completed_session_spend:.4f} 元；"
+        f"中止调用与断点重放费用：{interrupted_spend:.4f} 元",
         "- API Key：只从进程环境读取，未写入任何评测文件。",
         "",
         "## 策略",
@@ -772,7 +790,6 @@ def render_report(payload: dict[str, Any]) -> str:
         "- `managed_eager`：运行四级管线，但在缓存仍热时提前裁剪旧前缀。",
         "- `managed`：运行生产四级管线，60%～75% 热缓存区间延迟改写前缀。",
     ]
-    aggregate = payload.get("aggregate", {})
     if not aggregate:
         return "\n".join(lines) + "\n"
     lines.extend(
@@ -780,7 +797,7 @@ def render_report(payload: dict[str, Any]) -> str:
             "",
             "## 总体结果",
             "",
-            "| 策略 | 成功任务 | 输入 token | 命中率 | 摘要调用 | 峰值输入 | API 费用 |",
+            "| 策略 | 成功任务 | 输入 token | 命中率 | 摘要调用 | 峰值输入 | 完整会话 API 费用 |",
             "|---|---:|---:|---:|---:|---:|---:|",
         ]
     )
@@ -798,20 +815,26 @@ def render_report(payload: dict[str, Any]) -> str:
     main = comp.get("managed_vs_summary_only")
     if main:
         counts = main["success_counts"]
+        bootstrap = main["bootstrap"]
         lines.extend(
             [
                 "",
                 "## 主对照：完整管线 vs 单阶段摘要",
                 "",
-                f"- 含摘要累计输入 token：减少 **{pct(main['all_input_token_reduction'])}**。",
+                f"- 含摘要累计输入 token：减少 **{pct(main['all_input_token_reduction'])}**；"
+                f"配对 bootstrap 95% CI {pct_ci(bootstrap['prompt_token_reduction_95ci'])}。",
                 f"- 输入费用：减少 **{pct(main['input_cost_reduction'])}**。",
-                f"- API 总费用：减少 **{pct(main['total_cost_reduction'])}**。",
+                f"- 完整会话 API 总费用：观测减少 **{pct(main['total_cost_reduction'])}**；"
+                f"95% CI {pct_ci(bootstrap['total_cost_reduction_95ci'])}，区间跨 0。",
                 f"- 任务成功数：`managed` {counts['managed']}/{counts['denominator_each']}，"
                 f"`summary_only` {counts['summary_only']}/{counts['denominator_each']}。",
+                f"- 成功率差：+{(counts['managed'] - counts['summary_only']) / counts['denominator_each'] * 100:.1f} 个百分点；"
+                f"95% CI {pct_ci(bootstrap['success_rate_difference_95ci'], percentage_points=True)}。",
             ]
         )
     cache = comp.get("managed_vs_eager")
     if cache:
+        bootstrap = cache["bootstrap"]
         lines.extend(
             [
                 "",
@@ -819,8 +842,11 @@ def render_report(payload: dict[str, Any]) -> str:
                 "",
                 f"- 提前改写前缀：{pct(cache['eager_cache_hit_rate'])}。",
                 f"- 缓存热度感知：{pct(cache['managed_cache_hit_rate'])}。",
-                f"- 命中率变化：{cache['cache_hit_rate_gain_percentage_points']:+.1f} 个百分点。",
-                f"- API 费用变化：完整策略相对提前改写减少 {pct(cache['total_cost_reduction'])}。",
+                f"- 命中率变化：{cache['cache_hit_rate_gain_percentage_points']:+.1f} 个百分点；"
+                f"95% CI {pct_ci(bootstrap['cache_hit_rate_gain_95ci'], percentage_points=True)}，区间跨 0。",
+                f"- 完整会话 API 费用：完整策略相对提前改写观测减少 "
+                f"{pct(cache['total_cost_reduction'])}；"
+                f"95% CI {pct_ci(bootstrap['total_cost_reduction_95ci'])}，区间跨 0。",
             ]
         )
     guard = payload.get("quality_guard", {})
