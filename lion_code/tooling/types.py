@@ -26,9 +26,14 @@ class ToolCapabilities:
     """描述运行时可据此调度工具的稳定能力。"""
 
     read_only: bool = False
+    mutates_workspace: bool = False
+    executes_process: bool = False
+    external_side_effect: bool = False
     concurrency_safe: bool = False
     allowed_in_plan: bool = False
     requires_read_before_write: bool = False
+    tracks_read_freshness: bool = False
+    requires_confirmation: bool = False
     deferred: bool = False
     result_policy: Literal["normal", "snippable", "persist_large"] = "normal"
 
