@@ -42,6 +42,7 @@ from benchmark import (  # noqa: E402
     apply_pipeline,
     compact_with_metrics,
     expand_to_bytes,
+    process_tool_result,
     ratio,
     source_snapshot,
     sum_usage,
@@ -335,7 +336,7 @@ def apply_policy(agent: Agent, policy: str, result: FormalResult) -> None:
 def persist_if_managed(agent: Agent, policy: str, payload: str, result: FormalResult) -> str:
     if policy == "summary_only":
         return payload
-    persisted = agent._persist_large_result("read_file", payload)
+    persisted = process_tool_result(agent, "read_file", payload)
     if persisted != payload:
         result.events.persisted_results += 1
     return persisted

@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Mapping
 
+from .. import tools as tool_handlers
 from .types import JSONValue, LionTool, ToolCapabilities, ToolResult
 
 
@@ -21,7 +22,7 @@ BUILTIN_TOOL_NAMES = frozenset(
 )
 
 
-def wrap_legacy_tool(
+def create_builtin_tool(
     *,
     name: str,
     description: str,
@@ -29,7 +30,7 @@ def wrap_legacy_tool(
     handler: Callable[[dict], object],
     capabilities: ToolCapabilities,
 ) -> LionTool:
-    """保持旧实现行为，只把执行结果适配为结构化结果。"""
+    """把 Schema、底层处理函数与运行能力绑定为统一工具对象。"""
 
     async def execute(
         context,
@@ -57,12 +58,8 @@ def wrap_legacy_tool(
 
 def create_builtin_tools() -> list[LionTool]:
     """创建文件、搜索、Shell 与网页工具的统一定义。"""
-    # 延迟导入允许 tools.py 在模块加载末尾从本对象反向生成兼容 Schema，避免循环
-    # 导入时读取尚未初始化完成的 create_builtin_tools。
-    from .. import tools as legacy_tools
-
     return [
-        wrap_legacy_tool(
+        create_builtin_tool(
             name="read_file",
             description="Read the contents of a file. Returns the file content with line numbers.",
             parameters={
@@ -75,7 +72,7 @@ def create_builtin_tools() -> list[LionTool]:
                 },
                 "required": ["file_path"],
             },
-            handler=legacy_tools._read_file,
+            handler=tool_handlers._read_file,
             capabilities=ToolCapabilities(
                 read_only=True,
                 concurrency_safe=True,
@@ -84,7 +81,7 @@ def create_builtin_tools() -> list[LionTool]:
                 result_policy="snippable",
             ),
         ),
-        wrap_legacy_tool(
+        create_builtin_tool(
             name="write_file",
             description="Write content to a file. Creates the file if it doesn't exist, overwrites if it does.",
             parameters={
@@ -101,13 +98,13 @@ def create_builtin_tools() -> list[LionTool]:
                 },
                 "required": ["file_path", "content"],
             },
-            handler=legacy_tools._write_file,
+            handler=tool_handlers._write_file,
             capabilities=ToolCapabilities(
                 mutates_workspace=True,
                 requires_read_before_write=True,
             ),
         ),
-        wrap_legacy_tool(
+        create_builtin_tool(
             name="edit_file",
             description="Edit a file by replacing an exact string match with new content. The old_string must match exactly (including whitespace and indentation).",
             parameters={
@@ -128,13 +125,13 @@ def create_builtin_tools() -> list[LionTool]:
                 },
                 "required": ["file_path", "old_string", "new_string"],
             },
-            handler=legacy_tools._edit_file,
+            handler=tool_handlers._edit_file,
             capabilities=ToolCapabilities(
                 mutates_workspace=True,
                 requires_read_before_write=True,
             ),
         ),
-        wrap_legacy_tool(
+        create_builtin_tool(
             name="list_files",
             description="List files matching a glob pattern. Returns matching file paths.",
             parameters={
@@ -151,7 +148,7 @@ def create_builtin_tools() -> list[LionTool]:
                 },
                 "required": ["pattern"],
             },
-            handler=legacy_tools._list_files,
+            handler=tool_handlers._list_files,
             capabilities=ToolCapabilities(
                 read_only=True,
                 concurrency_safe=True,
@@ -159,7 +156,7 @@ def create_builtin_tools() -> list[LionTool]:
                 result_policy="snippable",
             ),
         ),
-        wrap_legacy_tool(
+        create_builtin_tool(
             name="grep_search",
             description="Search for a pattern in files. Returns matching lines with file paths and line numbers.",
             parameters={
@@ -180,7 +177,7 @@ def create_builtin_tools() -> list[LionTool]:
                 },
                 "required": ["pattern"],
             },
-            handler=legacy_tools._grep_search,
+            handler=tool_handlers._grep_search,
             capabilities=ToolCapabilities(
                 read_only=True,
                 concurrency_safe=True,
@@ -188,7 +185,7 @@ def create_builtin_tools() -> list[LionTool]:
                 result_policy="snippable",
             ),
         ),
-        wrap_legacy_tool(
+        create_builtin_tool(
             name="run_shell",
             description="Execute a shell command and return its output. Use this for running tests, installing packages, git operations, etc.",
             parameters={
@@ -205,13 +202,13 @@ def create_builtin_tools() -> list[LionTool]:
                 },
                 "required": ["command"],
             },
-            handler=legacy_tools._run_shell,
+            handler=tool_handlers._run_shell,
             capabilities=ToolCapabilities(
                 executes_process=True,
                 result_policy="snippable",
             ),
         ),
-        wrap_legacy_tool(
+        create_builtin_tool(
             name="web_fetch",
             description="Fetch a URL and return its content as text. For HTML pages, tags are stripped to return readable text. For JSON/text responses, content is returned directly.",
             parameters={
@@ -225,7 +222,7 @@ def create_builtin_tools() -> list[LionTool]:
                 },
                 "required": ["url"],
             },
-            handler=legacy_tools._web_fetch,
+            handler=tool_handlers._web_fetch,
             capabilities=ToolCapabilities(
                 read_only=True,
                 external_side_effect=True,

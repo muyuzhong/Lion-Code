@@ -1286,21 +1286,6 @@ class Agent:
             return False
         return tool.capabilities.result_policy == "snippable"
 
-    # ─── 大结果持久化 ────────────────────────────────────────
-    # 工具结果超过 30 KB 时先完整落盘，再用预览和文件路径替换上下文内容；
-    # 模型仍可通过 read_file 取回全文。
-
-    def _persist_large_result(self, tool_name: str, result: str) -> str:
-        """Deprecated：兼容基准脚本；正常执行由 ResultPolicyMiddleware 处理。"""
-        try:
-            tool = self.tool_registry.resolve(tool_name)
-        except LookupError:
-            return result
-        return self._result_store.process(
-            tool,
-            ToolResult(content=result),
-        ).content
-
     # ─── 工具路由（含 Agent、Skill 与 Plan 内部工具）────────
 
     async def _execute_tool_call(

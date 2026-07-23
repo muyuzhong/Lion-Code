@@ -37,6 +37,7 @@ from lion_code.agent import (  # noqa: E402
     _get_context_window,
     _to_openai_tools,
 )
+from lion_code.tooling.types import ToolResult  # noqa: E402
 
 
 HERE = Path(__file__).resolve().parent
@@ -257,6 +258,15 @@ def apply_pipeline(agent: Agent, variant: str, events: EventCounts) -> None:
     else:
         raise ValueError(f"未知变体：{variant}")
     update_pipeline_events(before, tool_content_stats(agent._openai_messages), events)
+
+
+def process_tool_result(agent: Agent, tool_name: str, content: str) -> str:
+    """让基准数据经过与运行时相同的结果策略。"""
+    try:
+        tool = agent.tool_registry.resolve(tool_name)
+    except LookupError:
+        return content
+    return agent._result_store.process(tool, ToolResult(content=content)).content
 
 
 def usage_from_response(response: Any) -> dict[str, int]:
@@ -584,7 +594,11 @@ def run_replay(
                     f"{scenario['id']}-tool-{turn}-{source}",
                 )
                 if variant != "raw":
-                    persisted = agent._persist_large_result(scenario["tool_name"], tool_payload)
+                    persisted = process_tool_result(
+                        agent,
+                        scenario["tool_name"],
+                        tool_payload,
+                    )
                     if persisted != tool_payload:
                         result.events.persisted_results += 1
                     tool_payload = persisted
@@ -670,7 +684,7 @@ def offline_probes(dataset: dict[str, Any]) -> list[dict[str, Any]]:
         with patch("lion_code.agent.Path.home", return_value=Path(temp_home)):
             agent = make_probe_agent(effective)
             raw = expand_to_bytes(seed, 120000, "offline-persistence")
-            stored = agent._persist_large_result("read_file", raw)
+            stored = process_tool_result(agent, "read_file", raw)
             probes.append(
                 {
                     "probe": "large_result_persistence",
