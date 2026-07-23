@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
 from .types import LionTool
@@ -70,6 +70,17 @@ class ToolRegistry:
     def all_tools(self) -> list[LionTool]:
         """按注册顺序返回全部定义，包括尚未激活的延迟工具。"""
         return list(self._tools.values())
+
+    def filtered(
+        self,
+        predicate: Callable[[LionTool], bool],
+    ) -> "ToolRegistry":
+        """创建共享不可变工具对象、但拥有独立激活状态的受限视图。"""
+        child = ToolRegistry()
+        for tool in self._tools.values():
+            if predicate(tool):
+                child.register(tool, activate=self.is_active(tool.name))
+        return child
 
     def deferred_tool_names(self) -> list[str]:
         """返回当前尚未激活的延迟工具名称。"""

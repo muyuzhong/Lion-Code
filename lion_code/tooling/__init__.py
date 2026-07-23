@@ -2,6 +2,7 @@
 
 from .registry import ToolRegistry
 from .runtime import ToolRuntime
+from .selection import ToolSelectionPolicy, select_tools
 from .types import JSONValue, LionTool, ToolCapabilities, ToolResult
 
 __all__ = [
@@ -11,4 +12,6 @@ __all__ = [
     "ToolRegistry",
     "ToolResult",
     "ToolRuntime",
+    "ToolSelectionPolicy",
+    "select_tools",
 ]

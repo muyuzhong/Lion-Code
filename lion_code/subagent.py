@@ -5,14 +5,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from .frontmatter import parse_frontmatter
-from .tools import tool_definitions, ToolDef
-
-# ─── explore 与 plan 共用的只读工具集 ──────────────────────
-
-READ_ONLY_TOOLS = {"read_file", "list_files", "grep_search"}
+from .tooling.selection import ToolSelectionPolicy
 
 EXPLORE_PROMPT = """You are a file search specialist for Lion Code. You excel at thoroughly navigating and exploring codebases.
 
@@ -121,24 +118,57 @@ def _load_agents_from_dir(directory: Path, agents: dict[str, dict]) -> None:
 # ─── 配置解析 ───────────────────────────────────────────────
 
 
-def get_sub_agent_config(agent_type: str) -> dict:
-    """返回指定 Agent 类型的系统提示词与工具集。"""
+@dataclass(frozen=True, slots=True)
+class SubAgentConfig:
+    """子 Agent 的提示词及其工具选择约束。"""
+
+    system_prompt: str
+    tool_policy: ToolSelectionPolicy
+
+
+def get_sub_agent_config(agent_type: str) -> SubAgentConfig:
+    """返回指定 Agent 类型的系统提示词与工具选择策略。"""
     custom = _discover_custom_agents().get(agent_type)
     if custom:
         if custom["allowed_tools"]:
-            tools = [t for t in tool_definitions if t["name"] in custom["allowed_tools"]]
+            policy = ToolSelectionPolicy(
+                allowed_names=frozenset(custom["allowed_tools"]),
+                exclude_names=frozenset({"schedule_wakeup"}),
+            )
         else:
-            tools = [t for t in tool_definitions if t["name"] != "agent"]
-        return {"system_prompt": custom["system_prompt"], "tools": tools}
-
-    read_only = [t for t in tool_definitions if t["name"] in READ_ONLY_TOOLS]
+            policy = ToolSelectionPolicy(
+                exclude_names=frozenset({"agent", "schedule_wakeup"}),
+            )
+        return SubAgentConfig(custom["system_prompt"], policy)
 
     if agent_type == "explore":
-        return {"system_prompt": EXPLORE_PROMPT, "tools": read_only}
+        return SubAgentConfig(
+            EXPLORE_PROMPT,
+            ToolSelectionPolicy(
+                require_read_only=True,
+                exclude_names=frozenset({
+                    "agent",
+                    "schedule_wakeup",
+                    "enter_plan_mode",
+                    "exit_plan_mode",
+                }),
+            ),
+        )
     elif agent_type == "plan":
-        return {"system_prompt": PLAN_PROMPT, "tools": read_only}
+        return SubAgentConfig(
+            PLAN_PROMPT,
+            ToolSelectionPolicy(
+                require_read_only=True,
+                exclude_names=frozenset({"agent", "schedule_wakeup"}),
+            ),
+        )
     else:  # 未知内置类型按 general 处理，保持调用侧的向后兼容行为。
-        return {"system_prompt": GENERAL_PROMPT, "tools": [t for t in tool_definitions if t["name"] != "agent"]}
+        return SubAgentConfig(
+            GENERAL_PROMPT,
+            ToolSelectionPolicy(
+                exclude_names=frozenset({"agent", "schedule_wakeup"}),
+            ),
+        )
 
 
 # ─── 可写入系统提示词的 Agent 类型 ─────────────────────────
