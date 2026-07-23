@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from lion_code.tooling.builtin import BUILTIN_TOOL_NAMES, create_builtin_tools
+from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
 from lion_code.tools import tool_definitions
@@ -34,7 +35,16 @@ class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
             path = Path(directory) / "hello.txt"
             path.write_text("第一行\nsecond", encoding="utf-8")
 
-            result = await ToolRuntime(registry).execute(
+            context = ToolContext(
+                session_id="session",
+                cwd=Path(directory),
+                controller=object(),
+                registry=registry,
+                permission_mode="default",
+                plan_file_path=None,
+                read_file_state={},
+            )
+            result = await ToolRuntime(registry, context).execute(
                 tool_call_id="call-1",
                 name="read_file",
                 arguments={"file_path": str(path)},

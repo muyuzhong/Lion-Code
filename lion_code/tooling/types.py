@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Literal, TypeAlias
+from typing import TYPE_CHECKING, Literal, TypeAlias
+
+if TYPE_CHECKING:
+    from .context import ToolContext
 
 
 JSONValue: TypeAlias = (
@@ -41,8 +44,18 @@ class ToolResult:
     terminate: bool = False
 
 
+ToolUpdateCallback: TypeAlias = Callable[
+    [ToolResult],
+    Awaitable[None] | None,
+]
+
 ToolExecutor = Callable[
-    [str, Mapping[str, JSONValue]],
+    [
+        "ToolContext",
+        str,
+        Mapping[str, JSONValue],
+        ToolUpdateCallback | None,
+    ],
     Awaitable[ToolResult],
 ]
 
@@ -63,11 +76,13 @@ class LionTool:
 
     async def execute(
         self,
+        context: "ToolContext",
         tool_call_id: str,
         arguments: Mapping[str, JSONValue],
+        on_update: ToolUpdateCallback | None = None,
     ) -> ToolResult:
         """按统一签名执行工具。"""
-        return await self.execute_fn(tool_call_id, arguments)
+        return await self.execute_fn(context, tool_call_id, arguments, on_update)
 
     def to_anthropic_schema(self) -> dict:
         """返回 Anthropic 工具 Schema。"""

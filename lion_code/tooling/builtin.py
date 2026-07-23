@@ -32,10 +32,12 @@ def wrap_legacy_tool(
     """保持旧实现行为，只把执行结果适配为结构化结果。"""
 
     async def execute(
+        context,
         tool_call_id: str,
         arguments: Mapping[str, JSONValue],
+        on_update,
     ) -> ToolResult:
-        del tool_call_id
+        del context, tool_call_id, on_update
         result = handler(dict(arguments))
         if inspect.isawaitable(result):
             result = await result

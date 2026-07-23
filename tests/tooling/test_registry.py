@@ -6,7 +6,7 @@ from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 
 
-async def _execute(_tool_call_id, _arguments):
+async def _execute(_context, _tool_call_id, _arguments, _on_update):
     return ToolResult(content="ok")
 
 

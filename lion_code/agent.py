@@ -76,6 +76,7 @@ from .mcp_client import McpManager
 from .hooks import HookOutcome, load_pre_tool_use_hooks, run_pre_tool_use_hooks
 from .tooling import ToolRegistry, ToolRuntime
 from .tooling.builtin import BUILTIN_TOOL_NAMES, create_builtin_tools
+from .tooling.context import ToolContext
 
 # ─── 指数退避重试 ───────────────────────────────────────────
 
@@ -282,7 +283,17 @@ class Agent:
         for tool in create_builtin_tools(self._read_file_state):
             if tool.name in selected_tool_names:
                 self.tool_registry.register(tool)
-        self.tool_runtime = ToolRuntime(self.tool_registry)
+        self.tool_context = ToolContext(
+            session_id=self.session_id,
+            cwd=Path.cwd(),
+            controller=self,
+            registry=self.tool_registry,
+            permission_mode=self.permission_mode,
+            plan_file_path=self._plan_file_path,
+            read_file_state=self._read_file_state,
+            confirm_fn=self._confirm_dangerous,
+        )
+        self.tool_runtime = ToolRuntime(self.tool_registry, self.tool_context)
 
         # MCP 延迟到首次对话初始化，避免仅查看 --help 也启动外部进程。
         self._mcp_manager = McpManager()
