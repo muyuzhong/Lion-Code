@@ -459,6 +459,83 @@ print(json.dumps({"action": "allow"}))
         self.assertNotEqual(original.project_root, second_descriptor.project_root)
         self.assertFalse(is_project_hook_trusted(second_descriptor))
 
+    async def test_input_limit_rejects_hook_before_process_start(self):
+        script = self._write_script(
+            "input_limit.py",
+            """from pathlib import Path
+
+Path("input-limit-hook-ran").touch()
+print('{"action":"allow"}')
+""",
+        )
+
+        denial = await run_pre_tool_use_hooks(
+            [self._user_python_hook(script)],
+            "run_shell",
+            {"command": "x" * hook_module.MAX_HOOK_INPUT_BYTES},
+        )
+
+        self.assertIn("input limit of 262144 bytes", denial)
+        self.assertFalse((self.root / "input-limit-hook-ran").exists())
+
+    async def test_stdout_limit_aborts_hook_promptly(self):
+        script = self._write_script(
+            "large_stdout.py",
+            f"""import sys
+import time
+
+sys.stdout.buffer.write(b"x" * {hook_module.MAX_STDOUT_BYTES + 8192})
+sys.stdout.buffer.flush()
+time.sleep(10)
+""",
+        )
+        started = time.monotonic()
+
+        with patch.object(
+            hook_module,
+            "_kill_and_reap",
+            wraps=hook_module._kill_and_reap,
+        ) as kill_and_reap:
+            denial = await run_pre_tool_use_hooks(
+                [self._user_python_hook(script, timeout_ms=5000)], "run_shell", {}
+            )
+
+        self.assertIn("output limit of 65536 bytes", denial)
+        kill_and_reap.assert_awaited_once()
+        self.assertLess(time.monotonic() - started, 2)
+
+    async def test_stderr_has_independent_output_limit(self):
+        script = self._write_script(
+            "large_stderr.py",
+            f"""import sys
+import time
+
+sys.stderr.buffer.write(b"x" * {hook_module.MAX_STDERR_BYTES + 8192})
+sys.stderr.buffer.flush()
+time.sleep(10)
+""",
+        )
+
+        denial = await run_pre_tool_use_hooks(
+            [self._user_python_hook(script, timeout_ms=5000)], "run_shell", {}
+        )
+
+        self.assertIn("output limit of 16384 bytes", denial)
+
+    async def test_stream_read_failure_is_denied_without_escaping(self):
+        script = self._write_script("read_failure.py", "import time\ntime.sleep(10)\n")
+
+        with patch.object(
+            hook_module,
+            "read_limited",
+            AsyncMock(side_effect=OSError("read failed")),
+        ):
+            denial = await run_pre_tool_use_hooks(
+                [self._user_python_hook(script, timeout_ms=5000)], "run_shell", {}
+            )
+
+        self.assertIn("failed during I/O: read failed", denial)
+
     async def test_timeout_kills_process_tree_promptly(self):
         script = self._write_script("sleep.py", "import time\ntime.sleep(10)\n")
         started = time.monotonic()
