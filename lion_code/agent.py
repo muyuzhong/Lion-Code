@@ -1230,7 +1230,12 @@ class Agent:
     # ─── 工具路由（含 Agent、Skill 与 Plan 内部工具）────────
 
     async def _execute_tool_call(self, name: str, inp: dict) -> str:
-        denial = await run_pre_tool_use_hooks(self._pre_tool_use_hooks, name, inp)
+        denial = await run_pre_tool_use_hooks(
+            self._pre_tool_use_hooks,
+            name,
+            inp,
+            confirm_trust=self._confirm_hook_trust,
+        )
         if denial is not None:
             return f"Action denied by PreToolUse hook: {denial}"
 
@@ -1948,6 +1953,12 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
         return await _with_retry(_do)
 
     # ─── 后端共用交互 ────────────────────────────────────────
+
+    async def _confirm_hook_trust(self, message: str) -> bool:
+        # 项目 Hook 信任独立于工具权限；--yolo 也不能替仓库代码自动取得信任。
+        if self.permission_mode == "dontAsk":
+            return False
+        return await self._confirm_dangerous(message)
 
     async def _confirm_dangerous(self, command: str) -> bool:
         print_confirmation(command)
