@@ -136,6 +136,8 @@ Hook 从 stdin 接收 UTF-8 JSON，并在 stdout 返回单个 JSON 对象：
 {"action": "deny", "reason": "当前项目禁止直接推送"}
 ```
 
+单次 Hook 输入最多 256 KiB，stdout 最多 64 KiB，stderr 最多 16 KiB。stdin 写入、两条输出读取和进程等待共享同一执行超时；任一输出流超限时，Lion Code 会立即终止并回收整棵 Hook 进程树。
+
 项目 Hook 的信任记录保存在 `~/.lion-code/trusted-hooks.json`。记录同时绑定规范化项目根目录、Hook `id`、完整配置哈希，以及命令中可解析的项目文件内容哈希。命令、配置、项目脚本内容或项目根目录变化后，原信任记录不再匹配；修改配置后需要重启 Lion Code，脚本内容则会在每次匹配执行前重新校验。
 
 Hook 子进程不会继承 Lion Code 的完整环境。默认只传递 `PATH`、`HOME`、`USERPROFILE`、`SYSTEMROOT`、`TEMP`、`TMP`，并注入 `LION_HOOK_EVENT`、`LION_PROJECT_ROOT`、`LION_HOOK_ID`。`pass_env` 可以声明额外变量，但 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GITHUB_TOKEN` 以及 `AWS_*`、`AZURE_*`、`GOOGLE_*` 会被拒绝。
