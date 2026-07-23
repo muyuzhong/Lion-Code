@@ -11,7 +11,6 @@ from pathlib import Path
 from .memory import build_memory_prompt_section
 from .skills import build_skill_descriptions
 from .subagent import build_agent_descriptions
-from .tools import get_deferred_tool_names
 
 # ─── 内嵌的系统提示词模板 ───────────────────────────────────
 
@@ -217,11 +216,17 @@ def build_dynamic_system_context(
     skills_section = build_skill_descriptions()
     agent_section = build_agent_descriptions()
 
-    deferred_names = (
-        get_deferred_tool_names()
-        if deferred_tool_names is None
-        else deferred_tool_names
-    )
+    if deferred_tool_names is None:
+        from .tooling.builtin import create_builtin_tools
+        from .tooling.internal import create_internal_tools
+
+        deferred_names = [
+            tool.name
+            for tool in [*create_builtin_tools(), *create_internal_tools()]
+            if tool.capabilities.deferred
+        ]
+    else:
+        deferred_names = deferred_tool_names
     deferred_section = (
         f"\n\nThe following deferred tools are available via tool_search: {', '.join(deferred_names)}. Use tool_search to fetch their full schemas when needed."
         if deferred_names else ""

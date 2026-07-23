@@ -17,7 +17,6 @@ import anthropic
 import openai
 
 from .tools import (
-    tool_definitions,
     ToolDef,
     PermissionMode,
 )
@@ -286,24 +285,17 @@ class Agent:
         if tool_registry is not None and custom_tools is not None:
             raise ValueError("tool_registry and custom_tools cannot be combined")
         if tool_registry is None:
-            selected_schemas = (
-                custom_tools if custom_tools is not None else tool_definitions
+            selected_tool_names = (
+                {tool["name"] for tool in custom_tools}
+                if custom_tools is not None
+                else None
             )
-            selected_tool_names = {tool["name"] for tool in selected_schemas}
             self.tool_registry = ToolRegistry()
-            for tool in create_builtin_tools():
-                if tool.name in selected_tool_names:
-                    self.tool_registry.register(tool)
-            for tool in create_internal_tools():
-                if tool.name in selected_tool_names:
+            for tool in [*create_builtin_tools(), *create_internal_tools()]:
+                if selected_tool_names is None or tool.name in selected_tool_names:
                     self.tool_registry.register(tool)
         else:
             self.tool_registry = tool_registry
-        # Deprecated：仅供旧基准脚本读取；运行时和子 Agent 不再依赖 Schema 列表。
-        self.tools = [
-            tool.to_anthropic_schema()
-            for tool in self.tool_registry.all_tools()
-        ]
         self.tool_context = ToolContext(
             session_id=self.session_id,
             cwd=Path.cwd(),
@@ -532,10 +524,6 @@ class Agent:
                     self.tool_registry.register(
                         create_mcp_tool(self._mcp_manager, definition)
                     )
-                self.tools = [
-                    tool.to_anthropic_schema()
-                    for tool in self.tool_registry.all_tools()
-                ]
             except Exception as e:
                 print(f"[mcp] Init failed: {e}", flush=True)
 

@@ -23,9 +23,11 @@ def _tool(name: str) -> LionTool:
 
 class _ChildAgent:
     created_with = None
+    last_instance = None
 
     def __init__(self, **kwargs):
         type(self).created_with = kwargs
+        type(self).last_instance = self
         self.run_once = AsyncMock(
             return_value={
                 "text": "skill result",
@@ -36,6 +38,37 @@ class _ChildAgent:
 
 
 class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
+    async def test_subagent_uses_parent_registry_view_and_shared_environment(self):
+        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
+            parent = Agent(api_key="test-key")
+        mcp_name = "mcp__docs__search"
+        parent.tool_registry.register(_tool(mcp_name))
+
+        with (
+            patch("lion_code.agent.Agent", _ChildAgent),
+            patch("lion_code.agent.print_sub_agent_start"),
+            patch("lion_code.agent.print_sub_agent_end"),
+        ):
+            result = await parent._execute_agent_tool(
+                {
+                    "type": "general",
+                    "description": "research",
+                    "prompt": "find docs",
+                }
+            )
+
+        kwargs = _ChildAgent.created_with
+        child_registry = kwargs["tool_registry"]
+        self.assertEqual(result, "skill result")
+        self.assertIs(child_registry.resolve(mcp_name), parent.tool_registry.resolve(mcp_name))
+        with self.assertRaises(LookupError):
+            child_registry.resolve("agent")
+        self.assertIs(
+            kwargs["tool_environment"].mcp_manager,
+            parent.tool_environment.mcp_manager,
+        )
+        _ChildAgent.last_instance.close.assert_awaited_once_with()
+
     async def test_fork_skill_selects_parent_registry_including_mcp(self):
         with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
             parent = Agent(api_key="test-key")

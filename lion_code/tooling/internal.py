@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
-from typing import Any
 
 from .types import LionTool, ToolCapabilities, ToolResult
 
@@ -207,22 +205,3 @@ def create_internal_tools() -> list[LionTool]:
         create_agent_tool(),
         create_tool_search_tool(),
     ]
-
-
-def create_legacy_mcp_tool(manager: Any, schema: Mapping[str, Any]) -> LionTool:
-    """PR 2 兼容适配器；PR 4 会由带来源描述的正式 MCP Adapter 替换。"""
-    public_name = str(schema["name"])
-
-    async def execute(context, tool_call_id, arguments, on_update):
-        del context, tool_call_id, on_update
-        content = await manager.call_tool(public_name, dict(arguments))
-        return ToolResult(content=content)
-
-    return LionTool(
-        name=public_name,
-        label=public_name,
-        description=str(schema.get("description", "")),
-        parameters=dict(schema.get("input_schema", {})),
-        execute_fn=execute,
-        capabilities=ToolCapabilities(result_policy="persist_large"),
-    )

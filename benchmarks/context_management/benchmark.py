@@ -37,7 +37,6 @@ from lion_code.agent import (  # noqa: E402
     _get_context_window,
     _to_openai_tools,
 )
-from lion_code.tools import get_active_tool_definitions  # noqa: E402
 
 
 HERE = Path(__file__).resolve().parent
@@ -549,7 +548,7 @@ def run_replay(
         ),
     )
     agent.effective_window = effective_window
-    tools = _to_openai_tools(get_active_tool_definitions(agent.tools))
+    tools = _to_openai_tools(agent._active_anthropic_tools())
     result = ReplayResult(scenario["id"], scenario["name"], variant)
 
     with tempfile.TemporaryDirectory(prefix="lion-context-bench-") as temp_home:

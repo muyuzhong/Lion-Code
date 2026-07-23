@@ -1,7 +1,4 @@
-"""工具定义与执行：提供文件、搜索、Shell、Skill、Plan 和子 Agent 等工具。
-
-权限与执行分层参考 Claude Code 的公开设计，所有工具共享同一权限判定入口。
-"""
+"""内置文件、搜索、Shell 与网页工具的底层实现。"""
 
 from __future__ import annotations
 
@@ -13,7 +10,6 @@ import sys
 from pathlib import Path
 
 from .memory import get_memory_dir
-from .frontmatter import parse_frontmatter
 
 # ─── 权限模式 ───────────────────────────────────────────────
 
@@ -24,28 +20,6 @@ IS_WIN = sys.platform == "win32"
 # ─── 类型别名 ───────────────────────────────────────────────
 
 ToolDef = dict  # Anthropic 工具 schema；OpenAI 格式在 Agent 层转换。
-
-# 模块加载末尾会从统一工具对象生成兼容 Schema。
-tool_definitions: list[ToolDef]
-
-def reset_activated_tools() -> None:
-    """Deprecated：激活状态现由每个 Agent 的 ToolRegistry 持有。"""
-
-
-def get_active_tool_definitions(all_tools: list[ToolDef] | None = None) -> list[ToolDef]:
-    """返回当前已启用的工具，并移除不属于 API schema 的 `deferred` 字段。"""
-    tools = all_tools if all_tools is not None else tool_definitions
-    return [
-        {k: v for k, v in t.items() if k != "deferred"}
-        for t in tools
-        if not t.get("deferred")
-    ]
-
-
-def get_deferred_tool_names(all_tools: list[ToolDef] | None = None) -> list[str]:
-    """返回尚未激活的延迟工具名称。"""
-    tools = all_tools if all_tools is not None else tool_definitions
-    return [t["name"] for t in tools if t.get("deferred")]
 
 
 # ─── 工具执行 ───────────────────────────────────────────────
@@ -327,126 +301,3 @@ def _web_fetch(inp: dict) -> str:
         text = text[:max_length] + f"\n\n[... truncated at {max_length} characters]"
 
     return text or "(empty response)"
-
-
-# ─── 兼容权限与结果入口 ──────────────────────────────────────
-
-from .tooling.permission import (  # noqa: E402
-    PermissionPolicy,
-    is_dangerous,
-    load_permission_rules as _load_permission_rules,
-    reset_permission_cache,
-)
-from .tooling.result_store import (  # noqa: E402
-    MAX_RESULT_CHARS,
-    truncate_result as _truncate_result,
-)
-
-
-def load_permission_rules() -> dict:
-    """Deprecated：转发到 tooling.permission。"""
-    return _load_permission_rules(Path.home(), Path.cwd())
-
-
-def check_permission(
-    tool_name: str,
-    inp: dict,
-    mode: str = "default",
-    plan_file_path: str | None = None,
-) -> dict:
-    """Deprecated：按统一工具 Capability 返回旧字典格式的权限决定。"""
-    from .tooling.builtin import create_builtin_tools
-    from .tooling.internal import create_internal_tools
-
-    tool = next(
-        (
-            candidate
-            for candidate in [*create_builtin_tools(), *create_internal_tools()]
-            if candidate.name == tool_name
-        ),
-        None,
-    )
-    if tool is None:
-        return {"action": "allow"}
-    decision = PermissionPolicy().check(
-        tool=tool,
-        arguments=inp,
-        mode=mode,
-        plan_file_path=plan_file_path,
-    )
-    result = {"action": decision.action}
-    if decision.message:
-        result["message"] = decision.message
-    return result
-
-
-# ─── 工具调用入口 ───────────────────────────────────────────
-# `agent` 和 `skill` 由 agent.py 处理，避免执行层产生循环依赖。
-
-
-async def execute_tool(
-    name: str, inp: dict, read_file_state: dict[str, float] | None = None
-) -> str:
-    # ─── 先读后写与 mtime 新鲜度检查 ────────────────────────
-    if name == "read_file":
-        result = _read_file(inp)
-        if read_file_state is not None and not result.startswith("Error"):
-            abs_path = str(Path(inp["file_path"]).resolve())
-            try:
-                read_file_state[abs_path] = os.path.getmtime(abs_path)
-            except OSError:
-                pass
-        # 此处必须返回完整结果：Agent 层会先把大结果持久化，再做上下文截断；
-        # 若执行层提前截断，落盘前就会永久丢失数据。
-        return result
-
-    if name in ("write_file", "edit_file") and read_file_state is not None:
-        abs_path = str(Path(inp["file_path"]).resolve())
-        if os.path.exists(abs_path):
-            if abs_path not in read_file_state:
-                verb = "writing" if name == "write_file" else "editing"
-                return f"Error: You must read this file before {verb}. Use read_file first to see its current contents."
-            if os.path.getmtime(abs_path) != read_file_state[abs_path]:
-                verb = "writing" if name == "write_file" else "editing"
-                return f"Warning: {inp['file_path']} was modified externally since your last read. Please read_file again before {verb}."
-
-    handlers: dict = {
-        "write_file": _write_file,
-        "edit_file": _edit_file,
-        "list_files": _list_files,
-        "grep_search": _grep_search,
-        "run_shell": _run_shell,
-        "web_fetch": _web_fetch,
-    }
-    handler = handlers.get(name)
-    if not handler:
-        return f"Unknown tool: {name}"
-    result = handler(inp)
-
-    # 写入成功后刷新 mtime，保证同一 Agent 后续编辑不会被误判为外部修改。
-    if name in ("write_file", "edit_file") and read_file_state is not None and not result.startswith("Error"):
-        abs_path = str(Path(inp["file_path"]).resolve())
-        try:
-            read_file_state[abs_path] = os.path.getmtime(abs_path)
-        except OSError:
-            pass
-
-    return result
-
-
-# 保留旧导入入口，但普通工具 Schema 的唯一事实来源是 LionTool。
-from .tooling.builtin import create_builtin_tools  # noqa: E402
-from .tooling.internal import create_internal_tools  # noqa: E402
-
-
-def _compat_tool_schema(tool) -> ToolDef:
-    schema = tool.to_anthropic_schema()
-    if tool.capabilities.deferred:
-        schema["deferred"] = True
-    return schema
-
-
-tool_definitions = [
-    _compat_tool_schema(tool)
-    for tool in [*create_builtin_tools(), *create_internal_tools()]
-]

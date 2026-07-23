@@ -16,7 +16,7 @@ from .agent import Agent
 from .frontmatter import format_frontmatter, parse_frontmatter
 from .memory import VALID_TYPES, _update_memory_index, get_memory_dir, load_memory_index
 from .session import SESSION_DIR
-from .tools import tool_definitions
+from .tooling.selection import ToolSelectionPolicy, select_tools
 
 
 DREAM_SESSION_LIMIT = 5
@@ -493,10 +493,18 @@ class DreamCoordinator:
         )
 
     def _create_agent(self, context: DreamContext) -> _DreamAgent:
+        child_registry = select_tools(
+            self.agent.tool_registry,
+            ToolSelectionPolicy(
+                allowed_names=frozenset(DREAM_READ_TOOLS),
+                require_read_only=True,
+            ),
+        )
         kwargs: dict[str, Any] = {
             "model": self.agent.model,
             "custom_system_prompt": DREAM_SYSTEM_PROMPT,
-            "custom_tools": [tool for tool in tool_definitions if tool["name"] in DREAM_READ_TOOLS],
+            "tool_registry": child_registry,
+            "tool_environment": self.agent.tool_environment.child_view(),
             "is_sub_agent": True,
             "permission_mode": "bypassPermissions",
             "max_turns": DREAM_MAX_TURNS,

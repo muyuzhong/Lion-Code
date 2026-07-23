@@ -215,30 +215,6 @@ class McpManager:
             raise RuntimeError(f"MCP server '{server_name}' not connected")
         return await conn.call_tool(tool_name, arguments)
 
-    def get_tool_definitions(self) -> list[dict]:
-        """Deprecated：返回旧版 Anthropic Schema，供迁移期调用方使用。"""
-        return [
-            {
-                "name": f"mcp__{tool.server_name}__{tool.remote_name}",
-                "description": tool.description
-                or f"MCP tool {tool.remote_name} from {tool.server_name}",
-                "input_schema": tool.input_schema,
-            }
-            for tool in self._tools
-        ]
-
-    async def call_tool(self, prefixed_name: str, args: dict) -> str:
-        """Deprecated：解析旧版公共名称并转发到显式远端调用接口。"""
-        parts = prefixed_name.split("__")
-        if len(parts) < 3:
-            raise ValueError(f"Invalid MCP tool name: {prefixed_name}")
-        # 工具名本身可能包含 `__`，只能切出 Server 段后再拼回剩余部分。
-        return await self.call_remote_tool(
-            server_name=parts[1],
-            tool_name="__".join(parts[2:]),
-            arguments=args,
-        )
-
     async def disconnect_all(self) -> None:
         """断开全部 Server 并清空已发现的工具。"""
         for conn in self._connections.values():

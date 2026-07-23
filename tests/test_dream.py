@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, Mock, patch
 from lion_code import dream
 from lion_code.agent import Agent
 from lion_code.frontmatter import format_frontmatter, parse_frontmatter
+from lion_code.tooling.builtin import create_builtin_tools
+from lion_code.tooling.registry import ToolRegistry
 
 
 def _write_memory(path: Path, name: str, memory_type: str, body: str) -> None:
@@ -232,12 +234,20 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             context = dream.DreamContext(root, root, "", [], [], {})
+            registry = ToolRegistry()
+            for tool in create_builtin_tools():
+                registry.register(tool)
+            child_environment = object()
+            environment = Mock()
+            environment.child_view.return_value = child_environment
             parent = SimpleNamespace(
                 model="test-model",
                 use_openai=True,
                 _openai_client=SimpleNamespace(
                     base_url="https://example.test/v1", api_key="test-key"
                 ),
+                tool_registry=registry,
+                tool_environment=environment,
             )
             coordinator = dream.DreamCoordinator(parent)
 
@@ -246,9 +256,10 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
 
         kwargs = factory.call_args.kwargs
         self.assertEqual(
-            {tool["name"] for tool in kwargs["custom_tools"]},
+            {tool.name for tool in kwargs["tool_registry"].all_tools()},
             {"read_file", "list_files", "grep_search"},
         )
+        self.assertIs(kwargs["tool_environment"], child_environment)
         self.assertTrue(kwargs["is_sub_agent"])
         self.assertEqual(kwargs["max_turns"], dream.DREAM_MAX_TURNS)
 

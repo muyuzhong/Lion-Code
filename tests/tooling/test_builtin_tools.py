@@ -8,7 +8,6 @@ from lion_code.tooling.builtin import BUILTIN_TOOL_NAMES, create_builtin_tools
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
-from lion_code.tools import tool_definitions
 
 
 class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
@@ -16,14 +15,11 @@ class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
         tools = create_builtin_tools()
 
         self.assertEqual({tool.name for tool in tools}, BUILTIN_TOOL_NAMES)
-        compatible = {
-            tool["name"]: tool
-            for tool in tool_definitions
-            if tool["name"] in BUILTIN_TOOL_NAMES
-        }
+        schemas = {tool.name: tool.to_anthropic_schema() for tool in tools}
+        self.assertEqual(schemas["read_file"]["name"], "read_file")
         self.assertEqual(
-            compatible,
-            {tool.name: tool.to_anthropic_schema() for tool in tools},
+            schemas["read_file"]["input_schema"],
+            tools[0].parameters,
         )
 
     async def test_read_file_runs_through_runtime(self):
