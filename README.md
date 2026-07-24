@@ -4,7 +4,7 @@
 
 **一个强调执行可控、长会话效率与经验复用的轻量级 Python Coding Agent**
 
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
 [![Status: Active Development](https://img.shields.io/badge/Status-Active%20Development-f59e0b.svg)](#当前边界与路线图)
 
@@ -224,7 +224,7 @@ python benchmarks/context_management/formal_benchmark.py --online `
 
 ## 快速开始
 
-需要 Python 3.11 或更高版本。
+需要 Python 3.12 或更高版本。
 
 ```powershell
 git clone https://github.com/muyuzhong/Lion-Code.git
