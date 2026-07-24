@@ -9,6 +9,7 @@ import signal
 import sys
 
 from .agent import Agent
+from .config import load_api_config
 from .ui import print_welcome, print_user_prompt, print_error, print_info, print_plan_for_approval, print_plan_approval_options
 from .session import load_session, get_latest_session_id
 from .memory import list_memories
@@ -31,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", "-m", default=None, help="Model to use")
     parser.add_argument("--api-base", default=None, help="OpenAI-compatible API base URL")
     parser.add_argument("--resume", action="store_true", help="Resume last session")
+    parser.add_argument("--repl", action="store_true", help="Use the plain REPL instead of the default TUI")
     parser.add_argument("--max-cost", type=float, default=None, help="Max USD spend")
     parser.add_argument("--max-turns", type=int, default=None, help="Max agentic turns")
     parser.add_argument("--help", "-h", action="store_true", help="Show help")
@@ -248,6 +250,7 @@ Options:
   --model, -m         Model to use (default: claude-opus-4-6, or LION_CODE_MODEL env)
   --api-base URL      Use OpenAI-compatible API endpoint (key via env var)
   --resume            Resume the last session
+  --repl              Plain REPL instead of the default TUI
   --max-cost USD      Stop when estimated cost exceeds this amount
   --max-turns N       Stop after N agentic turns
   --help, -h          Show this help
@@ -273,7 +276,7 @@ Examples:
   lion-code --max-cost 0.50 --max-turns 20 "实现功能 X"
   OPENAI_API_KEY=sk-xxx lion-code --api-base https://aihubmix.com/v1 --model gpt-4o "hello"
   lion-code --resume
-  lion-code  # 启动交互式 REPL
+  lion-code  # 启动 TUI（可先在界面内用 /model 配置 API）
 """)
         sys.exit(0)
 
@@ -303,7 +306,21 @@ Examples:
         resolved_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
         resolved_use_openai = True
 
+    # 三级回退：CLI 参数 > 环境变量 > /model 保存的配置。
     if not resolved_api_key:
+        saved = load_api_config()
+        if saved.get("api_key"):
+            resolved_api_key = saved["api_key"]
+            resolved_use_openai = saved.get("provider") == "openai"
+            resolved_api_base = saved.get("base_url") or None
+            if not args.model and saved.get("model"):
+                model = saved["model"]
+
+    prompt = " ".join(args.prompt) if args.prompt else None
+    use_tui = not prompt and not args.repl
+
+    # TUI 允许无凭证启动（进入后用 /model 配置）；one-shot 与 REPL 仍需预先配置。
+    if not resolved_api_key and not use_tui:
         print_error(
             "API key is required.\n"
             "  Set ANTHROPIC_API_KEY (+ optional ANTHROPIC_BASE_URL) for Anthropic format,\n"
@@ -337,7 +354,12 @@ Examples:
         else:
             print_info("No previous sessions found.")
 
-    prompt = " ".join(args.prompt) if args.prompt else None
+    if use_tui:
+        # TUI 内自带输入循环，one-shot prompt 不适用。
+        from .tui import run_tui
+
+        run_tui(agent)
+        return
 
     if prompt:
         # one-shot 也通过 finally 回收 MCP，确保模型或工具异常时不遗留子进程。
