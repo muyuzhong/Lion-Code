@@ -10,8 +10,9 @@ import os
 import time
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Awaitable
+from typing import Any, Callable, Awaitable, Literal
 
 import anthropic
 import openai
@@ -204,6 +205,40 @@ When a Skill should be created:
 The `content` value must be a concise, executable `SKILL.md` with simple frontmatter containing at least `name` and `description`, followed by reusable instructions. Its frontmatter name must match `name`. Do not include session-specific secrets or claim unverified facts."""
 
 
+# ─── 结构化运行结果 ───────────────────────────────────────
+
+
+StopReason = Literal[
+    "completed",
+    "max_turns",
+    "max_cost",
+    "timeout",
+    "model_error",
+    "tool_error",
+    "aborted",
+]
+
+
+@dataclass(slots=True)
+class AgentRunResult:
+    """agent.run() 的结构化返回值，供评测系统等非终端消费者使用。
+
+    turns 口径与 max_turns 一致，只计执行了工具的轮次，不含末尾纯文本轮；
+    cost_usd 沿用 Agent 的近似估算，不代表供应商实际账单。
+    """
+
+    session_id: str
+    final_text: str
+    stop_reason: str
+    turns: int
+    wall_time_seconds: float
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cost_usd: float
+    error: str | None = None
+
+
 # ─── Agent ──────────────────────────────────────────────────
 
 
@@ -263,6 +298,9 @@ class Agent:
         # 当前异步任务用于把 Ctrl+C 传播到正在等待的模型或工具调用。
         self._aborted = False
         self._current_task: asyncio.Task | None = None
+        self._early_tool_tasks: set[asyncio.Task] = set()
+        # 最近一次 chat/run 的终止原因，供 run() 结构化返回；chat 自身不读取。
+        self._last_stop_reason: str | None = None
 
         # 仅缓存用户已确认的具体路径，不缓存宽泛的确认原因。
         self._confirmed_paths: set[str] = set()
@@ -376,8 +414,13 @@ class Agent:
             except ValueError:
                 pass
         # 只初始化选中的协议客户端，后续可用 None 明确判断当前后端。
+        # 缺少凭证时保留 None 客户端而非构造失败：TUI 允许先启动、再由 /model 配置。
         if self.use_openai:
-            self._openai_client = openai.AsyncOpenAI(base_url=api_base, api_key=api_key, **_sdk_retries)
+            self._openai_client = (
+                openai.AsyncOpenAI(base_url=api_base, api_key=api_key, **_sdk_retries)
+                if api_key or os.environ.get("OPENAI_API_KEY")
+                else None
+            )
             self._anthropic_client = None
             self._openai_messages.append({"role": "system", "content": self._system_prompt})
         else:
@@ -387,7 +430,11 @@ class Agent:
             if anthropic_base_url:
                 kwargs["base_url"] = anthropic_base_url
             kwargs.update(_sdk_retries)
-            self._anthropic_client = anthropic.AsyncAnthropic(**kwargs)
+            self._anthropic_client = (
+                anthropic.AsyncAnthropic(**kwargs)
+                if api_key or os.environ.get("ANTHROPIC_API_KEY")
+                else None
+            )
             self._openai_client = None
 
     # ─── Anthropic 前缀缓存 ──────────────────────────────────
@@ -472,6 +519,16 @@ class Agent:
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
 
+    async def _cancel_early_tool_tasks(self) -> None:
+        """取消并回收流式响应期间提前启动、但尚未归属主等待链的工具任务。"""
+        tasks = tuple(self._early_tool_tasks)
+        self._early_tool_tasks.clear()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]]) -> None:
         self.confirm_fn = fn
 
@@ -503,6 +560,56 @@ class Agent:
     def get_token_usage(self) -> dict:
         return {"input": self.total_input_tokens, "output": self.total_output_tokens}
 
+    # ─── 运行时模型/凭证配置（TUI /model 的后端）──────────────
+
+    @property
+    def api_configured(self) -> bool:
+        return self._openai_client is not None or self._anthropic_client is not None
+
+    def get_api_config(self) -> dict:
+        """当前模型与凭证快照，供配置界面预填；不含任何客户端内部状态。"""
+        client = self._openai_client or self._anthropic_client
+        return {
+            "use_openai": self.use_openai,
+            "model": self.model,
+            "api_key": getattr(client, "api_key", "") or "",
+            "base_url": str(getattr(client, "base_url", "") or ""),
+        }
+
+    def configure_api(
+        self,
+        *,
+        model: str | None = None,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        anthropic_base_url: str | None = None,
+        use_openai: bool | None = None,
+    ) -> None:
+        """运行时配置/切换模型与凭证，无需重建 Agent。
+
+        跨协议切换时目标后端的消息历史为空、相当于新会话（两种后端的历史本就
+        分开存储，协议间不做有损转换）；同协议换 key/换模型保留历史。
+        """
+        if model:
+            self.model = model
+            self.effective_window = _get_context_window(model) - 20000
+            self._thinking_mode = self._resolve_thinking_mode()
+        if use_openai is not None:
+            self.use_openai = use_openai
+        if self.use_openai:
+            self._openai_client = openai.AsyncOpenAI(base_url=api_base, api_key=api_key)
+            self._anthropic_client = None
+            if not self._openai_messages:
+                self._openai_messages.append({"role": "system", "content": self._system_prompt})
+        else:
+            kwargs: dict[str, Any] = {}
+            if api_key:
+                kwargs["api_key"] = api_key
+            if anthropic_base_url:
+                kwargs["base_url"] = anthropic_base_url
+            self._anthropic_client = anthropic.AsyncAnthropic(**kwargs)
+            self._openai_client = None
+
     def _active_anthropic_tools(self) -> list[dict]:
         """每次模型调用前读取当前 Registry，避免缓存过期的激活状态。"""
         return [
@@ -527,16 +634,26 @@ class Agent:
                         create_mcp_tool(self._mcp_manager, definition)
                     )
             except Exception as e:
-                print(f"[mcp] Init failed: {e}", flush=True)
+                print_info(f"[mcp] Init failed: {e}")
+
+        if self._openai_client is None and self._anthropic_client is None:
+            print_error(
+                "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
+                "或在 TUI 中用 /model 配置。"
+            )
+            return
 
         self._aborted = False
+        self._last_stop_reason = None
         coro = self._chat_openai(user_message) if self.use_openai else self._chat_anthropic(user_message)
         self._current_task = asyncio.current_task()
         try:
             await coro
         except asyncio.CancelledError:
             self._aborted = True
+            self._last_stop_reason = "aborted"
         finally:
+            await self._cancel_early_tool_tasks()
             self._current_task = None
         if not self.is_sub_agent:
             print_divider()
@@ -558,6 +675,78 @@ class Agent:
                 "output": self.total_output_tokens - prev_out,
             },
         }
+
+    # ─── 结构化单次运行入口（评测 / 非终端消费者）────────────
+
+    async def run(self, prompt: str, *, timeout: float | None = None) -> AgentRunResult:
+        """运行一次并返回结构化结果，供评测系统等不依赖终端文本的消费者使用。
+
+        与 chat() 的差异：捕获最终文本、轮次、token、成本与停止原因，并在模型异常
+        或超时时返回结构化结果而非抛出。turns 口径与 max_turns 一致，只计执行了工具
+        的轮次，不含末尾纯文本轮。timeout 到期后直接取消承载 chat() 的任务，因此首次
+        MCP 初始化也受同一超时约束；chat() 可能吞掉 CancelledError，这里统一改写原因。
+
+        注意：tool_error 当前不会触发——工具异常由 ToolRuntime 转成错误内容回传，
+        Agent 会继续运行直到 completed 或其他边界；该枚举值保留供未来需要时使用。
+        调用方负责在结束时 await agent.close() 释放 MCP 等外部资源。
+        """
+        pre_input = self.total_input_tokens
+        pre_output = self.total_output_tokens
+        pre_cache = self.total_cache_read_tokens
+        pre_turns = self.current_turns
+        pre_cost = self._get_current_cost_usd()
+        start = time.monotonic()
+
+        self._output_buffer = []
+
+        timed_out = False
+        timeout_handle = None
+        run_task = asyncio.current_task()
+        if timeout is not None:
+            loop = asyncio.get_running_loop()
+
+            def _on_timeout() -> None:
+                nonlocal timed_out
+                timed_out = True
+                self._aborted = True
+                if run_task is not None and not run_task.done():
+                    run_task.cancel()
+
+            timeout_handle = loop.call_later(timeout, _on_timeout)
+
+        stop_reason = "completed"
+        error: str | None = None
+        try:
+            await self.chat(prompt)
+            stop_reason = self._last_stop_reason or "completed"
+        except asyncio.CancelledError:
+            # chat() 已吞掉自身的 CancelledError；到达这里说明取消来自更外层。
+            stop_reason = "aborted"
+        except Exception as exc:
+            stop_reason = "model_error"
+            error = str(exc) or exc.__class__.__name__
+        finally:
+            if timeout_handle is not None:
+                timeout_handle.cancel()
+            final_text = "".join(self._output_buffer or [])
+            self._output_buffer = None
+
+        if timed_out:
+            stop_reason = "timeout"
+            error = error or f"timeout after {timeout}s"
+
+        return AgentRunResult(
+            session_id=self.session_id,
+            final_text=final_text,
+            stop_reason=stop_reason,
+            turns=self.current_turns - pre_turns,
+            wall_time_seconds=time.monotonic() - start,
+            input_tokens=self.total_input_tokens - pre_input,
+            output_tokens=self.total_output_tokens - pre_output,
+            cache_read_tokens=self.total_cache_read_tokens - pre_cache,
+            cost_usd=self._get_current_cost_usd() - pre_cost,
+            error=error,
+        )
 
     # ─── 输出分流 ────────────────────────────────────────────
 
@@ -607,9 +796,9 @@ class Agent:
 
     def _check_budget(self) -> dict:
         if self.max_cost_usd is not None and self._get_current_cost_usd() >= self.max_cost_usd:
-            return {"exceeded": True, "reason": f"Cost limit reached (${self._get_current_cost_usd():.4f} >= ${self.max_cost_usd})"}
+            return {"exceeded": True, "kind": "max_cost", "reason": f"Cost limit reached (${self._get_current_cost_usd():.4f} >= ${self.max_cost_usd})"}
         if self.max_turns is not None and self.current_turns >= self.max_turns:
-            return {"exceeded": True, "reason": f"Turn limit reached ({self.current_turns} >= {self.max_turns})"}
+            return {"exceeded": True, "kind": "max_turns", "reason": f"Turn limit reached ({self.current_turns} >= {self.max_turns})"}
         return {"exceeded": False}
 
     async def compact(self) -> None:
@@ -1612,6 +1801,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
 
         while True:
             if self._aborted:
+                self._last_stop_reason = "aborted"
                 break
 
             self._run_compression_pipeline()
@@ -1645,6 +1835,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                     )
                 )
                 early_executions[block["id"]] = task
+                self._early_tool_tasks.add(task)
 
             response = await self._call_anthropic_stream(on_tool_block_complete=_on_tool_block)
 
@@ -1674,6 +1865,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             if not tool_uses:
                 if not self.is_sub_agent:
                     print_cost(self.total_input_tokens, self.total_output_tokens, self.total_cache_read_tokens, self.total_cache_creation_tokens)
+                self._last_stop_reason = "completed"
                 break
 
             self.current_turns += 1
@@ -1689,6 +1881,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                      "content": f"Tool call not executed: {budget['reason']}"}
                     for tu in tool_uses
                 ]})
+                self._last_stop_reason = budget["kind"]
                 break
 
             # 流式阶段已启动的工具只需等待，其余工具再走权限检查和执行。
@@ -1820,6 +2013,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
 
         while True:
             if self._aborted:
+                self._last_stop_reason = "aborted"
                 break
 
             self._run_compression_pipeline()
@@ -1859,6 +2053,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             if not tool_calls:
                 if not self.is_sub_agent:
                     print_cost(self.total_input_tokens, self.total_output_tokens, self.total_cache_read_tokens, self.total_cache_creation_tokens)
+                self._last_stop_reason = "completed"
                 break
 
             self.current_turns += 1
@@ -1873,6 +2068,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                             "tool_call_id": tc["id"],
                             "content": f"Tool call not executed: {budget['reason']}",
                         })
+                self._last_stop_reason = budget["kind"]
                 break
 
             # 先串行解析调用；权限、Hook 与确认均由每个 Runtime 调用统一处理。
