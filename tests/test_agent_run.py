@@ -102,12 +102,17 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
     async def test_run_stop_reason_max_turns(self):
         agent = Agent(api_key="test-key", is_sub_agent=True, max_turns=1)
         responses = [_anthropic_response([_tool_block()])]
-        with patch.object(Agent, "_call_anthropic_stream", new=_anthropic_stream(responses)):
+        encoding_error = UnicodeEncodeError("gbk", "ℹ", 0, 1, "illegal multibyte sequence")
+        with (
+            patch.object(Agent, "_call_anthropic_stream", new=_anthropic_stream(responses)),
+            patch("lion_code.agent.print_info", side_effect=encoding_error),
+        ):
             result = await agent.run("do something")
         await agent.close()
 
         self.assertEqual(result.stop_reason, "max_turns")
         self.assertEqual(result.turns, 1)
+        self.assertEqual(agent._anthropic_messages[-1]["content"][0]["type"], "tool_result")
 
     async def test_run_model_error_captured(self):
         agent = Agent(api_key="test-key", is_sub_agent=True)

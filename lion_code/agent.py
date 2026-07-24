@@ -1871,7 +1871,6 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             self.current_turns += 1
             budget = self._check_budget()
             if budget["exceeded"]:
-                print_info(f"Budget exceeded: {budget['reason']}")
                 # 每个 tool_use 都必须有 tool_result 配对；预算超限时写入拒绝结果，
                 # 不能静默丢弃并留下无效消息历史。
                 for task in early_executions.values():
@@ -1882,6 +1881,11 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                     for tu in tool_uses
                 ]})
                 self._last_stop_reason = budget["kind"]
+                try:
+                    print_info(f"Budget exceeded: {budget['reason']}")
+                except UnicodeError:
+                    # 终端编码能力不能覆盖已经确定的结构化停止原因。
+                    pass
                 break
 
             # 流式阶段已启动的工具只需等待，其余工具再走权限检查和执行。
@@ -2059,7 +2063,6 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             self.current_turns += 1
             budget = self._check_budget()
             if budget["exceeded"]:
-                print_info(f"Budget exceeded: {budget['reason']}")
                 # 与 Anthropic 相同，每个 tool_call 都必须有 role=tool 的配对响应。
                 for tc in tool_calls:
                     if tc.get("id"):
@@ -2069,6 +2072,11 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                             "content": f"Tool call not executed: {budget['reason']}",
                         })
                 self._last_stop_reason = budget["kind"]
+                try:
+                    print_info(f"Budget exceeded: {budget['reason']}")
+                except UnicodeError:
+                    # 终端编码能力不能覆盖已经确定的结构化停止原因。
+                    pass
                 break
 
             # 先串行解析调用；权限、Hook 与确认均由每个 Runtime 调用统一处理。
