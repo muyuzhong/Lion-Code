@@ -15,7 +15,7 @@ from lion_code.core import (
     ToolCall,
     TurnEndEvent,
 )
-from lion_code.core.provider_events import AssistantDoneEvent
+from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 
 from fakes import FakeProvider
 
@@ -34,6 +34,28 @@ def _noop_tool() -> AgentTool:
 
 
 class TestHarnessCancel(unittest.IsolatedAsyncioTestCase):
+    async def test_error_event_reason_overrides_message_stop_reason(self) -> None:
+        provider = FakeProvider(
+            [
+                AssistantErrorEvent(
+                    reason="aborted",
+                    error=AssistantMessage(model="fake"),
+                )
+            ]
+        )
+        harness = AgentHarness(
+            AgentHarnessConfig(
+                provider=provider,
+                model="fake",
+                system="test",
+            )
+        )
+
+        async for _ in harness.prompt("hello"):
+            pass
+
+        self.assertEqual(harness.messages[-1].stop_reason, "aborted")
+
     async def test_cancel_aborts_run_after_turn(self) -> None:
         # Turn 1 requests a tool call; turn 2 would answer with final text, but we
         # cancel between turns so the next provider stream aborts.

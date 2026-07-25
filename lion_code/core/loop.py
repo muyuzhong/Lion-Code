@@ -232,13 +232,15 @@ async def _assistant_events(
             started = True
             yield MessageStartEvent(message=event.partial)
         elif isinstance(event, AssistantDoneEvent):
+            message = event.message.model_copy(update={"stop_reason": event.reason})
             if not started:
-                yield MessageStartEvent(message=event.message)
-            yield MessageEndEvent(message=event.message)
+                yield MessageStartEvent(message=message)
+            yield MessageEndEvent(message=message)
         elif isinstance(event, AssistantErrorEvent):
+            message = event.error.model_copy(update={"stop_reason": event.reason})
             if not started:
-                yield MessageStartEvent(message=event.error)
-            yield MessageEndEvent(message=event.error)
+                yield MessageStartEvent(message=message)
+            yield MessageEndEvent(message=message)
         else:
             yield MessageUpdateEvent(
                 message=event.partial,
