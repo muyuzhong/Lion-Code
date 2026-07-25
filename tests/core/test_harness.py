@@ -228,5 +228,63 @@ class TestUnknownTool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(messages[3].text, "recovered")
 
 
+class TestStructuredToolError(unittest.IsolatedAsyncioTestCase):
+    async def test_tool_returning_is_error_is_not_reclassified_as_success(self) -> None:
+        # A tool that surfaces a structured error (e.g. a host runtime denial)
+        # without raising must propagate is_error=True to the tool result
+        # message, not be silently marked successful.
+        async def execute(tool_call_id, arguments, signal, on_update):
+            return AgentToolResult(
+                content=[TextContent(text="denied by policy")],
+                details={},
+                is_error=True,
+            )
+
+        provider = FakeProvider(
+            [
+                AssistantDoneEvent(
+                    reason="toolUse",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[ToolCall(id="c1", name="guarded", arguments={})],
+                        stop_reason="toolUse",
+                    ),
+                ),
+                AssistantDoneEvent(
+                    reason="stop",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[TextContent(text="recovered")],
+                        stop_reason="stop",
+                    ),
+                ),
+            ]
+        )
+
+        harness = AgentHarness(
+            AgentHarnessConfig(
+                provider=provider,
+                model="fake",
+                system="test",
+                tools=[
+                    AgentTool(
+                        name="guarded",
+                        label="Guarded",
+                        description="guarded",
+                        parameters={},
+                        execute_fn=execute,
+                    )
+                ],
+            )
+        )
+
+        async for _ in harness.prompt("hello"):
+            pass
+
+        messages = harness.messages
+        self.assertTrue(messages[2].is_error)
+        self.assertEqual(messages[2].text, "denied by policy")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

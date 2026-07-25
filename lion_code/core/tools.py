@@ -26,6 +26,11 @@ class AgentToolResult(WireModel):
     added_tool_names: list[str] | None = None
     terminate: bool | None = None
 
+    # Lion extension: preserve ToolRuntime's structured error state so that
+    # permission denials, hook rejections, and freshness failures surfaced by
+    # the host runtime are not reclassified as successful tool calls.
+    is_error: bool = False
+
     @model_validator(mode="before")
     @classmethod
     def _normalize_text_content(cls, value: object) -> object:

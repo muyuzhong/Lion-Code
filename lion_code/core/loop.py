@@ -419,7 +419,10 @@ async def _run_tool(
 
     try:
         result = await tool.execute(call.id, call.arguments, signal, on_update)
-        return result, False, updates
+        # Honor structured errors returned without raising: the host runtime
+        # surfaces permission denials, hook rejections, and freshness failures
+        # as ``AgentToolResult(is_error=True)`` rather than exceptions.
+        return result, result.is_error, updates
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - tools are an isolation boundary
@@ -429,7 +432,7 @@ async def _run_tool(
 
 
 def _error_result(message: str) -> AgentToolResult:
-    return AgentToolResult(content=[TextContent(text=message)], details={})
+    return AgentToolResult(content=[TextContent(text=message)], details={}, is_error=True)
 
 
 def _error_message(model: str, message: str) -> AssistantMessage:
