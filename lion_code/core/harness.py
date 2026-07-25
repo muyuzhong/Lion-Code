@@ -10,7 +10,7 @@ from inspect import isawaitable
 from typing import Literal
 
 from lion_code.core.events import AgentEvent
-from lion_code.core.loop import AfterToolCall, BeforeToolCall, GetTools, run_agent_loop
+from lion_code.core.loop import AfterToolCall, BeforeToolCall, GetSystem, GetTools, run_agent_loop
 from lion_code.core.messages import (
     AgentMessage,
     AssistantMessage,
@@ -40,6 +40,7 @@ class AgentHarnessConfig:
     provider: ModelProvider
     model: str
     system: str
+    get_system: GetSystem | None = None
     tools: list[AgentTool] = field(default_factory=list)
     get_tools: GetTools | None = None
     max_turns: int | None = None
@@ -171,6 +172,7 @@ class AgentHarness:
                 provider=self._config.provider,
                 model=self._config.model,
                 system=self._config.system,
+                get_system=self._config.get_system,
                 messages=self._messages,
                 prompts=prompts,
                 tools=self._config.tools,

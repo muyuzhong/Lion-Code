@@ -40,6 +40,7 @@ AfterToolCall = Callable[
     Awaitable[tuple[AgentToolResult, bool]],
 ]
 GetTools = Callable[[], Sequence[AgentTool]]
+GetSystem = Callable[[], str]
 
 
 async def run_agent_loop(
@@ -47,6 +48,7 @@ async def run_agent_loop(
     provider: ModelProvider,
     model: str,
     system: str,
+    get_system: GetSystem | None = None,
     messages: list[AgentMessage],
     tools: list[AgentTool],
     get_tools: GetTools | None = None,
@@ -111,6 +113,9 @@ async def run_agent_loop(
             # skill-added, and per-subagent tool views are honored.
             active_tools = list(get_tools() if get_tools else tools)
             tool_by_name = {tool.name: tool for tool in active_tools}
+            # Resolve the system prompt per turn so plan-mode, dynamic skills,
+            # and tool-activation prompt updates are visible without rebuilding.
+            current_system = get_system() if get_system else system
             # Python async generators cannot pass a yielding callback through a
             # normal await cleanly, so consume the assistant sub-generator and
             # retain its final message through the terminal event.
@@ -118,7 +123,7 @@ async def run_agent_loop(
             async for event in _assistant_events(
                 provider=provider,
                 model=model,
-                system=system,
+                system=current_system,
                 messages=_provider_context(messages),
                 tools=active_tools,
                 signal=signal,
