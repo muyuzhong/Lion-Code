@@ -15,6 +15,8 @@ from lion_code.core import (
     AssistantMessage,
     TextContent,
     ToolCall,
+    ToolExecutionEndEvent,
+    ToolExecutionUpdateEvent,
 )
 from lion_code.core.provider_events import AssistantDoneEvent
 
@@ -113,6 +115,242 @@ class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(messages[2].is_error)
         self.assertEqual(messages[3].text, "final")
         self.assertEqual(provider.call_count, 2)
+
+    async def test_all_terminating_tool_results_skip_provider_follow_up(self) -> None:
+        async def execute(tool_call_id, arguments, signal, on_update):
+            return AgentToolResult(
+                content=[TextContent(text=tool_call_id)],
+                terminate=True,
+            )
+
+        provider = FakeProvider(
+            [
+                AssistantDoneEvent(
+                    reason="toolUse",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[
+                            ToolCall(id="c1", name="one", arguments={}),
+                            ToolCall(id="c2", name="two", arguments={}),
+                        ],
+                    ),
+                )
+            ]
+        )
+        tools = [
+            AgentTool(
+                name=name,
+                label=name,
+                description=name,
+                parameters={},
+                execute_fn=execute,
+            )
+            for name in ("one", "two")
+        ]
+        harness = AgentHarness(
+            AgentHarnessConfig(
+                provider=provider,
+                model="fake",
+                system="test",
+                tools=tools,
+            )
+        )
+
+        async for _ in harness.prompt("hello"):
+            pass
+
+        self.assertEqual(provider.call_count, 1)
+        self.assertEqual(
+            [message.role for message in harness.messages],
+            ["user", "assistant", "toolResult", "toolResult"],
+        )
+
+    async def test_mixed_terminate_results_keep_provider_follow_up(self) -> None:
+        async def execute(tool_call_id, arguments, signal, on_update):
+            return AgentToolResult(
+                content=[TextContent(text=tool_call_id)],
+                terminate=tool_call_id == "c1",
+            )
+
+        provider = FakeProvider(
+            [
+                AssistantDoneEvent(
+                    reason="toolUse",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[
+                            ToolCall(id="c1", name="one", arguments={}),
+                            ToolCall(id="c2", name="two", arguments={}),
+                        ],
+                    ),
+                ),
+                AssistantDoneEvent(
+                    reason="stop",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[TextContent(text="final")],
+                    ),
+                ),
+            ]
+        )
+        tools = [
+            AgentTool(
+                name=name,
+                label=name,
+                description=name,
+                parameters={},
+                execute_fn=execute,
+            )
+            for name in ("one", "two")
+        ]
+        harness = AgentHarness(
+            AgentHarnessConfig(
+                provider=provider,
+                model="fake",
+                system="test",
+                tools=tools,
+            )
+        )
+
+        async for _ in harness.prompt("hello"):
+            pass
+
+        self.assertEqual(provider.call_count, 2)
+        self.assertEqual(harness.messages[-1].text, "final")
+
+    async def test_prepare_arguments_runs_before_hooks_and_execute(self) -> None:
+        observed: list[tuple[str, dict]] = []
+
+        def prepare(arguments):
+            observed.append(("prepare", dict(arguments)))
+            return {"msg": arguments["legacy"]}
+
+        async def before(call):
+            observed.append(("before", dict(call.arguments)))
+            return False, None
+
+        async def execute(tool_call_id, arguments, signal, on_update):
+            observed.append(("execute", dict(arguments)))
+            return AgentToolResult(content=[TextContent(text=arguments["msg"])])
+
+        provider = FakeProvider(
+            [
+                AssistantDoneEvent(
+                    reason="toolUse",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[
+                            ToolCall(
+                                id="c1",
+                                name="compat",
+                                arguments={"legacy": "converted"},
+                            )
+                        ],
+                    ),
+                ),
+                AssistantDoneEvent(
+                    reason="stop",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[TextContent(text="final")],
+                    ),
+                ),
+            ]
+        )
+        harness = AgentHarness(
+            AgentHarnessConfig(
+                provider=provider,
+                model="fake",
+                system="test",
+                tools=[
+                    AgentTool(
+                        name="compat",
+                        label="Compat",
+                        description="compat",
+                        parameters={},
+                        execute_fn=execute,
+                        prepare_arguments=prepare,
+                    )
+                ],
+                before_tool_call=before,
+            )
+        )
+
+        async for _ in harness.prompt("hello"):
+            pass
+
+        self.assertEqual(
+            observed,
+            [
+                ("prepare", {"legacy": "converted"}),
+                ("before", {"msg": "converted"}),
+                ("execute", {"msg": "converted"}),
+            ],
+        )
+
+    async def test_tool_updates_are_emitted_before_execution_finishes(self) -> None:
+        release = asyncio.Event()
+
+        async def execute(tool_call_id, arguments, signal, on_update):
+            on_update(AgentToolResult(content=[TextContent(text="working")]))
+            await release.wait()
+            return AgentToolResult(content=[TextContent(text="done")])
+
+        provider = FakeProvider(
+            [
+                AssistantDoneEvent(
+                    reason="toolUse",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[ToolCall(id="c1", name="slow", arguments={})],
+                    ),
+                ),
+                AssistantDoneEvent(
+                    reason="stop",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[TextContent(text="final")],
+                    ),
+                ),
+            ]
+        )
+        harness = AgentHarness(
+            AgentHarnessConfig(
+                provider=provider,
+                model="fake",
+                system="test",
+                tools=[
+                    AgentTool(
+                        name="slow",
+                        label="Slow",
+                        description="slow",
+                        parameters={},
+                        execute_fn=execute,
+                    )
+                ],
+            )
+        )
+        events = []
+
+        async def consume() -> None:
+            async for event in harness.prompt("hello"):
+                events.append(event)
+                if isinstance(event, ToolExecutionUpdateEvent):
+                    release.set()
+
+        await asyncio.wait_for(consume(), timeout=1)
+
+        update_index = next(
+            index
+            for index, event in enumerate(events)
+            if isinstance(event, ToolExecutionUpdateEvent)
+        )
+        end_index = next(
+            index
+            for index, event in enumerate(events)
+            if isinstance(event, ToolExecutionEndEvent)
+        )
+        self.assertLess(update_index, end_index)
 
     async def test_parallel_tools_run_concurrently(self) -> None:
         started = asyncio.Event()

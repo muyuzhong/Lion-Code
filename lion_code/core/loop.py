@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from contextlib import suppress
+from dataclasses import dataclass
 from inspect import isawaitable
 
 from lion_code.core.events import (
@@ -46,6 +48,12 @@ PrepareContext = Callable[
     [list[AgentMessage]],
     Awaitable[list[AgentMessage]] | list[AgentMessage],
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class _ToolRunOutcome:
+    result: AgentToolResult
+    is_error: bool
 
 
 async def run_agent_loop(
@@ -163,6 +171,7 @@ async def run_agent_loop(
             tool_results: list[ToolResultMessage] = []
             calls = list(assistant.tool_calls)
             has_more_tools = bool(calls)
+            terminate_flags: list[bool] = []
             for call_batch in _tool_call_batches(calls, tool_by_name):
                 if len(call_batch) == 1:
                     async for event in _execute_tool_call(
@@ -173,6 +182,8 @@ async def run_agent_loop(
                         after_tool_call,
                     ):
                         yield event
+                        if isinstance(event, ToolExecutionEndEvent):
+                            terminate_flags.append(event.result.terminate is True)
                         if isinstance(event, MessageEndEvent) and isinstance(
                             event.message, ToolResultMessage
                         ):
@@ -187,22 +198,26 @@ async def run_agent_loop(
                         tool_name=call.name,
                         args=call.arguments,
                     )
-                event_batches = await _run_parallel_tool_batch(
+                async for event in _run_parallel_tool_batch(
                     call_batch,
                     tool_by_name,
                     signal,
                     before_tool_call,
                     after_tool_call,
-                )
-                for events in event_batches:
-                    for event in events:
-                        yield event
-                        if isinstance(event, MessageEndEvent) and isinstance(
-                            event.message, ToolResultMessage
-                        ):
-                            tool_results.append(event.message)
-                            messages.append(event.message)
-                            new_messages.append(event.message)
+                ):
+                    yield event
+                    if isinstance(event, ToolExecutionEndEvent):
+                        terminate_flags.append(event.result.terminate is True)
+                    if isinstance(event, MessageEndEvent) and isinstance(
+                        event.message, ToolResultMessage
+                    ):
+                        tool_results.append(event.message)
+                        messages.append(event.message)
+                        new_messages.append(event.message)
+
+            has_more_tools = bool(calls) and not (
+                len(terminate_flags) == len(calls) and all(terminate_flags)
+            )
 
             yield TurnEndEvent(message=assistant, tool_results=tool_results)
             turn += 1
@@ -244,46 +259,55 @@ async def _run_parallel_tool_batch(
     signal: CancellationToken | None,
     before_tool_call: BeforeToolCall | None,
     after_tool_call: AfterToolCall | None,
-) -> list[list[AgentEvent]]:
-    """Run a parallel batch and return its event streams in call order."""
-    results = await asyncio.gather(
-        *(
-            _collect_tool_events(
+) -> AsyncIterator[AgentEvent]:
+    """实时转发并行工具事件，并按调用顺序提交最终消息。"""
+    queue: asyncio.Queue[
+        tuple[int, AgentEvent | None, BaseException | None]
+    ] = asyncio.Queue()
+    message_events: list[list[AgentEvent]] = [[] for _ in calls]
+
+    async def forward(index: int, call: ToolCall) -> None:
+        try:
+            async for event in _execute_tool_call(
                 call,
                 tools,
                 signal,
                 before_tool_call,
                 after_tool_call,
-            )
-            for call in calls
-        ),
-        return_exceptions=True,
-    )
-    for result in results:
-        if isinstance(result, BaseException):
-            raise result
-    return results
+                include_start=False,
+            ):
+                await queue.put((index, event, None))
+        except BaseException as exc:
+            await queue.put((index, None, exc))
+        else:
+            await queue.put((index, None, None))
 
-
-async def _collect_tool_events(
-    call: ToolCall,
-    tools: Mapping[str, AgentTool],
-    signal: CancellationToken | None,
-    before_tool_call: BeforeToolCall | None,
-    after_tool_call: AfterToolCall | None,
-) -> list[AgentEvent]:
-    """Collect one parallel tool's events without duplicating its start event."""
-    return [
-        event
-        async for event in _execute_tool_call(
-            call,
-            tools,
-            signal,
-            before_tool_call,
-            after_tool_call,
-            include_start=False,
-        )
+    tasks = [
+        asyncio.create_task(forward(index, call))
+        for index, call in enumerate(calls)
     ]
+    remaining = len(tasks)
+    try:
+        while remaining:
+            index, event, error = await queue.get()
+            if error is not None:
+                raise error
+            if event is None:
+                remaining -= 1
+                continue
+            if isinstance(event, (MessageStartEvent, MessageEndEvent)):
+                message_events[index].append(event)
+            else:
+                yield event
+
+        for events in message_events:
+            for event in events:
+                yield event
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def _provider_context(messages: list[AgentMessage]) -> list[AgentMessage]:
@@ -358,34 +382,52 @@ async def _execute_tool_call(
             args=call.arguments,
         )
 
-    blocked = False
-    block_reason: str | None = None
-    if before_tool_call is not None:
-        blocked, block_reason = await before_tool_call(call)
-
-    if blocked:
-        result = _error_result(block_reason or "Tool execution was blocked")
-        is_error = True
-    elif signal is not None and signal.is_cancelled():
-        result = _error_result("Operation aborted")
+    tool = tools.get(call.name)
+    prepared_call = call
+    if tool is None:
+        result = _error_result(f"Tool {call.name} not found")
         is_error = True
     else:
-        tool = tools.get(call.name)
-        if tool is None:
-            result = _error_result(f"Tool {call.name} not found")
+        try:
+            prepared_call = _prepare_tool_call(tool, call)
+        except Exception as exc:  # noqa: BLE001 - 参数兼容钩子属于工具边界
+            result = _error_result(str(exc))
             is_error = True
         else:
-            result, is_error, updates = await _run_tool(tool, call, signal)
-            for update in updates:
-                yield ToolExecutionUpdateEvent(
-                    tool_call_id=call.id,
-                    tool_name=call.name,
-                    args=call.arguments,
-                    partial_result=update,
-                )
+            blocked = False
+            block_reason: str | None = None
+            if before_tool_call is not None:
+                blocked, block_reason = await before_tool_call(prepared_call)
+
+            if blocked:
+                result = _error_result(block_reason or "Tool execution was blocked")
+                is_error = True
+            elif signal is not None and signal.is_cancelled():
+                result = _error_result("Operation aborted")
+                is_error = True
+            else:
+                outcome: _ToolRunOutcome | None = None
+                async for item in _run_tool(tool, prepared_call, signal):
+                    if isinstance(item, _ToolRunOutcome):
+                        outcome = item
+                        continue
+                    update = item
+                    yield ToolExecutionUpdateEvent(
+                        tool_call_id=call.id,
+                        tool_name=call.name,
+                        args=call.arguments,
+                        partial_result=update,
+                    )
+                if outcome is None:  # pragma: no cover - 私有生成器始终产生终态
+                    outcome = _ToolRunOutcome(
+                        result=_error_result("Tool produced no result"),
+                        is_error=True,
+                    )
+                result = outcome.result
+                is_error = outcome.is_error
 
     if after_tool_call is not None:
-        result, is_error = await after_tool_call(call, result, is_error)
+        result, is_error = await after_tool_call(prepared_call, result, is_error)
 
     yield ToolExecutionEndEvent(
         tool_call_id=call.id,
@@ -405,30 +447,62 @@ async def _execute_tool_call(
     yield MessageEndEvent(message=message)
 
 
+def _prepare_tool_call(tool: AgentTool, call: ToolCall) -> ToolCall:
+    if tool.prepare_arguments is None:
+        return call
+    prepared = tool.prepare_arguments(call.arguments)
+    if not isinstance(prepared, Mapping):
+        raise TypeError(f"Tool {tool.name} prepare_arguments must return a mapping")
+    if prepared is call.arguments:
+        return call
+    return call.model_copy(update={"arguments": dict(prepared)})
+
+
 async def _run_tool(
     tool: AgentTool,
     call: ToolCall,
     signal: CancellationToken | None,
-) -> tuple[AgentToolResult, bool, list[AgentToolResult]]:
-    updates: list[AgentToolResult] = []
+) -> AsyncIterator[AgentToolResult | _ToolRunOutcome]:
+    updates: asyncio.Queue[AgentToolResult] = asyncio.Queue()
     accepting = True
 
     def on_update(partial: AgentToolResult) -> None:
         if accepting:
-            updates.append(partial.model_copy(deep=True))
+            updates.put_nowait(partial.model_copy(deep=True))
 
+    task = asyncio.create_task(
+        tool.execute(call.id, call.arguments, signal, on_update)
+    )
     try:
-        result = await tool.execute(call.id, call.arguments, signal, on_update)
-        # Honor structured errors returned without raising: the host runtime
-        # surfaces permission denials, hook rejections, and freshness failures
-        # as ``AgentToolResult(is_error=True)`` rather than exceptions.
-        return result, result.is_error, updates
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:  # noqa: BLE001 - tools are an isolation boundary
-        return _error_result(str(exc)), True, updates
+        while not task.done():
+            next_update = asyncio.create_task(updates.get())
+            done, _ = await asyncio.wait(
+                {task, next_update},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if next_update in done:
+                yield next_update.result()
+            else:
+                next_update.cancel()
+                with suppress(asyncio.CancelledError):
+                    await next_update
+
+        while not updates.empty():
+            yield updates.get_nowait()
+
+        try:
+            result = task.result()
+            yield _ToolRunOutcome(result=result, is_error=result.is_error)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - tools are an isolation boundary
+            yield _ToolRunOutcome(result=_error_result(str(exc)), is_error=True)
     finally:
         accepting = False
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 def _error_result(message: str) -> AgentToolResult:

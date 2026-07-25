@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 
 from .context import ToolContext
 from .middleware import ToolMiddleware, can_run_parallel
@@ -30,6 +31,7 @@ class ToolRuntime:
         name: str,
         arguments: Mapping[str, JSONValue],
         on_update: ToolUpdateCallback | None = None,
+        cancellation_fn: Callable[[], bool] | None = None,
     ) -> ToolResult:
         try:
             tool = self.registry.resolve(name)
@@ -38,11 +40,12 @@ class ToolRuntime:
 
         pre = [item for item in self.middleware if item.phase == "pre"]
         post = [item for item in self.middleware if item.phase == "post"]
+        context = self._execution_context(cancellation_fn)
 
         async def invoke(index: int) -> ToolResult:
             if index == len(pre):
                 return await tool.execute(
-                    self.context,
+                    context,
                     tool_call_id,
                     arguments,
                     on_update,
@@ -50,7 +53,7 @@ class ToolRuntime:
             current = pre[index]
             return await current.handle(
                 tool=tool,
-                context=self.context,
+                context=context,
                 tool_call_id=tool_call_id,
                 arguments=arguments,
                 call_next=lambda: invoke(index + 1),
@@ -64,7 +67,7 @@ class ToolRuntime:
 
                 result = await current.handle(
                     tool=tool,
-                    context=self.context,
+                    context=context,
                     tool_call_id=tool_call_id,
                     arguments=arguments,
                     call_next=current_result,
@@ -75,6 +78,19 @@ class ToolRuntime:
                 content=f"{type(exc).__name__}: {exc}",
                 is_error=True,
             )
+
+    def _execution_context(
+        self,
+        cancellation_fn: Callable[[], bool] | None,
+    ) -> ToolContext:
+        if cancellation_fn is None:
+            return self.context
+        existing = self.context.cancellation_fn
+        if existing is None:
+            combined = cancellation_fn
+        else:
+            combined = lambda: existing() or cancellation_fn()
+        return replace(self.context, cancellation_fn=combined)
 
     def can_run_parallel(self, name: str) -> bool:
         """按 Registry 中的 Capability 判断工具是否可并行。"""

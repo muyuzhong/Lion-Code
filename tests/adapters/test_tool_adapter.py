@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from pathlib import Path
 
 from lion_code.adapters import adapt_active_tools, adapt_lion_tool, to_core_result
+from lion_code.core import SimpleCancellationToken
 from lion_code.tooling.context import ToolContext
+from lion_code.tooling.middleware import CancellationMiddleware
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
@@ -72,7 +75,11 @@ class TestToolMetadataMapping(unittest.TestCase):
 class TestResultMapping(unittest.IsolatedAsyncioTestCase):
     async def test_maps_success_result(self):
         async def execute(_ctx, _id, _args, _on_update):
-            return ToolResult(content="hello", details={"k": "v"})
+            return ToolResult(
+                content="hello",
+                details={"k": "v"},
+                terminate=True,
+            )
 
         lion_tool = _tool("echo", execute)
         runtime = _runtime([lion_tool])
@@ -83,6 +90,7 @@ class TestResultMapping(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.text, "hello")
         self.assertFalse(result.is_error)
         self.assertEqual(result.details, {"k": "v"})
+        self.assertTrue(result.terminate)
 
     async def test_to_core_result_preserves_error_state(self):
         # A Lion runtime denial surfaces as ToolResult(is_error=True), not an
@@ -142,6 +150,42 @@ class TestMiddlewareExecution(unittest.IsolatedAsyncioTestCase):
         await core_tool.execute("call-1", {})
 
         self.assertEqual(calls, 1)
+
+    async def test_core_signal_reaches_runtime_cancellation_middleware(self):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        executed = False
+
+        class DelayMiddleware:
+            phase = "pre"
+
+            async def handle(self, *, call_next, **_):
+                entered.set()
+                await release.wait()
+                return await call_next()
+
+        async def execute(_ctx, _id, _args, _on_update):
+            nonlocal executed
+            executed = True
+            return ToolResult(content="should not run")
+
+        lion_tool = _tool("slow", execute)
+        runtime = _runtime(
+            [lion_tool],
+            [DelayMiddleware(), CancellationMiddleware()],
+        )
+        core_tool = adapt_lion_tool(lion_tool, runtime)
+        signal = SimpleCancellationToken()
+
+        task = asyncio.create_task(core_tool.execute("call-1", {}, signal))
+        await entered.wait()
+        signal.cancel()
+        release.set()
+        result = await asyncio.wait_for(task, timeout=1)
+
+        self.assertTrue(result.is_error)
+        self.assertIn("cancelled", result.text.lower())
+        self.assertFalse(executed)
 
 
 class TestConcurrencyMapping(unittest.TestCase):

@@ -69,6 +69,7 @@ def adapt_lion_tool(tool: LionTool, runtime: ToolRuntime) -> AgentTool:
             name=tool.name,
             arguments=lion_arguments,
             on_update=forward_update,
+            cancellation_fn=signal.is_cancelled if signal is not None else None,
         )
 
         return to_core_result(result)
