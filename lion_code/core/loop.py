@@ -163,21 +163,46 @@ async def run_agent_loop(
             tool_results: list[ToolResultMessage] = []
             calls = list(assistant.tool_calls)
             has_more_tools = bool(calls)
-            for call in calls:
-                async for event in _execute_tool_call(
-                    call,
+            for call_batch in _tool_call_batches(calls, tool_by_name):
+                if len(call_batch) == 1:
+                    async for event in _execute_tool_call(
+                        call_batch[0],
+                        tool_by_name,
+                        signal,
+                        before_tool_call,
+                        after_tool_call,
+                    ):
+                        yield event
+                        if isinstance(event, MessageEndEvent) and isinstance(
+                            event.message, ToolResultMessage
+                        ):
+                            tool_results.append(event.message)
+                            messages.append(event.message)
+                            new_messages.append(event.message)
+                    continue
+
+                for call in call_batch:
+                    yield ToolExecutionStartEvent(
+                        tool_call_id=call.id,
+                        tool_name=call.name,
+                        args=call.arguments,
+                    )
+                event_batches = await _run_parallel_tool_batch(
+                    call_batch,
                     tool_by_name,
                     signal,
                     before_tool_call,
                     after_tool_call,
-                ):
-                    yield event
-                    if isinstance(event, MessageEndEvent) and isinstance(
-                        event.message, ToolResultMessage
-                    ):
-                        tool_results.append(event.message)
-                        messages.append(event.message)
-                        new_messages.append(event.message)
+                )
+                for events in event_batches:
+                    for event in events:
+                        yield event
+                        if isinstance(event, MessageEndEvent) and isinstance(
+                            event.message, ToolResultMessage
+                        ):
+                            tool_results.append(event.message)
+                            messages.append(event.message)
+                            new_messages.append(event.message)
 
             yield TurnEndEvent(message=assistant, tool_results=tool_results)
             turn += 1
@@ -190,6 +215,75 @@ async def run_agent_loop(
         break
 
     yield AgentEndEvent(messages=new_messages)
+
+
+def _tool_call_batches(
+    calls: Sequence[ToolCall],
+    tools: Mapping[str, AgentTool],
+) -> list[list[ToolCall]]:
+    """Group adjacent parallel calls while keeping sequential tools as barriers."""
+    batches: list[list[ToolCall]] = []
+    parallel_batch: list[ToolCall] = []
+    for call in calls:
+        tool = tools.get(call.name)
+        if tool is not None and tool.execution_mode == "parallel":
+            parallel_batch.append(call)
+            continue
+        if parallel_batch:
+            batches.append(parallel_batch)
+            parallel_batch = []
+        batches.append([call])
+    if parallel_batch:
+        batches.append(parallel_batch)
+    return batches
+
+
+async def _run_parallel_tool_batch(
+    calls: Sequence[ToolCall],
+    tools: Mapping[str, AgentTool],
+    signal: CancellationToken | None,
+    before_tool_call: BeforeToolCall | None,
+    after_tool_call: AfterToolCall | None,
+) -> list[list[AgentEvent]]:
+    """Run a parallel batch and return its event streams in call order."""
+    results = await asyncio.gather(
+        *(
+            _collect_tool_events(
+                call,
+                tools,
+                signal,
+                before_tool_call,
+                after_tool_call,
+            )
+            for call in calls
+        ),
+        return_exceptions=True,
+    )
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+    return results
+
+
+async def _collect_tool_events(
+    call: ToolCall,
+    tools: Mapping[str, AgentTool],
+    signal: CancellationToken | None,
+    before_tool_call: BeforeToolCall | None,
+    after_tool_call: AfterToolCall | None,
+) -> list[AgentEvent]:
+    """Collect one parallel tool's events without duplicating its start event."""
+    return [
+        event
+        async for event in _execute_tool_call(
+            call,
+            tools,
+            signal,
+            before_tool_call,
+            after_tool_call,
+            include_start=False,
+        )
+    ]
 
 
 def _provider_context(messages: list[AgentMessage]) -> list[AgentMessage]:
@@ -254,12 +348,15 @@ async def _execute_tool_call(
     signal: CancellationToken | None,
     before_tool_call: BeforeToolCall | None,
     after_tool_call: AfterToolCall | None,
+    *,
+    include_start: bool = True,
 ) -> AsyncIterator[AgentEvent]:
-    yield ToolExecutionStartEvent(
-        tool_call_id=call.id,
-        tool_name=call.name,
-        args=call.arguments,
-    )
+    if include_start:
+        yield ToolExecutionStartEvent(
+            tool_call_id=call.id,
+            tool_name=call.name,
+            args=call.arguments,
+        )
 
     blocked = False
     block_reason: str | None = None

@@ -7,6 +7,7 @@ Verifies the transcript order is exactly:
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 
 from lion_code.core import (
@@ -40,6 +41,72 @@ def _echo_tool() -> AgentTool:
 
 
 class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
+    async def test_parallel_tools_run_concurrently(self) -> None:
+        started = asyncio.Event()
+        active = 0
+        max_active = 0
+
+        async def execute(tool_call_id, arguments, signal, on_update):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            if active == 2:
+                started.set()
+            await started.wait()
+            active -= 1
+            return AgentToolResult(content=[TextContent(text=tool_call_id)])
+
+        provider = FakeProvider(
+            [
+                AssistantDoneEvent(
+                    reason="toolUse",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[
+                            ToolCall(id="c1", name="one", arguments={}),
+                            ToolCall(id="c2", name="two", arguments={}),
+                        ],
+                        stop_reason="toolUse",
+                    ),
+                ),
+                AssistantDoneEvent(
+                    reason="stop",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[TextContent(text="final")],
+                        stop_reason="stop",
+                    ),
+                ),
+            ]
+        )
+        tools = [
+            AgentTool(
+                name=name,
+                label=name,
+                description=name,
+                parameters={},
+                execute_fn=execute,
+                execution_mode="parallel",
+            )
+            for name in ("one", "two")
+        ]
+        harness = AgentHarness(
+            AgentHarnessConfig(
+                provider=provider,
+                model="fake",
+                system="test",
+                tools=tools,
+            )
+        )
+
+        async def consume() -> None:
+            async for _ in harness.prompt("hello"):
+                pass
+
+        await asyncio.wait_for(consume(), timeout=1)
+
+        self.assertEqual(max_active, 2)
+
     async def test_tool_call_closed_loop(self) -> None:
         provider = FakeProvider(
             [
