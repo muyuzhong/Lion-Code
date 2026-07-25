@@ -39,6 +39,7 @@ AfterToolCall = Callable[
     [ToolCall, AgentToolResult, bool],
     Awaitable[tuple[AgentToolResult, bool]],
 ]
+GetTools = Callable[[], Sequence[AgentTool]]
 
 
 async def run_agent_loop(
@@ -48,6 +49,7 @@ async def run_agent_loop(
     system: str,
     messages: list[AgentMessage],
     tools: list[AgentTool],
+    get_tools: GetTools | None = None,
     prompts: Sequence[AgentMessage] = (),
     max_turns: int | None = None,
     signal: CancellationToken | None = None,
@@ -77,7 +79,6 @@ async def run_agent_loop(
         yield AgentEndEvent(messages=new_messages)
         return
 
-    tool_by_name = {tool.name: tool for tool in tools}
     turn = 1
     first_turn = True
     pending = tuple(get_steering_messages() if get_steering_messages else ())
@@ -106,6 +107,10 @@ async def run_agent_loop(
                 yield AgentEndEvent(messages=new_messages)
                 return
 
+            # Resolve tools per turn so dynamically discovered, lazily activated,
+            # skill-added, and per-subagent tool views are honored.
+            active_tools = list(get_tools() if get_tools else tools)
+            tool_by_name = {tool.name: tool for tool in active_tools}
             # Python async generators cannot pass a yielding callback through a
             # normal await cleanly, so consume the assistant sub-generator and
             # retain its final message through the terminal event.
@@ -115,7 +120,7 @@ async def run_agent_loop(
                 model=model,
                 system=system,
                 messages=_provider_context(messages),
-                tools=tools,
+                tools=active_tools,
                 signal=signal,
             ):
                 yield event
