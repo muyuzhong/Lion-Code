@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from inspect import isawaitable
 
 from lion_code.core.events import (
     AgentEndEvent,
@@ -41,6 +42,10 @@ AfterToolCall = Callable[
 ]
 GetTools = Callable[[], Sequence[AgentTool]]
 GetSystem = Callable[[], str]
+PrepareContext = Callable[
+    [list[AgentMessage]],
+    Awaitable[list[AgentMessage]] | list[AgentMessage],
+]
 
 
 async def run_agent_loop(
@@ -52,6 +57,7 @@ async def run_agent_loop(
     messages: list[AgentMessage],
     tools: list[AgentTool],
     get_tools: GetTools | None = None,
+    prepare_context: PrepareContext | None = None,
     prompts: Sequence[AgentMessage] = (),
     max_turns: int | None = None,
     signal: CancellationToken | None = None,
@@ -116,6 +122,14 @@ async def run_agent_loop(
             # Resolve the system prompt per turn so plan-mode, dynamic skills,
             # and tool-activation prompt updates are visible without rebuilding.
             current_system = get_system() if get_system else system
+            # Let the host shape provider context (trim tool results, budget,
+            # cache-heat, summarization, memory injection) without rebuilding.
+            provider_messages = _provider_context(messages)
+            if prepare_context is not None:
+                prepared = prepare_context(provider_messages)
+                provider_messages = (
+                    await prepared if isawaitable(prepared) else prepared
+                )
             # Python async generators cannot pass a yielding callback through a
             # normal await cleanly, so consume the assistant sub-generator and
             # retain its final message through the terminal event.
@@ -124,7 +138,7 @@ async def run_agent_loop(
                 provider=provider,
                 model=model,
                 system=current_system,
-                messages=_provider_context(messages),
+                messages=provider_messages,
                 tools=active_tools,
                 signal=signal,
             ):
