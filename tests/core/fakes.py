@@ -6,6 +6,9 @@ replays one ``AssistantMessageEvent`` per ``stream_response`` call (a terminal
 if the cancellation signal is set when a stream starts it emits
 ``AssistantErrorEvent(aborted)`` so the loop terminates like a real provider whose
 stream was cancelled.
+
+It also records what each model request received (system, messages, tool names)
+so dynamic-configuration tests can assert per-turn behavior.
 """
 
 from __future__ import annotations
@@ -21,11 +24,17 @@ class FakeProvider:
         self._events = list(events)
         self._index = 0
         self.call_count = 0
+        self.received_systems: list[str] = []
+        self.received_messages: list[list] = []
+        self.received_tools: list[list[str]] = []
 
     def stream_response(
         self, *, model, system, messages, tools, signal=None
     ) -> AsyncIterator[AssistantMessageEvent]:
         self.call_count += 1
+        self.received_systems.append(system)
+        self.received_messages.append(list(messages))
+        self.received_tools.append([tool.name for tool in tools])
         return self._gen(signal)
 
     async def _gen(self, signal):

@@ -1,4 +1,4 @@
-"""Cancellation aborts an in-flight harness run via the provider stream."""
+"""Cancellation contracts: in-flight runs abort via the provider stream."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from lion_code.core import (
 )
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 
-from fakes import FakeProvider
+from .fakes import FakeProvider
 
 
 def _noop_tool() -> AgentTool:
@@ -34,28 +34,6 @@ def _noop_tool() -> AgentTool:
 
 
 class TestHarnessCancel(unittest.IsolatedAsyncioTestCase):
-    async def test_error_event_reason_overrides_message_stop_reason(self) -> None:
-        provider = FakeProvider(
-            [
-                AssistantErrorEvent(
-                    reason="aborted",
-                    error=AssistantMessage(model="fake"),
-                )
-            ]
-        )
-        harness = AgentHarness(
-            AgentHarnessConfig(
-                provider=provider,
-                model="fake",
-                system="test",
-            )
-        )
-
-        async for _ in harness.prompt("hello"):
-            pass
-
-        self.assertEqual(harness.messages[-1].stop_reason, "aborted")
-
     async def test_cancel_aborts_run_after_turn(self) -> None:
         # Turn 1 requests a tool call; turn 2 would answer with final text, but we
         # cancel between turns so the next provider stream aborts.
@@ -105,6 +83,28 @@ class TestHarnessCancel(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(harness.messages[-1].stop_reason, "aborted")
         # the never-reached "final" text never entered history
         self.assertNotIn("final", [getattr(m, "text", "") for m in harness.messages])
+
+    async def test_error_event_reason_overrides_message_stop_reason(self) -> None:
+        provider = FakeProvider(
+            [
+                AssistantErrorEvent(
+                    reason="aborted",
+                    error=AssistantMessage(model="fake"),
+                )
+            ]
+        )
+        harness = AgentHarness(
+            AgentHarnessConfig(
+                provider=provider,
+                model="fake",
+                system="test",
+            )
+        )
+
+        async for _ in harness.prompt("hello"):
+            pass
+
+        self.assertEqual(harness.messages[-1].stop_reason, "aborted")
 
 
 if __name__ == "__main__":
