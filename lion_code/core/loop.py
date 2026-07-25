@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from inspect import isawaitable
 
 from lion_code.core.events import (
     AgentEndEvent,
@@ -41,6 +42,10 @@ AfterToolCall = Callable[
 ]
 GetTools = Callable[[], Sequence[AgentTool]]
 GetSystem = Callable[[], str]
+PrepareContext = Callable[
+    [list[AgentMessage]],
+    Awaitable[list[AgentMessage]] | list[AgentMessage],
+]
 
 
 async def run_agent_loop(
@@ -52,6 +57,7 @@ async def run_agent_loop(
     messages: list[AgentMessage],
     tools: list[AgentTool],
     get_tools: GetTools | None = None,
+    prepare_context: PrepareContext | None = None,
     prompts: Sequence[AgentMessage] = (),
     max_turns: int | None = None,
     signal: CancellationToken | None = None,
@@ -116,6 +122,14 @@ async def run_agent_loop(
             # Resolve the system prompt per turn so plan-mode, dynamic skills,
             # and tool-activation prompt updates are visible without rebuilding.
             current_system = get_system() if get_system else system
+            # Let the host shape provider context (trim tool results, budget,
+            # cache-heat, summarization, memory injection) without rebuilding.
+            provider_messages = _provider_context(messages)
+            if prepare_context is not None:
+                prepared = prepare_context(provider_messages)
+                provider_messages = (
+                    await prepared if isawaitable(prepared) else prepared
+                )
             # Python async generators cannot pass a yielding callback through a
             # normal await cleanly, so consume the assistant sub-generator and
             # retain its final message through the terminal event.
@@ -124,7 +138,7 @@ async def run_agent_loop(
                 provider=provider,
                 model=model,
                 system=current_system,
-                messages=_provider_context(messages),
+                messages=provider_messages,
                 tools=active_tools,
                 signal=signal,
             ):
@@ -149,21 +163,46 @@ async def run_agent_loop(
             tool_results: list[ToolResultMessage] = []
             calls = list(assistant.tool_calls)
             has_more_tools = bool(calls)
-            for call in calls:
-                async for event in _execute_tool_call(
-                    call,
+            for call_batch in _tool_call_batches(calls, tool_by_name):
+                if len(call_batch) == 1:
+                    async for event in _execute_tool_call(
+                        call_batch[0],
+                        tool_by_name,
+                        signal,
+                        before_tool_call,
+                        after_tool_call,
+                    ):
+                        yield event
+                        if isinstance(event, MessageEndEvent) and isinstance(
+                            event.message, ToolResultMessage
+                        ):
+                            tool_results.append(event.message)
+                            messages.append(event.message)
+                            new_messages.append(event.message)
+                    continue
+
+                for call in call_batch:
+                    yield ToolExecutionStartEvent(
+                        tool_call_id=call.id,
+                        tool_name=call.name,
+                        args=call.arguments,
+                    )
+                event_batches = await _run_parallel_tool_batch(
+                    call_batch,
                     tool_by_name,
                     signal,
                     before_tool_call,
                     after_tool_call,
-                ):
-                    yield event
-                    if isinstance(event, MessageEndEvent) and isinstance(
-                        event.message, ToolResultMessage
-                    ):
-                        tool_results.append(event.message)
-                        messages.append(event.message)
-                        new_messages.append(event.message)
+                )
+                for events in event_batches:
+                    for event in events:
+                        yield event
+                        if isinstance(event, MessageEndEvent) and isinstance(
+                            event.message, ToolResultMessage
+                        ):
+                            tool_results.append(event.message)
+                            messages.append(event.message)
+                            new_messages.append(event.message)
 
             yield TurnEndEvent(message=assistant, tool_results=tool_results)
             turn += 1
@@ -176,6 +215,75 @@ async def run_agent_loop(
         break
 
     yield AgentEndEvent(messages=new_messages)
+
+
+def _tool_call_batches(
+    calls: Sequence[ToolCall],
+    tools: Mapping[str, AgentTool],
+) -> list[list[ToolCall]]:
+    """Group adjacent parallel calls while keeping sequential tools as barriers."""
+    batches: list[list[ToolCall]] = []
+    parallel_batch: list[ToolCall] = []
+    for call in calls:
+        tool = tools.get(call.name)
+        if tool is not None and tool.execution_mode == "parallel":
+            parallel_batch.append(call)
+            continue
+        if parallel_batch:
+            batches.append(parallel_batch)
+            parallel_batch = []
+        batches.append([call])
+    if parallel_batch:
+        batches.append(parallel_batch)
+    return batches
+
+
+async def _run_parallel_tool_batch(
+    calls: Sequence[ToolCall],
+    tools: Mapping[str, AgentTool],
+    signal: CancellationToken | None,
+    before_tool_call: BeforeToolCall | None,
+    after_tool_call: AfterToolCall | None,
+) -> list[list[AgentEvent]]:
+    """Run a parallel batch and return its event streams in call order."""
+    results = await asyncio.gather(
+        *(
+            _collect_tool_events(
+                call,
+                tools,
+                signal,
+                before_tool_call,
+                after_tool_call,
+            )
+            for call in calls
+        ),
+        return_exceptions=True,
+    )
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+    return results
+
+
+async def _collect_tool_events(
+    call: ToolCall,
+    tools: Mapping[str, AgentTool],
+    signal: CancellationToken | None,
+    before_tool_call: BeforeToolCall | None,
+    after_tool_call: AfterToolCall | None,
+) -> list[AgentEvent]:
+    """Collect one parallel tool's events without duplicating its start event."""
+    return [
+        event
+        async for event in _execute_tool_call(
+            call,
+            tools,
+            signal,
+            before_tool_call,
+            after_tool_call,
+            include_start=False,
+        )
+    ]
 
 
 def _provider_context(messages: list[AgentMessage]) -> list[AgentMessage]:
@@ -218,13 +326,15 @@ async def _assistant_events(
             started = True
             yield MessageStartEvent(message=event.partial)
         elif isinstance(event, AssistantDoneEvent):
+            message = event.message.model_copy(update={"stop_reason": event.reason})
             if not started:
-                yield MessageStartEvent(message=event.message)
-            yield MessageEndEvent(message=event.message)
+                yield MessageStartEvent(message=message)
+            yield MessageEndEvent(message=message)
         elif isinstance(event, AssistantErrorEvent):
+            message = event.error.model_copy(update={"stop_reason": event.reason})
             if not started:
-                yield MessageStartEvent(message=event.error)
-            yield MessageEndEvent(message=event.error)
+                yield MessageStartEvent(message=message)
+            yield MessageEndEvent(message=message)
         else:
             yield MessageUpdateEvent(
                 message=event.partial,
@@ -238,12 +348,15 @@ async def _execute_tool_call(
     signal: CancellationToken | None,
     before_tool_call: BeforeToolCall | None,
     after_tool_call: AfterToolCall | None,
+    *,
+    include_start: bool = True,
 ) -> AsyncIterator[AgentEvent]:
-    yield ToolExecutionStartEvent(
-        tool_call_id=call.id,
-        tool_name=call.name,
-        args=call.arguments,
-    )
+    if include_start:
+        yield ToolExecutionStartEvent(
+            tool_call_id=call.id,
+            tool_name=call.name,
+            args=call.arguments,
+        )
 
     blocked = False
     block_reason: str | None = None

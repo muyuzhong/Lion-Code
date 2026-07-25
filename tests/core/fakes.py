@@ -1,0 +1,44 @@
+"""Shared fakes for Core tests.
+
+``FakeProvider`` is a scripted, signal-aware stand-in for ``ModelProvider``: it
+replays one ``AssistantMessageEvent`` per ``stream_response`` call (a terminal
+``AssistantDoneEvent`` / ``AssistantErrorEvent`` is enough to drive the loop), and
+if the cancellation signal is set when a stream starts it emits
+``AssistantErrorEvent(aborted)`` so the loop terminates like a real provider whose
+stream was cancelled.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from lion_code.core.messages import AssistantMessage
+from lion_code.core.provider_events import AssistantErrorEvent, AssistantMessageEvent
+
+
+class FakeProvider:
+    def __init__(self, events) -> None:
+        self._events = list(events)
+        self._index = 0
+        self.call_count = 0
+
+    def stream_response(
+        self, *, model, system, messages, tools, signal=None
+    ) -> AsyncIterator[AssistantMessageEvent]:
+        self.call_count += 1
+        return self._gen(signal)
+
+    async def _gen(self, signal):
+        if signal is not None and signal.is_cancelled():
+            yield AssistantErrorEvent(
+                reason="aborted",
+                error=AssistantMessage(model="fake", content=[], stop_reason="aborted"),
+            )
+            return
+        if self._index >= len(self._events):
+            raise AssertionError(
+                f"FakeProvider scripted events exhausted after {self._index} call(s)"
+            )
+        event = self._events[self._index]
+        self._index += 1
+        yield event
