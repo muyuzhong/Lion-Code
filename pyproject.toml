@@ -11,6 +11,7 @@ license = "MIT"
 dependencies = [
     "anthropic>=0.40.0",
     "openai>=1.50.0",
+    "pydantic>=2.11",
     "rich>=13.0.0",
     "textual>=0.86",
 ]
