@@ -1016,6 +1016,44 @@ class Agent:
             self._build_core_memory_query_service()
         )
 
+        # Core 路径:key/base 变更时重建 Provider 与 Runtime,否则模型热配
+        # 只换了 SDK 客户端,真实请求路径(httpx Provider)仍用旧凭证。
+        # 保留 Harness messages 与队列语义,observers 按恢复会话的既有流程重建。
+        if (
+            self._use_core_runtime
+            and self.use_openai
+            and self._core_runtime is not None
+            and (api_key is not None or api_base is not None)
+        ):
+            provider = create_provider(
+                api_key=(
+                    api_key
+                    if api_key is not None
+                    else str(getattr(self._openai_client, "api_key", "") or "")
+                ),
+                api_base=(
+                    api_base
+                    if api_base is not None
+                    else str(getattr(self._openai_client, "base_url", "") or "") or None
+                ),
+            )
+            messages = self._core_runtime.messages
+            self._core_runtime = LionAgentRuntime(
+                provider=provider,
+                model=self.model,
+                get_system=lambda: self._system_prompt,
+                tool_runtime=self.tool_runtime,
+                prepare_context=self._prepare_core_context,
+                max_turns=self.max_turns,
+            )
+            self._core_runtime.harness.replace_messages(list(messages))
+            self._context_compactor = ProviderContextCompactor(
+                provider=provider,
+                get_model=lambda: self.model,
+            )
+            self._resolved_model_limits_for = None
+            self._reset_core_observers()
+
         recorder = self._session_recorder
         if recorder is not None and self.use_openai and (
             self.model != previous_model

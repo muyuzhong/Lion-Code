@@ -587,5 +587,43 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(state.entries), len(state.messages))
 
 
+    async def test_configure_api_rebuilds_core_provider(self) -> None:
+        """Core 路径下换 key/base 必须重建 Provider,且保留 Harness 消息。"""
+        agent, _fake = self._make_agent([_stop_event("done")], ToolRegistry())
+        await agent.chat("hello")
+        old_runtime = agent._core_runtime
+
+        new_fake = FakeProvider([_stop_event("again")])
+        with patch(
+            "lion_code.agent.create_provider", return_value=new_fake
+        ) as mock_create:
+            agent.configure_api(api_key="new-key", api_base="https://new.test/v1")
+
+        mock_create.assert_called_once_with(
+            api_key="new-key", api_base="https://new.test/v1"
+        )
+        self.assertIsNot(agent._core_runtime, old_runtime)
+        self.assertEqual(
+            [m.role for m in agent._core_runtime.messages], ["user", "assistant"]
+        )
+
+        # 新 Provider 接管后续请求。
+        await agent.chat("second")
+        self.assertEqual(new_fake.call_count, 1)
+        self.assertEqual(agent._core_runtime.messages[-1].text, "again")
+
+    async def test_configure_api_model_only_keeps_core_provider(self) -> None:
+        """只改模型不重建 Provider,经 set_model 直接生效。"""
+        agent, fake = self._make_agent([_stop_event("done")], ToolRegistry())
+        old_runtime = agent._core_runtime
+
+        agent.configure_api(model="new-model")
+
+        self.assertIs(agent._core_runtime, old_runtime)
+        self.assertEqual(agent._core_runtime.harness.config.model, "new-model")
+        await agent.chat("hello")
+        self.assertEqual(fake.call_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
