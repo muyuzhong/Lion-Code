@@ -11,7 +11,6 @@ import sys
 from .agent import Agent
 from .config import load_api_config
 from .ui import print_welcome, print_user_prompt, print_error, print_info, print_plan_for_approval, print_plan_approval_options
-from .session import load_session, get_latest_session_id
 from .memory import list_memories
 from .skills import discover_skills, resolve_skill_prompt, get_skill_by_name, execute_skill
 
@@ -339,42 +338,29 @@ Examples:
         api_key=resolved_api_key,
     )
 
-    # --resume 只恢复对话历史，模型和权限仍以本次 CLI 参数为准。
-    if args.resume:
-        session_id = get_latest_session_id()
-        if session_id:
-            session = load_session(session_id)
-            if session:
-                agent.restore_session({
-                    "anthropicMessages": session.get("anthropicMessages"),
-                    "openaiMessages": session.get("openaiMessages"),
-                })
-            else:
-                print_info("No session found to resume.")
-        else:
-            print_info("No previous sessions found.")
-
     if use_tui:
         # TUI 内自带输入循环，one-shot prompt 不适用。
         from .tui import run_tui
 
-        run_tui(agent)
+        run_tui(agent, resume=args.resume)
         return
 
-    if prompt:
-        # one-shot 也通过 finally 回收 MCP，确保模型或工具异常时不遗留子进程。
-        async def _one_shot() -> None:
+    async def run_cli() -> None:
+        if args.resume:
+            await agent.restore_latest_session()
+        if prompt:
             try:
                 await agent.chat(prompt)
             finally:
                 await agent.close()
-        try:
-            asyncio.run(_one_shot())
-        except Exception as e:
-            print_error(str(e))
-            sys.exit(1)
-    else:
-        asyncio.run(run_repl(agent))
+            return
+        await run_repl(agent)
+
+    try:
+        asyncio.run(run_cli())
+    except Exception as e:
+        print_error(str(e))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

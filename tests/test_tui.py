@@ -115,6 +115,15 @@ class FakeAgent:
     async def clear_history(self):
         self.clear_count += 1
 
+    async def list_sessions(self):
+        return []
+
+    async def restore_session_id(self, _session_id: str):
+        return False
+
+    async def restore_latest_session(self):
+        return False
+
     def abort(self):
         pass
 

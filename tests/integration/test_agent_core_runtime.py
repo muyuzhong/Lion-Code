@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -285,6 +286,66 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await restored.restore_core_session(agent.session_id))
         self.assertEqual(restored.model, "claude-sonnet-4-6")
         self.assertEqual(restored._thinking_mode, "adaptive")
+
+    async def test_legacy_json_is_migrated_without_deleting_source(self) -> None:
+        session_id = "legacy01"
+        legacy_path = self._session_repository.session_dir / f"{session_id}.json"
+        legacy_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {
+                        "id": session_id,
+                        "model": "legacy-model",
+                        "cwd": str(Path.cwd().resolve()),
+                        "startTime": "2026-01-01T00:00:00Z",
+                    },
+                    "openaiMessages": [
+                        {"role": "system", "content": "old system"},
+                        {"role": "user", "content": "old question"},
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "old-call",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "echo",
+                                        "arguments": '{"msg":"legacy"}',
+                                    },
+                                }
+                            ],
+                        },
+                        {
+                            "role": "tool",
+                            "tool_call_id": "old-call",
+                            "content": "legacy result",
+                        },
+                        {"role": "assistant", "content": "old answer"},
+                    ],
+                    "anthropicMessages": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+        registry = ToolRegistry()
+        registry.register(_echo_lion_tool())
+        agent, fake = self._make_agent([_stop_event("new answer")], registry)
+
+        self.assertTrue(await agent.restore_session_id(session_id))
+        self.assertTrue(legacy_path.exists())
+        self.assertTrue(self._session_repository.storage_for(session_id).path.exists())
+        await agent.chat("continue")
+
+        self.assertEqual(
+            [message.role for message in fake.received_messages[0]],
+            ["user", "assistant", "toolResult", "assistant", "user"],
+        )
+        sessions = [
+            item for item in await agent.list_sessions() if item["id"] == session_id
+        ]
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0]["format"], "jsonl")
 
 
 if __name__ == "__main__":

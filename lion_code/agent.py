@@ -69,7 +69,13 @@ from .ui import (
     stop_spinner,
 )
 from .session import save_session
-from .session_runtime import SessionRecorder, SessionRepository
+from .session_runtime import (
+    SessionRecorder,
+    SessionRepository,
+    legacy_session_messages,
+    list_legacy_sessions,
+    load_legacy_session,
+)
 from .prompt import build_system_prompt, build_static_system_prompt, build_dynamic_system_context, build_user_context_reminder, load_claude_md
 from .skills import create_skill
 from .subagent import get_sub_agent_config
@@ -1462,6 +1468,82 @@ class Agent:
         await self._ensure_core_session_ready()
         print_info(f"Session restored ({len(state.messages)} messages).")
         return True
+
+    async def restore_session_id(self, session_id: str) -> bool:
+        """优先恢复 JSONL；Core 遇到旧 JSON 时原地迁移且保留源文件。"""
+        if self._core_runtime is not None:
+            if self._session_repository.exists(session_id):
+                return await self.restore_core_session(session_id)
+            legacy = load_legacy_session(
+                self._session_repository.session_dir,
+                session_id,
+            )
+            if legacy is None:
+                return False
+            await self._migrate_legacy_core_session(session_id, legacy)
+            return await self.restore_core_session(session_id)
+
+        if self._session_repository.exists(session_id):
+            print_info(
+                f"Session {session_id} uses append-only JSONL; "
+                "enable LION_CORE_RUNTIME=1 to restore it."
+            )
+            return False
+        legacy = load_legacy_session(
+            self._session_repository.session_dir,
+            session_id,
+        )
+        if legacy is None:
+            return False
+        self.session_id = session_id
+        self.tool_context.session_id = session_id
+        self.restore_session(legacy)
+        return True
+
+    async def list_sessions(self) -> list[dict[str, Any]]:
+        """统一枚举新 JSONL 与尚未迁移的旧 JSON Session。"""
+        current = await self._session_repository.list_sessions()
+        current_ids = {str(item.get("id")) for item in current}
+        legacy = [
+            item
+            for item in list_legacy_sessions(self._session_repository.session_dir)
+            if str(item.get("id")) not in current_ids
+        ]
+        sessions = [*current, *legacy]
+        sessions.sort(key=lambda item: str(item.get("startTime", "")), reverse=True)
+        return sessions
+
+    async def latest_session_id(self) -> str | None:
+        sessions = await self.list_sessions()
+        return str(sessions[0]["id"]) if sessions else None
+
+    async def restore_latest_session(self) -> bool:
+        session_id = await self.latest_session_id()
+        if session_id is None:
+            print_info("No previous sessions found.")
+            return False
+        restored = await self.restore_session_id(session_id)
+        if not restored:
+            print_info(f"Session {session_id} could not be restored in this runtime.")
+        return restored
+
+    async def _migrate_legacy_core_session(
+        self,
+        session_id: str,
+        legacy: dict[str, Any],
+    ) -> None:
+        metadata = legacy.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        recorder = SessionRecorder(
+            session_id=session_id,
+            model=str(metadata.get("model") or self.model),
+            thinking_level=self._thinking_mode,
+            cwd=Path(str(metadata.get("cwd") or self.tool_context.cwd)),
+            storage=self._session_repository.storage_for(session_id),
+        )
+        await recorder.initialize()
+        for message in legacy_session_messages(legacy):
+            await recorder.record_message(message)
 
     def _get_message_count(self) -> int:
         if self._core_runtime is not None and self.use_openai:
