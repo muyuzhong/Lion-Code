@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .frontmatter import parse_frontmatter, format_frontmatter
+from .frontmatter import parse_frontmatter
 
 # sideQuery 使用独立模型调用，签名为 async (system, user_message) -> str。
 from typing import Callable
@@ -55,15 +55,6 @@ def _get_index_path() -> Path:
     return get_memory_dir() / "MEMORY.md"
 
 
-# ─── 文件名规范化 ───────────────────────────────────────────
-
-
-def _slugify(text: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "_", text.lower())
-    s = s.strip("_")
-    return s[:40]
-
-
 # ─── 增删改查 ───────────────────────────────────────────────
 
 
@@ -92,24 +83,6 @@ def list_memories(memory_dir: Path | None = None) -> list[MemoryEntry]:
     # 最近更新的记忆优先，便于列表展示和后续召回裁剪。
     entries.sort(key=lambda e: (d / e.filename).stat().st_mtime, reverse=True)
     return entries
-
-
-def save_memory(name: str, description: str, type: str, content: str) -> str:
-    d = get_memory_dir()
-    filename = f"{type}_{_slugify(name)}.md"
-    text = format_frontmatter({"name": name, "description": description, "type": type}, content)
-    (d / filename).write_text(text, encoding="utf-8")
-    _update_memory_index()
-    return filename
-
-
-def delete_memory(filename: str) -> bool:
-    filepath = get_memory_dir() / filename
-    if not filepath.exists():
-        return False
-    filepath.unlink()
-    _update_memory_index()
-    return True
 
 
 # ─── MEMORY.md 索引 ─────────────────────────────────────────
