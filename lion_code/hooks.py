@@ -273,6 +273,16 @@ def load_pre_tool_use_hooks() -> list[HookConfig]:
             if not isinstance(entry, dict):
                 raise ValueError(f"Hook must be a JSON object: {label}")
 
+            # settings.json 与 Claude Code 及其插件共享:它们的 PreToolUse
+            # 条目是 matcher + 嵌套 hooks 数组、无 id/command。不属于 Lion
+            # 的 schema,跳过而非报错;Lion 自己的条目仍严格校验。
+            if (
+                "id" not in entry
+                and "command" not in entry
+                and isinstance(entry.get("hooks"), list)
+            ):
+                continue
+
             hook_id = entry.get("id")
             matcher = entry.get("matcher", "*")
             timeout_ms = entry.get("timeout_ms", DEFAULT_HOOK_TIMEOUT_MS)

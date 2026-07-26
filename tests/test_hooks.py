@@ -117,6 +117,41 @@ class TestHookConfig(unittest.TestCase):
         self.assertEqual(loaded[1]["timeout_ms"], 250.0)
         self.assertEqual(loaded[1]["pass_env"], ("POLICY_CONFIG_PATH",))
 
+    def test_skips_claude_code_schema_entries(self):
+        """Claude Code/插件写入同一 settings.json 的 hook 条目应跳过而非崩溃。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            _write_settings(
+                project / ".claude" / "settings.json",
+                [
+                    {
+                        # Claude Code schema:matcher + 嵌套 hooks 数组,无 id/command。
+                        "matcher": "Task",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "python .claude/hooks/subagent.py",
+                                "timeout": 30,
+                            }
+                        ],
+                    },
+                    {
+                        "id": "lion-policy",
+                        "matcher": "write_file",
+                        "command": ["lion-hook"],
+                    },
+                ],
+            )
+
+            with (
+                patch.object(hook_module.Path, "home", return_value=root / "home"),
+                patch.object(hook_module.Path, "cwd", return_value=project),
+            ):
+                loaded = load_pre_tool_use_hooks()
+
+        self.assertEqual([hook["id"] for hook in loaded], ["lion-policy"])
+
     def test_requires_array_command_unless_shell_is_explicit(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
