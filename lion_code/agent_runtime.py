@@ -26,6 +26,7 @@ from lion_code.core import (
     EventListener,
 )
 from lion_code.core.loop import PrepareContext
+from lion_code.core.messages import UserMessage
 from lion_code.core.provider import ModelProvider
 from lion_code.tooling import ToolRuntime
 
@@ -70,6 +71,20 @@ class LionAgentRuntime:
         """驱动一次完整对话：消费完 harness 产生的全部事件。"""
         async for _ in self.harness.prompt(content):
             pass
+
+    async def continue_(self) -> None:
+        """使用当前 Harness 上下文继续运行，不追加新的用户消息。"""
+        async for _ in self.harness.continue_():
+            pass
+
+    def set_model(self, model: str) -> None:
+        """更新后续 Provider 请求使用的模型。"""
+        self.harness.config.model = model
+
+    async def reset_active_context(self, content: str) -> None:
+        """只替换模型活跃上下文；durable history 由 SessionRecorder 保留。"""
+        self.harness.clear_queues()
+        self.harness.replace_messages([UserMessage(content=content)])
 
     def cancel(self) -> None:
         """请求取消当前正在进行的模型流。"""

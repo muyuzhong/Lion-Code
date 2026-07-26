@@ -26,7 +26,6 @@ from textual.widgets import Button, Footer, Header, Input, Label, ListItem, List
 from . import ui
 from .agent import Agent
 from .config import save_api_config
-from .session import list_sessions, load_session
 
 CONFIG_PATH = Path.home() / ".lion-code" / "tui.json"
 
@@ -230,10 +229,17 @@ class LionTUI(App):
     }
     """
 
-    def __init__(self, agent: Agent, config: dict | None = None) -> None:
+    def __init__(
+        self,
+        agent: Agent,
+        config: dict | None = None,
+        *,
+        resume: bool = False,
+    ) -> None:
         super().__init__()
         self.agent = agent
         self.config = config or load_config()
+        self._resume_on_mount = resume
         self._processing = False
         self._stream_widget: Static | None = None
         self._stream_text = ""
@@ -258,12 +264,18 @@ class LionTUI(App):
         yield Input(placeholder="Message…   /model /clear /plan /cost /compact · Esc aborts")
         yield Footer()
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self._set_subtitle()
         ui.set_sink(lambda kind, payload: self.post_message(AgentEvent(kind, payload)))
         self.agent.set_confirm_fn(self._confirm)
         self.agent.set_plan_approval_fn(self._plan_approval)
-        self._reload_sessions()
+        if self._resume_on_mount:
+            try:
+                await self.agent.restore_latest_session()
+                self._set_subtitle()
+            except Exception as error:
+                self._add(f"Session restore failed: {error}", "error")
+        await self._reload_sessions()
         self.query_one(Input).focus()
         if not self.agent.api_configured:
             self._add("ℹ API 未配置 — 用 /model 设置模型与密钥", "info")
@@ -351,12 +363,14 @@ class LionTUI(App):
             self.post_message(AgentEvent("error", {"message": str(e)}))
         finally:
             self.post_message(AgentEvent("chat_done", {}))
+            await self._reload_sessions()
 
     async def _handle_command(self, text: str) -> None:
         cmd = text.split(maxsplit=1)[0]
         if cmd == "/clear":
-            self.agent.clear_history()
+            await self.agent.clear_history()
             self._clear_chat()
+            await self._reload_sessions()
         elif cmd == "/plan":
             self.agent.toggle_plan_mode()
         elif cmd == "/cost":
@@ -375,13 +389,13 @@ class LionTUI(App):
 
     # ─── 会话侧边栏 ──────────────────────────────────────────
 
-    def _reload_sessions(self) -> None:
+    async def _reload_sessions(self) -> None:
         lv = self.query_one("#sessions", ListView)
         lv.clear()
         lv.append(ListItem(Label("＋ New session"), name="__new__"))
         cwd = str(Path.cwd().resolve())
         metas = sorted(
-            (m for m in list_sessions() if m.get("cwd") == cwd),
+            (m for m in await self.agent.list_sessions() if m.get("cwd") == cwd),
             key=lambda m: m.get("startTime", ""),
             reverse=True,
         )
@@ -396,18 +410,20 @@ class LionTUI(App):
             return
         name = event.item.name
         if name == "__new__":
-            self.agent.clear_history()
+            await self.agent.clear_history()
             self._clear_chat()
-            return
-        session = load_session(str(name))
-        if not session:
+            await self._reload_sessions()
             return
         self._clear_chat()
-        self.agent.restore_session({
-            "anthropicMessages": session.get("anthropicMessages"),
-            "openaiMessages": session.get("openaiMessages"),
-        })
-        # restore_session 的 print_info 会经 sink 落到聊天区。
+        try:
+            restored = await self.agent.restore_session_id(str(name))
+        except Exception as error:
+            self._add(f"Session restore failed: {error}", "error")
+            return
+        if not restored:
+            self._add(f"Session {name} could not be restored.", "error")
+            return
+        self._set_subtitle()
 
     # ─── 快捷键动作 ──────────────────────────────────────────
 
@@ -420,11 +436,12 @@ class LionTUI(App):
         sidebar = self.query_one("#sessions")
         sidebar.display = not sidebar.display
 
-    def action_new_session(self) -> None:
+    async def action_new_session(self) -> None:
         if self._processing:
             return
-        self.agent.clear_history()
+        await self.agent.clear_history()
         self._clear_chat()
+        await self._reload_sessions()
 
     def action_model(self) -> None:
         if self._processing:
@@ -478,6 +495,6 @@ class LionTUI(App):
         self._chat().remove_children()
 
 
-def run_tui(agent: Agent) -> None:
+def run_tui(agent: Agent, *, resume: bool = False) -> None:
     """TUI 入口：agent 的构建与 CLI 完全一致，本函数只负责跑界面。"""
-    LionTUI(agent).run()
+    LionTUI(agent, resume=resume).run()

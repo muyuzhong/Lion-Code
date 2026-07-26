@@ -9,7 +9,12 @@ from dataclasses import dataclass, field
 from inspect import isawaitable
 from typing import Literal
 
-from lion_code.core.events import AgentEvent
+from lion_code.core.events import (
+    AgentEvent,
+    AgentStartEvent,
+    MessageEndEvent,
+    MessageStartEvent,
+)
 from lion_code.core.loop import AfterToolCall, BeforeToolCall, GetSystem, GetTools, PrepareContext, run_agent_loop
 from lion_code.core.messages import (
     AgentMessage,
@@ -148,7 +153,6 @@ class AgentHarness:
 
     def prompt_message(self, message: AgentMessage) -> AsyncIterator[AgentEvent]:
         self._ensure_not_running()
-        self._append_interrupted_tool_results()
         self._running = True
         return self._run(prompts=(message,))
 
@@ -157,7 +161,6 @@ class AgentHarness:
 
     def continue_(self) -> AsyncIterator[AgentEvent]:
         self._ensure_not_running()
-        self._append_interrupted_tool_results()
         self._running = True
         return self._run()
 
@@ -169,6 +172,7 @@ class AgentHarness:
         signal = SimpleCancellationToken()
         self._current_signal = signal
         try:
+            repaired_before_run = self._append_interrupted_tool_results()
             async for event in run_agent_loop(
                 provider=self._config.provider,
                 model=self._config.model,
@@ -188,12 +192,26 @@ class AgentHarness:
             ):
                 await self._notify(event)
                 yield event
+                if isinstance(event, AgentStartEvent):
+                    # 保持 AgentStart 为首个事件，再把恢复出的未配对调用交给持久化监听器。
+                    for message in repaired_before_run:
+                        for repair_event in (
+                            MessageStartEvent(message=message),
+                            MessageEndEvent(message=message),
+                        ):
+                            await self._notify(repair_event)
+                            yield repair_event
         finally:
+            repaired: tuple[ToolResultMessage, ...] = ()
             if signal.is_cancelled():
-                self._append_interrupted_tool_results()
+                repaired = self._append_interrupted_tool_results()
             if self._current_signal is signal:
                 self._current_signal = None
             self._running = False
+            # finally 中无法再向已结束的生成器 yield，但订阅者仍必须看到修复消息。
+            for message in repaired:
+                await self._notify(MessageStartEvent(message=message))
+                await self._notify(MessageEndEvent(message=message))
 
     async def _notify(self, event: AgentEvent) -> None:
         for listener in list(self._listeners):
@@ -227,12 +245,13 @@ class AgentHarness:
         self._append_interrupted_tool_results()
         return len(self._messages) - before
 
-    def _append_interrupted_tool_results(self) -> None:
+    def _append_interrupted_tool_results(self) -> tuple[ToolResultMessage, ...]:
         returned_ids = {
             message.tool_call_id
             for message in self._messages
             if isinstance(message, ToolResultMessage)
         }
+        repaired: list[ToolResultMessage] = []
         for message in tuple(self._messages):
             if not isinstance(message, AssistantMessage):
                 continue
@@ -240,11 +259,12 @@ class AgentHarness:
                 if call.id in returned_ids:
                     continue
                 returned_ids.add(call.id)
-                self._messages.append(
-                    ToolResultMessage(
-                        tool_call_id=call.id,
-                        tool_name=call.name,
-                        content=[TextContent(text="Tool call interrupted by user")],
-                        is_error=True,
-                    )
+                result = ToolResultMessage(
+                    tool_call_id=call.id,
+                    tool_name=call.name,
+                    content=[TextContent(text="Tool call interrupted by user")],
+                    is_error=True,
                 )
+                self._messages.append(result)
+                repaired.append(result)
+        return tuple(repaired)

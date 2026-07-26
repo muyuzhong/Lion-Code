@@ -9,12 +9,16 @@
 from __future__ import annotations
 
 import os
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from lion_code.agent import Agent
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent
 from lion_code.core.provider_events import AssistantDoneEvent
+from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 from lion_code.ui import set_sink
@@ -83,10 +87,13 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         # 捕获所有 ui 输出，避免测试污染 stdout。
         self._collected: list[tuple[str, dict]] = []
         self._prev_sink = set_sink(lambda kind, data: self._collected.append((kind, data)))
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._session_repository = SessionRepository(Path(self._temp_dir.name))
 
     def tearDown(self) -> None:
         set_sink(self._prev_sink)
         os.environ.pop("LION_CORE_RUNTIME", None)
+        self._temp_dir.cleanup()
 
     def _make_agent(self, events: list, registry: ToolRegistry) -> tuple[Agent, FakeProvider]:
         fake = FakeProvider(events)
@@ -97,6 +104,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 api_key="test-key",
                 tool_registry=registry,
                 custom_system_prompt="test",
+                session_repository=self._session_repository,
             )
         # 跳过 MCP 发现，避免测试环境副作用。
         agent._mcp_initialized = True
@@ -156,6 +164,11 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(messages[2].is_error)
         self.assertEqual(messages[-1].text, "done")
         self.assertEqual(fake.call_count, 2)
+        state = await self._session_repository.load(agent.session_id)
+        self.assertEqual(
+            [message.role for message in state.messages],
+            ["user", "assistant", "toolResult", "assistant"],
+        )
 
     async def test_dynamic_system_prompt_refetched_per_turn(self) -> None:
         # 模拟 Plan 模式切换：运行中改 _system_prompt，下一轮请求必须看到新值。
@@ -217,6 +230,184 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent._core_runtime.messages[-1].text, "done")
         # 第一轮 + 被取消的第二轮 + 续聊一轮，共 3 次 provider 调用。
         self.assertEqual(fake.call_count, 3)
+
+    async def test_restore_continues_with_persisted_harness_messages(self) -> None:
+        registry = ToolRegistry()
+        first, _ = self._make_agent([_stop_event("first answer")], registry)
+        await first.chat("first question")
+        session_id = first.session_id
+
+        second, fake = self._make_agent([_stop_event("second answer")], registry)
+        self.assertTrue(await second.restore_core_session(session_id))
+        await second.chat("second question")
+
+        self.assertEqual(
+            [message.text for message in fake.received_messages[0]],
+            ["first question", "first answer", "second question"],
+        )
+        state = await self._session_repository.load(session_id)
+        self.assertEqual(
+            [message.text for message in state.messages],
+            ["first question", "first answer", "second question", "second answer"],
+        )
+
+    async def test_clear_creates_new_session_and_preserves_old_jsonl(self) -> None:
+        registry = ToolRegistry()
+        agent, _ = self._make_agent([_stop_event()], registry)
+        await agent.chat("hello")
+        previous_session_id = agent.session_id
+        previous_path = self._session_repository.storage_for(previous_session_id).path
+        agent._core_runtime.harness.follow_up("queued")
+        agent.current_turns = 3
+
+        await agent.clear_history()
+
+        self.assertNotEqual(agent.session_id, previous_session_id)
+        self.assertTrue(previous_path.exists())
+        self.assertTrue(self._session_repository.storage_for(agent.session_id).path.exists())
+        self.assertEqual(agent._core_runtime.messages, ())
+        self.assertEqual(agent._core_runtime.harness.pending_message_count, 0)
+        self.assertEqual(agent.current_turns, 0)
+
+    async def test_model_and_thinking_changes_are_restored(self) -> None:
+        registry = ToolRegistry()
+        agent, _ = self._make_agent([_stop_event()], registry)
+        await agent.chat("hello")
+        previous_client = agent._openai_client
+        agent.configure_api(model="claude-sonnet-4-6")
+        self.assertIs(agent._openai_client, previous_client)
+        self.assertEqual(agent.set_thinking(True), "adaptive")
+        await agent.close()
+
+        state = await self._session_repository.load(agent.session_id)
+        self.assertEqual(state.model, "claude-sonnet-4-6")
+        self.assertEqual(state.thinking_level, "adaptive")
+
+        restored, _ = self._make_agent([], registry)
+        self.assertTrue(await restored.restore_core_session(agent.session_id))
+        self.assertEqual(restored.model, "claude-sonnet-4-6")
+        self.assertEqual(restored._thinking_mode, "adaptive")
+
+    async def test_legacy_json_is_migrated_without_deleting_source(self) -> None:
+        session_id = "legacy01"
+        legacy_path = self._session_repository.session_dir / f"{session_id}.json"
+        legacy_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {
+                        "id": session_id,
+                        "model": "legacy-model",
+                        "cwd": str(Path.cwd().resolve()),
+                        "startTime": "2026-01-01T00:00:00Z",
+                    },
+                    "openaiMessages": [
+                        {"role": "system", "content": "old system"},
+                        {"role": "user", "content": "old question"},
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "old-call",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "echo",
+                                        "arguments": '{"msg":"legacy"}',
+                                    },
+                                }
+                            ],
+                        },
+                        {
+                            "role": "tool",
+                            "tool_call_id": "old-call",
+                            "content": "legacy result",
+                        },
+                        {"role": "assistant", "content": "old answer"},
+                    ],
+                    "anthropicMessages": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+        registry = ToolRegistry()
+        registry.register(_echo_lion_tool())
+        agent, fake = self._make_agent([_stop_event("new answer")], registry)
+
+        self.assertTrue(await agent.restore_session_id(session_id))
+        self.assertTrue(legacy_path.exists())
+        self.assertTrue(self._session_repository.storage_for(session_id).path.exists())
+        await agent.chat("continue")
+
+        self.assertEqual(
+            [message.role for message in fake.received_messages[0]],
+            ["user", "assistant", "toolResult", "assistant", "user"],
+        )
+        sessions = [
+            item for item in await agent.list_sessions() if item["id"] == session_id
+        ]
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0]["format"], "jsonl")
+
+    async def test_plan_clear_and_execute_compacts_without_deleting_history(self) -> None:
+        fake = FakeProvider(
+            [
+                AssistantDoneEvent(
+                    reason="toolUse",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[
+                            ToolCall(
+                                id="exit-plan",
+                                name="exit_plan_mode",
+                                arguments={},
+                            )
+                        ],
+                        stop_reason="toolUse",
+                    ),
+                ),
+                _stop_event("implemented"),
+            ]
+        )
+        os.environ["LION_CORE_RUNTIME"] = "1"
+        with patch("lion_code.agent.create_provider", return_value=fake):
+            agent = Agent(
+                permission_mode="plan",
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+            )
+        agent._mcp_initialized = True
+        agent.tool_registry.activate("exit_plan_mode")
+        plan_path = Path(self._temp_dir.name) / "approved-plan.md"
+        plan_path.write_text("1. change code\n2. run tests", encoding="utf-8")
+        agent._plan_file_path = str(plan_path)
+        agent.tool_context.plan_file_path = str(plan_path)
+
+        async def approve(_plan: str) -> dict:
+            return {"choice": "clear-and-execute"}
+
+        agent.set_plan_approval_fn(approve)
+        await agent.chat("prepare the change")
+
+        self.assertEqual(fake.call_count, 2)
+        self.assertEqual(len(fake.received_messages[1]), 1)
+        self.assertIn("Approved plan", fake.received_messages[1][0].text)
+        self.assertEqual(
+            [message.role for message in agent._core_runtime.messages],
+            ["user", "assistant"],
+        )
+        self.assertEqual(agent._core_runtime.messages[-1].text, "implemented")
+        self.assertEqual(agent.tool_context.permission_mode, "acceptEdits")
+
+        state = await self._session_repository.load(agent.session_id)
+        self.assertEqual(
+            [message.role for message in state.messages],
+            ["user", "assistant"],
+        )
+        self.assertEqual(len(state.compaction_entries), 1)
+        self.assertEqual(len(state.compaction_entries[0].replaces_entry_ids), 3)
+        self.assertGreater(len(state.entries), len(state.messages))
 
 
 if __name__ == "__main__":
