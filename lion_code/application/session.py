@@ -29,6 +29,7 @@ from lion_code.core.messages import AgentMessage
 
 from .commands import CommandRegistry, CommandResult, create_default_command_registry
 from .prompt_templates import PromptTemplate
+from .provider_settings import ModelChoice, load_model_choices, remember_model
 from .skills import Skill
 from .events import (
     AgentSettledEvent,
@@ -198,6 +199,18 @@ class LionCodingSession:
     def configure_provider(self, **kwargs: Any) -> None:
         """运行时切换模型/凭证,直接透传 Agent.configure_api。"""
         self._agent.configure_api(**kwargs)
+        if kwargs.get("model"):
+            remember_model(provider=self.provider_name, model=kwargs["model"])
+
+    @property
+    def available_model_choices(self) -> tuple[ModelChoice, ...]:
+        """picker 候选:当前模型置顶,其余按最近使用排序(本地累积)。"""
+        current = ModelChoice(provider_name=self.provider_name, model=self.model)
+        return tuple(dict.fromkeys((current, *load_model_choices())))
+
+    def set_model(self, model: str) -> None:
+        """切换活动模型(同 provider),并记入已知模型。"""
+        self.configure_provider(model=model)
 
     # ─── 技能 / 模板视图(补全与 picker 消费)─────────────────
 

@@ -176,6 +176,70 @@ async def test_completion_navigation_moves_selection(app_factory) -> None:
 
 
 @pytest.mark.asyncio
+async def test_model_picker_lists_and_applies_choice(app_factory, tmp_path, monkeypatch) -> None:
+    from lion_code import config as config_module
+    from lion_code.application.provider_settings import remember_model
+    from lion_code.tui.app import ModelPickerScreen
+
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "config.json")
+    remember_model(provider="openai", model="model-alpha")
+
+    app = app_factory([])
+    async with app.run_test() as pilot:
+        await _submit(app, pilot, "/model")
+        await pilot.pause()
+        assert isinstance(app.screen, ModelPickerScreen)
+        labels = [c.model for c in app.screen.visible_choices]
+        assert "model-alpha" in labels
+
+        # 搜索过滤 + Enter 选中即切换模型并持久化。
+        search = app.screen.query_one("#model-picker-search")
+        search.value = "alpha"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert app.session.model == "model-alpha"
+    saved = config_module.load_api_config()
+    assert saved["known_models"][0]["model"] == "model-alpha"
+
+
+@pytest.mark.asyncio
+async def test_model_picker_accepts_custom_typed_name(app_factory, tmp_path, monkeypatch) -> None:
+    from lion_code import config as config_module
+    from lion_code.tui.app import ModelPickerScreen
+
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "config.json")
+
+    app = app_factory([])
+    async with app.run_test() as pilot:
+        await _submit(app, pilot, "/model")
+        await pilot.pause()
+        assert isinstance(app.screen, ModelPickerScreen)
+        search = app.screen.query_one("#model-picker-search")
+        search.value = "my-brand-new-model"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert app.session.model == "my-brand-new-model"
+
+
+@pytest.mark.asyncio
+async def test_model_command_with_arg_sets_directly(app_factory, tmp_path, monkeypatch) -> None:
+    from lion_code import config as config_module
+
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "config.json")
+
+    app = app_factory([])
+    async with app.run_test() as pilot:
+        await _submit(app, pilot, "/model direct-model")
+        await pilot.pause()
+
+    assert app.session.model == "direct-model"
+
+
+@pytest.mark.asyncio
 async def test_sessions_sidebar_lists_new_entry(app_factory) -> None:
     app = app_factory([])
     async with app.run_test() as pilot:

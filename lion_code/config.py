@@ -19,12 +19,15 @@ def load_api_config() -> dict:
 
 def save_api_config(*, provider: str, model: str, api_key: str, base_url: str = "") -> None:
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps({
+    # 合并写回:保留 known_models 等扩展键,只更新凭证四字段。
+    config = load_api_config()
+    config.update({
         "provider": provider,
         "model": model,
         "api_key": api_key,
         "base_url": base_url,
-    }, indent=2))
+    })
+    CONFIG_PATH.write_text(json.dumps(config, indent=2))
     # 凭证文件仅所有者可读写（Windows 上 chmod 仅影响只读位，0o600 语义不变）。
     try:
         CONFIG_PATH.parent.chmod(0o700)

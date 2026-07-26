@@ -185,6 +185,14 @@ class CommandRegistry:
         )
 
 
+def _model_command(ctx: CommandContext) -> CommandResult:
+    """带参数直接切模型;无参数交给前端开 picker。"""
+    if ctx.args:
+        ctx.session.set_model(ctx.args)
+        return CommandResult(handled=True, message=f"Model set: {ctx.args}")
+    return CommandResult(handled=True, model_picker_requested=True)
+
+
 def create_default_command_registry() -> CommandRegistry:
     """注册 Lion 内置 TUI 命令;全部以 CommandResult 意图返回,由前端执行。"""
     registry = CommandRegistry()
@@ -223,9 +231,9 @@ def create_default_command_registry() -> CommandRegistry:
         ),
         SlashCommand(
             name="model",
-            description="配置 provider / model / api key",
-            usage="/model",
-            handler=lambda _ctx: CommandResult(handled=True, model_picker_requested=True),
+            description="切换模型 / 配置 API",
+            usage="/model [name]",
+            handler=_model_command,
         ),
         SlashCommand(
             name="theme",

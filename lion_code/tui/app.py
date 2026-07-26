@@ -284,6 +284,147 @@ class ModelScreen(ModalScreen[dict | None]):
         )
 
 
+class ModelPickerSearchInput(Input):
+    """搜索框:把 picker 控制键留在弹层内(vendored 自上游,裁掉 scoped 模式)。"""
+
+    def on_key(self, event) -> None:
+        if event.key == "up":
+            event.stop()
+            event.prevent_default()
+            self.screen.action_cursor_up()
+        elif event.key == "down":
+            event.stop()
+            event.prevent_default()
+            self.screen.action_cursor_down()
+        elif event.key == "escape":
+            event.stop()
+            event.prevent_default()
+            self.screen.action_cancel()
+        elif event.key == "ctrl+e":
+            event.stop()
+            event.prevent_default()
+            self.screen.action_edit_config()
+
+
+class ModelPickerScreen(ModalScreen[object]):
+    """模型选择列表(Claude Code 式):搜索过滤、Enter 选中、Ctrl+E 编辑凭证。
+
+    dismiss 值:ModelChoice(选中候选)| str(搜索框里的自定义模型名)|
+    "__edit__"(打开凭证表单)| None(取消)。
+    """
+
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+        ("up", "cursor_up", "Up"),
+        ("down", "cursor_down", "Down"),
+        ("enter", "accept_model", "Select"),
+        ("ctrl+e", "edit_config", "Edit config"),
+    ]
+
+    def __init__(
+        self,
+        choices: tuple,
+        *,
+        current_model: str,
+        provider_name: str,
+    ) -> None:
+        super().__init__()
+        self.choices = tuple(dict.fromkeys(choices))
+        self.visible_choices = self.choices
+        self.current_model = current_model
+        self.provider_name = provider_name
+        self.search_value = ""
+
+    def compose(self) -> ComposeResult:
+        yield VerticalScroll(
+            Label(f"Model: {self.provider_name}"),
+            ModelPickerSearchInput(placeholder="Search models…", id="model-picker-search"),
+            ListView(id="model-picker-list"),
+            Label("", id="model-picker-help", classes="dim"),
+            id="dialog",
+        )
+
+    def on_mount(self) -> None:
+        self.query_one("#model-picker-search", Input).focus()
+        self._refresh_list()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "model-picker-search":
+            return
+        event.stop()
+        self.search_value = event.value
+        self._refresh_list()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "model-picker-search":
+            return
+        event.stop()
+        self.action_accept_model()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        event.stop()
+        self.action_accept_model()
+
+    def action_cursor_up(self) -> None:
+        self.query_one("#model-picker-list", ListView).action_cursor_up()
+
+    def action_cursor_down(self) -> None:
+        self.query_one("#model-picker-list", ListView).action_cursor_down()
+
+    def action_accept_model(self) -> None:
+        if self.visible_choices:
+            model_list = self.query_one("#model-picker-list", ListView)
+            index = model_list.index
+            if index is not None:
+                self.dismiss(self.visible_choices[index])
+            return
+        custom = self.search_value.strip()
+        if custom:
+            # 无匹配时把输入文本当作自定义模型名直接使用。
+            self.dismiss(custom)
+
+    def action_edit_config(self) -> None:
+        self.dismiss("__edit__")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _refresh_list(self) -> None:
+        needle = self.search_value.strip().lower()
+        self.visible_choices = tuple(
+            choice
+            for choice in self.choices
+            if not needle
+            or needle in choice.model.lower()
+            or needle in choice.provider_name.lower()
+        )
+        model_list = self.query_one("#model-picker-list", ListView)
+        model_list.clear()
+        model_list.extend(
+            ListItem(
+                Label(
+                    ("● " if choice.model == self.current_model else "  ")
+                    + f"{choice.model}  ({choice.provider_name})",
+                    markup=False,
+                )
+            )
+            for choice in self.visible_choices
+        )
+        if self.visible_choices:
+            try:
+                model_list.index = [c.model for c in self.visible_choices].index(
+                    self.current_model
+                )
+            except ValueError:
+                model_list.index = 0
+            help_text = "Enter selects · Ctrl+E edit API config · Esc closes"
+        else:
+            help_text = (
+                "No match — Enter uses typed name as model · Ctrl+E edit API config"
+            )
+        self.query_one("#model-picker-help", Label).update(help_text)
+
+
 class ThemePickerScreen(ModalScreen[str | None]):
     """主题选择列表(vendored 自上游,Claude Code 式可选列表)。"""
 
@@ -465,11 +606,18 @@ class LionTuiApp(App):
         self._refresh_completions()
 
     def _build_completion_state(self, text: str) -> CompletionState:
+        model_names: tuple[str, ...] = ()
+        if text.startswith("/model"):
+            # 仅在补 /model 参数时读本地已知模型,避免每次击键都读盘。
+            model_names = tuple(
+                choice.model for choice in self.session.available_model_choices
+            )
         return build_completion_state(
             text,
             command_registry=self.session.command_registry,
             skills=self.session.skills,
             prompt_templates=self.session.prompt_templates,
+            model_names=model_names,
             theme_names=available_tui_theme_names(),
             cwd=self.session.cwd,
         )
@@ -672,6 +820,7 @@ class LionTuiApp(App):
             )
         elif result.message:
             self._notice(result.message)
+        self._set_subtitle()
 
     async def _new_session(self) -> None:
         await self.session.new_session()
@@ -777,6 +926,31 @@ class LionTuiApp(App):
         if self.session.is_running:
             self._notice("…agent is working — Esc to abort")
             return
+        if not self.session.api_configured:
+            # 首跑没有凭证,直接进表单;配置过之后一律列表 picker。
+            self._open_model_form()
+            return
+        self.push_screen(
+            ModelPickerScreen(
+                self.session.available_model_choices,
+                current_model=self.session.model,
+                provider_name=self.session.provider_name,
+            ),
+            self._handle_model_pick,
+        )
+
+    def _handle_model_pick(self, result: object) -> None:
+        if result is None:
+            return
+        if result == "__edit__":
+            self._open_model_form()
+            return
+        model = result if isinstance(result, str) else result.model
+        self.session.set_model(model)
+        self._set_subtitle()
+        self._notice(f"Model set: {model}")
+
+    def _open_model_form(self) -> None:
         self.push_screen(
             ModelScreen(self.session.get_provider_config()), self._apply_model_config
         )
