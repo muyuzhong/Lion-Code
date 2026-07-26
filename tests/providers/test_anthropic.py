@@ -264,5 +264,46 @@ class TestAnthropicErrorsAndCancellation(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(events[-1], AssistantErrorEvent)
 
 
+class TestAnthropicThinkingPayload(unittest.IsolatedAsyncioTestCase):
+    """thinking 三种模式的请求 payload 形状(与上游 0.3.3 对齐)。"""
+
+    async def _request_body(self, config: AnthropicConfig) -> dict[str, Any]:
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(
+                200,
+                content=_sse(
+                    {"type": "message_delta", "delta": {"stop_reason": "end_turn"}}
+                ),
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = AnthropicProvider(config, client=client)
+            async for _ in provider.stream_response(
+                model="claude-3-5",
+                system="s",
+                messages=[UserMessage(content="hi")],
+                tools=[],
+            ):
+                pass
+        return json.loads(seen[0].content)
+
+    async def test_disabled_mode_sends_explicit_disabled_payload(self) -> None:
+        body = await self._request_body(_config(thinking_mode="disabled"))
+        self.assertEqual(body["thinking"], {"type": "disabled"})
+
+    async def test_budget_mode_sends_enabled_with_budget(self) -> None:
+        body = await self._request_body(_config(thinking_budget_tokens=2048))
+        self.assertEqual(
+            body["thinking"], {"type": "enabled", "budget_tokens": 2048}
+        )
+
+    async def test_default_without_budget_omits_thinking(self) -> None:
+        body = await self._request_body(_config())
+        self.assertNotIn("thinking", body)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
