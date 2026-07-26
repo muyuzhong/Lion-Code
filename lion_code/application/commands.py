@@ -236,6 +236,16 @@ def create_default_command_registry() -> CommandRegistry:
             handler=_model_command,
         ),
         SlashCommand(
+            name="resume",
+            description="恢复历史会话",
+            usage="/resume [session-id]",
+            handler=lambda ctx: (
+                CommandResult(handled=True, resume_session_id=ctx.args)
+                if ctx.args
+                else CommandResult(handled=True, resume_picker_requested=True)
+            ),
+        ),
+        SlashCommand(
             name="theme",
             description="切换 TUI 主题",
             usage="/theme <name>",

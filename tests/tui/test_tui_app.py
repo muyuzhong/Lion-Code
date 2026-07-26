@@ -240,6 +240,44 @@ async def test_model_command_with_arg_sets_directly(app_factory, tmp_path, monke
 
 
 @pytest.mark.asyncio
+async def test_resume_picker_restores_previous_session(app_factory) -> None:
+    from lion_code.tui.app import SessionPickerScreen
+
+    app = app_factory([_stop_event("first")])
+    async with app.run_test() as pilot:
+        await _submit(app, pilot, "hi")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        old_id = app.session.session_id
+        assert app.session.messages
+
+        await _submit(app, pilot, "/clear")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.session.messages == ()
+        assert app.session.session_id != old_id
+
+        await _submit(app, pilot, "/resume")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert isinstance(app.screen, SessionPickerScreen)
+        ids = [meta.get("id") for meta in app.screen.visible_sessions]
+        assert old_id in ids
+
+        # 用 id 过滤,消除对真实 home 会话目录里其它会话的顺序依赖。
+        search = app.screen.query_one("#session-picker-search")
+        search.value = old_id
+        await pilot.pause()
+        assert [m.get("id") for m in app.screen.visible_sessions] == [old_id]
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    assert app.session.session_id == old_id
+    assert [m.role for m in app.session.messages] == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
 async def test_sessions_sidebar_lists_new_entry(app_factory) -> None:
     app = app_factory([])
     async with app.run_test() as pilot:

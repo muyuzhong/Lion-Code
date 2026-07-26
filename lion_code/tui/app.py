@@ -425,6 +425,98 @@ class ModelPickerScreen(ModalScreen[object]):
         self.query_one("#model-picker-help", Label).update(help_text)
 
 
+class SessionPickerScreen(ModalScreen[str | None]):
+    """会话选择列表:搜索过滤、Enter 恢复;dismiss 会话 id 或 None。"""
+
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+        ("up", "cursor_up", "Up"),
+        ("down", "cursor_down", "Down"),
+        ("enter", "accept", "Resume"),
+    ]
+
+    def __init__(self, sessions: list[dict], *, current_id: str | None = None) -> None:
+        super().__init__()
+        self.sessions = sessions
+        self.visible_sessions = list(sessions)
+        self.current_id = current_id
+        self.search_value = ""
+
+    def compose(self) -> ComposeResult:
+        yield VerticalScroll(
+            Label("Resume session"),
+            ModelPickerSearchInput(placeholder="Search sessions…", id="session-picker-search"),
+            ListView(id="session-picker-list"),
+            Label("Enter resumes · Esc closes", classes="dim"),
+            id="dialog",
+        )
+
+    def on_mount(self) -> None:
+        self.query_one("#session-picker-search", Input).focus()
+        self._refresh_list()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "session-picker-search":
+            return
+        event.stop()
+        self.search_value = event.value
+        self._refresh_list()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "session-picker-search":
+            return
+        event.stop()
+        self.action_accept()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        event.stop()
+        self.action_accept()
+
+    def action_cursor_up(self) -> None:
+        self.query_one("#session-picker-list", ListView).action_cursor_up()
+
+    def action_cursor_down(self) -> None:
+        self.query_one("#session-picker-list", ListView).action_cursor_down()
+
+    def action_accept(self) -> None:
+        if not self.visible_sessions:
+            return
+        index = self.query_one("#session-picker-list", ListView).index
+        if index is not None:
+            self.dismiss(str(self.visible_sessions[index].get("id", "")))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    @staticmethod
+    def _label(meta: dict) -> str:
+        start = str(meta.get("startTime", ""))[:16].replace("T", " ")
+        count = meta.get("messageCount", 0)
+        return f"{start}  {str(meta.get('id', ''))[:8]}  ({count} msgs)"
+
+    def _refresh_list(self) -> None:
+        needle = self.search_value.strip().lower()
+        self.visible_sessions = [
+            meta
+            for meta in self.sessions
+            if not needle or needle in self._label(meta).lower()
+        ]
+        session_list = self.query_one("#session-picker-list", ListView)
+        session_list.clear()
+        session_list.extend(
+            ListItem(
+                Label(
+                    ("● " if meta.get("id") == self.current_id else "  ")
+                    + self._label(meta),
+                    markup=False,
+                )
+            )
+            for meta in self.visible_sessions
+        )
+        if self.visible_sessions:
+            session_list.index = 0
+
+
 class ThemePickerScreen(ModalScreen[str | None]):
     """主题选择列表(vendored 自上游,Claude Code 式可选列表)。"""
 
@@ -709,7 +801,39 @@ class LionTuiApp(App):
             prompt.move_cursor((0, 1))
 
     def action_open_session_picker(self) -> None:
-        self.action_toggle_sidebar()
+        if not self.session.is_running:
+            self.run_worker(self._open_session_picker(), group="chat")
+
+    async def _open_session_picker(self) -> None:
+        cwd = str(Path.cwd().resolve())
+        metas = sorted(
+            (m for m in await self.session.list_sessions() if m.get("cwd") == cwd),
+            key=lambda m: m.get("startTime", ""),
+            reverse=True,
+        )
+        if not metas:
+            self._notice("没有可恢复的会话")
+            return
+        self.push_screen(
+            SessionPickerScreen(metas, current_id=self.session.session_id),
+            self._handle_session_pick,
+        )
+
+    def _handle_session_pick(self, session_id: str | None) -> None:
+        if session_id:
+            self.run_worker(self._resume_session(session_id), group="chat")
+
+    async def _resume_session(self, session_id: str) -> None:
+        try:
+            restored = await self.session.resume(session_id)
+        except Exception as error:
+            self._notice(f"Session restore failed: {error}", role="error")
+            return
+        if not restored:
+            self._notice(f"Session {session_id} could not be restored.", role="error")
+            return
+        self._load_transcript_from_session()
+        await self._reload_sessions()
 
     def action_cycle_thinking(self) -> None:
         self._notice("thinking 档位切换将在阶段 4 提供")
@@ -808,6 +932,10 @@ class LionTuiApp(App):
             self.run_worker(self._compact(), exclusive=True, group="chat")
         elif result.model_picker_requested:
             self.action_model()
+        elif result.resume_session_id is not None:
+            self.run_worker(self._resume_session(result.resume_session_id), group="chat")
+        elif result.resume_picker_requested:
+            self.run_worker(self._open_session_picker(), group="chat")
         elif result.theme is not None:
             self._switch_theme(result.theme)
         elif result.theme_picker_requested:
@@ -899,15 +1027,7 @@ class LionTuiApp(App):
         if name == "__new__":
             await self._new_session()
             return
-        try:
-            restored = await self.session.resume(str(name))
-        except Exception as error:
-            self._notice(f"Session restore failed: {error}", role="error")
-            return
-        if not restored:
-            self._notice(f"Session {name} could not be restored.", role="error")
-            return
-        self._load_transcript_from_session()
+        await self._resume_session(str(name))
 
     # ─── 快捷键动作 ──────────────────────────────────────────
 
