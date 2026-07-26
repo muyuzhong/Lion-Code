@@ -309,6 +309,7 @@ class TestAgentDreamRefresh(unittest.TestCase):
             changed_path = str(memory_dir / "project_changed.md")
             pending = SimpleNamespace(settled=False, task=Mock())
             agent = Agent.__new__(Agent)
+            agent._memory_coordinator = Mock()
             agent._memory_prefetch = pending
             agent._already_surfaced_memories = {changed_path, "other.md"}
             agent._dynamic_system_context = "old dynamic"
@@ -324,6 +325,9 @@ class TestAgentDreamRefresh(unittest.TestCase):
             ):
                 agent._refresh_memory_context_after_dream(["project_changed.md"])
 
+        agent._memory_coordinator.invalidate.assert_called_once_with(
+            ["project_changed.md"]
+        )
         pending.task.cancel.assert_called_once()
         self.assertIsNone(agent._memory_prefetch)
         self.assertNotIn(changed_path, agent._already_surfaced_memories)

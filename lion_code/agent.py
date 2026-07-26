@@ -483,17 +483,8 @@ class Agent:
             )
             self._openai_client = None
 
-        memory_query_service = None
-        if self._use_core_runtime and (
-            self._openai_client is not None or self._anthropic_client is not None
-        ):
-            memory_query_service = LegacySdkTextQueryService(
-                openai_client=self._openai_client,
-                anthropic_client=self._anthropic_client,
-                model=lambda: self.model,
-            )
         self._memory_coordinator = MemoryCoordinator(
-            query_service=memory_query_service
+            query_service=self._build_core_memory_query_service()
         )
         self._memory_injector = MemoryContextInjector()
         self._last_memory_injection = MemoryInjectionReport()
@@ -605,10 +596,24 @@ class Agent:
             return _sq_oai
         return None
 
+    def _build_core_memory_query_service(self):
+        """为 Core Memory 创建 SDK 迁移期 Adapter；旧路径继续使用原回调。"""
+
+        if not self._use_core_runtime or (
+            self._openai_client is None and self._anthropic_client is None
+        ):
+            return None
+        return LegacySdkTextQueryService(
+            openai_client=self._openai_client,
+            anthropic_client=self._anthropic_client,
+            model=lambda: self.model,
+        )
+
     def abort(self) -> None:
         if self._core_runtime is not None and self.use_openai:
             # 新路径：取消 harness 信号，同时中断模型流与工具执行
             # （adapt_lion_tool 把 signal.is_cancelled 传给 ToolRuntime 中间件）。
+            self._memory_coordinator.cancel_pending()
             self._core_runtime.cancel()
             return
         self._aborted = True
@@ -998,6 +1003,10 @@ class Agent:
                 self._anthropic_client = anthropic.AsyncAnthropic(**kwargs)
             self._openai_client = None
 
+        self._memory_coordinator.set_query_service(
+            self._build_core_memory_query_service()
+        )
+
         recorder = self._session_recorder
         if recorder is not None and self.use_openai and (
             self.model != previous_model
@@ -1194,6 +1203,8 @@ class Agent:
     async def clear_history(self) -> None:
         """结束当前会话并创建新 Session；旧 append-only 历史保持可恢复。"""
         await self._flush_session_writes()
+        self._memory_coordinator.reset()
+        self._last_memory_injection = MemoryInjectionReport()
         self.session_id = uuid.uuid4().hex[:8]
         self.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self.tool_context.session_id = self.session_id
@@ -1271,6 +1282,7 @@ class Agent:
 
     def _refresh_memory_context_after_dream(self, filenames: list[str]) -> None:
         """丢弃旧预取，并让本会话后续请求看到 Dream 后的索引和文件内容。"""
+        self._memory_coordinator.invalidate(filenames)
         if self._memory_prefetch and not self._memory_prefetch.settled:
             self._memory_prefetch.task.cancel()
         self._memory_prefetch = None
@@ -1690,6 +1702,8 @@ class Agent:
         if state is None:
             return False
 
+        self._memory_coordinator.reset()
+        self._last_memory_injection = MemoryInjectionReport()
         self.session_id = session_id
         self.tool_context.session_id = session_id
         self._pending_core_context_reset = None
@@ -2304,7 +2318,10 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
         try:
             await self._flush_session_writes()
         finally:
-            await self.tool_environment.close()
+            try:
+                await self._memory_coordinator.close()
+            finally:
+                await self.tool_environment.close()
 
     def _consume_memory_prefetch_if_ready(self, messages: list) -> None:
         """非阻塞消费已完成的 Memory 预取，并追加到末条用户消息以保持 role 交替。"""

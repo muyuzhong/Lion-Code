@@ -47,6 +47,12 @@ class MemoryCoordinator:
     def already_surfaced(self) -> frozenset[str]:
         return frozenset(self._already_surfaced)
 
+    def set_query_service(self, service: TextQueryService | None) -> None:
+        """替换 Side Query 实现，并取消仍引用旧 Client 的预取。"""
+
+        self.cancel_pending()
+        self._query_service = service
+
     def begin_turn(self, user_message: str) -> None:
         """收集上一轮结果，并为当前用户输入启动零等待预取。"""
 
@@ -92,6 +98,9 @@ class MemoryCoordinator:
             )
             byte_size = len(content.encode("utf-8"))
             if self._session_bytes + byte_size > self._policy.max_session_bytes:
+                self._already_surfaced.add(memory.path)
+                continue
+            if self._policy.max_active_memories <= 0:
                 self._already_surfaced.add(memory.path)
                 continue
             if len(self._active) >= self._policy.max_active_memories:
