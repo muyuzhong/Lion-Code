@@ -19,13 +19,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
-from typing import TYPE_CHECKING, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
 
 from lion_code.core.events import AgentEndEvent, AgentEvent
 from lion_code.core.messages import AgentMessage
 
+from .commands import CommandRegistry, CommandResult, create_default_command_registry
 from .events import (
     AgentSettledEvent,
     LionSessionEvent,
@@ -54,6 +56,33 @@ class LionCodingSession:
         self._agent = agent
         self._runtime = runtime
         self._running = False
+        self._command_registry = create_default_command_registry()
+
+    # ─── 环境 / 身份 ─────────────────────────────────────────
+
+    @property
+    def cwd(self) -> Path:
+        return Path(self._agent.tool_context.cwd)
+
+    @property
+    def model(self) -> str:
+        return self._agent.model
+
+    @property
+    def provider_name(self) -> str:
+        return "openai-compatible" if self._agent.use_openai else "anthropic"
+
+    @property
+    def permission_mode(self) -> str:
+        return self._agent.permission_mode
+
+    @property
+    def session_id(self) -> str:
+        return self._agent.session_id
+
+    @property
+    def api_configured(self) -> bool:
+        return self._agent.api_configured
 
     # ─── 状态 ────────────────────────────────────────────────
 
@@ -134,6 +163,62 @@ class LionCodingSession:
     async def aclose(self) -> None:
         """关闭底层 Agent(落盘会话、回收 Memory 任务与 MCP 连接)。"""
         await self._agent.close()
+
+    # ─── 会话管理 ────────────────────────────────────────────
+
+    async def list_sessions(self) -> list[dict]:
+        return await self._agent.list_sessions()
+
+    async def resume(self, session_id: str) -> bool:
+        return await self._agent.restore_session_id(session_id)
+
+    async def restore_latest(self) -> bool:
+        return await self._agent.restore_latest_session()
+
+    async def new_session(self) -> None:
+        await self._agent.clear_history()
+
+    # ─── 压缩 / 用量 ─────────────────────────────────────────
+
+    async def compact(self) -> None:
+        await self._agent.compact()
+
+    def token_usage(self) -> dict:
+        """累计用量与计费快照(input/output/cache/cost 字段见 Agent)。"""
+        return self._agent.get_token_usage()
+
+    # ─── Provider / 模型配置 ─────────────────────────────────
+
+    def get_provider_config(self) -> dict:
+        return self._agent.get_api_config()
+
+    def configure_provider(self, **kwargs: Any) -> None:
+        """运行时切换模型/凭证,直接透传 Agent.configure_api。"""
+        self._agent.configure_api(**kwargs)
+
+    # ─── 命令 ────────────────────────────────────────────────
+
+    @property
+    def command_registry(self) -> CommandRegistry:
+        return self._command_registry
+
+    def handle_command(self, text: str) -> CommandResult:
+        return self._command_registry.execute(self, text)
+
+    # ─── Lion 特有交互(权限确认 / Plan 审批)─────────────────
+
+    def set_confirm_fn(
+        self, fn: Callable[[str], Awaitable[bool]] | None
+    ) -> None:
+        self._agent.set_confirm_fn(fn)
+
+    def set_plan_approval_fn(
+        self, fn: Callable[[str], Awaitable[dict]] | None
+    ) -> None:
+        self._agent.set_plan_approval_fn(fn)
+
+    def toggle_plan_mode(self) -> None:
+        self._agent.toggle_plan_mode()
 
     # ─── 事件桥 ──────────────────────────────────────────────
 

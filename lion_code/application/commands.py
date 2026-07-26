@@ -103,6 +103,9 @@ class CommandResult:
     thinking_level: str | None = None
     theme: str | None = None
     message: str | None = None
+    # Lion 增补:Plan 模式切换与费用显示是 Lion 特有交互,Tau 无对应。
+    plan_toggle_requested: bool = False
+    cost_requested: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +183,63 @@ class CommandRegistry:
         return command.handler(
             CommandContext(session=session, registry=self, text=stripped, name=name, args=args)
         )
+
+
+def create_default_command_registry() -> CommandRegistry:
+    """注册 Lion 内置 TUI 命令;全部以 CommandResult 意图返回,由前端执行。"""
+    registry = CommandRegistry()
+    for command in (
+        SlashCommand(
+            name="quit",
+            description="退出 Lion Code",
+            usage="/quit",
+            handler=lambda _ctx: CommandResult(handled=True, exit_requested=True),
+            aliases=("exit",),
+        ),
+        SlashCommand(
+            name="clear",
+            description="清空对话并开始新会话",
+            usage="/clear",
+            handler=lambda _ctx: CommandResult(handled=True, new_session_requested=True),
+            aliases=("new",),
+        ),
+        SlashCommand(
+            name="plan",
+            description="切换 Plan 模式",
+            usage="/plan",
+            handler=lambda _ctx: CommandResult(handled=True, plan_toggle_requested=True),
+        ),
+        SlashCommand(
+            name="cost",
+            description="显示本会话用量与费用",
+            usage="/cost",
+            handler=lambda _ctx: CommandResult(handled=True, cost_requested=True),
+        ),
+        SlashCommand(
+            name="compact",
+            description="压缩当前上下文",
+            usage="/compact",
+            handler=lambda ctx: CommandResult(handled=True, compact_summary=ctx.args),
+        ),
+        SlashCommand(
+            name="model",
+            description="配置 provider / model / api key",
+            usage="/model",
+            handler=lambda _ctx: CommandResult(handled=True, model_picker_requested=True),
+        ),
+        SlashCommand(
+            name="theme",
+            description="切换 TUI 主题",
+            usage="/theme <name>",
+            handler=lambda ctx: (
+                CommandResult(handled=True, theme=ctx.args)
+                if ctx.args
+                else CommandResult(handled=True, theme_picker_requested=True)
+            ),
+        ),
+    ):
+        registry.register(command)
+    return registry
 
 
 def _parse_command(text: str) -> tuple[str, str]:
