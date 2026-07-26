@@ -510,12 +510,10 @@ class DreamCoordinator:
             "max_turns": DREAM_MAX_TURNS,
             "read_roots": [context.project_root, context.memory_dir],
         }
-        if self.agent.use_openai:
-            client = self.agent._openai_client
-            kwargs.update(api_base=str(client.base_url), api_key=client.api_key)
-        else:
-            client = self.agent._anthropic_client
-            kwargs.update(anthropic_base_url=str(client.base_url), api_key=client.api_key)
+        # 凭证与后端继承走公共 seam,不再直读 Agent 私有客户端。
+        api_kwargs = self.agent._child_api_kwargs()
+        api_kwargs.pop("model", None)
+        kwargs.update(api_kwargs)
         return _DreamAgent(**kwargs)
 
     async def run(self) -> DreamResult:

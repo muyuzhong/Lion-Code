@@ -33,7 +33,7 @@ from .context import (
     fallback_model_limits,
 )
 from .core.events import AgentEvent, MessageUpdateEvent
-from .core.messages import AgentMessage, UserMessage
+from .core.messages import AgentMessage, AssistantMessage, TextContent, UserMessage
 from .core.provider_events import TextDeltaEvent
 from .observers import TerminalRenderer, UsageObserver
 from .providers.factory import create_provider
@@ -48,7 +48,9 @@ from .memory_runtime import (
     MemoryContextInjector,
     MemoryCoordinator,
     MemoryInjectionReport,
+    ProviderTextQueryService,
 )
+from .providers.oneshot import complete_text
 from .autonomy import (
     goal_directive,
     GOAL_EVALUATOR_SYSTEM,
@@ -519,6 +521,10 @@ class Agent:
                     get_model=lambda: self.model,
                 )
             self._reset_core_observers()
+            # MemoryCoordinator 先于 Core Runtime 构造,这里补挂 Provider 查询服务。
+            self._memory_coordinator.set_query_service(
+                self._build_core_memory_query_service()
+            )
 
     # ─── Anthropic 前缀缓存 ──────────────────────────────────
     def _build_anthropic_system(self) -> list[dict]:
@@ -581,8 +587,22 @@ class Agent:
     def _build_side_query(self):
         """构建供 Memory 召回和 Auto Mode 分类器共用的跨后端 sideQuery。
 
-        temperature 固定为 0，让相同输入尽可能得到稳定判定。
+        Core 路径直接走 Provider(采样由 Provider 配置决定);legacy 路径
+        保留 SDK 实现,temperature 固定为 0。
         """
+        if self._core_runtime is not None:
+            provider = self._core_runtime.provider
+            model = self.model
+
+            async def _sq_provider(system: str, user_message: str) -> str:
+                return await complete_text(
+                    provider,
+                    model=model,
+                    system=system,
+                    messages=[UserMessage(content=user_message)],
+                )
+
+            return _sq_provider
         if self._anthropic_client:
             client = self._anthropic_client
             model = self.model
@@ -609,11 +629,17 @@ class Agent:
         return None
 
     def _build_core_memory_query_service(self):
-        """为 Core Memory 创建 SDK 迁移期 Adapter；旧路径继续使用原回调。"""
+        """Core 路径用 Provider 直连的查询服务;SDK Adapter 仅剩迁移期兜底。"""
 
-        if not self._use_core_runtime or (
-            self._openai_client is None and self._anthropic_client is None
-        ):
+        if not self._use_core_runtime:
+            return None
+        runtime = getattr(self, "_core_runtime", None)
+        if runtime is not None:
+            return ProviderTextQueryService(
+                provider=runtime.provider,
+                model=lambda: self.model,
+            )
+        if self._openai_client is None and self._anthropic_client is None:
             return None
         return LegacySdkTextQueryService(
             openai_client=self._openai_client,
@@ -1020,10 +1046,6 @@ class Agent:
                 self._anthropic_client = anthropic.AsyncAnthropic(**kwargs)
             self._openai_client = None
 
-        self._memory_coordinator.set_query_service(
-            self._build_core_memory_query_service()
-        )
-
         # Core 路径:key/base/协议变更时重建 Provider 与 Runtime,否则模型热配
         # 只换了 SDK 客户端,真实请求路径(httpx Provider)仍用旧凭证。
         # Canonical 消息与协议无关,跨协议切换也保留 Harness messages;
@@ -1082,6 +1104,11 @@ class Agent:
             )
             self._resolved_model_limits_for = None
             self._reset_core_observers()
+
+        # 放在 Provider 重建之后,确保查询服务拿到的是新 Provider。
+        self._memory_coordinator.set_query_service(
+            self._build_core_memory_query_service()
+        )
 
         recorder = self._session_recorder
         if recorder is not None and (
@@ -1503,6 +1530,23 @@ class Agent:
             # 评估异常按“未满足”处理，绝不能因故障误清除目标。
             return {"ok": False, "reason": f"evaluator error: {e}", "impossible": False}
 
+    def _canonical_side_messages(self, messages: list) -> list[AgentMessage]:
+        """把 {role, content} 字典消息转为 canonical,供 Provider side-query。"""
+        canonical: list[AgentMessage] = []
+        for message in messages:
+            content = str(message.get("content", ""))
+            if message.get("role") == "assistant":
+                canonical.append(
+                    AssistantMessage(
+                        model=self.model,
+                        content=[TextContent(text=content)],
+                        stop_reason="stop",
+                    )
+                )
+            else:
+                canonical.append(UserMessage(content=content))
+        return canonical
+
     async def _run_evaluator_query(
         self, system: str, messages: list, max_tokens: int = 512
     ) -> str:
@@ -1510,6 +1554,13 @@ class Agent:
 
         与只接受单条 user 消息的 sideQuery 分开，避免 Memory 接口限制目标评估结构。
         """
+        if self._core_runtime is not None:
+            return await complete_text(
+                self._core_runtime.provider,
+                model=self.model,
+                system=system,
+                messages=self._canonical_side_messages(messages),
+            )
         if self._anthropic_client:
             resp = await self._anthropic_client.messages.create(
                 model=self.model, max_tokens=max_tokens, system=system, temperature=0, messages=messages,
@@ -1528,6 +1579,13 @@ class Agent:
 
         第一阶段只需输出门控结论，第二阶段留出推理空间；temperature 固定为 0。
         """
+        if self._core_runtime is not None:
+            return await complete_text(
+                self._core_runtime.provider,
+                model=self.model,
+                system=system,
+                messages=[UserMessage(content=user)],
+            )
         if self._anthropic_client:
             resp = await self._anthropic_client.messages.create(
                 model=self.model, max_tokens=max_tokens, system=system, temperature=0,

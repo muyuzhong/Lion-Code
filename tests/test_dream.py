@@ -243,9 +243,11 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
             parent = SimpleNamespace(
                 model="test-model",
                 use_openai=True,
-                _openai_client=SimpleNamespace(
-                    base_url="https://example.test/v1", api_key="test-key"
-                ),
+                _child_api_kwargs=lambda: {
+                    "model": "test-model",
+                    "api_base": "https://example.test/v1",
+                    "api_key": "test-key",
+                },
                 tool_registry=registry,
                 tool_environment=environment,
             )

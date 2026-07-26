@@ -706,6 +706,35 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         sessions = await self._session_repository.list_sessions()
         self.assertEqual(len(sessions), 1)
 
+    async def test_side_queries_use_core_provider(self) -> None:
+        """Memory/分类器/评估器的 side-query 全部改走 Core Provider,不再用 SDK。"""
+        from lion_code.memory_runtime import ProviderTextQueryService
+
+        agent, fake = self._make_agent(
+            [_stop_event("cls-ok"), _stop_event("eval-ok")], ToolRegistry()
+        )
+
+        self.assertIsInstance(
+            agent._build_core_memory_query_service(), ProviderTextQueryService
+        )
+
+        out_cls = await agent._run_classifier_query("sys", "user text", 16)
+        self.assertEqual(out_cls, "cls-ok")
+
+        out_eval = await agent._run_evaluator_query(
+            "sys",
+            [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "prev"},
+            ],
+        )
+        self.assertEqual(out_eval, "eval-ok")
+        self.assertEqual(fake.call_count, 2)
+        # 评估请求保留 role 结构。
+        self.assertEqual(
+            [m.role for m in fake.received_messages[1]], ["user", "assistant"]
+        )
+
     async def test_configure_api_model_only_keeps_core_provider(self) -> None:
         """只改模型不重建 Provider,经 set_model 直接生效。"""
         agent, fake = self._make_agent([_stop_event("done")], ToolRegistry())
