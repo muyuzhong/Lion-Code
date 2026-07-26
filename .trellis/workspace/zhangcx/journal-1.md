@@ -140,3 +140,40 @@ provider-neutral context、memory overlay。本次会话完成审计 + 阶段 0-
 - 阶段4:model/session picker数据层(provider_settings+session_manager)
 - 灰度扩围:Anthropic后端与子Agent上Core;3处side-query迁Provider
 - 阶段5:删legacy双后端/legacy_tui/SDK依赖
+
+
+## Session 2: hooks 兼容修复 + 新 TUI 成为默认入口
+
+**Date**: 2026-07-27
+**Task**: hooks 兼容修复 + 新 TUI 成为默认入口
+**Branch**: `master`
+
+### Summary
+
+两个用户上报问题:trellis 写入的 Claude Code schema hooks 导致 lion-code 启动崩溃(跳过外来 schema);裸启动落入 legacy TUI 看不到新体验(TUI 启动默认 LION_CORE_RUNTIME=1,无凭证默认 OpenAI-compatible 占位由新 TUI 承载首跑配置)。全量 390 通过。
+
+### Main Changes
+
+- hooks.py:识别并跳过 matcher+嵌套hooks 数组的外来 schema 条目,Lion 条目仍严格校验
+- __main__.py:TUI 启动 setdefault LION_CORE_RUNTIME=1;无凭证默认 OpenAI-compatible 占位端点
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5c58be3` | (see git log) |
+| `fe8825d` | (see git log) |
+
+### Testing
+
+- [OK] tests/test_hooks.py 25例(含新回归用例);入口三场景冒烟(无凭证/--legacy-tui/OpenAI凭证)
+- [OK] 全量 390 passed / 18 skipped
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 阶段4任务已建:.trellis/tasks/07-27-phase4-tui-and-rollout(PRD 含 A-D 四组需求与验收)
+- 用户待真机确认 / 补全手感;/model 列表 picker 是 A1 首件
