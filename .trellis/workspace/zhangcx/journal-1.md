@@ -177,3 +177,40 @@ provider-neutral context、memory overlay。本次会话完成审计 + 阶段 0-
 
 - 阶段4任务已建:.trellis/tasks/07-27-phase4-tui-and-rollout(PRD 含 A-D 四组需求与验收)
 - 用户待真机确认 / 补全手感;/model 列表 picker 是 A1 首件
+
+
+## Session 3: 阶段4-A:model/session 列表 picker 落地
+
+**Date**: 2026-07-27
+**Task**: 阶段4-A:model/session 列表 picker 落地
+**Branch**: `master`
+
+### Summary
+
+A1:/model 换 Claude Code 式可搜索列表(known_models 用过即记住,累积在 ~/.lion-code/config.json;无匹配输入即自定义模型名;Ctrl+E 进凭证表单;/model <name> 带参直切;参数补全接已知模型)。A2:/resume 会话列表 picker(复用 SessionRepository.list_sessions,未新建 session_manager);Ctrl+R 同入口。全量 399 通过。
+
+### Main Changes
+
+- application/provider_settings.py 最小模型目录(ModelChoice/load/remember)
+- config.save_api_config 合并写回保留扩展键
+- tui/app.py:ModelPickerScreen + SessionPickerScreen + 命令/快捷键接线
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `22a3840` | (see git log) |
+| `b41e64b` | (see git log) |
+
+### Testing
+
+- [OK] tests/application/test_provider_settings.py 5例;tui picker 4例;全量 399 passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- A 组完成;下一子项 B3 thinking 档位或 C6 Anthropic 上 Core
+- 坑:ModalScreen 自定义属性勿用 visible(撞 DOMNode 样式 setter)
