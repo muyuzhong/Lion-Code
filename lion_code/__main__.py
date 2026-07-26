@@ -319,6 +319,16 @@ Examples:
     prompt = " ".join(args.prompt) if args.prompt else None
     use_tui = not prompt and not args.repl
 
+    if use_tui and not args.legacy_tui:
+        # 新 TUI 是默认体验:TUI 启动默认启用 Core Runtime(可用
+        # LION_CORE_RUNTIME=0 显式关闭);完全未配置凭证时默认
+        # OpenAI-compatible 占位端点,让新 TUI 承载 /model 首跑配置。
+        # Anthropic 凭证用户仍走 legacy TUI,待 Anthropic 上 Core 后统一。
+        os.environ.setdefault("LION_CORE_RUNTIME", "1")
+        if not resolved_api_key and not resolved_use_openai:
+            resolved_use_openai = True
+            resolved_api_base = resolved_api_base or "https://api.openai.com/v1"
+
     # TUI 允许无凭证启动（进入后用 /model 配置）；one-shot 与 REPL 仍需预先配置。
     if not resolved_api_key and not use_tui:
         print_error(
