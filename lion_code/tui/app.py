@@ -196,11 +196,10 @@ class PlanScreen(ModalScreen[dict]):
 
 
 class ModelScreen(ModalScreen[dict | None]):
-    """模型/API 配置:model + key + base url,保存即生效并持久化。
+    """模型/API 配置:provider + model + key + base url,保存即生效并持久化。
 
-    新 TUI 只面向 Core Runtime(OpenAI-compatible)路径;切换到 Anthropic
-    后端需 legacy TUI(--legacy-tui),阶段 4 Anthropic 上 Core 后放开。
-    """
+    两种后端都走 Core Runtime;跨协议切换保留会话历史(canonical 消息
+    与协议无关)。"""
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
@@ -256,13 +255,11 @@ class ModelScreen(ModalScreen[dict | None]):
         key = self.query_one("#key", Input).value.strip()
         base = self.query_one("#base", Input).value.strip()
         error = self.query_one("#form-error", Label)
-        if provider == "anthropic":
-            error.update("Anthropic 后端暂需 legacy TUI(--legacy-tui 启动)")
-            return
         if not model or not key:
             error.update("model 和 api key 必填")
             return
-        if not base:
+        use_openai = provider == "openai"
+        if use_openai and not base:
             error.update("OpenAI 兼容端点需要 base url")
             return
         self.dismiss(
@@ -270,9 +267,9 @@ class ModelScreen(ModalScreen[dict | None]):
                 "agent_kwargs": {
                     "model": model,
                     "api_key": key,
-                    "use_openai": True,
-                    "api_base": base,
-                    "anthropic_base_url": None,
+                    "use_openai": use_openai,
+                    "api_base": base if use_openai else None,
+                    "anthropic_base_url": None if use_openai else (base or None),
                 },
                 "config": {
                     "provider": provider,

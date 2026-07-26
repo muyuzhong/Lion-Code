@@ -612,6 +612,51 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_fake.call_count, 1)
         self.assertEqual(agent._core_runtime.messages[-1].text, "again")
 
+    async def test_anthropic_backend_routes_to_core_runtime(self) -> None:
+        """Anthropic 后端(无 api_base)同样走 Core Runtime,不再落 legacy。"""
+        fake = FakeProvider([_stop_event("done")])
+        os.environ["LION_CORE_RUNTIME"] = "1"
+        with patch("lion_code.agent.create_provider", return_value=fake):
+            agent = Agent(
+                api_key="ak",
+                tool_registry=ToolRegistry(),
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+            )
+        agent._mcp_initialized = True
+
+        self.assertFalse(agent.use_openai)
+        self.assertIsNotNone(agent.core_runtime)
+
+        with patch.object(
+            Agent, "_chat_anthropic", new_callable=AsyncMock
+        ) as mock_legacy:
+            await agent.chat("hello")
+
+        mock_legacy.assert_not_called()
+        self.assertEqual(agent._core_runtime.messages[-1].text, "done")
+        self.assertEqual(fake.call_count, 1)
+
+    async def test_cross_protocol_switch_keeps_messages(self) -> None:
+        """OpenAI→Anthropic 切换重建 Provider,canonical 历史保留。"""
+        agent, _fake = self._make_agent([_stop_event("done")], ToolRegistry())
+        await agent.chat("hello")
+
+        new_fake = FakeProvider([_stop_event("再见")])
+        with patch(
+            "lion_code.agent.create_provider", return_value=new_fake
+        ) as mock_create:
+            agent.configure_api(use_openai=False, api_key="ak")
+
+        self.assertIn("anthropic_base_url", mock_create.call_args.kwargs)
+        self.assertEqual(
+            [m.role for m in agent._core_runtime.messages], ["user", "assistant"]
+        )
+
+        await agent.chat("second")
+        self.assertEqual(new_fake.call_count, 1)
+        self.assertEqual(agent._core_runtime.messages[-1].text, "再见")
+
     async def test_configure_api_model_only_keeps_core_provider(self) -> None:
         """只改模型不重建 Provider,经 set_model 直接生效。"""
         agent, fake = self._make_agent([_stop_event("done")], ToolRegistry())

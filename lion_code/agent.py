@@ -293,11 +293,11 @@ class Agent:
         self.model = model
         self.use_openai = bool(api_base)
         self.is_sub_agent = is_sub_agent
-        # 灰度开关：仅根 Agent + OpenAI-compatible 后端启用新 Core Runtime，
-        # 旧 _chat_openai() 保留为回退；子 Agent 仍走旧路径以保留文本捕获。
+        # 灰度开关：根 Agent 的两种后端(OpenAI-compatible/Anthropic)都走
+        # 新 Core Runtime,旧 _chat_* 保留为回退;子 Agent 仍走旧路径以保留
+        # 文本捕获(阶段4-C7 迁移)。
         self._use_core_runtime = (
             os.environ.get("LION_CORE_RUNTIME") == "1"
-            and self.use_openai
             and not self.is_sub_agent
         )
         self._pre_tool_use_hooks = load_pre_tool_use_hooks()
@@ -498,7 +498,13 @@ class Agent:
         self._observer_unsubscribers: list[Callable[[], None]] = []
         if self._use_core_runtime:
             provider = create_provider(
-                api_key=api_key or os.environ.get("OPENAI_API_KEY") or "",
+                api_key=(
+                    api_key
+                    or os.environ.get(
+                        "OPENAI_API_KEY" if self.use_openai else "ANTHROPIC_API_KEY"
+                    )
+                    or ""
+                ),
                 api_base=api_base,
                 anthropic_base_url=anthropic_base_url,
             )
@@ -562,7 +568,7 @@ class Agent:
 
     @property
     def is_processing(self) -> bool:
-        if self._core_runtime is not None and self.use_openai:
+        if self._core_runtime is not None:
             return self._core_runtime.harness.is_running
         return self._current_task is not None and not self._current_task.done()
 
@@ -573,7 +579,7 @@ class Agent:
         供应用会话层(LionCodingSession)订阅事件与读取消息快照,
         不是给前端直接使用的接口。
         """
-        return self._core_runtime if self.use_openai else None
+        return self._core_runtime
 
     def _build_side_query(self):
         """构建供 Memory 召回和 Auto Mode 分类器共用的跨后端 sideQuery。
@@ -619,7 +625,7 @@ class Agent:
         )
 
     def abort(self) -> None:
-        if self._core_runtime is not None and self.use_openai:
+        if self._core_runtime is not None:
             # 新路径：取消 harness 信号，同时中断模型流与工具执行
             # （adapt_lion_tool 把 signal.is_cancelled 传给 ToolRuntime 中间件）。
             self._memory_coordinator.cancel_pending()
@@ -1016,27 +1022,48 @@ class Agent:
             self._build_core_memory_query_service()
         )
 
-        # Core 路径:key/base 变更时重建 Provider 与 Runtime,否则模型热配
+        # Core 路径:key/base/协议变更时重建 Provider 与 Runtime,否则模型热配
         # 只换了 SDK 客户端,真实请求路径(httpx Provider)仍用旧凭证。
-        # 保留 Harness messages 与队列语义,observers 按恢复会话的既有流程重建。
+        # Canonical 消息与协议无关,跨协议切换也保留 Harness messages;
+        # observers 按恢复会话的既有流程重建。
         if (
             self._use_core_runtime
-            and self.use_openai
             and self._core_runtime is not None
-            and (api_key is not None or api_base is not None)
-        ):
-            provider = create_provider(
-                api_key=(
-                    api_key
-                    if api_key is not None
-                    else str(getattr(self._openai_client, "api_key", "") or "")
-                ),
-                api_base=(
-                    api_base
-                    if api_base is not None
-                    else str(getattr(self._openai_client, "base_url", "") or "") or None
-                ),
+            and (
+                api_key is not None
+                or api_base is not None
+                or anthropic_base_url is not None
+                or self.use_openai != previous_use_openai
             )
+        ):
+            if self.use_openai:
+                provider = create_provider(
+                    api_key=(
+                        api_key
+                        if api_key is not None
+                        else str(getattr(self._openai_client, "api_key", "") or "")
+                    ),
+                    api_base=(
+                        api_base
+                        if api_base is not None
+                        else str(getattr(self._openai_client, "base_url", "") or "")
+                        or None
+                    ),
+                )
+            else:
+                provider = create_provider(
+                    api_key=(
+                        api_key
+                        if api_key is not None
+                        else str(getattr(self._anthropic_client, "api_key", "") or "")
+                    ),
+                    anthropic_base_url=(
+                        anthropic_base_url
+                        if anthropic_base_url is not None
+                        else str(getattr(self._anthropic_client, "base_url", "") or "")
+                        or None
+                    ),
+                )
             messages = self._core_runtime.messages
             self._core_runtime = LionAgentRuntime(
                 provider=provider,
@@ -1055,7 +1082,7 @@ class Agent:
             self._reset_core_observers()
 
         recorder = self._session_recorder
-        if recorder is not None and self.use_openai and (
+        if recorder is not None and (
             self.model != previous_model
             or self._thinking_mode != previous_thinking_level
         ):
@@ -1077,7 +1104,7 @@ class Agent:
         self.thinking = enabled
         self._thinking_mode = self._resolve_thinking_mode()
         recorder = self._session_recorder
-        if recorder is not None and self.use_openai and self._thinking_mode != previous:
+        if recorder is not None and self._thinking_mode != previous:
             thinking_value = self._thinking_mode
             self._schedule_session_write(
                 lambda: recorder.record_thinking_level_change(thinking_value)
@@ -1113,7 +1140,7 @@ class Agent:
         self._aborted = False
         self._last_stop_reason = None
 
-        if self._core_runtime is not None and self.use_openai:
+        if self._core_runtime is not None:
             # 新路径接管：消息由 AgentHarness 管理，SessionRecorder 在 MessageEnd
             # 时逐条落盘，退出前不再依赖整体快照 _auto_save()。
             await self._ensure_core_session_ready()
@@ -1269,8 +1296,7 @@ class Agent:
             self._core_runtime.harness.clear_queues()
             self._core_runtime.harness.replace_messages([])
             self._reset_core_observers()
-            if self.use_openai:
-                await self._ensure_core_session_ready()
+            await self._ensure_core_session_ready()
         self.tool_context.plan_file_path = self._plan_file_path
         self._reset_session_counters()
         print_info("Conversation cleared.")
@@ -1742,7 +1768,7 @@ class Agent:
 
     async def restore_core_session(self, session_id: str) -> bool:
         """从 JSONL 重建 Harness 唯一历史，并继续追加同一 Session。"""
-        if self._core_runtime is None or not self.use_openai:
+        if self._core_runtime is None:
             return False
         await self._flush_session_writes()
         state = await self._session_repository.load(session_id)
@@ -1781,7 +1807,7 @@ class Agent:
 
     async def restore_session_id(self, session_id: str) -> bool:
         """优先恢复 JSONL；Core 遇到旧 JSON 时原地迁移且保留源文件。"""
-        if self._core_runtime is not None and self.use_openai:
+        if self._core_runtime is not None:
             if self._session_repository.exists(session_id):
                 restored = await self.restore_core_session(session_id)
                 if restored:
@@ -1859,7 +1885,7 @@ class Agent:
             await recorder.record_message(message)
 
     def _get_message_count(self) -> int:
-        if self._core_runtime is not None and self.use_openai:
+        if self._core_runtime is not None:
             return len(self._core_runtime.messages)
         return len(self._openai_messages) if self.use_openai else len(self._anthropic_messages)
 
@@ -2279,7 +2305,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                 self.tool_context.plan_file_path = self._plan_file_path
 
                 if choice == "clear-and-execute":
-                    if self._core_runtime is not None and self.use_openai:
+                    if self._core_runtime is not None:
                         self._pending_core_context_reset = (
                             f"Approved plan:\n{plan_content}\n\n"
                             "Proceed with implementation."
