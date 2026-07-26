@@ -4,8 +4,18 @@ from lion_code.memory_runtime.query import (
     LegacySdkTextQueryService,
     TextQueryService,
 )
+from lion_code.memory_runtime.injector import MemoryContextInjector
+from lion_code.memory_runtime.types import (
+    MemoryContextPolicy,
+    MemoryInjectionReport,
+    MemoryOverlay,
+)
 
 __all__ = [
     "LegacySdkTextQueryService",
+    "MemoryContextInjector",
+    "MemoryContextPolicy",
+    "MemoryInjectionReport",
+    "MemoryOverlay",
     "TextQueryService",
 ]
