@@ -86,7 +86,13 @@ class SessionState:
                     message_rows = _apply_compaction(message_rows, entry)
                 case "branch_summary":
                     message_rows.append(
-                        (entry.id, UserMessage(content=_format_branch_summary(entry)))
+                        (
+                            entry.id,
+                            UserMessage(
+                                content=_format_branch_summary(entry),
+                                timestamp=int(entry.timestamp * 1000),
+                            ),
+                        )
                     )
 
         return cls(
@@ -116,12 +122,26 @@ def _apply_compaction(
             continue
         if not inserted_summary:
             retained.append(
-                (entry.id, UserMessage(content=_format_compaction_summary(entry.summary)))
+                (
+                    entry.id,
+                    UserMessage(
+                        content=_format_compaction_summary(entry.summary),
+                        timestamp=int(entry.timestamp * 1000),
+                    ),
+                )
             )
             inserted_summary = True
 
     if not inserted_summary:
-        retained.append((entry.id, UserMessage(content=_format_compaction_summary(entry.summary))))
+        retained.append(
+            (
+                entry.id,
+                UserMessage(
+                    content=_format_compaction_summary(entry.summary),
+                    timestamp=int(entry.timestamp * 1000),
+                ),
+            )
+        )
     return retained
 
 

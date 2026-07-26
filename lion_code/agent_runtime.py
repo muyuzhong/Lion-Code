@@ -15,7 +15,7 @@ ToolRuntime 的中间件负责，运行时不再额外注入 ``before_tool_call`
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from lion_code.adapters import adapt_active_tools
 from lion_code.core import (
@@ -81,10 +81,22 @@ class LionAgentRuntime:
         """更新后续 Provider 请求使用的模型。"""
         self.harness.config.model = model
 
+    @property
+    def provider(self) -> ModelProvider:
+        """返回摘要与模型限制发现所复用的 Provider。"""
+
+        return self._provider
+
+    async def replace_active_context(self, messages: Sequence[AgentMessage]) -> None:
+        """替换模型活跃上下文；durable history 仍由 SessionRecorder 保留。"""
+
+        self.harness.clear_queues()
+        self.harness.replace_messages(messages)
+
     async def reset_active_context(self, content: str) -> None:
         """只替换模型活跃上下文；durable history 由 SessionRecorder 保留。"""
-        self.harness.clear_queues()
-        self.harness.replace_messages([UserMessage(content=content)])
+
+        await self.replace_active_context([UserMessage(content=content)])
 
     def cancel(self) -> None:
         """请求取消当前正在进行的模型流。"""
