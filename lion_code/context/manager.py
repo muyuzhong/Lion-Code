@@ -1,4 +1,4 @@
-"""Pure active-context derivation over canonical AgentMessage values."""
+"""基于 canonical AgentMessage 的纯活跃上下文派生。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class _ToolResultRef:
 
 
 class ContextManager:
-    """Derive provider context without mutating Harness or Session messages."""
+    """派生 Provider 上下文，不修改 Harness 或 Session 消息。"""
 
     def __init__(
         self,

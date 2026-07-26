@@ -1,4 +1,4 @@
-"""Cheap deterministic token estimates for projected canonical messages."""
+"""对 canonical 消息投影进行低成本、确定性的 token 估算。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ APPROXIMATE_CHARS_PER_TOKEN = 4
 
 
 def estimate_messages_tokens(messages: Iterable[AgentMessage]) -> int:
-    """Estimate serialized message tokens without importing a provider tokenizer."""
+    """不引入供应商 tokenizer，按序列化字符数估算 token。"""
 
     chars = sum(
         len(message.model_dump_json(by_alias=True, exclude_none=True))

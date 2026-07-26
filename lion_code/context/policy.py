@@ -1,4 +1,4 @@
-"""Thresholds for provider-neutral context projection."""
+"""供应商无关 Context 投影阈值。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class ContextPolicy:
-    """Stable policy values migrated from the legacy provider-specific paths."""
+    """从旧供应商专用路径迁移出的稳定策略值。"""
 
     budget_start_ratio: float = 0.50
     aggressive_budget_ratio: float = 0.70

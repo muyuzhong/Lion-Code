@@ -1,4 +1,4 @@
-"""Model-limit discovery with a static compatibility fallback."""
+"""模型限制发现及静态兼容 fallback。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ MODEL_CONTEXT_WINDOWS = MappingProxyType(
 
 
 def fallback_context_window(model: str) -> int:
-    """Return the legacy static window until a provider advertises live limits."""
+    """Provider 尚未声明实时限制时返回旧版静态窗口。"""
 
     return MODEL_CONTEXT_WINDOWS.get(model, DEFAULT_CONTEXT_WINDOW_TOKENS)
 
@@ -37,14 +37,14 @@ def fallback_model_limits(model: str) -> RuntimeModelLimits:
 
 
 def effective_window_tokens(limits: RuntimeModelLimits) -> int:
-    """Reserve the advertised maximum output from the usable provider window."""
+    """从 Provider 可用窗口中预留其声明的最大输出。"""
 
     reserve = limits.max_output_tokens or 0
     return max(1, limits.effective_context_window - reserve)
 
 
 class ModelLimitsResolver:
-    """Prefer optional provider discovery and otherwise preserve legacy limits."""
+    """优先使用 Provider 可选发现能力，否则保持旧版限制。"""
 
     async def resolve(
         self,

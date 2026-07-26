@@ -1,4 +1,4 @@
-"""Provider-neutral active-context projection for Lion Core."""
+"""Lion Core 的供应商无关活跃上下文投影。"""
 
 from lion_code.context.compaction import (
     ContextCompactor,

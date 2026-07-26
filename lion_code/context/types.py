@@ -1,4 +1,4 @@
-"""Context projection contracts shared by Agent and benchmarks."""
+"""Agent 与基准共用的 Context 投影契约。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ ContextActionType = Literal[
 
 @dataclass(frozen=True, slots=True)
 class ContextAction:
-    """One observable rewrite made to the active model projection."""
+    """活跃模型投影中的一次可观测改写。"""
 
     type: ContextActionType
     tool_call_id: str | None = None
@@ -28,7 +28,7 @@ class ContextAction:
 
 @dataclass(frozen=True, slots=True)
 class ContextRuntimeState:
-    """Runtime-only inputs used to select a projection policy."""
+    """选择投影策略所需、但不进入持久历史的运行态输入。"""
 
     effective_window_tokens: int
     last_prompt_tokens: int
@@ -44,7 +44,7 @@ class ContextRuntimeState:
 
 @dataclass(frozen=True, slots=True)
 class PreparedContext:
-    """Provider-bound projection plus the decisions that produced it."""
+    """发往 Provider 的投影及其派生决策。"""
 
     messages: tuple[AgentMessage, ...]
     actions: tuple[ContextAction, ...] = ()

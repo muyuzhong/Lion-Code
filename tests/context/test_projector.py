@@ -45,7 +45,11 @@ def test_prepare_does_not_modify_source_messages() -> None:
 
     assert [message.model_dump(mode="json") for message in messages] == snapshot
     assert prepared.messages[1] is not messages[1]
-    assert any(action.type == "budget_tool_result" for action in prepared.actions)
+    budget_actions = [
+        action for action in prepared.actions if action.type == "budget_tool_result"
+    ]
+    assert len(budget_actions) == 5
+    assert all(action.retained_chars <= 15_000 for action in budget_actions)
 
 
 def test_tool_call_and_result_pairing_is_preserved() -> None:
@@ -88,3 +92,20 @@ def test_error_and_non_snippable_results_are_preserved() -> None:
     assert prepared.messages[1].text == "x" * 40_000
     assert prepared.messages[3].text == "y" * 40_000
     assert not any(action.tool_call_id in {"call-0", "call-1"} for action in prepared.actions)
+
+
+def test_canonical_result_policy_metadata_works_without_registry_callback() -> None:
+    messages = _conversation(["x" * 200 for _ in range(6)], tool_name="custom_read")
+    for message in messages:
+        if isinstance(message, ToolResultMessage):
+            message.details = {"result_policy": "snippable"}
+
+    prepared = ContextManager().prepare(messages, ContextRuntimeState(100, 65))
+
+    texts = [
+        message.text
+        for message in prepared.messages
+        if isinstance(message, ToolResultMessage)
+    ]
+    assert texts[:3] == [ContextManager().policy.snip_placeholder] * 3
+    assert all(text == "x" * 200 for text in texts[-3:])
