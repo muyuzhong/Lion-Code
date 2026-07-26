@@ -22,6 +22,7 @@ from .tools import (
     PermissionMode,
 )
 from .agent_runtime import LionAgentRuntime
+from .context.limits import fallback_context_window as _get_context_window
 from .core.events import AgentEvent, MessageUpdateEvent
 from .core.messages import AgentMessage
 from .core.provider_events import TextDeltaEvent
@@ -127,23 +128,6 @@ async def _with_retry(fn, max_retries: int = 3):
             reason = f"HTTP {status}" if status else (getattr(error, "code", None) or "network error")
             print_retry(attempt + 1, max_retries, reason)
             await asyncio.sleep(delay)
-
-
-# ─── 模型上下文窗口 ─────────────────────────────────────────
-
-MODEL_CONTEXT = {
-    "claude-opus-4-6": 200000,
-    "claude-sonnet-4-6": 200000,
-    "claude-sonnet-4-20250514": 200000,
-    "claude-haiku-4-5-20251001": 200000,
-    "claude-opus-4-20250514": 200000,
-    "gpt-4o": 128000,
-    "gpt-4o-mini": 128000,
-}
-
-
-def _get_context_window(model: str) -> int:
-    return MODEL_CONTEXT.get(model, 200000)
 
 
 # ─── Thinking 能力检测 ──────────────────────────────────────
