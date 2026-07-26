@@ -214,3 +214,40 @@ A1:/model 换 Claude Code 式可搜索列表(known_models 用过即记住,累积
 
 - A 组完成;下一子项 B3 thinking 档位或 C6 Anthropic 上 Core
 - 坑:ModalScreen 自定义属性勿用 visible(撞 DOMNode 样式 setter)
+
+
+## Session 4: 阶段4-C6/C7:Anthropic 后端与子 Agent 上 Core
+
+**Date**: 2026-07-27
+**Task**: 阶段4-C6/C7:Anthropic 后端与子 Agent 上 Core
+**Branch**: `master`
+
+### Summary
+
+灰度全面扩围:去掉 use_openai 与 is_sub_agent 两个排除条件,根/子 Agent、双后端统一走 Core Loop。跨协议切换保留会话历史(canonical 消息协议无关);子 Agent 不落盘会话、Memory 预取仍只服务主会话;修复 fork 不传 api_key 的凭证缺陷(_child_api_kwargs);新 TUI ModelScreen 撤 Anthropic 封锁,sink 路由器补子 Agent 文本缓冲。全量 402 通过。
+
+### Main Changes
+
+- agent.py:_use_core_runtime 仅看环境变量;core 门控统一为判 _core_runtime;configure_api 双协议+跨协议重建 Provider
+- agent.py:_child_api_kwargs 凭证随 fork 继承;子 Agent 无 SessionRecorder
+- tui/app.py:ModelScreen 支持 anthropic 保存;子 Agent 文本缓冲展示
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2696819` | (see git log) |
+| `30c788d` | (see git log) |
+
+### Testing
+
+- [OK] 集成:anthropic core 闭环、跨协议保历史、子 Agent core 闭环+不落盘;全量 402 passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- C8:3 处 side-query 迁 Provider + LegacySdkTextQueryService 替换 + dream.py 解耦
+- 注意:仓库有并行维护 Agent 在 slim/round-2 分支工作(.codex/ + MAINTENANCE.md),提交前确认当前分支是 master
