@@ -591,7 +591,7 @@ class Agent:
             self._output_buffer.append(event.assistant_message_event.delta)
 
     def _sync_core_usage(self) -> None:
-        """把 UsageObserver 的累计值同步到 Agent 用量字段，供 /cost 与预算使用。"""
+        """同步累计账单字段，并用最近一次响应更新上下文利用率。"""
         if self._usage_observer is None:
             return
         totals = self._usage_observer.totals
@@ -599,7 +599,20 @@ class Agent:
         self.total_output_tokens = totals.output_tokens
         self.total_cache_read_tokens = totals.cache_read_tokens
         self.total_cache_creation_tokens = totals.cache_write_tokens
-        self.last_input_token_count = totals.input_tokens
+        last = self._usage_observer.last_usage
+        if last is None:
+            self.last_input_token_count = 0
+        elif last.total_tokens:
+            self.last_input_token_count = last.total_tokens
+        else:
+            self.last_input_token_count = (
+                last.input
+                + last.cache_read
+                + last.cache_write
+                + last.output
+            )
+        if self._usage_observer.last_response_at is not None:
+            self.last_api_call_time = self._usage_observer.last_response_at
 
     def _reset_session_counters(self) -> None:
         self.total_input_tokens = 0
