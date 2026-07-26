@@ -293,13 +293,10 @@ class Agent:
         self.model = model
         self.use_openai = bool(api_base)
         self.is_sub_agent = is_sub_agent
-        # 灰度开关：根 Agent 的两种后端(OpenAI-compatible/Anthropic)都走
-        # 新 Core Runtime,旧 _chat_* 保留为回退;子 Agent 仍走旧路径以保留
-        # 文本捕获(阶段4-C7 迁移)。
-        self._use_core_runtime = (
-            os.environ.get("LION_CORE_RUNTIME") == "1"
-            and not self.is_sub_agent
-        )
+        # 灰度开关:根与子 Agent、两种后端(OpenAI-compatible/Anthropic)
+        # 都走新 Core Runtime,旧 _chat_* 保留为回退;子 Agent 的文本经
+        # _capture_core_text 捕获,不落盘会话。
+        self._use_core_runtime = os.environ.get("LION_CORE_RUNTIME") == "1"
         self._pre_tool_use_hooks = load_pre_tool_use_hooks()
         self.max_cost_usd = max_cost_usd
         self.max_turns = max_turns
@@ -734,19 +731,24 @@ class Agent:
         self._terminal_renderer = TerminalRenderer()
         self._usage_observer = UsageObserver()
         self._last_synced_core_response_count = 0
-        self._session_recorder = SessionRecorder(
-            session_id=self.session_id,
-            model=self.model,
-            thinking_level=self._thinking_mode,
-            cwd=self.tool_context.cwd,
-            storage=self._session_repository.storage_for(self.session_id),
-        )
+        if self.is_sub_agent:
+            # 子 Agent 不落盘会话:输出经文本捕获返回父级,避免污染会话列表。
+            self._session_recorder = None
+        else:
+            self._session_recorder = SessionRecorder(
+                session_id=self.session_id,
+                model=self.model,
+                thinking_level=self._thinking_mode,
+                cwd=self.tool_context.cwd,
+                storage=self._session_repository.storage_for(self.session_id),
+            )
         self._observer_unsubscribers.append(
             self._core_runtime.subscribe(self._usage_observer.handle)
         )
-        self._observer_unsubscribers.append(
-            self._core_runtime.subscribe(self._session_recorder.handle)
-        )
+        if self._session_recorder is not None:
+            self._observer_unsubscribers.append(
+                self._core_runtime.subscribe(self._session_recorder.handle)
+            )
         self._observer_unsubscribers.append(
             self._core_runtime.subscribe(self._terminal_renderer.handle)
         )
@@ -1145,7 +1147,9 @@ class Agent:
             # 时逐条落盘，退出前不再依赖整体快照 _auto_save()。
             await self._ensure_core_session_ready()
             await self._compact_core_context_if_needed()
-            self._memory_coordinator.begin_turn(user_message)
+            if not self.is_sub_agent:
+                # 与 legacy 一致:Memory 召回只服务主会话,子 Agent 不预取。
+                self._memory_coordinator.begin_turn(user_message)
             await self._core_runtime.prompt(user_message)
             while await self._apply_pending_core_context_reset():
                 await self._core_runtime.continue_()
@@ -1183,6 +1187,13 @@ class Agent:
         prev_out = self.total_output_tokens
         await self.chat(prompt)
         text = "".join(self._output_buffer)
+        if not text and self._core_runtime is not None:
+            # Provider 可能不发文本增量(整段消息一次到达),从 canonical
+            # transcript 兜底取最近一轮 assistant 文本。
+            for message in reversed(self._core_runtime.messages):
+                if getattr(message, "role", "") == "assistant" and message.text:
+                    text = message.text
+                    break
         self._output_buffer = None
         return {
             "text": text,
@@ -1745,6 +1756,27 @@ class Agent:
             return {"action": "confirm", "message": message}
         return {"action": "deny", "message": f"{message} (headless — denied)"}
 
+    def _child_api_kwargs(self) -> dict:
+        """子 Agent fork 的模型与凭证参数:继承父级当前后端的 key/base。
+
+        此前 fork 只传 api_base 不传 key,/model 配置(无环境变量)的用户
+        fork 出的子 Agent 是无凭证的。
+        """
+        if self.use_openai:
+            client = self._openai_client
+            return {
+                "model": self.model,
+                "api_base": str(client.base_url) if client else None,
+                "api_key": getattr(client, "api_key", None),
+            }
+        client = self._anthropic_client
+        return {
+            "model": self.model,
+            "api_base": None,
+            "anthropic_base_url": str(client.base_url) if client else None,
+            "api_key": getattr(client, "api_key", None),
+        }
+
     def _child_permission_mode(self) -> str:
         """确定子 Agent 继承的权限模式。
 
@@ -2200,8 +2232,7 @@ class Agent:
             child_registry = select_tools(self.tool_registry, policy)
             print_sub_agent_start("skill-fork", inp.get("skill_name", ""))
             sub_agent = Agent(
-                model=self.model,
-                api_base=str(self._openai_client.base_url) if self.use_openai and self._openai_client else None,
+                **self._child_api_kwargs(),
                 custom_system_prompt=result["prompt"],
                 tool_registry=child_registry,
                 tool_environment=self.tool_environment.child_view(),
@@ -2363,8 +2394,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             config.tool_policy,
         )
         sub_agent = Agent(
-            model=self.model,
-            api_base=str(self._openai_client.base_url) if self.use_openai and self._openai_client else None,
+            **self._child_api_kwargs(),
             custom_system_prompt=config.system_prompt,
             tool_registry=child_registry,
             tool_environment=self.tool_environment.child_view(),

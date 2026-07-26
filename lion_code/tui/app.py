@@ -636,6 +636,7 @@ class LionTuiApp(App):
         self.adapter = TuiEventAdapter(self.state)
         self._resume_on_mount = resume
         self._subagent_depth = 0
+        self._subagent_buffer = ""
         self._status_info = ""
         self._completion_state = CompletionState()
         keys = self.settings.keybindings
@@ -979,14 +980,24 @@ class LionTuiApp(App):
         kind, p = event.kind, event.payload
         if kind == "sub_agent_start":
             self._subagent_depth += 1
+            self._subagent_buffer = ""
             self._notice(f"┌─ Sub-agent [{p['agent_type']}]: {p['description']}")
         elif kind == "sub_agent_end":
             self._subagent_depth = max(0, self._subagent_depth - 1)
+            if self._subagent_buffer.strip():
+                self._notice(self._subagent_buffer.strip())
+            self._subagent_buffer = ""
             self._notice(f"└─ Sub-agent [{p['agent_type']}] completed")
         elif kind in ("text", "tool_call", "tool_result"):
-            # 根 Agent 的打印与核心事件重复,丢弃;子 Agent 输出保留为状态行。
-            if self._subagent_depth > 0 and kind == "tool_call":
-                self._notice(f"  {p.get('icon', '·')} {p.get('name', '')}  {p.get('summary', '')}")
+            # 根 Agent 的打印与核心事件重复,丢弃;子 Agent 输出缓冲后
+            # 在结束时作为一条状态行展示,工具调用即时显示。
+            if self._subagent_depth > 0:
+                if kind == "text":
+                    self._subagent_buffer += p.get("text", "")
+                elif kind == "tool_call":
+                    self._notice(
+                        f"  {p.get('icon', '·')} {p.get('name', '')}  {p.get('summary', '')}"
+                    )
         elif kind == "info":
             self._notice(f"ℹ {p['message']}")
         elif kind == "error":

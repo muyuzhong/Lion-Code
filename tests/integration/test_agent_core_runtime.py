@@ -657,6 +657,55 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_fake.call_count, 1)
         self.assertEqual(agent._core_runtime.messages[-1].text, "再见")
 
+    async def test_sub_agent_runs_on_core_runtime(self) -> None:
+        """子 Agent 也走 Core:凭证随 fork 传递,文本经 canonical 兜底捕获。"""
+        os.environ["LION_CORE_RUNTIME"] = "1"
+        parent_fake = FakeProvider(
+            [
+                AssistantDoneEvent(
+                    reason="toolUse",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[
+                            ToolCall(
+                                id="a1",
+                                name="agent",
+                                arguments={
+                                    "agent_type": "general",
+                                    "description": "demo",
+                                    "prompt": "do the thing",
+                                },
+                            )
+                        ],
+                        stop_reason="toolUse",
+                    ),
+                ),
+                _stop_event("parent done"),
+            ]
+        )
+        sub_fake = FakeProvider([_stop_event("sub says hi")])
+        with patch(
+            "lion_code.agent.create_provider", side_effect=[parent_fake, sub_fake]
+        ):
+            agent = Agent(
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+            )
+            agent._mcp_initialized = True
+            await agent.chat("hello")
+
+        self.assertEqual(sub_fake.call_count, 1)
+        self.assertEqual(
+            [m.role for m in agent._core_runtime.messages],
+            ["user", "assistant", "toolResult", "assistant"],
+        )
+        self.assertIn("sub says hi", agent._core_runtime.messages[2].text)
+        # 子 Agent 不落盘会话:仓库里只有父会话。
+        sessions = await self._session_repository.list_sessions()
+        self.assertEqual(len(sessions), 1)
+
     async def test_configure_api_model_only_keeps_core_provider(self) -> None:
         """只改模型不重建 Provider,经 set_model 直接生效。"""
         agent, fake = self._make_agent([_stop_event("done")], ToolRegistry())

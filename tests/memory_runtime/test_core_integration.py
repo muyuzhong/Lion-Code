@@ -210,23 +210,32 @@ async def test_clear_and_restore_drop_previous_overlay(monkeypatch, tmp_path) ->
 
 
 @pytest.mark.asyncio
-async def test_sub_agent_keeps_legacy_openai_path(monkeypatch, tmp_path) -> None:
+async def test_sub_agent_on_core_skips_memory_prefetch(monkeypatch, tmp_path) -> None:
+    """子 Agent 也走 Core(阶段4-C7),但 Memory 召回仍只服务主会话。"""
     monkeypatch.setenv("LION_CORE_RUNTIME", "1")
-    agent = Agent(
-        api_base="https://example.test/v1",
-        api_key="test-key",
-        custom_system_prompt="test",
-        is_sub_agent=True,
-        session_repository=SessionRepository(tmp_path),
-    )
+    fake = FakeProvider([_stop_event("sub done")])
+    with patch("lion_code.agent.create_provider", return_value=fake):
+        agent = Agent(
+            api_base="https://example.test/v1",
+            api_key="test-key",
+            custom_system_prompt="test",
+            is_sub_agent=True,
+            session_repository=SessionRepository(tmp_path),
+        )
     agent._mcp_initialized = True
 
     with (
         patch.object(agent, "_chat_openai", new_callable=AsyncMock) as old_chat,
-        patch.object(agent, "_auto_save"),
+        patch.object(
+            agent._memory_coordinator, "begin_turn", wraps=agent._memory_coordinator.begin_turn
+        ) as begin_turn,
     ):
-        await agent.chat("legacy question")
+        await agent.chat("sub question")
 
-    assert agent._core_runtime is None
-    old_chat.assert_awaited_once_with("legacy question")
+    old_chat.assert_not_awaited()
+    begin_turn.assert_not_called()
+    assert agent._core_runtime is not None
+    assert agent._core_runtime.messages[-1].text == "sub done"
+    # 子 Agent 不落盘会话。
+    assert await SessionRepository(tmp_path).list_sessions() == []
     await agent.close()
