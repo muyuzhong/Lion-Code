@@ -340,7 +340,7 @@ Examples:
 
     if use_tui:
         # TUI 内自带输入循环，one-shot prompt 不适用。
-        from .tui import run_tui
+        from .legacy_tui import run_tui
 
         run_tui(agent, resume=args.resume)
         return

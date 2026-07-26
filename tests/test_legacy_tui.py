@@ -130,7 +130,7 @@ class FakeAgent:
 
 @pytest.mark.asyncio
 async def test_app_streams_agent_output():
-    tui = pytest.importorskip("lion_code.tui")
+    tui = pytest.importorskip("lion_code.legacy_tui")
     app = tui.LionTUI(FakeAgent())
     async with app.run_test() as pilot:
         assert app.agent.confirm_fn is not None
@@ -149,7 +149,7 @@ async def test_app_streams_agent_output():
 
 @pytest.mark.asyncio
 async def test_app_blocks_commands_while_agent_is_working():
-    tui = pytest.importorskip("lion_code.tui")
+    tui = pytest.importorskip("lion_code.legacy_tui")
     agent = FakeAgent()
     app = tui.LionTUI(agent)
     async with app.run_test() as pilot:
@@ -165,7 +165,7 @@ async def test_app_blocks_commands_while_agent_is_working():
 
 @pytest.mark.asyncio
 async def test_confirm_screen_roundtrip():
-    tui = pytest.importorskip("lion_code.tui")
+    tui = pytest.importorskip("lion_code.legacy_tui")
     app = tui.LionTUI(FakeAgent())
     async with app.run_test() as pilot:
         async def ask():
@@ -181,7 +181,7 @@ async def test_confirm_screen_roundtrip():
 
 @pytest.mark.asyncio
 async def test_auto_opens_model_screen_when_unconfigured():
-    tui = pytest.importorskip("lion_code.tui")
+    tui = pytest.importorskip("lion_code.legacy_tui")
     agent = FakeAgent()
     agent.api_configured = False
     app = tui.LionTUI(agent)
@@ -196,7 +196,7 @@ async def test_auto_opens_model_screen_when_unconfigured():
 
 @pytest.mark.asyncio
 async def test_model_screen_save_configures_and_persists(tmp_path, monkeypatch):
-    tui = pytest.importorskip("lion_code.tui")
+    tui = pytest.importorskip("lion_code.legacy_tui")
     saved: list[dict] = []
     monkeypatch.setattr(tui, "save_api_config", lambda **kw: saved.append(kw))
     app = tui.LionTUI(FakeAgent())
