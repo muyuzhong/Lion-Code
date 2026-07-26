@@ -7,10 +7,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "benchmarks" / "context_management" / "formal_benchmark.py"
+BASE_MODULE_PATH = ROOT / "benchmarks" / "context_management" / "benchmark.py"
 
 
 def load_formal_benchmark():
     spec = importlib.util.spec_from_file_location("lion_formal_benchmark", MODULE_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_base_benchmark():
+    spec = importlib.util.spec_from_file_location("lion_context_benchmark", BASE_MODULE_PATH)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -85,3 +95,25 @@ def test_report_formats_bootstrap_intervals_with_units():
         benchmark.pct_ci([-0.0138, 0.0826], percentage_points=True)
         == "[-1.4, +8.3] 个百分点"
     )
+
+
+def test_benchmarks_no_longer_import_agent_private_context_helpers():
+    for path in (BASE_MODULE_PATH, MODULE_PATH):
+        source = path.read_text(encoding="utf-8")
+        assert "from lion_code.agent" not in source
+        assert "._openai_messages" not in source
+        assert "_budget_tool_results" not in source
+        assert "_snip_stale_results" not in source
+        assert "_microcompact" not in source
+
+
+def test_offline_probes_run_through_context_manager():
+    benchmark = load_base_benchmark()
+
+    probes = benchmark.offline_probes(benchmark.read_dataset())
+    by_name = {probe["probe"]: probe for probe in probes}
+
+    assert by_name["snip_hot_below_override"]["snipped_results"] == 0
+    assert by_name["snip_cold"]["snipped_results"] == 5
+    assert by_name["snip_hot_override"]["snipped_results"] == 5
+    assert by_name["microcompact_after_idle"]["cleared_results"] == 5
