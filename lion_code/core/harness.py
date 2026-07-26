@@ -9,7 +9,12 @@ from dataclasses import dataclass, field
 from inspect import isawaitable
 from typing import Literal
 
-from lion_code.core.events import AgentEvent, MessageEndEvent, MessageStartEvent
+from lion_code.core.events import (
+    AgentEvent,
+    AgentStartEvent,
+    MessageEndEvent,
+    MessageStartEvent,
+)
 from lion_code.core.loop import AfterToolCall, BeforeToolCall, GetSystem, GetTools, PrepareContext, run_agent_loop
 from lion_code.core.messages import (
     AgentMessage,
@@ -167,14 +172,7 @@ class AgentHarness:
         signal = SimpleCancellationToken()
         self._current_signal = signal
         try:
-            # 恢复出的未配对工具调用要先补齐，并通过同一事件流交给持久化监听器。
-            for message in self._append_interrupted_tool_results():
-                for event in (
-                    MessageStartEvent(message=message),
-                    MessageEndEvent(message=message),
-                ):
-                    await self._notify(event)
-                    yield event
+            repaired_before_run = self._append_interrupted_tool_results()
             async for event in run_agent_loop(
                 provider=self._config.provider,
                 model=self._config.model,
@@ -194,6 +192,15 @@ class AgentHarness:
             ):
                 await self._notify(event)
                 yield event
+                if isinstance(event, AgentStartEvent):
+                    # 保持 AgentStart 为首个事件，再把恢复出的未配对调用交给持久化监听器。
+                    for message in repaired_before_run:
+                        for repair_event in (
+                            MessageStartEvent(message=message),
+                            MessageEndEvent(message=message),
+                        ):
+                            await self._notify(repair_event)
+                            yield repair_event
         finally:
             repaired: tuple[ToolResultMessage, ...] = ()
             if signal.is_cancelled():

@@ -83,6 +83,7 @@ class LionAgentRuntime:
 
     async def reset_active_context(self, content: str) -> None:
         """只替换模型活跃上下文；durable history 由 SessionRecorder 保留。"""
+        self.harness.clear_queues()
         self.harness.replace_messages([UserMessage(content=content)])
 
     def cancel(self) -> None:

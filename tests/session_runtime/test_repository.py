@@ -46,7 +46,7 @@ class TestSessionRepository(unittest.IsolatedAsyncioTestCase):
             await storage.append(first)
             await storage.append(second)
             with storage.path.open("ab") as file:
-                file.write(b'{"type":"message"')
+                file.write(b'{"type":"message","content":"\xe4\xb8')
 
             self.assertEqual([entry.id for entry in await storage.read_all()], ["one", "two"])
 

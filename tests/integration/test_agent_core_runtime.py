@@ -257,6 +257,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         await agent.chat("hello")
         previous_session_id = agent.session_id
         previous_path = self._session_repository.storage_for(previous_session_id).path
+        agent._core_runtime.harness.follow_up("queued")
+        agent.current_turns = 3
 
         await agent.clear_history()
 
@@ -264,17 +266,16 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(previous_path.exists())
         self.assertTrue(self._session_repository.storage_for(agent.session_id).path.exists())
         self.assertEqual(agent._core_runtime.messages, ())
+        self.assertEqual(agent._core_runtime.harness.pending_message_count, 0)
+        self.assertEqual(agent.current_turns, 0)
 
     async def test_model_and_thinking_changes_are_restored(self) -> None:
         registry = ToolRegistry()
         agent, _ = self._make_agent([_stop_event()], registry)
         await agent.chat("hello")
-        agent.configure_api(
-            model="claude-sonnet-4-6",
-            api_key="test-key",
-            api_base="https://example.test/v1",
-            use_openai=True,
-        )
+        previous_client = agent._openai_client
+        agent.configure_api(model="claude-sonnet-4-6")
+        self.assertIs(agent._openai_client, previous_client)
         self.assertEqual(agent.set_thinking(True), "adaptive")
         await agent.close()
 
@@ -397,6 +398,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             ["user", "assistant"],
         )
         self.assertEqual(agent._core_runtime.messages[-1].text, "implemented")
+        self.assertEqual(agent.tool_context.permission_mode, "acceptEdits")
 
         state = await self._session_repository.load(agent.session_id)
         self.assertEqual(

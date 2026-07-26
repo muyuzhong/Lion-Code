@@ -131,7 +131,19 @@ class SessionRecorder:
             self._context_entry_ids = list(state.context_entry_ids)
             if state.model is not None:
                 self.model = state.model
-            self.thinking_level = state.thinking_level
+            else:
+                await self._append_unlocked(
+                    ModelChangeEntry(parent_id=self._parent_id, model=self.model)
+                )
+            if any(entry.type == "thinking_level_change" for entry in entries):
+                self.thinking_level = state.thinking_level
+            else:
+                await self._append_unlocked(
+                    ThinkingLevelChangeEntry(
+                        parent_id=self._parent_id,
+                        thinking_level=self.thinking_level,
+                    )
+                )
             self._initialized = True
             return
 

@@ -270,8 +270,11 @@ class LionTUI(App):
         self.agent.set_confirm_fn(self._confirm)
         self.agent.set_plan_approval_fn(self._plan_approval)
         if self._resume_on_mount:
-            await self.agent.restore_latest_session()
-            self._set_subtitle()
+            try:
+                await self.agent.restore_latest_session()
+                self._set_subtitle()
+            except Exception as error:
+                self._add(f"Session restore failed: {error}", "error")
         await self._reload_sessions()
         self.query_one(Input).focus()
         if not self.agent.api_configured:
@@ -412,7 +415,12 @@ class LionTUI(App):
             await self._reload_sessions()
             return
         self._clear_chat()
-        if not await self.agent.restore_session_id(str(name)):
+        try:
+            restored = await self.agent.restore_session_id(str(name))
+        except Exception as error:
+            self._add(f"Session restore failed: {error}", "error")
+            return
+        if not restored:
             self._add(f"Session {name} could not be restored.", "error")
             return
         self._set_subtitle()

@@ -16,6 +16,7 @@ from lion_code.core.messages import (
 from lion_code.core.provider_events import TextDeltaEvent
 from lion_code.core.provider_events import AssistantDoneEvent
 from lion_code.core.session import JsonlSessionStorage, SessionState
+from lion_code.core.session import SessionInfoEntry
 from lion_code.session_runtime import SessionRecorder
 
 from core.fakes import FakeProvider
@@ -104,6 +105,27 @@ class TestSessionRecorder(unittest.IsolatedAsyncioTestCase):
             entries = await storage.read_all()
             self.assertEqual(entries[-1].parent_id, entries[-2].id)
             self.assertEqual(len(SessionState.from_entries(entries).messages), 2)
+
+    async def test_initialization_repairs_metadata_interrupted_after_info(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = JsonlSessionStorage(Path(tmp) / "s1.jsonl")
+            await storage.append(SessionInfoEntry(id="info", cwd=tmp))
+            recorder = SessionRecorder(
+                session_id="s1",
+                model="m1",
+                thinking_level="disabled",
+                cwd=Path(tmp),
+                storage=storage,
+            )
+
+            await recorder.initialize()
+
+            entries = await storage.read_all()
+            self.assertEqual(
+                [entry.type for entry in entries],
+                ["session_info", "model_change", "thinking_level_change"],
+            )
+            self.assertEqual(entries[1].parent_id, "info")
 
     async def test_compaction_changes_replay_but_retains_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

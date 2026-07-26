@@ -617,6 +617,16 @@ class Agent:
         self.total_cache_creation_tokens = totals.cache_write_tokens
         self.last_input_token_count = totals.input_tokens
 
+    def _reset_session_counters(self) -> None:
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.total_cache_read_tokens = 0
+        self.total_cache_creation_tokens = 0
+        self.last_input_token_count = 0
+        self.current_turns = 0
+        self.last_api_call_time = 0.0
+        self._last_stop_reason = None
+
     def _reset_core_observers(self) -> None:
         """按 Usage → Session → Renderer 顺序重建 Core 观察器。"""
         if self._core_runtime is None:
@@ -718,6 +728,8 @@ class Agent:
             self._system_prompt = self._base_system_prompt
             if self.use_openai and self._openai_messages:
                 self._openai_messages[0]["content"] = self._system_prompt
+            self.tool_context.permission_mode = self.permission_mode
+            self.tool_context.plan_file_path = self._plan_file_path
             print_info(f"Exited plan mode → {self.permission_mode} mode")
             return self.permission_mode
         else:
@@ -727,6 +739,8 @@ class Agent:
             self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt()
             if self.use_openai and self._openai_messages:
                 self._openai_messages[0]["content"] = self._system_prompt
+            self.tool_context.permission_mode = self.permission_mode
+            self.tool_context.plan_file_path = self._plan_file_path
             print_info(f"Entered plan mode. Plan file: {self._plan_file_path}")
             return "plan"
 
@@ -765,6 +779,9 @@ class Agent:
         """
         previous_model = self.model
         previous_thinking_level = self._thinking_mode
+        previous_use_openai = self.use_openai
+        previous_openai_client = self._openai_client
+        previous_anthropic_client = self._anthropic_client
         if model:
             self.model = model
             self.effective_window = _get_context_window(model) - 20000
@@ -774,21 +791,66 @@ class Agent:
         if use_openai is not None:
             self.use_openai = use_openai
         if self.use_openai:
-            self._openai_client = openai.AsyncOpenAI(base_url=api_base, api_key=api_key)
+            if (
+                previous_use_openai
+                and previous_openai_client is not None
+                and api_key is None
+                and api_base is None
+            ):
+                self._openai_client = previous_openai_client
+            else:
+                inherited_key = (
+                    getattr(previous_openai_client, "api_key", None)
+                    if previous_use_openai
+                    else None
+                )
+                inherited_base = (
+                    str(getattr(previous_openai_client, "base_url", "") or "")
+                    if previous_use_openai
+                    else ""
+                )
+                self._openai_client = openai.AsyncOpenAI(
+                    base_url=api_base if api_base is not None else (inherited_base or None),
+                    api_key=api_key if api_key is not None else inherited_key,
+                )
             self._anthropic_client = None
             if not self._openai_messages:
                 self._openai_messages.append({"role": "system", "content": self._system_prompt})
         else:
-            kwargs: dict[str, Any] = {}
-            if api_key:
-                kwargs["api_key"] = api_key
-            if anthropic_base_url:
-                kwargs["base_url"] = anthropic_base_url
-            self._anthropic_client = anthropic.AsyncAnthropic(**kwargs)
+            if (
+                not previous_use_openai
+                and previous_anthropic_client is not None
+                and api_key is None
+                and anthropic_base_url is None
+            ):
+                self._anthropic_client = previous_anthropic_client
+            else:
+                kwargs: dict[str, Any] = {}
+                inherited_key = (
+                    getattr(previous_anthropic_client, "api_key", None)
+                    if not previous_use_openai
+                    else None
+                )
+                inherited_base = (
+                    str(getattr(previous_anthropic_client, "base_url", "") or "")
+                    if not previous_use_openai
+                    else ""
+                )
+                resolved_key = api_key if api_key is not None else inherited_key
+                resolved_base = (
+                    anthropic_base_url
+                    if anthropic_base_url is not None
+                    else (inherited_base or None)
+                )
+                if resolved_key is not None:
+                    kwargs["api_key"] = resolved_key
+                if resolved_base is not None:
+                    kwargs["base_url"] = resolved_base
+                self._anthropic_client = anthropic.AsyncAnthropic(**kwargs)
             self._openai_client = None
 
         recorder = self._session_recorder
-        if recorder is not None and (
+        if recorder is not None and self.use_openai and (
             self.model != previous_model
             or self._thinking_mode != previous_thinking_level
         ):
@@ -810,7 +872,7 @@ class Agent:
         self.thinking = enabled
         self._thinking_mode = self._resolve_thinking_mode()
         recorder = self._session_recorder
-        if recorder is not None and self._thinking_mode != previous:
+        if recorder is not None and self.use_openai and self._thinking_mode != previous:
             thinking_value = self._thinking_mode
             self._schedule_session_write(
                 lambda: recorder.record_thinking_level_change(thinking_value)
@@ -990,15 +1052,13 @@ class Agent:
         if self.use_openai:
             self._openai_messages.append({"role": "system", "content": self._system_prompt})
         if self._core_runtime is not None:
+            self._core_runtime.harness.clear_queues()
             self._core_runtime.harness.replace_messages([])
             self._reset_core_observers()
-            await self._ensure_core_session_ready()
+            if self.use_openai:
+                await self._ensure_core_session_ready()
         self.tool_context.plan_file_path = self._plan_file_path
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_cache_read_tokens = 0
-        self.total_cache_creation_tokens = 0
-        self.last_input_token_count = 0
+        self._reset_session_counters()
         print_info("Conversation cleared.")
 
     def show_cost(self) -> None:
@@ -1467,7 +1527,7 @@ class Agent:
 
     async def restore_core_session(self, session_id: str) -> bool:
         """从 JSONL 重建 Harness 唯一历史，并继续追加同一 Session。"""
-        if self._core_runtime is None:
+        if self._core_runtime is None or not self.use_openai:
             return False
         await self._flush_session_writes()
         state = await self._session_repository.load(session_id)
@@ -1477,6 +1537,7 @@ class Agent:
         self.session_id = session_id
         self.tool_context.session_id = session_id
         self._pending_core_context_reset = None
+        self._core_runtime.harness.clear_queues()
         self._core_runtime.harness.replace_messages(state.messages)
         if state.model is not None:
             self.model = state.model
@@ -1492,14 +1553,17 @@ class Agent:
             )
         self._reset_core_observers()
         await self._ensure_core_session_ready()
+        self._reset_session_counters()
         print_info(f"Session restored ({len(state.messages)} messages).")
         return True
 
     async def restore_session_id(self, session_id: str) -> bool:
         """优先恢复 JSONL；Core 遇到旧 JSON 时原地迁移且保留源文件。"""
-        if self._core_runtime is not None:
+        if self._core_runtime is not None and self.use_openai:
             if self._session_repository.exists(session_id):
-                return await self.restore_core_session(session_id)
+                restored = await self.restore_core_session(session_id)
+                if restored:
+                    return True
             legacy = load_legacy_session(
                 self._session_repository.session_dir,
                 session_id,
@@ -1524,6 +1588,7 @@ class Agent:
         self.session_id = session_id
         self.tool_context.session_id = session_id
         self.restore_session(legacy)
+        self._reset_session_counters()
         return True
 
     async def list_sessions(self) -> list[dict[str, Any]]:
@@ -1947,6 +2012,8 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt()
             if self.use_openai and self._openai_messages:
                 self._openai_messages[0]["content"] = self._system_prompt
+            self.tool_context.permission_mode = self.permission_mode
+            self.tool_context.plan_file_path = self._plan_file_path
             print_info("Entered plan mode (read-only). Plan file: " + self._plan_file_path)
             return f"Entered plan mode. You are now in read-only mode.\n\nYour plan file: {self._plan_file_path}\nWrite your plan to this file. This is the only file you can edit.\n\nWhen your plan is complete, call exit_plan_mode."
 
@@ -1986,6 +2053,8 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                 self._system_prompt = self._base_system_prompt
                 if self.use_openai and self._openai_messages:
                     self._openai_messages[0]["content"] = self._system_prompt
+                self.tool_context.permission_mode = self.permission_mode
+                self.tool_context.plan_file_path = self._plan_file_path
 
                 if choice == "clear-and-execute":
                     if self._core_runtime is not None and self.use_openai:
@@ -2018,6 +2087,8 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             self._system_prompt = self._base_system_prompt
             if self.use_openai and self._openai_messages:
                 self._openai_messages[0]["content"] = self._system_prompt
+            self.tool_context.permission_mode = self.permission_mode
+            self.tool_context.plan_file_path = self._plan_file_path
             print_info("Exited plan mode. Restored to " + self.permission_mode + " mode.")
             return f"Exited plan mode. Permission mode restored to: {self.permission_mode}\n\n## Your Plan:\n{plan_content}"
 
@@ -2069,8 +2140,10 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
 
     async def close(self) -> None:
         """释放 MCP 子进程等外部资源，确保进程正常退出（issue #8）。"""
-        await self._flush_session_writes()
-        await self.tool_environment.close()
+        try:
+            await self._flush_session_writes()
+        finally:
+            await self.tool_environment.close()
 
     def _consume_memory_prefetch_if_ready(self, messages: list) -> None:
         """非阻塞消费已完成的 Memory 预取，并追加到末条用户消息以保持 role 交替。"""
