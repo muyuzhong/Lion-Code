@@ -335,6 +335,7 @@ class Agent:
         self._plan_file_path: str | None = None
         self._plan_approval_fn: Callable[[str], Awaitable[dict]] | None = None
         self._context_cleared: bool = False  # Plan 审批选择清空上下文时置位。
+        self._pending_core_context_reset: str | None = None
 
         # 根据用户开关和模型能力解析实际 Thinking 模式。
         self._thinking_mode = self._resolve_thinking_mode()
@@ -650,6 +651,27 @@ class Agent:
         if self._session_recorder is not None:
             await self._session_recorder.initialize()
 
+    async def _apply_pending_core_context_reset(self) -> bool:
+        """把 Plan 批准结果写成 Compaction，再从该摘要继续 Core Loop。"""
+        summary = self._pending_core_context_reset
+        if (
+            summary is None
+            or self._core_runtime is None
+            or self._session_recorder is None
+        ):
+            return False
+        replaced_ids = list(await self._session_recorder.context_entry_ids())
+        await self._session_recorder.record_compaction(
+            summary=summary,
+            replaces_entry_ids=replaced_ids,
+        )
+        state = await self._session_repository.load(self.session_id)
+        if state is None or len(state.messages) != 1:
+            raise RuntimeError("Compaction replay did not produce one active context message")
+        await self._core_runtime.reset_active_context(state.messages[0].text)
+        self._pending_core_context_reset = None
+        return True
+
     def _schedule_session_write(
         self,
         operation: Callable[[], Awaitable[object]],
@@ -829,6 +851,8 @@ class Agent:
             # 时逐条落盘，退出前不再依赖整体快照 _auto_save()。
             await self._ensure_core_session_ready()
             await self._core_runtime.prompt(user_message)
+            while await self._apply_pending_core_context_reset():
+                await self._core_runtime.continue_()
             self._sync_core_usage()
             return
 
@@ -957,6 +981,7 @@ class Agent:
         self.session_id = uuid.uuid4().hex[:8]
         self.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self.tool_context.session_id = self.session_id
+        self._pending_core_context_reset = None
         if self.permission_mode == "plan":
             self._plan_file_path = self._generate_plan_file_path()
             self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt()
@@ -1451,6 +1476,7 @@ class Agent:
 
         self.session_id = session_id
         self.tool_context.session_id = session_id
+        self._pending_core_context_reset = None
         self._core_runtime.harness.replace_messages(state.messages)
         if state.model is not None:
             self.model = state.model
@@ -1827,8 +1853,10 @@ class Agent:
 
     async def exit_plan_mode_tool(self) -> ToolResult:
         """退出 Plan 模式并返回结构化工具结果。"""
+        content = await self._execute_plan_mode_tool("exit_plan_mode")
         return ToolResult(
-            content=await self._execute_plan_mode_tool("exit_plan_mode")
+            content=content,
+            terminate=self._pending_core_context_reset is not None,
         )
 
     async def schedule_wakeup_tool(
@@ -1960,8 +1988,14 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                     self._openai_messages[0]["content"] = self._system_prompt
 
                 if choice == "clear-and-execute":
-                    self._clear_history_keep_system()
-                    self._context_cleared = True
+                    if self._core_runtime is not None and self.use_openai:
+                        self._pending_core_context_reset = (
+                            f"Approved plan:\n{plan_content}\n\n"
+                            "Proceed with implementation."
+                        )
+                    else:
+                        self._clear_history_keep_system()
+                        self._context_cleared = True
                     print_info(f"Plan approved. Context cleared, executing in {target_mode} mode.")
                     return (
                         f"User approved the plan. Context was cleared. Permission mode: {target_mode}\n\n"

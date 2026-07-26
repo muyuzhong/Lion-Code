@@ -347,6 +347,66 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sessions), 1)
         self.assertEqual(sessions[0]["format"], "jsonl")
 
+    async def test_plan_clear_and_execute_compacts_without_deleting_history(self) -> None:
+        fake = FakeProvider(
+            [
+                AssistantDoneEvent(
+                    reason="toolUse",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[
+                            ToolCall(
+                                id="exit-plan",
+                                name="exit_plan_mode",
+                                arguments={},
+                            )
+                        ],
+                        stop_reason="toolUse",
+                    ),
+                ),
+                _stop_event("implemented"),
+            ]
+        )
+        os.environ["LION_CORE_RUNTIME"] = "1"
+        with patch("lion_code.agent.create_provider", return_value=fake):
+            agent = Agent(
+                permission_mode="plan",
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+            )
+        agent._mcp_initialized = True
+        agent.tool_registry.activate("exit_plan_mode")
+        plan_path = Path(self._temp_dir.name) / "approved-plan.md"
+        plan_path.write_text("1. change code\n2. run tests", encoding="utf-8")
+        agent._plan_file_path = str(plan_path)
+        agent.tool_context.plan_file_path = str(plan_path)
+
+        async def approve(_plan: str) -> dict:
+            return {"choice": "clear-and-execute"}
+
+        agent.set_plan_approval_fn(approve)
+        await agent.chat("prepare the change")
+
+        self.assertEqual(fake.call_count, 2)
+        self.assertEqual(len(fake.received_messages[1]), 1)
+        self.assertIn("Approved plan", fake.received_messages[1][0].text)
+        self.assertEqual(
+            [message.role for message in agent._core_runtime.messages],
+            ["user", "assistant"],
+        )
+        self.assertEqual(agent._core_runtime.messages[-1].text, "implemented")
+
+        state = await self._session_repository.load(agent.session_id)
+        self.assertEqual(
+            [message.role for message in state.messages],
+            ["user", "assistant"],
+        )
+        self.assertEqual(len(state.compaction_entries), 1)
+        self.assertEqual(len(state.compaction_entries[0].replaces_entry_ids), 3)
+        self.assertGreater(len(state.entries), len(state.messages))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
