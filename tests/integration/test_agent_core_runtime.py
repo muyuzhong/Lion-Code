@@ -9,12 +9,15 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from lion_code.agent import Agent
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent
 from lion_code.core.provider_events import AssistantDoneEvent
+from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 from lion_code.ui import set_sink
@@ -83,10 +86,13 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         # 捕获所有 ui 输出，避免测试污染 stdout。
         self._collected: list[tuple[str, dict]] = []
         self._prev_sink = set_sink(lambda kind, data: self._collected.append((kind, data)))
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._session_repository = SessionRepository(Path(self._temp_dir.name))
 
     def tearDown(self) -> None:
         set_sink(self._prev_sink)
         os.environ.pop("LION_CORE_RUNTIME", None)
+        self._temp_dir.cleanup()
 
     def _make_agent(self, events: list, registry: ToolRegistry) -> tuple[Agent, FakeProvider]:
         fake = FakeProvider(events)
@@ -97,6 +103,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 api_key="test-key",
                 tool_registry=registry,
                 custom_system_prompt="test",
+                session_repository=self._session_repository,
             )
         # 跳过 MCP 发现，避免测试环境副作用。
         agent._mcp_initialized = True
@@ -156,6 +163,11 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(messages[2].is_error)
         self.assertEqual(messages[-1].text, "done")
         self.assertEqual(fake.call_count, 2)
+        state = await self._session_repository.load(agent.session_id)
+        self.assertEqual(
+            [message.role for message in state.messages],
+            ["user", "assistant", "toolResult", "assistant"],
+        )
 
     async def test_dynamic_system_prompt_refetched_per_turn(self) -> None:
         # 模拟 Plan 模式切换：运行中改 _system_prompt，下一轮请求必须看到新值。
@@ -217,6 +229,62 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent._core_runtime.messages[-1].text, "done")
         # 第一轮 + 被取消的第二轮 + 续聊一轮，共 3 次 provider 调用。
         self.assertEqual(fake.call_count, 3)
+
+    async def test_restore_continues_with_persisted_harness_messages(self) -> None:
+        registry = ToolRegistry()
+        first, _ = self._make_agent([_stop_event("first answer")], registry)
+        await first.chat("first question")
+        session_id = first.session_id
+
+        second, fake = self._make_agent([_stop_event("second answer")], registry)
+        self.assertTrue(await second.restore_core_session(session_id))
+        await second.chat("second question")
+
+        self.assertEqual(
+            [message.text for message in fake.received_messages[0]],
+            ["first question", "first answer", "second question"],
+        )
+        state = await self._session_repository.load(session_id)
+        self.assertEqual(
+            [message.text for message in state.messages],
+            ["first question", "first answer", "second question", "second answer"],
+        )
+
+    async def test_clear_creates_new_session_and_preserves_old_jsonl(self) -> None:
+        registry = ToolRegistry()
+        agent, _ = self._make_agent([_stop_event()], registry)
+        await agent.chat("hello")
+        previous_session_id = agent.session_id
+        previous_path = self._session_repository.storage_for(previous_session_id).path
+
+        await agent.clear_history()
+
+        self.assertNotEqual(agent.session_id, previous_session_id)
+        self.assertTrue(previous_path.exists())
+        self.assertTrue(self._session_repository.storage_for(agent.session_id).path.exists())
+        self.assertEqual(agent._core_runtime.messages, ())
+
+    async def test_model_and_thinking_changes_are_restored(self) -> None:
+        registry = ToolRegistry()
+        agent, _ = self._make_agent([_stop_event()], registry)
+        await agent.chat("hello")
+        agent.configure_api(
+            model="claude-sonnet-4-6",
+            api_key="test-key",
+            api_base="https://example.test/v1",
+            use_openai=True,
+        )
+        self.assertEqual(agent.set_thinking(True), "adaptive")
+        await agent.close()
+
+        state = await self._session_repository.load(agent.session_id)
+        self.assertEqual(state.model, "claude-sonnet-4-6")
+        self.assertEqual(state.thinking_level, "adaptive")
+
+        restored, _ = self._make_agent([], registry)
+        self.assertTrue(await restored.restore_core_session(agent.session_id))
+        self.assertEqual(restored.model, "claude-sonnet-4-6")
+        self.assertEqual(restored._thinking_mode, "adaptive")
 
 
 if __name__ == "__main__":

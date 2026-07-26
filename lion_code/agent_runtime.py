@@ -71,6 +71,15 @@ class LionAgentRuntime:
         async for _ in self.harness.prompt(content):
             pass
 
+    async def continue_(self) -> None:
+        """使用当前 Harness 上下文继续运行，不追加新的用户消息。"""
+        async for _ in self.harness.continue_():
+            pass
+
+    def set_model(self, model: str) -> None:
+        """更新后续 Provider 请求使用的模型。"""
+        self.harness.config.model = model
+
     def cancel(self) -> None:
         """请求取消当前正在进行的模型流。"""
         self.harness.cancel()

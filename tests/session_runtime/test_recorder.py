@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from lion_code.core.events import MessageEndEvent, MessageUpdateEvent
+from lion_code.core.harness import AgentHarness, AgentHarnessConfig
 from lion_code.core.messages import (
     AssistantMessage,
     TextContent,
@@ -13,8 +14,11 @@ from lion_code.core.messages import (
     UserMessage,
 )
 from lion_code.core.provider_events import TextDeltaEvent
+from lion_code.core.provider_events import AssistantDoneEvent
 from lion_code.core.session import JsonlSessionStorage, SessionState
 from lion_code.session_runtime import SessionRecorder
+
+from core.fakes import FakeProvider
 
 
 class TestSessionRecorder(unittest.IsolatedAsyncioTestCase):
@@ -128,6 +132,45 @@ class TestSessionRecorder(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(state.context_entry_ids[-1], recent.id)
             self.assertEqual(len(state.entries), 7)
+
+    async def test_interrupted_tool_repair_is_persisted_through_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = JsonlSessionStorage(Path(tmp) / "s1.jsonl")
+            recorder = SessionRecorder(
+                session_id="s1",
+                model="m1",
+                thinking_level="disabled",
+                cwd=Path(tmp),
+                storage=storage,
+            )
+            pending = AssistantMessage(
+                model="m1",
+                content=[ToolCall(id="pending", name="echo", arguments={})],
+                stop_reason="toolUse",
+            )
+            await recorder.record_message(pending)
+            provider = FakeProvider([
+                AssistantDoneEvent(
+                    reason="stop",
+                    message=AssistantMessage(model="m1", content="continued"),
+                )
+            ])
+            harness = AgentHarness(
+                AgentHarnessConfig(provider=provider, model="m1", system="test"),
+                messages=[pending],
+            )
+            harness.subscribe(recorder.handle)
+
+            async for _ in harness.prompt("continue"):
+                pass
+
+            state = SessionState.from_entries(await storage.read_all())
+            self.assertEqual(
+                [message.role for message in state.messages],
+                ["assistant", "toolResult", "user", "assistant"],
+            )
+            self.assertTrue(state.messages[1].is_error)
+            self.assertEqual(state.messages[1].tool_call_id, "pending")
 
 
 if __name__ == "__main__":

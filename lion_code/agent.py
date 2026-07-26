@@ -69,6 +69,7 @@ from .ui import (
     stop_spinner,
 )
 from .session import save_session
+from .session_runtime import SessionRecorder, SessionRepository
 from .prompt import build_system_prompt, build_static_system_prompt, build_dynamic_system_context, build_user_context_reminder, load_claude_md
 from .skills import create_skill
 from .subagent import get_sub_agent_config
@@ -267,6 +268,7 @@ class Agent:
         custom_tools: list[ToolDef] | None = None,
         tool_registry: ToolRegistry | None = None,
         tool_environment: ToolEnvironment | None = None,
+        session_repository: SessionRepository | None = None,
         is_sub_agent: bool = False,
     ):
         self.permission_mode = permission_mode
@@ -288,6 +290,10 @@ class Agent:
         self.effective_window = _get_context_window(model) - 20000
         self.session_id = uuid.uuid4().hex[:8]
         self.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._session_repository = session_repository or SessionRepository()
+        self._session_recorder: SessionRecorder | None = None
+        self._session_write_tasks: set[asyncio.Task] = set()
+        self._session_write_errors: list[BaseException] = []
 
         self.total_input_tokens = 0
         self.total_output_tokens = 0
@@ -463,8 +469,6 @@ class Agent:
                 api_base=api_base,
                 anthropic_base_url=anthropic_base_url,
             )
-            self._terminal_renderer = TerminalRenderer()
-            self._usage_observer = UsageObserver()
             self._core_runtime = LionAgentRuntime(
                 provider=provider,
                 model=self.model,
@@ -473,15 +477,7 @@ class Agent:
                 prepare_context=self._prepare_core_context,
                 max_turns=self.max_turns,
             )
-            self._observer_unsubscribers.append(
-                self._core_runtime.subscribe(self._terminal_renderer.handle)
-            )
-            self._observer_unsubscribers.append(
-                self._core_runtime.subscribe(self._usage_observer.handle)
-            )
-            self._observer_unsubscribers.append(
-                self._core_runtime.subscribe(self._capture_core_text)
-            )
+            self._reset_core_observers()
 
     # ─── Anthropic 前缀缓存 ──────────────────────────────────
     def _build_anthropic_system(self) -> list[dict]:
@@ -615,21 +611,68 @@ class Agent:
         self.last_input_token_count = totals.input_tokens
 
     def _reset_core_observers(self) -> None:
-        """/clear 后重建观察器，避免 usage 跨会话累计与渲染状态残留。"""
+        """按 Usage → Session → Renderer 顺序重建 Core 观察器。"""
+        if self._core_runtime is None:
+            return
         for unsubscribe in self._observer_unsubscribers:
             unsubscribe()
         self._observer_unsubscribers.clear()
         self._terminal_renderer = TerminalRenderer()
         self._usage_observer = UsageObserver()
-        self._observer_unsubscribers.append(
-            self._core_runtime.subscribe(self._terminal_renderer.handle)
+        self._session_recorder = SessionRecorder(
+            session_id=self.session_id,
+            model=self.model,
+            thinking_level=self._thinking_mode,
+            cwd=self.tool_context.cwd,
+            storage=self._session_repository.storage_for(self.session_id),
         )
         self._observer_unsubscribers.append(
             self._core_runtime.subscribe(self._usage_observer.handle)
         )
         self._observer_unsubscribers.append(
+            self._core_runtime.subscribe(self._session_recorder.handle)
+        )
+        self._observer_unsubscribers.append(
+            self._core_runtime.subscribe(self._terminal_renderer.handle)
+        )
+        self._observer_unsubscribers.append(
             self._core_runtime.subscribe(self._capture_core_text)
         )
+
+    async def _ensure_core_session_ready(self) -> None:
+        await self._flush_session_writes()
+        if self._session_recorder is not None:
+            await self._session_recorder.initialize()
+
+    def _schedule_session_write(
+        self,
+        operation: Callable[[], Awaitable[object]],
+    ) -> None:
+        """从同步配置入口提交有序写入；下次对话或 close 会等待其完成。"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(operation())
+            return
+
+        task = loop.create_task(operation())
+        self._session_write_tasks.add(task)
+
+        def collect_result(done: asyncio.Task) -> None:
+            self._session_write_tasks.discard(done)
+            try:
+                done.result()
+            except BaseException as error:
+                self._session_write_errors.append(error)
+
+        task.add_done_callback(collect_result)
+
+    async def _flush_session_writes(self) -> None:
+        pending = tuple(self._session_write_tasks)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        if self._session_write_errors:
+            raise self._session_write_errors.pop(0)
 
     def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]]) -> None:
         self.confirm_fn = fn
@@ -692,10 +735,14 @@ class Agent:
         跨协议切换时目标后端的消息历史为空、相当于新会话（两种后端的历史本就
         分开存储，协议间不做有损转换）；同协议换 key/换模型保留历史。
         """
+        previous_model = self.model
+        previous_thinking_level = self._thinking_mode
         if model:
             self.model = model
             self.effective_window = _get_context_window(model) - 20000
             self._thinking_mode = self._resolve_thinking_mode()
+            if self._core_runtime is not None:
+                self._core_runtime.set_model(model)
         if use_openai is not None:
             self.use_openai = use_openai
         if self.use_openai:
@@ -711,6 +758,36 @@ class Agent:
                 kwargs["base_url"] = anthropic_base_url
             self._anthropic_client = anthropic.AsyncAnthropic(**kwargs)
             self._openai_client = None
+
+        recorder = self._session_recorder
+        if recorder is not None and (
+            self.model != previous_model
+            or self._thinking_mode != previous_thinking_level
+        ):
+            model_value = self.model
+            thinking_value = self._thinking_mode
+
+            async def persist_configuration() -> object:
+                if model_value != previous_model:
+                    await recorder.record_model_change(model_value)
+                if thinking_value != previous_thinking_level:
+                    await recorder.record_thinking_level_change(thinking_value)
+                return None
+
+            self._schedule_session_write(persist_configuration)
+
+    def set_thinking(self, enabled: bool) -> str:
+        """切换 Thinking，并把实际生效级别写入当前 Core Session。"""
+        previous = self._thinking_mode
+        self.thinking = enabled
+        self._thinking_mode = self._resolve_thinking_mode()
+        recorder = self._session_recorder
+        if recorder is not None and self._thinking_mode != previous:
+            thinking_value = self._thinking_mode
+            self._schedule_session_write(
+                lambda: recorder.record_thinking_level_change(thinking_value)
+            )
+        return self._thinking_mode
 
     def _active_anthropic_tools(self) -> list[dict]:
         """每次模型调用前读取当前 Registry，避免缓存过期的激活状态。"""
@@ -742,8 +819,9 @@ class Agent:
         self._last_stop_reason = None
 
         if self._core_runtime is not None and self.use_openai:
-            # 新路径接管：消息由 AgentHarness 管理，Divider 由 TerminalRenderer
-            # 在 AgentEndEvent 时输出，_auto_save 暂不触发（Session 迁移待后续阶段）。
+            # 新路径接管：消息由 AgentHarness 管理，SessionRecorder 在 MessageEnd
+            # 时逐条落盘，退出前不再依赖整体快照 _auto_save()。
+            await self._ensure_core_session_ready()
             await self._core_runtime.prompt(user_message)
             self._sync_core_usage()
             return
@@ -867,15 +945,24 @@ class Agent:
 
     # ─── REPL 命令状态 ───────────────────────────────────────
 
-    def clear_history(self) -> None:
+    async def clear_history(self) -> None:
+        """结束当前会话并创建新 Session；旧 append-only 历史保持可恢复。"""
+        await self._flush_session_writes()
+        self.session_id = uuid.uuid4().hex[:8]
+        self.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self.tool_context.session_id = self.session_id
+        if self.permission_mode == "plan":
+            self._plan_file_path = self._generate_plan_file_path()
+            self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt()
         self._anthropic_messages = []
         self._openai_messages = []
         if self.use_openai:
             self._openai_messages.append({"role": "system", "content": self._system_prompt})
         if self._core_runtime is not None:
-            # 新路径下对话状态唯一来源是 AgentHarness.messages，需同步清空并重建观察器。
             self._core_runtime.harness.replace_messages([])
             self._reset_core_observers()
+            await self._ensure_core_session_ready()
+        self.tool_context.plan_file_path = self._plan_file_path
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_cache_read_tokens = 0
@@ -1347,7 +1434,38 @@ class Agent:
             self._openai_messages = data["openaiMessages"]
         print_info(f"Session restored ({self._get_message_count()} messages).")
 
+    async def restore_core_session(self, session_id: str) -> bool:
+        """从 JSONL 重建 Harness 唯一历史，并继续追加同一 Session。"""
+        if self._core_runtime is None:
+            return False
+        await self._flush_session_writes()
+        state = await self._session_repository.load(session_id)
+        if state is None:
+            return False
+
+        self.session_id = session_id
+        self.tool_context.session_id = session_id
+        self._core_runtime.harness.replace_messages(state.messages)
+        if state.model is not None:
+            self.model = state.model
+            self.effective_window = _get_context_window(self.model) - 20000
+            self._core_runtime.set_model(self.model)
+        if state.thinking_level is not None:
+            self._thinking_mode = state.thinking_level
+            self.thinking = state.thinking_level != "disabled"
+        if state.session_info is not None:
+            self.session_start_time = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ",
+                time.gmtime(state.session_info.created_at),
+            )
+        self._reset_core_observers()
+        await self._ensure_core_session_ready()
+        print_info(f"Session restored ({len(state.messages)} messages).")
+        return True
+
     def _get_message_count(self) -> int:
+        if self._core_runtime is not None and self.use_openai:
+            return len(self._core_runtime.messages)
         return len(self._openai_messages) if self.use_openai else len(self._anthropic_messages)
 
     def _auto_save(self) -> None:
@@ -1835,6 +1953,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
 
     async def close(self) -> None:
         """释放 MCP 子进程等外部资源，确保进程正常退出（issue #8）。"""
+        await self._flush_session_writes()
         await self.tool_environment.close()
 
     def _consume_memory_prefetch_if_ready(self, messages: list) -> None:

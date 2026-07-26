@@ -355,7 +355,7 @@ class LionTUI(App):
     async def _handle_command(self, text: str) -> None:
         cmd = text.split(maxsplit=1)[0]
         if cmd == "/clear":
-            self.agent.clear_history()
+            await self.agent.clear_history()
             self._clear_chat()
         elif cmd == "/plan":
             self.agent.toggle_plan_mode()
@@ -396,7 +396,7 @@ class LionTUI(App):
             return
         name = event.item.name
         if name == "__new__":
-            self.agent.clear_history()
+            await self.agent.clear_history()
             self._clear_chat()
             return
         session = load_session(str(name))
@@ -420,10 +420,10 @@ class LionTUI(App):
         sidebar = self.query_one("#sessions")
         sidebar.display = not sidebar.display
 
-    def action_new_session(self) -> None:
+    async def action_new_session(self) -> None:
         if self._processing:
             return
-        self.agent.clear_history()
+        await self.agent.clear_history()
         self._clear_chat()
 
     def action_model(self) -> None:

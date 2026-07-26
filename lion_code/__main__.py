@@ -135,7 +135,7 @@ async def run_repl(agent: Agent) -> None:
 
         # 内置 REPL 命令在普通对话前分发，避免被误送给模型。
         if inp == "/clear":
-            agent.clear_history()
+            await agent.clear_history()
             continue
         if inp == "/plan":
             agent.toggle_plan_mode()
