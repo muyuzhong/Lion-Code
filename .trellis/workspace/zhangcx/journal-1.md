@@ -251,3 +251,40 @@ A1:/model 换 Claude Code 式可搜索列表(known_models 用过即记住,累积
 
 - C8:3 处 side-query 迁 Provider + LegacySdkTextQueryService 替换 + dream.py 解耦
 - 注意:仓库有并行维护 Agent 在 slim/round-2 分支工作(.codex/ + MAINTENANCE.md),提交前确认当前分支是 master
+
+
+## Session 5: 阶段4-C8:side-query 全面迁移 Core Provider
+
+**Date**: 2026-07-27
+**Task**: 阶段4-C8:side-query 全面迁移 Core Provider
+**Branch**: `master`
+
+### Summary
+
+新增 providers/oneshot.complete_text 与 ProviderTextQueryService;Core 路径下 Memory 召回、side_query、评估器(role 结构经 canonical 转换)、Auto Mode 分类器全部改走 httpx Provider;dream.py 经 _child_api_kwargs 解除私有客户端直读;查询服务在 Runtime 构建/Provider 重建后刷新。C 组(灰度扩围)全部完成,阶段 5 删 legacy 的前置就绪。全量 405 通过。
+
+### Main Changes
+
+- providers/oneshot.py 一次性补全助手
+- memory_runtime/query.py ProviderTextQueryService
+- agent.py 三处 side-query Core 分支 + _canonical_side_messages
+- dream.py 凭证走 _child_api_kwargs seam
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `517fde8` | (see git log) |
+
+### Testing
+
+- [OK] oneshot 契约 2 例;集成 side-query 走 provider 1 例;全量 405 passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 剩余阶段4子项:B3 thinking 档位、B4 AgentSettled 终端通知、B5 溢出压缩+AutoRetry 链、D 组小项
+- 阶段5可开:删 legacy _chat_*/压缩/legacy_tui/session旧JSON写,pyproject 移除 openai/anthropic
