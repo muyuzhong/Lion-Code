@@ -55,6 +55,86 @@
 
 [OK] **Completed**
 
+### 详细纪要
+
+### 背景
+
+Tau(huggingface/tau)融合项目:把 Tau 的 Agent 内核/Provider/TUI 吸收为 Lion 底层,
+Lion 保留工具/权限/中间件/Context/Memory/Session/Plan/Skill/子Agent/自动化。
+此前 PR #7-12 已完成 core、providers、runtime、append-only session、
+provider-neutral context、memory overlay。本次会话完成审计 + 阶段 0-3 + 补全体验。
+
+### 架构审计(7cf347f)
+
+`docs/tui-migration-audit.md`:12 项完整审计。核心结论:
+- core/providers 与上游 Tau 0.3.3 (d597a8a) 逐文件比对:大多仅 import 改名;
+  本地演化集中在 loop.py(get_tools/get_system/prepare_context/并行分批)、
+  harness(中断修复事件化)、storage(fsync+断尾)、tools(is_error)
+- Tau TUI 11 文件:2 个 A 类原样迁、8 个 B 类改 import、仅 app.py(6711 行)C 类需重构
+- LionCodingSession 最小接口 + 应用级事件模型(Settled 为唯一归位信号)定稿
+
+### 阶段 0:准备
+
+- textual>=8.2.8 + pygments>=2.18(a0812a6);顺修 ModelScreen 弹屏测试竞态
+- UPSTREAM.md 上游溯源 + THIRD_PARTY_NOTICES 扩充 + TAU_LICENSE 版权行更正(28e20d4)
+- vendor providers/fake.py 供测试(ee48f36)
+- 同步上游 anthropic thinking_mode=="disabled" 显式 payload(03fe14d)
+
+### 阶段 1:application 骨架
+
+- application/events.py(e1e5961):10 种应用级事件,对齐 Tau 实 emit 集 + Lion 增补
+- application/session.py LionCodingSession(df02482):组合现 Agent(Core 路径),
+  订阅桥转 AsyncIterator,AgentEnd→SessionAgentEnd,协程完成+排空后发 Settled;
+  is_running 契约 = 从开始消费到 Settled(fake provider 秒完成时 task.done() 会失真);
+  运行中 prompt 必须 streaming_behavior(steer/follow_up 入 Harness 队列)
+- Agent 仅新增公开 core_runtime 只读属性
+
+### 阶段 2:TUI 素材迁入
+
+- 支撑类型(96d8cd1):application/{skills,prompt_templates,session_stats,resources,
+  commands}.py + prompt.ProjectContextFile + version.py
+- tui.py→legacy_tui.py(0b3aa4d/6972f68);用户已明确旧 TUI 要废弃
+- lion_code/tui/ vendor 10 模块+3 主题 JSON(f8be40c):import 全改 lion_code.*,
+  Delta 事件统一 core.provider_events,配置落 ~/.lion-code/tui.json,新增 markup.py
+- 上游测试迁入 4 文件(6a34711);POSIX 拖拽格式用例 win32 跳过
+
+### 阶段 3:新 TUI 主应用(ponytail 生效)
+
+- 未整体移植 6711 行上游 app.py,在 vendored 组件上新写 ~700 行 tui/app.py(fbf00fc):
+  TranscriptView 渲染 + 三 Modal 移植(权限确认/Plan 审批/模型热配)+ 会话侧边栏;
+  ui sink 路由器只留子 Agent 输出与状态行(根 Agent 打印与核心事件重复,丢弃)
+- LionCodingSession 扩属性面 + create_default_command_registry(9a6eb03):
+  /quit /clear /plan /cost /compact /model /theme,CommandResult 意图分发
+- __main__ 默认新 TUI(LION_CORE_RUNTIME=1 时),--legacy-tui 逃生
+- 真 bug 修复(73e7583):Core 路径 configure_api 换 key/base 只重建了 SDK 客户端,
+  httpx Provider 仍旧凭证 → 现在重建 Provider+Runtime 并保留 Harness 消息
+
+### 补全体验(60c17e5,用户点名的 Claude Code 手感)
+
+- vendor PromptInput→tui/prompt_input.py;`/` 弹补全(Tab 接受/Esc 关/上下选)
+- 运行中 Enter=steer 入队、Alt+Enter=follow-up;Ctrl+O/T 切工具结果/thinking 显示
+- /theme 换可搜索列表 picker;session.skills 视图(桥 SkillDefinition,缓存)
+- 上游 autocomplete 测试 30 例迁入(5 例改本地机制注册表与 Lion 命令集解耦)
+
+### 关键坑(勿重蹈)
+
+1. widgets CSS 引用 $tau-* Textual 主题变量,必须挂载前 register_theme(app.py 已 vendor 映射)
+2. IsolatedAsyncioTestCase 强制 asyncio debug,Textual 测试慢 10 倍 → TUI 测试一律 pytest-asyncio
+3. 事件桥 is_running 不能依赖 task.done()(快 provider 排空期失真)
+4. scratchpad 路径含中文用户名,Git Bash 编码崩 → 涉及该路径用 PowerShell
+
+### 遗留债务(阶段 4/5)
+
+- 阶段 4:model picker(需 provider_settings 模型目录)、session picker(需
+  session_manager 索引)、thinking 档位、AgentSettled 终端通知、溢出压缩+AutoRetry
+  事件链、Anthropic 后端上 Core、子 Agent 上 Core、3 处 side-query 迁 Provider
+  (agent.py:_build_side_query/_run_evaluator_query/_run_classifier_query)、
+  LegacySdkTextQueryService 替换、dream.py 私有客户端解耦、Windows 拖拽归一化、
+  补全窗口溢出时迁上游按行测量版
+- 阶段 5:删 legacy(_chat_openai/_chat_anthropic/旧压缩/legacy_tui/session.py 旧 JSON 写)、
+  pyproject 移除 openai/anthropic
+- Tau 上游克隆在会话 scratchpad(临时),下次同步需重新浅克隆并更新 UPSTREAM.md
+
 ### Next Steps
 
 - 阶段4:model/session picker数据层(provider_settings+session_manager)
