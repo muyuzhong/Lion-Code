@@ -43,6 +43,12 @@ from .memory import (
     get_memory_dir,
     MemoryPrefetch,
 )
+from .memory_runtime import (
+    LegacySdkTextQueryService,
+    MemoryContextInjector,
+    MemoryCoordinator,
+    MemoryInjectionReport,
+)
 from .autonomy import (
     goal_directive,
     GOAL_EVALUATOR_SYSTEM,
@@ -477,6 +483,21 @@ class Agent:
             )
             self._openai_client = None
 
+        memory_query_service = None
+        if self._use_core_runtime and (
+            self._openai_client is not None or self._anthropic_client is not None
+        ):
+            memory_query_service = LegacySdkTextQueryService(
+                openai_client=self._openai_client,
+                anthropic_client=self._anthropic_client,
+                model=lambda: self.model,
+            )
+        self._memory_coordinator = MemoryCoordinator(
+            query_service=memory_query_service
+        )
+        self._memory_injector = MemoryContextInjector()
+        self._last_memory_injection = MemoryInjectionReport()
+
         # 灰度：LION_CORE_RUNTIME=1 且 OpenAI-compatible 时，用 LionAgentRuntime
         # 接管主循环；旧 _chat_openai() 保留为回退。对话消息以 AgentHarness.messages
         # 为唯一来源，不再向 self._openai_messages 追加，避免双写。
@@ -611,14 +632,22 @@ class Agent:
     ) -> list[AgentMessage]:
         """只派生 Provider 投影，不改写 Harness、Session 或 UI。"""
 
+        self._memory_coordinator.collect_ready()
         self._sync_core_usage()
+        state = self._context_runtime_state()
         prepared = self._context_manager.prepare(
             messages,
-            self._context_runtime_state(),
+            state,
+        )
+        projected, memory_report = self._memory_injector.inject(
+            prepared.messages,
+            self._memory_coordinator.active_overlays,
+            max_tokens=state.effective_window_tokens,
         )
         self._last_context_actions = prepared.actions
+        self._last_memory_injection = memory_report
         self._core_compaction_required = prepared.compaction_required
-        return list(prepared.messages)
+        return projected
 
     async def _capture_core_text(self, event: AgentEvent) -> None:
         """为 run_once/run 捕获助手文本增量到输出缓冲区（评测与子 Agent 依赖）。
@@ -1033,6 +1062,7 @@ class Agent:
             # 时逐条落盘，退出前不再依赖整体快照 _auto_save()。
             await self._ensure_core_session_ready()
             await self._compact_core_context_if_needed()
+            self._memory_coordinator.begin_turn(user_message)
             await self._core_runtime.prompt(user_message)
             while await self._apply_pending_core_context_reset():
                 await self._core_runtime.continue_()
