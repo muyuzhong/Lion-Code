@@ -6,11 +6,20 @@ import os
 import platform
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from .memory import build_memory_prompt_section
 from .skills import build_skill_descriptions
 from .subagent import build_agent_descriptions
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectContextFile:
+    """进入系统提示的项目指令文件(CLAUDE.md/AGENTS.md)视图。"""
+
+    path: str
+    content: str
 
 # ─── 内嵌的系统提示词模板 ───────────────────────────────────
 
