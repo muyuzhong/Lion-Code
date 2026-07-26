@@ -55,7 +55,7 @@ def test_no_sink_falls_back_to_stdout(capsys):
 
 
 def test_load_config_merges_user_keys(tmp_path, monkeypatch):
-    from lion_code import tui
+    from lion_code import legacy_tui as tui
 
     cfg_file = tmp_path / "tui.json"
     cfg_file.write_text(json.dumps({"theme": "nord", "keys": {"abort": "ctrl+x"}}))
@@ -67,7 +67,7 @@ def test_load_config_merges_user_keys(tmp_path, monkeypatch):
 
 
 def test_load_config_missing_file(tmp_path, monkeypatch):
-    from lion_code import tui
+    from lion_code import legacy_tui as tui
 
     monkeypatch.setattr(tui, "CONFIG_PATH", tmp_path / "nope.json")
     assert tui.load_config() == tui.DEFAULT_CONFIG
