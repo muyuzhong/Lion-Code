@@ -21,6 +21,12 @@ from .tools import (
     ToolDef,
     PermissionMode,
 )
+from .agent_runtime import LionAgentRuntime
+from .core.events import AgentEvent, MessageUpdateEvent
+from .core.messages import AgentMessage
+from .core.provider_events import TextDeltaEvent
+from .observers import TerminalRenderer, UsageObserver
+from .providers.factory import create_provider
 from .memory import (
     start_memory_prefetch,
     format_memories_for_injection,
@@ -268,6 +274,13 @@ class Agent:
         self.model = model
         self.use_openai = bool(api_base)
         self.is_sub_agent = is_sub_agent
+        # 灰度开关：仅根 Agent + OpenAI-compatible 后端启用新 Core Runtime，
+        # 旧 _chat_openai() 保留为回退；子 Agent 仍走旧路径以保留文本捕获。
+        self._use_core_runtime = (
+            os.environ.get("LION_CORE_RUNTIME") == "1"
+            and self.use_openai
+            and not self.is_sub_agent
+        )
         self._pre_tool_use_hooks = load_pre_tool_use_hooks()
         self.max_cost_usd = max_cost_usd
         self.max_turns = max_turns
@@ -437,6 +450,39 @@ class Agent:
             )
             self._openai_client = None
 
+        # 灰度：LION_CORE_RUNTIME=1 且 OpenAI-compatible 时，用 LionAgentRuntime
+        # 接管主循环；旧 _chat_openai() 保留为回退。对话消息以 AgentHarness.messages
+        # 为唯一来源，不再向 self._openai_messages 追加，避免双写。
+        self._core_runtime: LionAgentRuntime | None = None
+        self._terminal_renderer: TerminalRenderer | None = None
+        self._usage_observer: UsageObserver | None = None
+        self._observer_unsubscribers: list[Callable[[], None]] = []
+        if self._use_core_runtime:
+            provider = create_provider(
+                api_key=api_key or os.environ.get("OPENAI_API_KEY") or "",
+                api_base=api_base,
+                anthropic_base_url=anthropic_base_url,
+            )
+            self._terminal_renderer = TerminalRenderer()
+            self._usage_observer = UsageObserver()
+            self._core_runtime = LionAgentRuntime(
+                provider=provider,
+                model=self.model,
+                get_system=lambda: self._system_prompt,
+                tool_runtime=self.tool_runtime,
+                prepare_context=self._prepare_core_context,
+                max_turns=self.max_turns,
+            )
+            self._observer_unsubscribers.append(
+                self._core_runtime.subscribe(self._terminal_renderer.handle)
+            )
+            self._observer_unsubscribers.append(
+                self._core_runtime.subscribe(self._usage_observer.handle)
+            )
+            self._observer_unsubscribers.append(
+                self._core_runtime.subscribe(self._capture_core_text)
+            )
+
     # ─── Anthropic 前缀缓存 ──────────────────────────────────
     def _build_anthropic_system(self) -> list[dict]:
         """构建带 cache_control 边界的 Anthropic system 文本块。
@@ -482,6 +528,8 @@ class Agent:
 
     @property
     def is_processing(self) -> bool:
+        if self._core_runtime is not None and self.use_openai:
+            return self._core_runtime.harness.is_running
         return self._current_task is not None and not self._current_task.done()
 
     def _build_side_query(self):
@@ -515,6 +563,11 @@ class Agent:
         return None
 
     def abort(self) -> None:
+        if self._core_runtime is not None and self.use_openai:
+            # 新路径：取消 harness 信号，同时中断模型流与工具执行
+            # （adapt_lion_tool 把 signal.is_cancelled 传给 ToolRuntime 中间件）。
+            self._core_runtime.cancel()
+            return
         self._aborted = True
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
@@ -528,6 +581,55 @@ class Agent:
                 task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    # ─── Core Runtime 灰度接入 ───────────────────────────────
+
+    async def _prepare_core_context(
+        self, messages: list[AgentMessage]
+    ) -> list[AgentMessage]:
+        """薄适配器：先原样透传，后续逐步加入裁剪/预算/memory/压缩策略。"""
+        return messages
+
+    async def _capture_core_text(self, event: AgentEvent) -> None:
+        """为 run_once/run 捕获助手文本增量到输出缓冲区（评测与子 Agent 依赖）。
+
+        正常 chat 时 _output_buffer 为 None，本监听器空操作；TerminalRenderer
+        负责终端渲染，二者不冲突。
+        """
+        if self._output_buffer is None:
+            return
+        if isinstance(event, MessageUpdateEvent) and isinstance(
+            event.assistant_message_event, TextDeltaEvent
+        ):
+            self._output_buffer.append(event.assistant_message_event.delta)
+
+    def _sync_core_usage(self) -> None:
+        """把 UsageObserver 的累计值同步到 Agent 用量字段，供 /cost 与预算使用。"""
+        if self._usage_observer is None:
+            return
+        totals = self._usage_observer.totals
+        self.total_input_tokens = totals.input_tokens
+        self.total_output_tokens = totals.output_tokens
+        self.total_cache_read_tokens = totals.cache_read_tokens
+        self.total_cache_creation_tokens = totals.cache_write_tokens
+        self.last_input_token_count = totals.input_tokens
+
+    def _reset_core_observers(self) -> None:
+        """/clear 后重建观察器，避免 usage 跨会话累计与渲染状态残留。"""
+        for unsubscribe in self._observer_unsubscribers:
+            unsubscribe()
+        self._observer_unsubscribers.clear()
+        self._terminal_renderer = TerminalRenderer()
+        self._usage_observer = UsageObserver()
+        self._observer_unsubscribers.append(
+            self._core_runtime.subscribe(self._terminal_renderer.handle)
+        )
+        self._observer_unsubscribers.append(
+            self._core_runtime.subscribe(self._usage_observer.handle)
+        )
+        self._observer_unsubscribers.append(
+            self._core_runtime.subscribe(self._capture_core_text)
+        )
 
     def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]]) -> None:
         self.confirm_fn = fn
@@ -636,15 +738,22 @@ class Agent:
             except Exception as e:
                 print_info(f"[mcp] Init failed: {e}")
 
+        self._aborted = False
+        self._last_stop_reason = None
+
+        if self._core_runtime is not None and self.use_openai:
+            # 新路径接管：消息由 AgentHarness 管理，Divider 由 TerminalRenderer
+            # 在 AgentEndEvent 时输出，_auto_save 暂不触发（Session 迁移待后续阶段）。
+            await self._core_runtime.prompt(user_message)
+            self._sync_core_usage()
+            return
+
         if self._openai_client is None and self._anthropic_client is None:
             print_error(
                 "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
                 "或在 TUI 中用 /model 配置。"
             )
             return
-
-        self._aborted = False
-        self._last_stop_reason = None
         coro = self._chat_openai(user_message) if self.use_openai else self._chat_anthropic(user_message)
         self._current_task = asyncio.current_task()
         try:
@@ -763,6 +872,10 @@ class Agent:
         self._openai_messages = []
         if self.use_openai:
             self._openai_messages.append({"role": "system", "content": self._system_prompt})
+        if self._core_runtime is not None:
+            # 新路径下对话状态唯一来源是 AgentHarness.messages，需同步清空并重建观察器。
+            self._core_runtime.harness.replace_messages([])
+            self._reset_core_observers()
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_cache_read_tokens = 0
