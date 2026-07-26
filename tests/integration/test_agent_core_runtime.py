@@ -19,12 +19,24 @@ from lion_code.agent import Agent
 from lion_code.context import SUMMARY_SYSTEM_PROMPT
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
 from lion_code.core.provider_events import AssistantDoneEvent
+from lion_code.providers import RuntimeModelLimits
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 from lion_code.ui import set_sink
 
 from core.fakes import FakeProvider
+
+
+class _LimitsFakeProvider(FakeProvider):
+    def __init__(self, events: list, limits: RuntimeModelLimits) -> None:
+        super().__init__(events)
+        self.limits = limits
+        self.discovered_models: list[str] = []
+
+    async def discover_model_limits(self, model: str) -> RuntimeModelLimits | None:
+        self.discovered_models.append(model)
+        return self.limits
 
 
 def _echo_lion_tool() -> LionTool:
@@ -192,6 +204,26 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent._core_runtime.messages[-1].text, "done")
         self.assertEqual(fake.call_count, 1)
 
+    async def test_core_runtime_applies_provider_discovered_model_limits(self) -> None:
+        fake = _LimitsFakeProvider(
+            [_stop_event("done")],
+            RuntimeModelLimits(context_window=128_000, max_output_tokens=8_000),
+        )
+        os.environ["LION_CORE_RUNTIME"] = "1"
+        with patch("lion_code.agent.create_provider", return_value=fake):
+            agent = Agent(
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+            )
+        agent._mcp_initialized = True
+
+        await agent.chat("hello")
+
+        self.assertEqual(agent.effective_window, 120_000)
+        self.assertEqual(fake.discovered_models, [agent.model])
+
     async def test_tool_loop_through_runtime(self) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
@@ -305,6 +337,15 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertIn("first question", raw_message_texts)
         self.assertIn("first answer", raw_message_texts)
         self.assertEqual(agent._core_runtime.messages, state.messages)
+        self.assertEqual(agent.last_input_token_count, 0)
+        self.assertFalse(agent._core_compaction_required)
+
+        restored, _ = self._make_agent([], registry)
+        self.assertTrue(await restored.restore_core_session(agent.session_id))
+        self.assertEqual(
+            [message.text for message in restored._core_runtime.messages],
+            [message.text for message in state.messages],
+        )
 
     async def test_dynamic_system_prompt_refetched_per_turn(self) -> None:
         # 模拟 Plan 模式切换：运行中改 _system_prompt，下一轮请求必须看到新值。

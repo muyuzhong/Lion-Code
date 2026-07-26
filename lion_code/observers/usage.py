@@ -32,6 +32,7 @@ class UsageObserver:
         self._totals = UsageTotals()
         self._last_usage: Usage | None = None
         self._last_response_at: float | None = None
+        self._response_count = 0
 
     @property
     def totals(self) -> UsageTotals:
@@ -59,6 +60,12 @@ class UsageObserver:
 
         return self._last_response_at
 
+    @property
+    def response_count(self) -> int:
+        """返回已观察到的助手终态响应数。"""
+
+        return self._response_count
+
     async def handle(self, event: AgentEvent) -> None:
         if not isinstance(event, MessageEndEvent):
             return
@@ -68,6 +75,7 @@ class UsageObserver:
         usage = event.message.usage
         self._last_usage = usage.model_copy(deep=True)
         self._last_response_at = time()
+        self._response_count += 1
         self._totals.input_tokens += usage.input
         self._totals.output_tokens += usage.output
         self._totals.cache_read_tokens += usage.cache_read

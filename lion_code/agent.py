@@ -30,7 +30,6 @@ from .context import (
     ModelLimitsResolver,
     ProviderContextCompactor,
     effective_window_tokens,
-    fallback_context_window as _get_context_window,
     fallback_model_limits,
 )
 from .core.events import AgentEvent, MessageUpdateEvent
@@ -308,6 +307,7 @@ class Agent:
         self._session_write_errors: list[BaseException] = []
         self._model_limits_resolver = model_limits_resolver or ModelLimitsResolver()
         self._resolved_model_limits_for: tuple[int, str] | None = None
+        self._last_synced_core_response_count = 0
 
         self.total_input_tokens = 0
         self.total_output_tokens = 0
@@ -643,19 +643,22 @@ class Agent:
         self.total_cache_read_tokens = totals.cache_read_tokens
         self.total_cache_creation_tokens = totals.cache_write_tokens
         last = self._usage_observer.last_usage
-        if last is None:
-            self.last_input_token_count = 0
-        elif last.total_tokens:
-            self.last_input_token_count = last.total_tokens
-        else:
-            self.last_input_token_count = (
-                last.input
-                + last.cache_read
-                + last.cache_write
-                + last.output
-            )
-        if self._usage_observer.last_response_at is not None:
-            self.last_api_call_time = self._usage_observer.last_response_at
+        response_count = self._usage_observer.response_count
+        if response_count != getattr(self, "_last_synced_core_response_count", 0):
+            if last is None:
+                self.last_input_token_count = 0
+            elif last.total_tokens:
+                self.last_input_token_count = last.total_tokens
+            else:
+                self.last_input_token_count = (
+                    last.input
+                    + last.cache_read
+                    + last.cache_write
+                    + last.output
+                )
+            if self._usage_observer.last_response_at is not None:
+                self.last_api_call_time = self._usage_observer.last_response_at
+            self._last_synced_core_response_count = response_count
 
     def _reset_session_counters(self) -> None:
         self.total_input_tokens = 0
@@ -665,6 +668,11 @@ class Agent:
         self.last_input_token_count = 0
         self.current_turns = 0
         self.last_api_call_time = 0.0
+        self._last_synced_core_response_count = (
+            self._usage_observer.response_count
+            if self._usage_observer is not None
+            else 0
+        )
         self._last_stop_reason = None
 
     def _reset_core_observers(self) -> None:
@@ -676,6 +684,7 @@ class Agent:
         self._observer_unsubscribers.clear()
         self._terminal_renderer = TerminalRenderer()
         self._usage_observer = UsageObserver()
+        self._last_synced_core_response_count = 0
         self._session_recorder = SessionRecorder(
             session_id=self.session_id,
             model=self.model,
@@ -734,10 +743,7 @@ class Agent:
             return False
 
         self._sync_core_usage()
-        if not (
-            self._core_compaction_required
-            or self._context_manager.should_compact(self._context_runtime_state())
-        ):
+        if not self._context_manager.should_compact(self._context_runtime_state()):
             return False
 
         messages = self._core_runtime.messages
@@ -787,6 +793,10 @@ class Agent:
         if state is None or len(state.messages) != 1:
             raise RuntimeError("Compaction replay did not produce one active context message")
         await self._core_runtime.reset_active_context(state.messages[0].text)
+        self._sync_core_usage()
+        self.last_input_token_count = 0
+        self._last_context_actions = ()
+        self._core_compaction_required = False
         self._pending_core_context_reset = None
         return True
 
@@ -894,6 +904,7 @@ class Agent:
             self.model = model
             self.effective_window = effective_window_tokens(fallback_model_limits(model))
             self._resolved_model_limits_for = None
+            self._core_compaction_required = False
             self._thinking_mode = self._resolve_thinking_mode()
             if self._core_runtime is not None:
                 self._core_runtime.set_model(model)
@@ -1026,6 +1037,9 @@ class Agent:
             while await self._apply_pending_core_context_reset():
                 await self._core_runtime.continue_()
             self._sync_core_usage()
+            self._core_compaction_required = self._context_manager.should_compact(
+                self._context_runtime_state()
+            )
             return
 
         if self._openai_client is None and self._anthropic_client is None:

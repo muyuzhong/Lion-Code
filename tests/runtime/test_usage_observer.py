@@ -86,6 +86,7 @@ class TestUsageObserver(unittest.IsolatedAsyncioTestCase):
         latest.total_tokens = 999
         self.assertEqual(observer.last_usage.total_tokens, 3)
         self.assertIsNotNone(observer.last_response_at)
+        self.assertEqual(observer.response_count, 2)
 
     async def test_agent_uses_latest_response_instead_of_session_totals(self) -> None:
         observer = UsageObserver()
@@ -109,6 +110,10 @@ class TestUsageObserver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.total_input_tokens, 107)
         self.assertEqual(agent.total_output_tokens, 23)
         self.assertEqual(agent.last_input_token_count, 17)
+
+        agent.last_input_token_count = 0
+        agent._sync_core_usage()
+        self.assertEqual(agent.last_input_token_count, 0)
 
 
 if __name__ == "__main__":
