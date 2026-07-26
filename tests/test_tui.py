@@ -186,7 +186,11 @@ async def test_auto_opens_model_screen_when_unconfigured():
     agent.api_configured = False
     app = tui.LionTUI(agent)
     async with app.run_test() as pilot:
-        await pilot.pause()
+        # call_after_refresh 的弹屏在高负载下可能晚于首次 pause,做有界等待避免偶发竞态
+        for _ in range(20):
+            await pilot.pause()
+            if isinstance(app.screen, tui.ModelScreen):
+                break
         assert isinstance(app.screen, tui.ModelScreen)
 
 
