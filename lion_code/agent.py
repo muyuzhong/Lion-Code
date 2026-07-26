@@ -566,6 +566,15 @@ class Agent:
             return self._core_runtime.harness.is_running
         return self._current_task is not None and not self._current_task.done()
 
+    @property
+    def core_runtime(self) -> LionAgentRuntime | None:
+        """Core Runtime 灰度路径的运行时;未启用(旧路径)时为 None。
+
+        供应用会话层(LionCodingSession)订阅事件与读取消息快照,
+        不是给前端直接使用的接口。
+        """
+        return self._core_runtime if self.use_openai else None
+
     def _build_side_query(self):
         """构建供 Memory 召回和 Auto Mode 分类器共用的跨后端 sideQuery。
 
