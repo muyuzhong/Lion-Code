@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import time
 
 from lion_code.core.events import AgentEvent, MessageEndEvent
-from lion_code.core.messages import AssistantMessage
+from lion_code.core.messages import AssistantMessage, Usage
 
 
 @dataclass(slots=True)
@@ -29,6 +30,9 @@ class UsageObserver:
 
     def __init__(self) -> None:
         self._totals = UsageTotals()
+        self._last_usage: Usage | None = None
+        self._last_response_at: float | None = None
+        self._response_count = 0
 
     @property
     def totals(self) -> UsageTotals:
@@ -42,6 +46,26 @@ class UsageObserver:
             cost_usd=self._totals.cost_usd,
         )
 
+    @property
+    def last_usage(self) -> Usage | None:
+        """返回最近一次助手响应的独立 Usage 快照。"""
+
+        if self._last_usage is None:
+            return None
+        return self._last_usage.model_copy(deep=True)
+
+    @property
+    def last_response_at(self) -> float | None:
+        """返回最近一次带 Usage 的助手终态事件时间。"""
+
+        return self._last_response_at
+
+    @property
+    def response_count(self) -> int:
+        """返回已观察到的助手终态响应数。"""
+
+        return self._response_count
+
     async def handle(self, event: AgentEvent) -> None:
         if not isinstance(event, MessageEndEvent):
             return
@@ -49,6 +73,9 @@ class UsageObserver:
             return
 
         usage = event.message.usage
+        self._last_usage = usage.model_copy(deep=True)
+        self._last_response_at = time()
+        self._response_count += 1
         self._totals.input_tokens += usage.input
         self._totals.output_tokens += usage.output
         self._totals.cache_read_tokens += usage.cache_read

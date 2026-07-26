@@ -7,7 +7,6 @@ API Key 只从环境变量读取，绝不写入结果文件。
 from __future__ import annotations
 
 import argparse
-import copy
 import hashlib
 import json
 import os
@@ -21,7 +20,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 from openai import OpenAI
 
@@ -30,13 +28,25 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from lion_code.agent import (  # noqa: E402
-    Agent,
-    MICROCOMPACT_IDLE_S,
-    SNIP_PLACEHOLDER,
-    _get_context_window,
-    _to_openai_tools,
+from lion_code.context import (  # noqa: E402
+    ContextManager,
+    ContextPolicy,
+    ContextRuntimeState,
+    PreparedContext,
+    fallback_context_window,
 )
+from lion_code.core import (  # noqa: E402
+    AgentMessage,
+    AssistantMessage,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+    message_text,
+)
+from lion_code.tooling.builtin import create_builtin_tools  # noqa: E402
+from lion_code.tooling.internal import create_internal_tools  # noqa: E402
+from lion_code.tooling.result_store import ResultStore  # noqa: E402
 from lion_code.tooling.types import ToolResult  # noqa: E402
 
 
@@ -44,6 +54,88 @@ HERE = Path(__file__).resolve().parent
 DATASET_PATH = HERE / "dataset.json"
 RESULTS_DIR = HERE / "results"
 REPORT_PATH = HERE / "REPORT_CN.md"
+DEFAULT_CONTEXT_POLICY = ContextPolicy()
+MICROCOMPACT_IDLE_S = DEFAULT_CONTEXT_POLICY.cache_idle_seconds
+SNIP_PLACEHOLDER = DEFAULT_CONTEXT_POLICY.snip_placeholder
+
+
+@dataclass
+class BenchmarkContext:
+    """基准专用的 canonical Active Context，不构造 Agent。"""
+
+    system_prompt: str
+    effective_window: int
+    messages: list[AgentMessage]
+    manager: ContextManager
+    result_store: ResultStore
+    tools_by_name: dict[str, Any]
+    last_prompt_tokens: int = 0
+    last_model_call_at: float | None = None
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        system_prompt: str,
+        effective_window: int,
+        result_root: Path | None = None,
+    ) -> "BenchmarkContext":
+        tools = [*create_builtin_tools(), *create_internal_tools()]
+        tools_by_name = {tool.name: tool for tool in tools}
+
+        def is_snippable(name: str) -> bool:
+            tool = tools_by_name.get(name)
+            return bool(
+                tool is not None
+                and tool.capabilities.result_policy == "snippable"
+            )
+
+        return cls(
+            system_prompt=system_prompt,
+            effective_window=effective_window,
+            messages=[],
+            manager=ContextManager(is_snippable_tool=is_snippable),
+            result_store=ResultStore(root=result_root),
+            tools_by_name=tools_by_name,
+        )
+
+    def runtime_state(self, *, eager_ablation: bool = False) -> ContextRuntimeState:
+        return ContextRuntimeState(
+            effective_window_tokens=self.effective_window,
+            last_prompt_tokens=self.last_prompt_tokens,
+            # eager 消融不声明缓存热度，因此触发 Snip、但不会触发冷缓存 Microcompact。
+            last_model_call_at=(
+                None if eager_ablation else self.last_model_call_at
+            ),
+            now=time.time(),
+        )
+
+    def prepare(self, variant: str) -> PreparedContext:
+        if variant == "raw":
+            projected = tuple(message.model_copy(deep=True) for message in self.messages)
+            return PreparedContext(messages=projected)
+        if variant not in {"managed", "eager_ablation"}:
+            raise ValueError(f"未知变体：{variant}")
+        return self.manager.prepare(
+            self.messages,
+            self.runtime_state(eager_ablation=variant == "eager_ablation"),
+        )
+
+    def openai_messages(
+        self,
+        messages: list[AgentMessage] | tuple[AgentMessage, ...] | None = None,
+    ) -> list[dict[str, Any]]:
+        return to_openai_messages(
+            self.system_prompt,
+            self.messages if messages is None else messages,
+        )
+
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [
+            tool.to_openai_schema()
+            for tool in self.tools_by_name.values()
+            if not tool.capabilities.deferred
+        ]
 
 
 @dataclass
@@ -183,25 +275,29 @@ def expand_to_bytes(seed: str, target_bytes: int, marker: str) -> str:
     return repeated[:lo]
 
 
-def make_tool_messages(scenario: dict[str, Any], turn: int, payload: str) -> list[dict[str, Any]]:
+def make_tool_messages(
+    scenario: dict[str, Any],
+    turn: int,
+    payload: str,
+) -> list[AgentMessage]:
     call_id = f"call_{scenario['id']}_{turn:02d}"
     source = scenario["source_files"][(turn - 1) % len(scenario["source_files"])]
-    arguments = json.dumps(
-        {"file_path": source, "benchmark_turn": turn}, ensure_ascii=False, separators=(",", ":")
-    )
     return [
-        {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": call_id,
-                    "type": "function",
-                    "function": {"name": scenario["tool_name"], "arguments": arguments},
-                }
+        AssistantMessage(
+            content=[
+                ToolCall(
+                    id=call_id,
+                    name=scenario["tool_name"],
+                    arguments={"file_path": source, "benchmark_turn": turn},
+                )
             ],
-        },
-        {"role": "tool", "tool_call_id": call_id, "content": payload},
+            stop_reason="toolUse",
+        ),
+        ToolResultMessage(
+            tool_call_id=call_id,
+            tool_name=scenario["tool_name"],
+            content=[TextContent(text=payload)],
+        ),
     ]
 
 
@@ -212,12 +308,12 @@ def facts_for_turn(scenario: dict[str, Any], turn: int) -> str:
     return "\n这些是后续验收必须精确保留的事实：\n" + "\n".join(rows)
 
 
-def tool_content_stats(messages: list[dict[str, Any]]) -> dict[str, tuple[int, str]]:
+def tool_content_stats(messages: list[AgentMessage]) -> dict[str, tuple[int, str]]:
     stats: dict[str, tuple[int, str]] = {}
-    for index, msg in enumerate(messages):
-        if msg.get("role") != "tool" or not isinstance(msg.get("content"), str):
+    for index, message in enumerate(messages):
+        if not isinstance(message, ToolResultMessage):
             continue
-        content = msg["content"]
+        content = message.text
         marker = "normal"
         if content == SNIP_PLACEHOLDER:
             marker = "snipped"
@@ -225,48 +321,83 @@ def tool_content_stats(messages: list[dict[str, Any]]) -> dict[str, tuple[int, s
             marker = "microcompacted"
         elif "[... budgeted:" in content:
             marker = "budgeted"
-        stats[f"{index}:{msg.get('tool_call_id', '')}"] = (len(content), marker)
+        stats[f"{index}:{message.tool_call_id}"] = (len(content), marker)
     return stats
 
 
-def update_pipeline_events(before: dict[str, tuple[int, str]], after: dict[str, tuple[int, str]], events: EventCounts) -> None:
-    for key, (after_len, after_marker) in after.items():
-        before_len, before_marker = before.get(key, (after_len, "normal"))
-        if after_marker == "budgeted" and after_len < before_len:
+def apply_pipeline(context: BenchmarkContext, variant: str, events: EventCounts) -> None:
+    if variant == "raw":
+        return
+    prepared = context.prepare(variant)
+    context.messages = list(prepared.messages)
+    for action in prepared.actions:
+        if action.type == "budget_tool_result":
             events.budget_rewrites += 1
-        if after_marker == "snipped" and before_marker != "snipped":
+        elif action.type == "snip_tool_result":
             events.snipped_results += 1
-        if after_marker == "microcompacted" and before_marker != "microcompacted":
+        elif action.type == "clear_tool_result":
             events.microcompacted_results += 1
 
 
-def apply_pipeline(agent: Agent, variant: str, events: EventCounts) -> None:
-    if variant == "raw":
-        return
-    before = tool_content_stats(agent._openai_messages)
-    if variant == "managed":
-        agent._run_compression_pipeline()
-    elif variant == "eager_ablation":
-        # 消融：保留预算层，但把 snip 看作冷缓存；不启用五分钟 microcompact，
-        # 从而只比较 60%～75% 热缓存保护这一项机制。
-        agent._budget_tool_results_openai()
-        original_time = agent.last_api_call_time
-        if original_time:
-            agent.last_api_call_time = time.time() - MICROCOMPACT_IDLE_S - 1
-        agent._snip_stale_results_openai()
-        agent.last_api_call_time = original_time
-    else:
-        raise ValueError(f"未知变体：{variant}")
-    update_pipeline_events(before, tool_content_stats(agent._openai_messages), events)
-
-
-def process_tool_result(agent: Agent, tool_name: str, content: str) -> str:
+def process_tool_result(
+    context: BenchmarkContext,
+    tool_name: str,
+    content: str,
+) -> str:
     """让基准数据经过与运行时相同的结果策略。"""
-    try:
-        tool = agent.tool_registry.resolve(tool_name)
-    except LookupError:
+    tool = context.tools_by_name.get(tool_name)
+    if tool is None:
         return content
-    return agent._result_store.process(tool, ToolResult(content=content)).content
+    return context.result_store.process(tool, ToolResult(content=content)).content
+
+
+def to_openai_messages(
+    system_prompt: str,
+    messages: list[AgentMessage] | tuple[AgentMessage, ...],
+) -> list[dict[str, Any]]:
+    """只在 API 边界把 canonical messages 序列化为 OpenAI 格式。"""
+
+    output: list[dict[str, Any]] = [
+        {"role": "system", "content": system_prompt}
+    ]
+    for message in messages:
+        if isinstance(message, UserMessage):
+            output.append({"role": "user", "content": message.text})
+            continue
+        if isinstance(message, AssistantMessage):
+            row: dict[str, Any] = {
+                "role": "assistant",
+                "content": message.text or None,
+            }
+            if message.tool_calls:
+                row["tool_calls"] = [
+                    {
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": json.dumps(
+                                call.arguments,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            ),
+                        },
+                    }
+                    for call in message.tool_calls
+                ]
+            output.append(row)
+            continue
+        if isinstance(message, ToolResultMessage):
+            output.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": message.tool_call_id,
+                    "content": message.text,
+                }
+            )
+            continue
+        output.append({"role": "user", "content": message_text(message)})
+    return output
 
 
 def usage_from_response(response: Any) -> dict[str, int]:
@@ -373,43 +504,40 @@ def record_call(
 
 def compact_with_metrics(
     client: OpenAI,
-    agent: Agent,
+    context: BenchmarkContext,
     result: ReplayResult,
     *,
     model: str,
     budget: Budget,
     turn: int,
 ) -> None:
-    messages = agent._openai_messages
-    if len(messages) < 5:
+    messages = context.messages
+    if len(messages) < 4:
         return
-    system_msg = messages[0]
     last_user_msg = messages[-1]
-    summary_messages = [
-        {"role": "system", "content": "你是对话摘要器。请简洁总结，但必须保留明确标注的事实、关键决策、文件路径和继续工作所需上下文。"},
-        *messages[1:-1],
-        {
-            "role": "user",
-            "content": "请用中文总结此前对话，必须逐字保留所有标为‘必须精确保留’的键和值，以及关键决策、文件路径和命令。",
-        },
+    summary_system = "你是对话摘要器。请简洁总结，但必须保留明确标注的事实、关键决策、文件路径和继续工作所需上下文。"
+    summary_context = [
+        *messages[:-1],
+        UserMessage(
+            content="请用中文总结此前对话，必须逐字保留所有标为‘必须精确保留’的键和值，以及关键决策、文件路径和命令。"
+        ),
     ]
     response, usage, cost = api_call(
         client,
         model=model,
-        messages=summary_messages,
+        messages=to_openai_messages(summary_system, summary_context),
         tools=None,
         max_tokens=2048,
         budget=budget,
     )
     summary_text = response.choices[0].message.content or "[摘要为空]"
-    agent._openai_messages = [
-        system_msg,
-        {"role": "user", "content": f"[Previous conversation summary]\n{summary_text}"},
-        {"role": "assistant", "content": "已理解此前上下文，可以继续。"},
+    context.messages = [
+        UserMessage(content=f"[Previous conversation summary]\n{summary_text}"),
+        AssistantMessage(content="已理解此前上下文，可以继续。"),
     ]
-    if last_user_msg.get("role") == "user":
-        agent._openai_messages.append(last_user_msg)
-    agent.last_input_token_count = 0
+    if isinstance(last_user_msg, UserMessage):
+        context.messages.append(last_user_msg)
+    context.last_prompt_tokens = 0
     result.events.summaries += 1
     record_call(
         result,
@@ -417,13 +545,13 @@ def compact_with_metrics(
         turn=turn,
         usage=usage,
         cost=cost,
-        effective_window=agent.effective_window,
+        effective_window=context.effective_window,
     )
 
 
 def maybe_compact(
     client: OpenAI,
-    agent: Agent,
+    context: BenchmarkContext,
     result: ReplayResult,
     *,
     variant: str,
@@ -433,8 +561,15 @@ def maybe_compact(
 ) -> None:
     if variant == "raw":
         return
-    if agent.last_input_token_count > agent.effective_window * 0.85:
-        compact_with_metrics(client, agent, result, model=model, budget=budget, turn=turn)
+    if context.manager.should_compact(context.runtime_state()):
+        compact_with_metrics(
+            client,
+            context,
+            result,
+            model=model,
+            budget=budget,
+            turn=turn,
+        )
 
 
 def flatten_strings(value: Any) -> list[str]:
@@ -461,7 +596,7 @@ def normalize_fact(value: str) -> str:
 
 def evaluate_retention(
     client: OpenAI,
-    agent: Agent,
+    context: BenchmarkContext,
     scenario: dict[str, Any],
     result: ReplayResult,
     *,
@@ -475,10 +610,10 @@ def evaluate_retention(
         "只输出一个 JSON 对象；键使用原始事实名称，值必须逐字一致。需要返回的键："
         + "、".join(expected)
     )
-    agent._openai_messages.append({"role": "user", "content": query})
+    context.messages.append(UserMessage(content=query))
     maybe_compact(
         client,
-        agent,
+        context,
         result,
         variant=variant,
         model=model,
@@ -488,7 +623,7 @@ def evaluate_retention(
     response, usage, cost = api_call(
         client,
         model=model,
-        messages=agent._openai_messages,
+        messages=context.openai_messages(),
         tools=None,
         max_tokens=512,
         budget=budget,
@@ -529,7 +664,7 @@ def evaluate_retention(
         turn=scenario["turns"] + 1,
         usage=usage,
         cost=cost,
-        effective_window=agent.effective_window,
+        effective_window=context.effective_window,
     )
 
 
@@ -539,8 +674,6 @@ def run_replay(
     *,
     variant: str,
     model: str,
-    base_url: str,
-    api_key: str,
     budget: Budget,
     effective_window: int,
     run_id: str,
@@ -548,129 +681,129 @@ def run_replay(
     seed, source_meta = source_snapshot(scenario["source_files"])
     # run_id 放在首部，确保试跑或上一次完整运行留下的服务端缓存不会污染本轮冷启动。
     salt = f"[运行={run_id}；场景={scenario['id']}；变体={variant}]"
-    agent = Agent(
-        model=model,
-        api_base=base_url,
-        api_key=api_key,
-        custom_system_prompt=(
-            salt + "\n你正在参与 Lion Code 上下文管理的固定回放测试。"
-            "基准计量点只需简短回复，不要主动调用工具。"
-        ),
-    )
-    agent.effective_window = effective_window
-    tools = _to_openai_tools(agent._active_anthropic_tools())
     result = ReplayResult(scenario["id"], scenario["name"], variant)
 
     with tempfile.TemporaryDirectory(prefix="lion-context-bench-") as temp_home:
-        with patch("lion_code.agent.Path.home", return_value=Path(temp_home)):
-            for turn in range(1, scenario["turns"] + 1):
-                source = scenario["source_files"][(turn - 1) % len(scenario["source_files"])]
-                user_payload = expand_to_bytes(
-                    seed,
-                    int(scenario.get("user_payload_bytes", 0)),
-                    f"{scenario['id']}-user-{turn}-{source}",
-                )
-                user_text = (
-                    f"第 {turn} 轮固定回放：继续分析 {source}。"
-                    f"{facts_for_turn(scenario, turn)}"
-                )
-                if user_payload:
-                    user_text += "\n以下是本轮设计讨论记录：\n" + user_payload
-                agent._openai_messages.append({"role": "user", "content": user_text})
+        context = BenchmarkContext.create(
+            system_prompt=(
+            salt + "\n你正在参与 Lion Code 上下文管理的固定回放测试。"
+            "基准计量点只需简短回复，不要主动调用工具。"
+        ),
+            effective_window=effective_window,
+            result_root=Path(temp_home) / "tool-results",
+        )
+        tools = context.openai_tools()
+        for turn in range(1, scenario["turns"] + 1):
+            source = scenario["source_files"][(turn - 1) % len(scenario["source_files"])]
+            user_payload = expand_to_bytes(
+                seed,
+                int(scenario.get("user_payload_bytes", 0)),
+                f"{scenario['id']}-user-{turn}-{source}",
+            )
+            user_text = (
+                f"第 {turn} 轮固定回放：继续分析 {source}。"
+                f"{facts_for_turn(scenario, turn)}"
+            )
+            if user_payload:
+                user_text += "\n以下是本轮设计讨论记录：\n" + user_payload
+            context.messages.append(UserMessage(content=user_text))
 
-                maybe_compact(
-                    client,
-                    agent,
-                    result,
-                    variant=variant,
-                    model=model,
-                    budget=budget,
-                    turn=turn,
-                )
-
-                tool_payload = expand_to_bytes(
-                    seed,
-                    int(scenario["tool_payload_bytes"]),
-                    f"{scenario['id']}-tool-{turn}-{source}",
-                )
-                if variant != "raw":
-                    persisted = process_tool_result(
-                        agent,
-                        scenario["tool_name"],
-                        tool_payload,
-                    )
-                    if persisted != tool_payload:
-                        result.events.persisted_results += 1
-                    tool_payload = persisted
-                agent._openai_messages.extend(make_tool_messages(scenario, turn, tool_payload))
-                agent._openai_messages.append(
-                    {"role": "user", "content": "基准计量点：只需回复‘继续’，不要调用工具。"}
-                )
-
-                if variant == "managed" and turn in scenario.get("idle_before_turns", []):
-                    agent.last_api_call_time = time.time() - MICROCOMPACT_IDLE_S - 1
-                apply_pipeline(agent, variant, result.events)
-
-                _, usage, cost = api_call(
-                    client,
-                    model=model,
-                    messages=agent._openai_messages,
-                    tools=tools,
-                    max_tokens=8,
-                    budget=budget,
-                )
-                record_call(
-                    result,
-                    kind="turn",
-                    turn=turn,
-                    usage=usage,
-                    cost=cost,
-                    effective_window=effective_window,
-                )
-                agent.last_input_token_count = usage["prompt_tokens"] + usage["completion_tokens"]
-                agent.last_api_call_time = time.time()
-                # 固定回放使用脚本化回复，避免模型随机输出成为 A/B 混杂变量。
-                agent._openai_messages.append({"role": "assistant", "content": "继续"})
-
-            evaluate_retention(
+            maybe_compact(
                 client,
-                agent,
-                scenario,
+                context,
                 result,
                 variant=variant,
                 model=model,
                 budget=budget,
+                turn=turn,
             )
+
+            tool_payload = expand_to_bytes(
+                seed,
+                int(scenario["tool_payload_bytes"]),
+                f"{scenario['id']}-tool-{turn}-{source}",
+            )
+            if variant != "raw":
+                persisted = process_tool_result(
+                    context,
+                    scenario["tool_name"],
+                    tool_payload,
+                )
+                if persisted != tool_payload:
+                    result.events.persisted_results += 1
+                tool_payload = persisted
+            context.messages.extend(make_tool_messages(scenario, turn, tool_payload))
+            context.messages.append(
+                UserMessage(content="基准计量点：只需回复‘继续’，不要调用工具。")
+            )
+
+            if variant == "managed" and turn in scenario.get("idle_before_turns", []):
+                context.last_model_call_at = time.time() - MICROCOMPACT_IDLE_S - 1
+            apply_pipeline(context, variant, result.events)
+
+            _, usage, cost = api_call(
+                client,
+                model=model,
+                messages=context.openai_messages(),
+                tools=tools,
+                max_tokens=8,
+                budget=budget,
+            )
+            record_call(
+                result,
+                kind="turn",
+                turn=turn,
+                usage=usage,
+                cost=cost,
+                effective_window=effective_window,
+            )
+            context.last_prompt_tokens = usage["prompt_tokens"] + usage["completion_tokens"]
+            context.last_model_call_at = time.time()
+            # 固定回放使用脚本化回复，避免模型随机输出成为 A/B 混杂变量。
+            context.messages.append(AssistantMessage(content="继续"))
+
+        evaluate_retention(
+            client,
+            context,
+            scenario,
+            result,
+            variant=variant,
+            model=model,
+            budget=budget,
+        )
     return result, source_meta
 
 
-def make_probe_agent(effective_window: int) -> Agent:
-    agent = Agent(
-        model="deepseek-v4-flash",
-        api_base="https://example.invalid",
-        api_key="offline-only",
-        custom_system_prompt="离线上下文压缩探针",
+def make_probe_context(effective_window: int) -> BenchmarkContext:
+    return BenchmarkContext.create(
+        system_prompt="离线上下文压缩探针",
+        effective_window=effective_window,
     )
-    agent.effective_window = effective_window
-    return agent
 
 
-def populate_probe_tools(agent: Agent, count: int, content: str) -> None:
+def populate_probe_tools(
+    context: BenchmarkContext,
+    count: int,
+    content: str,
+) -> None:
     for i in range(count):
-        agent._openai_messages.extend(
+        context.messages.extend(
             [
-                {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": f"probe_{i}",
-                            "type": "function",
-                            "function": {"name": "read_file", "arguments": "{}"},
-                        }
+                AssistantMessage(
+                    content=[
+                        ToolCall(
+                            id=f"probe_{i}",
+                            name="read_file",
+                            arguments={"file_path": "probe.txt"},
+                        )
                     ],
-                },
-                {"role": "tool", "tool_call_id": f"probe_{i}", "content": content},
+                    stop_reason="toolUse",
+                ),
+                ToolResultMessage(
+                    tool_call_id=f"probe_{i}",
+                    tool_name="read_file",
+                    content=[TextContent(text=content)],
+                ),
             ]
         )
 
@@ -681,27 +814,31 @@ def offline_probes(dataset: dict[str, Any]) -> list[dict[str, Any]]:
     probes: list[dict[str, Any]] = []
 
     with tempfile.TemporaryDirectory(prefix="lion-context-probe-") as temp_home:
-        with patch("lion_code.agent.Path.home", return_value=Path(temp_home)):
-            agent = make_probe_agent(effective)
-            raw = expand_to_bytes(seed, 120000, "offline-persistence")
-            stored = process_tool_result(agent, "read_file", raw)
-            probes.append(
-                {
-                    "probe": "large_result_persistence",
-                    "before_chars": len(raw),
-                    "after_chars": len(stored),
-                    "reduction": 1 - ratio(len(stored), len(raw)),
-                    "full_copy_persisted": stored.startswith("[Result too large"),
-                }
-            )
+        context = BenchmarkContext.create(
+            system_prompt="离线上下文压缩探针",
+            effective_window=effective,
+            result_root=Path(temp_home) / "tool-results",
+        )
+        raw = expand_to_bytes(seed, 120000, "offline-persistence")
+        stored = process_tool_result(context, "read_file", raw)
+        probes.append(
+            {
+                "probe": "large_result_persistence",
+                "before_chars": len(raw),
+                "after_chars": len(stored),
+                "reduction": 1 - ratio(len(stored), len(raw)),
+                "full_copy_persisted": stored.startswith("[Result too large"),
+            }
+        )
 
     for utilization in (0.55, 0.72):
-        agent = make_probe_agent(effective)
-        populate_probe_tools(agent, 4, "x" * 60000)
-        before = sum(v[0] for v in tool_content_stats(agent._openai_messages).values())
-        agent.last_input_token_count = int(effective * utilization)
-        agent._budget_tool_results_openai()
-        after = sum(v[0] for v in tool_content_stats(agent._openai_messages).values())
+        context = make_probe_context(effective)
+        populate_probe_tools(context, 4, "x" * 60000)
+        before = sum(v[0] for v in tool_content_stats(context.messages).values())
+        context.last_prompt_tokens = int(effective * utilization)
+        context.last_model_call_at = time.time()
+        apply_pipeline(context, "managed", EventCounts())
+        after = sum(v[0] for v in tool_content_stats(context.messages).values())
         probes.append(
             {
                 "probe": f"dynamic_budget_{utilization:.2f}",
@@ -716,12 +853,12 @@ def offline_probes(dataset: dict[str, Any]) -> list[dict[str, Any]]:
         ("snip_cold", 0.65, MICROCOMPACT_IDLE_S + 1),
         ("snip_hot_override", 0.78, 1),
     ):
-        agent = make_probe_agent(effective)
-        populate_probe_tools(agent, 8, "x" * 10000)
-        agent.last_input_token_count = int(effective * utilization)
-        agent.last_api_call_time = time.time() - age_seconds
-        agent._snip_stale_results_openai()
-        stats = tool_content_stats(agent._openai_messages)
+        context = make_probe_context(effective)
+        populate_probe_tools(context, 8, "x" * 10000)
+        context.last_prompt_tokens = int(effective * utilization)
+        context.last_model_call_at = time.time() - age_seconds
+        apply_pipeline(context, "managed", EventCounts())
+        stats = tool_content_stats(context.messages)
         probes.append(
             {
                 "probe": name,
@@ -730,11 +867,11 @@ def offline_probes(dataset: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
-    agent = make_probe_agent(effective)
-    populate_probe_tools(agent, 8, "x" * 10000)
-    agent.last_api_call_time = time.time() - MICROCOMPACT_IDLE_S - 1
-    agent._microcompact_openai()
-    stats = tool_content_stats(agent._openai_messages)
+    context = make_probe_context(effective)
+    populate_probe_tools(context, 8, "x" * 10000)
+    context.last_model_call_at = time.time() - MICROCOMPACT_IDLE_S - 1
+    apply_pipeline(context, "managed", EventCounts())
+    stats = tool_content_stats(context.messages)
     probes.append(
         {
             "probe": "microcompact_after_idle",
@@ -1011,7 +1148,7 @@ def main() -> int:
             "online": online,
             "model": args.model,
             "base_url": args.base_url,
-            "code_model_context_tokens": _get_context_window(args.model),
+            "code_model_context_tokens": fallback_context_window(args.model),
             "effective_window_tokens": effective_window,
             "dataset_version": dataset["version"],
             "benchmark_spend_cny": 0.0,
@@ -1055,8 +1192,6 @@ def main() -> int:
                     scenario,
                     variant=variant,
                     model=args.model,
-                    base_url=args.base_url,
-                    api_key=api_key,
                     budget=budget,
                     effective_window=effective_window,
                     run_id=payload["metadata"]["run_id"],

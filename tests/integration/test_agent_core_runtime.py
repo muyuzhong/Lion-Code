@@ -16,14 +16,27 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from lion_code.agent import Agent
-from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent
+from lion_code.context import SUMMARY_SYSTEM_PROMPT
+from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
 from lion_code.core.provider_events import AssistantDoneEvent
+from lion_code.providers import RuntimeModelLimits
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 from lion_code.ui import set_sink
 
 from core.fakes import FakeProvider
+
+
+class _LimitsFakeProvider(FakeProvider):
+    def __init__(self, events: list, limits: RuntimeModelLimits) -> None:
+        super().__init__(events)
+        self.limits = limits
+        self.discovered_models: list[str] = []
+
+    async def discover_model_limits(self, model: str) -> RuntimeModelLimits | None:
+        self.discovered_models.append(model)
+        return self.limits
 
 
 def _echo_lion_tool() -> LionTool:
@@ -60,6 +73,29 @@ def _named_lion_tool(name: str) -> LionTool:
     )
 
 
+def _snippable_lion_tool() -> LionTool:
+    async def execute(_ctx, _id, arguments, _on_update):
+        return ToolResult(content=f"durable-result-{arguments['index']}-" + "x" * 200)
+
+    return LionTool(
+        name="snippable",
+        label="Snippable",
+        description="return a rereadable result",
+        parameters={
+            "type": "object",
+            "properties": {"index": {"type": "integer"}},
+            "required": ["index"],
+        },
+        execute_fn=execute,
+        capabilities=ToolCapabilities(
+            read_only=True,
+            concurrency_safe=True,
+            result_policy="snippable",
+        ),
+        execution_mode="parallel",
+    )
+
+
 def _tooluse_event() -> AssistantDoneEvent:
     return AssistantDoneEvent(
         reason="toolUse",
@@ -71,13 +107,33 @@ def _tooluse_event() -> AssistantDoneEvent:
     )
 
 
-def _stop_event(text: str = "done") -> AssistantDoneEvent:
+def _stop_event(text: str = "done", usage: Usage | None = None) -> AssistantDoneEvent:
     return AssistantDoneEvent(
         reason="stop",
         message=AssistantMessage(
             model="fake",
             content=[TextContent(text=text)],
             stop_reason="stop",
+            usage=usage or Usage(),
+        ),
+    )
+
+
+def _many_tooluse_event(count: int, usage: Usage) -> AssistantDoneEvent:
+    return AssistantDoneEvent(
+        reason="toolUse",
+        message=AssistantMessage(
+            model="fake",
+            content=[
+                ToolCall(
+                    id=f"snip-{index}",
+                    name="snippable",
+                    arguments={"index": index},
+                )
+                for index in range(count)
+            ],
+            stop_reason="toolUse",
+            usage=usage,
         ),
     )
 
@@ -148,6 +204,26 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent._core_runtime.messages[-1].text, "done")
         self.assertEqual(fake.call_count, 1)
 
+    async def test_core_runtime_applies_provider_discovered_model_limits(self) -> None:
+        fake = _LimitsFakeProvider(
+            [_stop_event("done")],
+            RuntimeModelLimits(context_window=128_000, max_output_tokens=8_000),
+        )
+        os.environ["LION_CORE_RUNTIME"] = "1"
+        with patch("lion_code.agent.create_provider", return_value=fake):
+            agent = Agent(
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+            )
+        agent._mcp_initialized = True
+
+        await agent.chat("hello")
+
+        self.assertEqual(agent.effective_window, 120_000)
+        self.assertEqual(fake.discovered_models, [agent.model])
+
     async def test_tool_loop_through_runtime(self) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
@@ -168,6 +244,107 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [message.role for message in state.messages],
             ["user", "assistant", "toolResult", "assistant"],
+        )
+
+    async def test_provider_gets_projection_while_harness_and_session_stay_full(self) -> None:
+        registry = ToolRegistry()
+        registry.register(_snippable_lion_tool())
+        agent, fake = self._make_agent(
+            [
+                _many_tooluse_event(5, Usage(input=140_000, total_tokens=140_000)),
+                _stop_event("done"),
+            ],
+            registry,
+        )
+
+        await agent.chat("hello")
+
+        projected_results = [
+            message
+            for message in fake.received_messages[1]
+            if message.role == "toolResult"
+        ]
+        self.assertEqual(
+            [message.text for message in projected_results[:2]],
+            [agent._context_manager.policy.snip_placeholder] * 2,
+        )
+        durable_results = [
+            message
+            for message in agent._core_runtime.messages
+            if message.role == "toolResult"
+        ]
+        self.assertTrue(all(message.text.startswith("durable-result-") for message in durable_results))
+
+        state = await self._session_repository.load(agent.session_id)
+        session_results = [
+            message for message in state.messages if message.role == "toolResult"
+        ]
+        self.assertEqual(
+            [message.text for message in session_results],
+            [message.text for message in durable_results],
+        )
+
+    async def test_automatic_compaction_persists_summary_and_keeps_recent_turn(self) -> None:
+        registry = ToolRegistry()
+        agent, fake = self._make_agent(
+            [
+                _stop_event("first answer", Usage(total_tokens=100)),
+                _stop_event("second answer", Usage(input=160_000, total_tokens=160_000)),
+                _stop_event("condensed context"),
+                _stop_event("third answer"),
+            ],
+            registry,
+        )
+
+        await agent.chat("first question")
+        await agent.chat("second question")
+        await agent.chat("third question")
+
+        self.assertEqual(fake.received_systems[2], SUMMARY_SYSTEM_PROMPT)
+        self.assertEqual(fake.received_tools[2], [])
+        self.assertEqual(
+            [message.text for message in fake.received_messages[2][:-1]],
+            ["first question", "first answer"],
+        )
+        self.assertEqual(
+            [message.text for message in fake.received_messages[3]],
+            [
+                "Previous conversation summary:\ncondensed context",
+                "second question",
+                "second answer",
+                "third question",
+            ],
+        )
+
+        state = await self._session_repository.load(agent.session_id)
+        self.assertEqual(len(state.compaction_entries), 1)
+        self.assertEqual(len(state.compaction_entries[0].replaces_entry_ids), 2)
+        self.assertEqual(
+            [message.text for message in state.messages],
+            [
+                "Previous conversation summary:\ncondensed context",
+                "second question",
+                "second answer",
+                "third question",
+                "third answer",
+            ],
+        )
+        raw_message_texts = [
+            entry.message.text
+            for entry in state.entries
+            if entry.type == "message"
+        ]
+        self.assertIn("first question", raw_message_texts)
+        self.assertIn("first answer", raw_message_texts)
+        self.assertEqual(agent._core_runtime.messages, state.messages)
+        self.assertEqual(agent.last_input_token_count, 0)
+        self.assertFalse(agent._core_compaction_required)
+
+        restored, _ = self._make_agent([], registry)
+        self.assertTrue(await restored.restore_core_session(agent.session_id))
+        self.assertEqual(
+            [message.text for message in restored._core_runtime.messages],
+            [message.text for message in state.messages],
         )
 
     async def test_dynamic_system_prompt_refetched_per_turn(self) -> None:

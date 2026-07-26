@@ -13,6 +13,7 @@ from lion_code.core import (
     UserMessage,
 )
 from lion_code.observers import UsageObserver
+from lion_code.agent import Agent
 
 
 class TestUsageObserver(unittest.IsolatedAsyncioTestCase):
@@ -67,6 +68,52 @@ class TestUsageObserver(unittest.IsolatedAsyncioTestCase):
         snapshot.input_tokens = 999
 
         self.assertEqual(observer.totals.input_tokens, 5)
+
+    async def test_last_usage_tracks_latest_response_without_aliasing(self) -> None:
+        observer = UsageObserver()
+        await observer.handle(
+            MessageEndEvent(message=AssistantMessage(usage=Usage(input=5, output=3)))
+        )
+        await observer.handle(
+            MessageEndEvent(
+                message=AssistantMessage(usage=Usage(input=2, output=1, total_tokens=3))
+            )
+        )
+
+        latest = observer.last_usage
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest.total_tokens, 3)
+        latest.total_tokens = 999
+        self.assertEqual(observer.last_usage.total_tokens, 3)
+        self.assertIsNotNone(observer.last_response_at)
+        self.assertEqual(observer.response_count, 2)
+
+    async def test_agent_uses_latest_response_instead_of_session_totals(self) -> None:
+        observer = UsageObserver()
+        await observer.handle(
+            MessageEndEvent(
+                message=AssistantMessage(usage=Usage(input=100, output=20, total_tokens=120))
+            )
+        )
+        await observer.handle(
+            MessageEndEvent(
+                message=AssistantMessage(
+                    usage=Usage(input=7, output=3, cache_read=5, cache_write=2)
+                )
+            )
+        )
+        agent = Agent.__new__(Agent)
+        agent._usage_observer = observer
+
+        agent._sync_core_usage()
+
+        self.assertEqual(agent.total_input_tokens, 107)
+        self.assertEqual(agent.total_output_tokens, 23)
+        self.assertEqual(agent.last_input_token_count, 17)
+
+        agent.last_input_token_count = 0
+        agent._sync_core_usage()
+        self.assertEqual(agent.last_input_token_count, 0)
 
 
 if __name__ == "__main__":

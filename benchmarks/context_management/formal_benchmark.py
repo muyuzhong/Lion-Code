@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
-from unittest.mock import patch
 
 from openai import OpenAI
 
@@ -33,10 +32,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmark import (  # noqa: E402
-    Agent,
+    BenchmarkContext,
     Budget,
     EventCounts,
-    MICROCOMPACT_IDLE_S,
     Price,
     api_call,
     apply_pipeline,
@@ -55,7 +53,15 @@ from formal_tasks import (  # noqa: E402
     render_files,
     validate_fixture_catalog,
 )
-from lion_code.agent import _get_context_window  # noqa: E402
+from lion_code.context import fallback_context_window  # noqa: E402
+from lion_code.core import (  # noqa: E402
+    AgentMessage,
+    AssistantMessage,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
 
 
 DATASET_PATH = HERE / "formal_dataset.json"
@@ -235,28 +241,28 @@ def build_run_order(
     return order
 
 
-def make_tool_messages(task_id: str, turn: int | str, payload: str) -> list[dict[str, Any]]:
+def make_tool_messages(
+    task_id: str,
+    turn: int | str,
+    payload: str,
+) -> list[AgentMessage]:
     call_id = f"call_{task_id}_{turn}"
     return [
-        {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": call_id,
-                    "type": "function",
-                    "function": {
-                        "name": "read_file",
-                        "arguments": json.dumps(
-                            {"file_path": f"fixture://{task_id}", "turn": turn},
-                            ensure_ascii=False,
-                            separators=(",", ":"),
-                        ),
-                    },
-                }
+        AssistantMessage(
+            content=[
+                ToolCall(
+                    id=call_id,
+                    name="read_file",
+                    arguments={"file_path": f"fixture://{task_id}", "turn": turn},
+                )
             ],
-        },
-        {"role": "tool", "tool_call_id": call_id, "content": payload},
+            stop_reason="toolUse",
+        ),
+        ToolResultMessage(
+            tool_call_id=call_id,
+            tool_name="read_file",
+            content=[TextContent(text=payload)],
+        ),
     ]
 
 
@@ -310,33 +316,49 @@ def record_api_call(
 
 def maybe_compact(
     client: OpenAI,
-    agent: Agent,
+    context: BenchmarkContext,
     result: FormalResult,
     *,
     model: str,
     budget: Budget,
     turn: int,
 ) -> None:
-    if agent.last_input_token_count <= agent.effective_window * 0.85:
+    if not context.manager.should_compact(context.runtime_state()):
         return
     started = time.perf_counter()
     before_count = len(result.calls)
-    compact_with_metrics(client, agent, result, model=model, budget=budget, turn=turn)
+    compact_with_metrics(
+        client,
+        context,
+        result,
+        model=model,
+        budget=budget,
+        turn=turn,
+    )
     if len(result.calls) > before_count:
         result.calls[-1]["latency_seconds"] = time.perf_counter() - started
 
 
-def apply_policy(agent: Agent, policy: str, result: FormalResult) -> None:
+def apply_policy(
+    context: BenchmarkContext,
+    policy: str,
+    result: FormalResult,
+) -> None:
     if policy == "summary_only":
         return
     mapped = "eager_ablation" if policy == "managed_eager" else "managed"
-    apply_pipeline(agent, mapped, result.events)
+    apply_pipeline(context, mapped, result.events)
 
 
-def persist_if_managed(agent: Agent, policy: str, payload: str, result: FormalResult) -> str:
+def persist_if_managed(
+    context: BenchmarkContext,
+    policy: str,
+    payload: str,
+    result: FormalResult,
+) -> str:
     if policy == "summary_only":
         return payload
-    persisted = process_tool_result(agent, "read_file", payload)
+    persisted = process_tool_result(context, "read_file", payload)
     if persisted != payload:
         result.events.persisted_results += 1
     return persisted
@@ -356,8 +378,6 @@ def run_session(
     policy: str,
     repeat: int,
     model: str,
-    base_url: str,
-    api_key: str,
     budget: Budget,
     effective_window: int,
     run_id: str,
@@ -382,130 +402,119 @@ def run_session(
         "{\"status\":\"继续\"}。"
         "最终验收时必须返回 JSON 对象，不得调用工具或使用 Markdown 代码块。"
     )
-    agent = Agent(
-        model=model,
-        api_base=base_url,
-        api_key=api_key,
-        custom_system_prompt=system_prompt,
-    )
-    agent._openai_messages = [{"role": "system", "content": system_prompt}]
-    agent.effective_window = effective_window
 
     with tempfile.TemporaryDirectory(prefix="lion-formal-home-") as temp_home:
-        with patch("lion_code.agent.Path.home", return_value=Path(temp_home)):
-            for turn in range(1, int(task["turns"]) + 1):
-                user_seed = source_text + "\n" + fixture.failure_log
-                user_payload = expand_to_bytes(
-                    user_seed,
-                    int(task["user_payload_bytes"]),
-                    f"{task['id']}-user-r{repeat}-t{turn}",
-                )
-                user_text = (
-                    f"第 {turn} 轮：继续分析当前项目中的上下文管理缺陷。"
-                    f"{contract_for_turn(task, turn)}\n以下是本轮设计与排障记录：\n{user_payload}"
-                )
-                agent._openai_messages.append({"role": "user", "content": user_text})
-                maybe_compact(
-                    client,
-                    agent,
-                    result,
-                    model=model,
-                    budget=budget,
-                    turn=turn,
-                )
-
-                target_bytes = int(task["tool_payload_bytes"])
-                if turn in task.get("large_result_turns", []):
-                    target_bytes = int(task["large_tool_payload_bytes"])
-                prefix = (
-                    f"验收目标：{task['acceptance']}\n"
-                    f"失败日志：{fixture.failure_log}\n\n{fixture_text}\n\n"
-                )
-                tool_payload = fill_payload(
-                    prefix,
-                    source_text,
-                    target_bytes,
-                    f"{task['id']}-tool-r{repeat}-t{turn}",
-                )
-                tool_payload = persist_if_managed(agent, policy, tool_payload, result)
-                agent._openai_messages.extend(make_tool_messages(task["id"], turn, tool_payload))
-                agent._openai_messages.append(
-                    {
-                        "role": "user",
-                        "content": "计量点：只返回 {\"status\":\"继续\"}，不要给出修复。",
-                    }
-                )
-                apply_policy(agent, policy, result)
-
-                checkpoint_response = record_api_call(
-                    client,
-                    result,
-                    model=model,
-                    messages=agent._openai_messages,
-                    tools=READ_FILE_TOOL,
-                    max_tokens=32,
-                    budget=budget,
-                    kind="turn",
-                    turn=turn,
-                    effective_window=effective_window,
-                    response_format={"type": "json_object"},
-                    tool_choice="none",
-                )
-                usage = result.calls[-1]["usage"]
-                agent.last_input_token_count = usage["prompt_tokens"] + usage["completion_tokens"]
-                agent.last_api_call_time = time.time()
-                checkpoint_text = checkpoint_response.choices[0].message.content
-                agent._openai_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": checkpoint_text or '{"status":"继续"}',
-                    }
-                )
-                if cache_settle_seconds > 0:
-                    time.sleep(cache_settle_seconds)
-
-            agent._openai_messages.append(
-                {"role": "user", "content": "准备最终验收，请先压缩必要上下文，再重新读取待修复文件。"}
+        context = BenchmarkContext.create(
+            system_prompt=system_prompt,
+            effective_window=effective_window,
+            result_root=Path(temp_home) / "tool-results",
+        )
+        for turn in range(1, int(task["turns"]) + 1):
+            user_seed = source_text + "\n" + fixture.failure_log
+            user_payload = expand_to_bytes(
+                user_seed,
+                int(task["user_payload_bytes"]),
+                f"{task['id']}-user-r{repeat}-t{turn}",
             )
+            user_text = (
+                f"第 {turn} 轮：继续分析当前项目中的上下文管理缺陷。"
+                f"{contract_for_turn(task, turn)}\n以下是本轮设计与排障记录：\n{user_payload}"
+            )
+            context.messages.append(UserMessage(content=user_text))
             maybe_compact(
                 client,
-                agent,
+                context,
                 result,
                 model=model,
                 budget=budget,
-                turn=int(task["turns"]) + 1,
+                turn=turn,
             )
-            agent._openai_messages.extend(
-                make_tool_messages(task["id"], "final", fixture_text)
+
+            target_bytes = int(task["tool_payload_bytes"])
+            if turn in task.get("large_result_turns", []):
+                target_bytes = int(task["large_tool_payload_bytes"])
+            prefix = (
+                f"验收目标：{task['acceptance']}\n"
+                f"失败日志：{fixture.failure_log}\n\n{fixture_text}\n\n"
             )
-            allowed = sorted(fixture.allowed_files)
-            agent._openai_messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "现在完成修复。必须遵守此前会话中的全部契约。只返回一个 JSON 对象，"
-                        "格式为 {\"contract_check\": [\"已落实的早期契约\"], "
-                        "\"files\": {\"文件名\": \"完整文件内容\"}, \"note\": \"一句话说明\"}。"
-                        "先在 contract_check 中逐条核对早期契约，再给出文件内容。"
-                        f"只能修改这些文件：{', '.join(allowed)}。不要返回 Markdown。"
-                    ),
-                }
+            tool_payload = fill_payload(
+                prefix,
+                source_text,
+                target_bytes,
+                f"{task['id']}-tool-r{repeat}-t{turn}",
             )
-            apply_policy(agent, policy, result)
-            response = record_api_call(
+            tool_payload = persist_if_managed(context, policy, tool_payload, result)
+            context.messages.extend(make_tool_messages(task["id"], turn, tool_payload))
+            context.messages.append(
+                UserMessage(
+                    content="计量点：只返回 {\"status\":\"继续\"}，不要给出修复。"
+                )
+            )
+            apply_policy(context, policy, result)
+
+            checkpoint_response = record_api_call(
                 client,
                 result,
                 model=model,
-                messages=agent._openai_messages,
+                messages=context.openai_messages(),
                 tools=READ_FILE_TOOL,
-                max_tokens=4096,
+                max_tokens=32,
                 budget=budget,
-                kind="solution",
-                turn=int(task["turns"]) + 1,
+                kind="turn",
+                turn=turn,
                 effective_window=effective_window,
                 response_format={"type": "json_object"},
                 tool_choice="none",
             )
+            usage = result.calls[-1]["usage"]
+            context.last_prompt_tokens = usage["prompt_tokens"] + usage["completion_tokens"]
+            context.last_model_call_at = time.time()
+            checkpoint_text = checkpoint_response.choices[0].message.content
+            context.messages.append(
+                AssistantMessage(content=checkpoint_text or '{"status":"继续"}')
+            )
+            if cache_settle_seconds > 0:
+                time.sleep(cache_settle_seconds)
+
+        context.messages.append(
+            UserMessage(content="准备最终验收，请先压缩必要上下文，再重新读取待修复文件。")
+        )
+        maybe_compact(
+            client,
+            context,
+            result,
+            model=model,
+            budget=budget,
+            turn=int(task["turns"]) + 1,
+        )
+        context.messages.extend(make_tool_messages(task["id"], "final", fixture_text))
+        allowed = sorted(fixture.allowed_files)
+        context.messages.append(
+            UserMessage(
+                content=(
+                    "现在完成修复。必须遵守此前会话中的全部契约。只返回一个 JSON 对象，"
+                    "格式为 {\"contract_check\": [\"已落实的早期契约\"], "
+                    "\"files\": {\"文件名\": \"完整文件内容\"}, \"note\": \"一句话说明\"}。"
+                    "先在 contract_check 中逐条核对早期契约，再给出文件内容。"
+                    f"只能修改这些文件：{', '.join(allowed)}。不要返回 Markdown。"
+                )
+            )
+        )
+        apply_policy(context, policy, result)
+        response = record_api_call(
+            client,
+            result,
+            model=model,
+            messages=context.openai_messages(),
+            tools=READ_FILE_TOOL,
+            max_tokens=4096,
+            budget=budget,
+            kind="solution",
+            turn=int(task["turns"]) + 1,
+            effective_window=effective_window,
+            response_format={"type": "json_object"},
+            tool_choice="none",
+        )
 
     content = response.choices[0].message.content or ""
     try:
@@ -900,7 +909,7 @@ def initialize_payload(
             "mode": "OpenAI-compatible, non-thinking, paired formal benchmark",
             "dataset_version": dataset["version"],
             "dataset_sha256": sha256_file(DATASET_PATH),
-            "code_model_context_tokens": _get_context_window(args.model),
+            "code_model_context_tokens": fallback_context_window(args.model),
             "effective_window_tokens": int(dataset["effective_window_tokens"]),
             "provider_advertised_window_tokens": int(
                 dataset["provider_advertised_window_tokens"]
@@ -1017,8 +1026,6 @@ def main() -> int:
                 policy=entry["policy"],
                 repeat=int(entry["repeat"]),
                 model=args.model,
-                base_url=args.base_url,
-                api_key=api_key,
                 budget=budget,
                 effective_window=int(dataset["effective_window_tokens"]),
                 run_id=payload["metadata"]["run_id"],

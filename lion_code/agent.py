@@ -22,8 +22,18 @@ from .tools import (
     PermissionMode,
 )
 from .agent_runtime import LionAgentRuntime
+from .context import (
+    ContextAction,
+    ContextCompactor,
+    ContextManager,
+    ContextRuntimeState,
+    ModelLimitsResolver,
+    ProviderContextCompactor,
+    effective_window_tokens,
+    fallback_model_limits,
+)
 from .core.events import AgentEvent, MessageUpdateEvent
-from .core.messages import AgentMessage
+from .core.messages import AgentMessage, UserMessage
 from .core.provider_events import TextDeltaEvent
 from .observers import TerminalRenderer, UsageObserver
 from .providers.factory import create_provider
@@ -129,23 +139,6 @@ async def _with_retry(fn, max_retries: int = 3):
             await asyncio.sleep(delay)
 
 
-# ─── 模型上下文窗口 ─────────────────────────────────────────
-
-MODEL_CONTEXT = {
-    "claude-opus-4-6": 200000,
-    "claude-sonnet-4-6": 200000,
-    "claude-sonnet-4-20250514": 200000,
-    "claude-haiku-4-5-20251001": 200000,
-    "claude-opus-4-20250514": 200000,
-    "gpt-4o": 128000,
-    "gpt-4o-mini": 128000,
-}
-
-
-def _get_context_window(model: str) -> int:
-    return MODEL_CONTEXT.get(model, 200000)
-
-
 # ─── Thinking 能力检测 ──────────────────────────────────────
 
 
@@ -172,6 +165,15 @@ def _get_max_output_tokens(model: str) -> int:
     if any(x in m for x in ("opus-4", "sonnet-4", "haiku-4")):
         return 32000
     return 16384
+
+
+def _recent_context_boundary(messages: tuple[AgentMessage, ...]) -> int:
+    """保留最近一个完整用户轮次，避免把 ToolCall 与 ToolResult 拆开。"""
+
+    for index in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[index], UserMessage) and index > 0:
+            return index
+    return len(messages)
 
 
 # ─── Anthropic 工具格式转 OpenAI 格式 ───────────────────────
@@ -275,6 +277,9 @@ class Agent:
         tool_registry: ToolRegistry | None = None,
         tool_environment: ToolEnvironment | None = None,
         session_repository: SessionRepository | None = None,
+        context_manager: ContextManager | None = None,
+        context_compactor: ContextCompactor | None = None,
+        model_limits_resolver: ModelLimitsResolver | None = None,
         is_sub_agent: bool = False,
     ):
         self.permission_mode = permission_mode
@@ -293,13 +298,16 @@ class Agent:
         self.max_cost_usd = max_cost_usd
         self.max_turns = max_turns
         self.confirm_fn = confirm_fn
-        self.effective_window = _get_context_window(model) - 20000
+        self.effective_window = effective_window_tokens(fallback_model_limits(model))
         self.session_id = uuid.uuid4().hex[:8]
         self.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._session_repository = session_repository or SessionRepository()
         self._session_recorder: SessionRecorder | None = None
         self._session_write_tasks: set[asyncio.Task] = set()
         self._session_write_errors: list[BaseException] = []
+        self._model_limits_resolver = model_limits_resolver or ModelLimitsResolver()
+        self._resolved_model_limits_for: tuple[int, str] | None = None
+        self._last_synced_core_response_count = 0
 
         self.total_input_tokens = 0
         self.total_output_tokens = 0
@@ -389,6 +397,12 @@ class Agent:
                 AuditMiddleware(),
             ],
         )
+        self._context_manager = context_manager or ContextManager(
+            is_snippable_tool=self._is_snippable_tool
+        )
+        self._context_compactor = context_compactor
+        self._last_context_actions: tuple[ContextAction, ...] = ()
+        self._core_compaction_required = False
 
         # 根 Agent 拥有 MCP 生命周期；子 Agent 只接收共享环境的非拥有视图。
         self.tool_environment = tool_environment or ToolEnvironment(
@@ -484,6 +498,11 @@ class Agent:
                 prepare_context=self._prepare_core_context,
                 max_turns=self.max_turns,
             )
+            if self._context_compactor is None:
+                self._context_compactor = ProviderContextCompactor(
+                    provider=provider,
+                    get_model=lambda: self.model,
+                )
             self._reset_core_observers()
 
     # ─── Anthropic 前缀缓存 ──────────────────────────────────
@@ -590,8 +609,16 @@ class Agent:
     async def _prepare_core_context(
         self, messages: list[AgentMessage]
     ) -> list[AgentMessage]:
-        """薄适配器：先原样透传，后续逐步加入裁剪/预算/memory/压缩策略。"""
-        return messages
+        """只派生 Provider 投影，不改写 Harness、Session 或 UI。"""
+
+        self._sync_core_usage()
+        prepared = self._context_manager.prepare(
+            messages,
+            self._context_runtime_state(),
+        )
+        self._last_context_actions = prepared.actions
+        self._core_compaction_required = prepared.compaction_required
+        return list(prepared.messages)
 
     async def _capture_core_text(self, event: AgentEvent) -> None:
         """为 run_once/run 捕获助手文本增量到输出缓冲区（评测与子 Agent 依赖）。
@@ -607,7 +634,7 @@ class Agent:
             self._output_buffer.append(event.assistant_message_event.delta)
 
     def _sync_core_usage(self) -> None:
-        """把 UsageObserver 的累计值同步到 Agent 用量字段，供 /cost 与预算使用。"""
+        """同步累计账单字段，并用最近一次响应更新上下文利用率。"""
         if self._usage_observer is None:
             return
         totals = self._usage_observer.totals
@@ -615,7 +642,23 @@ class Agent:
         self.total_output_tokens = totals.output_tokens
         self.total_cache_read_tokens = totals.cache_read_tokens
         self.total_cache_creation_tokens = totals.cache_write_tokens
-        self.last_input_token_count = totals.input_tokens
+        last = self._usage_observer.last_usage
+        response_count = self._usage_observer.response_count
+        if response_count != getattr(self, "_last_synced_core_response_count", 0):
+            if last is None:
+                self.last_input_token_count = 0
+            elif last.total_tokens:
+                self.last_input_token_count = last.total_tokens
+            else:
+                self.last_input_token_count = (
+                    last.input
+                    + last.cache_read
+                    + last.cache_write
+                    + last.output
+                )
+            if self._usage_observer.last_response_at is not None:
+                self.last_api_call_time = self._usage_observer.last_response_at
+            self._last_synced_core_response_count = response_count
 
     def _reset_session_counters(self) -> None:
         self.total_input_tokens = 0
@@ -625,6 +668,11 @@ class Agent:
         self.last_input_token_count = 0
         self.current_turns = 0
         self.last_api_call_time = 0.0
+        self._last_synced_core_response_count = (
+            self._usage_observer.response_count
+            if self._usage_observer is not None
+            else 0
+        )
         self._last_stop_reason = None
 
     def _reset_core_observers(self) -> None:
@@ -636,6 +684,7 @@ class Agent:
         self._observer_unsubscribers.clear()
         self._terminal_renderer = TerminalRenderer()
         self._usage_observer = UsageObserver()
+        self._last_synced_core_response_count = 0
         self._session_recorder = SessionRecorder(
             session_id=self.session_id,
             model=self.model,
@@ -658,8 +707,73 @@ class Agent:
 
     async def _ensure_core_session_ready(self) -> None:
         await self._flush_session_writes()
+        await self._resolve_core_model_limits()
         if self._session_recorder is not None:
             await self._session_recorder.initialize()
+
+    async def _resolve_core_model_limits(self) -> None:
+        if self._core_runtime is None:
+            return
+        key = (id(self._core_runtime.provider), self.model)
+        if self._resolved_model_limits_for == key:
+            return
+        limits = await self._model_limits_resolver.resolve(
+            self._core_runtime.provider,
+            self.model,
+        )
+        self.effective_window = effective_window_tokens(limits)
+        self._resolved_model_limits_for = key
+
+    def _context_runtime_state(self) -> ContextRuntimeState:
+        return ContextRuntimeState(
+            effective_window_tokens=self.effective_window,
+            last_prompt_tokens=self.last_input_token_count,
+            last_model_call_at=self.last_api_call_time or None,
+            now=time.time(),
+        )
+
+    async def _compact_core_context_if_needed(self) -> bool:
+        """在新用户轮次前写入 CompactionEntry，并重放新的活跃上下文。"""
+
+        if (
+            self._core_runtime is None
+            or self._session_recorder is None
+            or self._context_compactor is None
+        ):
+            return False
+
+        self._sync_core_usage()
+        if not self._context_manager.should_compact(self._context_runtime_state()):
+            return False
+
+        messages = self._core_runtime.messages
+        entry_ids = await self._session_recorder.context_entry_ids()
+        if len(entry_ids) != len(messages):
+            raise RuntimeError("Session context does not match active Harness messages")
+
+        boundary = _recent_context_boundary(messages)
+        replaced_ids = list(entry_ids[:boundary])
+        summary_messages = tuple(messages[:boundary])
+        if not replaced_ids:
+            replaced_ids = list(entry_ids)
+            summary_messages = messages
+        if not replaced_ids:
+            return False
+
+        summary = await self._context_compactor.summarize(summary_messages)
+        await self._session_recorder.record_compaction(
+            summary=summary,
+            replaces_entry_ids=replaced_ids,
+        )
+        state = await self._session_repository.load(self.session_id)
+        if state is None:
+            raise RuntimeError("Session disappeared after compaction")
+
+        await self._core_runtime.replace_active_context(state.messages)
+        self.last_input_token_count = 0
+        self._last_context_actions = ()
+        self._core_compaction_required = False
+        return True
 
     async def _apply_pending_core_context_reset(self) -> bool:
         """把 Plan 批准结果写成 Compaction，再从该摘要继续 Core Loop。"""
@@ -679,6 +793,10 @@ class Agent:
         if state is None or len(state.messages) != 1:
             raise RuntimeError("Compaction replay did not produce one active context message")
         await self._core_runtime.reset_active_context(state.messages[0].text)
+        self._sync_core_usage()
+        self.last_input_token_count = 0
+        self._last_context_actions = ()
+        self._core_compaction_required = False
         self._pending_core_context_reset = None
         return True
 
@@ -784,7 +902,9 @@ class Agent:
         previous_anthropic_client = self._anthropic_client
         if model:
             self.model = model
-            self.effective_window = _get_context_window(model) - 20000
+            self.effective_window = effective_window_tokens(fallback_model_limits(model))
+            self._resolved_model_limits_for = None
+            self._core_compaction_required = False
             self._thinking_mode = self._resolve_thinking_mode()
             if self._core_runtime is not None:
                 self._core_runtime.set_model(model)
@@ -912,10 +1032,14 @@ class Agent:
             # 新路径接管：消息由 AgentHarness 管理，SessionRecorder 在 MessageEnd
             # 时逐条落盘，退出前不再依赖整体快照 _auto_save()。
             await self._ensure_core_session_ready()
+            await self._compact_core_context_if_needed()
             await self._core_runtime.prompt(user_message)
             while await self._apply_pending_core_context_reset():
                 await self._core_runtime.continue_()
             self._sync_core_usage()
+            self._core_compaction_required = self._context_manager.should_compact(
+                self._context_runtime_state()
+            )
             return
 
         if self._openai_client is None and self._anthropic_client is None:
@@ -1044,6 +1168,8 @@ class Agent:
         self.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self.tool_context.session_id = self.session_id
         self._pending_core_context_reset = None
+        self._core_compaction_required = False
+        self._last_context_actions = ()
         if self.permission_mode == "plan":
             self._plan_file_path = self._generate_plan_file_path()
             self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt()
@@ -1537,11 +1663,16 @@ class Agent:
         self.session_id = session_id
         self.tool_context.session_id = session_id
         self._pending_core_context_reset = None
+        self._core_compaction_required = False
+        self._last_context_actions = ()
         self._core_runtime.harness.clear_queues()
         self._core_runtime.harness.replace_messages(state.messages)
         if state.model is not None:
             self.model = state.model
-            self.effective_window = _get_context_window(self.model) - 20000
+            self.effective_window = effective_window_tokens(
+                fallback_model_limits(self.model)
+            )
+            self._resolved_model_limits_for = None
             self._core_runtime.set_model(self.model)
         if state.thinking_level is not None:
             self._thinking_mode = state.thinking_level
