@@ -16,6 +16,14 @@ from rich.console import Console
 
 console = Console(highlight=False)
 
+# 非 UTF-8 控制台（如 Windows GBK）下，盲文/emoji 等字符会让 sys.stdout.write
+# 抛 UnicodeEncodeError。保留控制台编码（中文仍正常显示），仅把无法编码的字符
+# 替换为 ?，避免 spinner 与流式文本崩溃。
+try:
+    sys.stdout.reconfigure(errors="replace")
+except (AttributeError, ValueError):
+    pass
+
 # ─── 事件汇（替代前端接入点）─────────────────────────────────
 
 UIEventSink = Callable[[str, dict], None]
@@ -161,6 +169,13 @@ def print_info(msg: str) -> None:
 # ─── 等待动画 ───────────────────────────────────────────────
 
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+_SPINNER_FRAMES_ASCII = ["|", "/", "-", "\\"]
+
+
+def _spinner_frames() -> list[str]:
+    """UTF-8 控制台用盲文帧；其他编码（如 GBK）退化为 ASCII 帧以保证动画可见。"""
+    encoding = (getattr(sys.stdout, "encoding", "") or "").lower()
+    return SPINNER_FRAMES if encoding in ("utf-8", "utf8") else _SPINNER_FRAMES_ASCII
 
 _spinner_thread: threading.Thread | None = None
 _spinner_stop = threading.Event()
@@ -176,13 +191,14 @@ def start_spinner(label: str = "Thinking") -> None:
     _spinner_stop.clear()
 
     def _run() -> None:
+        frames = _spinner_frames()
         frame = 0
-        sys.stdout.write(f"\n  {SPINNER_FRAMES[0]} {label}...")
+        sys.stdout.write(f"\n  {frames[0]} {label}...")
         sys.stdout.flush()
         while not _spinner_stop.is_set():
             time.sleep(0.08)
-            frame = (frame + 1) % len(SPINNER_FRAMES)
-            sys.stdout.write(f"\r  {SPINNER_FRAMES[frame]} {label}...")
+            frame = (frame + 1) % len(frames)
+            sys.stdout.write(f"\r  {frames[frame]} {label}...")
             sys.stdout.flush()
 
     _spinner_thread = threading.Thread(target=_run, daemon=True)
