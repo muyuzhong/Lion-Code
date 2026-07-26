@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api-base", default=None, help="OpenAI-compatible API base URL")
     parser.add_argument("--resume", action="store_true", help="Resume last session")
     parser.add_argument("--repl", action="store_true", help="Use the plain REPL instead of the default TUI")
+    parser.add_argument("--legacy-tui", action="store_true", help="Use the legacy TUI instead of the new one")
     parser.add_argument("--max-cost", type=float, default=None, help="Max USD spend")
     parser.add_argument("--max-turns", type=int, default=None, help="Max agentic turns")
     parser.add_argument("--help", "-h", action="store_true", help="Show help")
@@ -340,9 +341,17 @@ Examples:
 
     if use_tui:
         # TUI 内自带输入循环，one-shot prompt 不适用。
-        from .legacy_tui import run_tui
+        # 新 TUI 面向 Core Runtime 路径;未启用(LION_CORE_RUNTIME!=1 或
+        # Anthropic 后端)或显式 --legacy-tui 时回退旧 TUI。
+        if agent.core_runtime is not None and not args.legacy_tui:
+            from .application.session import LionCodingSession
+            from .tui.app import run_tui_app
 
-        run_tui(agent, resume=args.resume)
+            run_tui_app(LionCodingSession(agent), resume=args.resume)
+        else:
+            from .legacy_tui import run_tui
+
+            run_tui(agent, resume=args.resume)
         return
 
     async def run_cli() -> None:

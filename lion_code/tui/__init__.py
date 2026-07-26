@@ -5,6 +5,7 @@
 """
 
 from .adapter import TuiEventAdapter
+from .app import LionTuiApp, run_tui_app
 from .autocomplete import CompletionOption
 from .config import (
     BUILTIN_TUI_THEME_NAMES,
@@ -42,6 +43,7 @@ __all__ = [
     "CompactSessionInfo",
     "CompletionOption",
     "HIGH_CONTRAST_THEME",
+    "LionTuiApp",
     "SessionSidebar",
     "StreamingTranscriptMessageWidget",
     "TAU_DARK_THEME",
@@ -62,6 +64,7 @@ __all__ = [
     "render_chat_item",
     "render_compact_session_info",
     "render_session_sidebar",
+    "run_tui_app",
     "save_tui_settings",
     "transcript_item_selection_text",
     "tui_settings_path",
