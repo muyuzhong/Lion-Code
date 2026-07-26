@@ -41,11 +41,17 @@ from lion_code.application.commands import CommandResult
 from lion_code.application.session import LionCodingSession
 from lion_code.config import save_api_config
 
+from .autocomplete import CompletionState, build_completion_state
 from .config import TuiSettings, load_tui_settings, save_tui_settings
+from .prompt_input import (
+    COMPLETION_MAX_VISIBLE_LINES,
+    PromptInput,
+    text_end_location,
+)
 from .state import TuiState
 from .adapter import TuiEventAdapter
 from .themes import TuiTheme, available_tui_theme_names, get_tui_theme
-from .widgets import TranscriptView
+from .widgets import TranscriptView, render_completion_suggestions
 
 
 def _textual_theme_for_tui_theme(name: str) -> Theme:
@@ -106,6 +112,23 @@ def _theme_css_variables(theme: TuiTheme) -> dict[str, str]:
         "footer-key-foreground": theme.accent,
         "footer-item-background": theme.chrome_background,
     }
+
+
+def _visible_completion_state(
+    state: CompletionState, *, max_items: int
+) -> CompletionState:
+    """以选中项可见为前提裁剪补全窗口。
+
+    ponytail: 简单按条目数开窗;上游按渲染行数(含分类头/换行)精确测量,
+    如果长条目导致建议框溢出再迁上游 _visible_completion_state。
+    """
+    if not state.items or len(state.items) <= max_items:
+        return state
+    start = max(0, min(state.selected_index - max_items // 2, len(state.items) - max_items))
+    return CompletionState(
+        items=state.items[start : start + max_items],
+        selected_index=state.selected_index - start,
+    )
 
 
 class UiSinkEvent(Message):
@@ -261,6 +284,64 @@ class ModelScreen(ModalScreen[dict | None]):
         )
 
 
+class ThemePickerScreen(ModalScreen[str | None]):
+    """主题选择列表(vendored 自上游,Claude Code 式可选列表)。"""
+
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+        ("up", "cursor_up", "Up"),
+        ("down", "cursor_down", "Down"),
+        ("enter", "select_cursor", "Select"),
+    ]
+
+    def __init__(self, *, current_theme: str, theme_names: tuple[str, ...]) -> None:
+        super().__init__()
+        self.current_theme = current_theme
+        self.theme_names = theme_names
+
+    def compose(self) -> ComposeResult:
+        yield VerticalScroll(
+            Label("Theme"),
+            ListView(
+                *[
+                    ListItem(
+                        Label(
+                            ("● " if name == self.current_theme else "  ") + name,
+                            markup=False,
+                        )
+                    )
+                    for name in self.theme_names
+                ],
+                id="theme-picker-list",
+            ),
+            Label("Enter selects · Escape closes", classes="dim"),
+            id="dialog",
+        )
+
+    def on_mount(self) -> None:
+        theme_list = self.query_one("#theme-picker-list", ListView)
+        try:
+            theme_list.index = self.theme_names.index(self.current_theme)
+        except ValueError:
+            theme_list.index = 0
+        theme_list.focus()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        self.dismiss(self.theme_names[event.index])
+
+    def action_cursor_up(self) -> None:
+        self.query_one("#theme-picker-list", ListView).action_cursor_up()
+
+    def action_cursor_down(self) -> None:
+        self.query_one("#theme-picker-list", ListView).action_cursor_down()
+
+    def action_select_cursor(self) -> None:
+        self.query_one("#theme-picker-list", ListView).action_select_cursor()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class LionTuiApp(App):
     """流式对话 + 会话侧边栏 + 确认/审批/模型三 Modal。"""
 
@@ -290,6 +371,18 @@ class LionTuiApp(App):
         background: $surface;
         max-height: 80%;
     }
+    #autocomplete {
+        height: auto;
+        max-height: 17;
+        background: $panel;
+        padding: 0 1;
+        display: none;
+    }
+    #prompt {
+        height: auto;
+        max-height: 8;
+        border: tall $primary;
+    }
     """
 
     BINDINGS = [
@@ -314,9 +407,10 @@ class LionTuiApp(App):
         self._resume_on_mount = resume
         self._subagent_depth = 0
         self._status_info = ""
+        self._completion_state = CompletionState()
         keys = self.settings.keybindings
         self._bindings.bind(keys.quit, "quit_app", "quit", priority=True)
-        self._bindings.bind(keys.cancel, "abort", "abort", priority=True)
+        self._bindings.bind(keys.cancel, "cancel", "cancel", priority=True)
         # widgets 的 DEFAULT_CSS 引用 $tau-* 主题变量,挂载前必须注册。
         for name in available_tui_theme_names():
             self.register_theme(_textual_theme_for_tui_theme(name))
@@ -331,7 +425,8 @@ class LionTuiApp(App):
             yield ListView(id="sessions")
             yield TranscriptView(id="transcript")
         yield Static("", id="status")
-        yield Input(placeholder="Message…   /model /clear /plan /cost /compact /theme · Esc aborts")
+        yield Static("", id="autocomplete")
+        yield PromptInput(id="prompt", tui_keybindings=self.settings.keybindings)
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -346,7 +441,7 @@ class LionTuiApp(App):
             except Exception as error:
                 self._notice(f"Session restore failed: {error}", role="error")
         await self._reload_sessions()
-        self.query_one(Input).focus()
+        self._prompt().focus()
         if not self.session.api_configured:
             self._notice("API 未配置 — 用 /model 设置模型与密钥")
             self.call_after_refresh(self.action_model)
@@ -358,20 +453,164 @@ class LionTuiApp(App):
     def _set_subtitle(self) -> None:
         self.sub_title = f"{self.session.model} | {self.session.permission_mode}"
 
-    # ─── 会话事件流 ──────────────────────────────────────────
+    # ─── 提示输入 / 补全 ─────────────────────────────────────
 
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
-        text = event.value.strip()
-        event.input.clear()
+    def _prompt(self) -> PromptInput:
+        return self.query_one("#prompt", PromptInput)
+
+    def on_text_area_changed(self, event) -> None:
+        if event.text_area.id != "prompt":
+            return
+        self._completion_state = self._build_completion_state(event.text_area.text)
+        self._refresh_completions()
+
+    def _build_completion_state(self, text: str) -> CompletionState:
+        return build_completion_state(
+            text,
+            command_registry=self.session.command_registry,
+            skills=self.session.skills,
+            prompt_templates=self.session.prompt_templates,
+            theme_names=available_tui_theme_names(),
+            cwd=self.session.cwd,
+        )
+
+    def _refresh_completions(self) -> None:
+        suggestions = self.query_one("#autocomplete", Static)
+        suggestions.display = bool(self._completion_state.items)
+        suggestions.update(
+            render_completion_suggestions(
+                _visible_completion_state(
+                    self._completion_state, max_items=COMPLETION_MAX_VISIBLE_LINES
+                ),
+                theme=self._tui_theme,
+            )
+        )
+        self._sync_prompt_footer()
+
+    def _sync_prompt_footer(self) -> None:
+        if self._completion_state.items:
+            mode = "completion"
+        elif self.session.is_running:
+            mode = "running"
+        else:
+            mode = "normal"
+        self._prompt().set_footer_mode(mode)
+
+    def _apply_selected_completion(self, value: str) -> str | None:
+        item = self._completion_state.selected
+        if item is None:
+            return None
+        return item.apply(value)
+
+    def _clear_completions(self) -> None:
+        self._completion_state = CompletionState()
+        self._refresh_completions()
+
+    # ─── 补全/提交动作(PromptInput 经 CompletionActionTarget 委托)──
+
+    def action_accept_completion(self) -> None:
+        if isinstance(self.screen, ThemePickerScreen):
+            self.screen.action_select_cursor()
+            return
+        prompt = self._prompt()
+        applied = self._apply_selected_completion(prompt.text)
+        if applied is None:
+            return
+        prompt.text = applied
+        prompt.move_cursor(text_end_location(applied))
+        self._completion_state = self._build_completion_state(prompt.text)
+        self._refresh_completions()
+
+    def action_completion_next(self) -> None:
+        if isinstance(self.screen, ThemePickerScreen):
+            self.screen.action_cursor_down()
+            return
+        if not self._completion_state.items:
+            self._prompt().action_cursor_down()
+            return
+        self._completion_state = self._completion_state.select_next()
+        self._refresh_completions()
+
+    def action_completion_previous(self) -> None:
+        if isinstance(self.screen, ThemePickerScreen):
+            self.screen.action_cursor_up()
+            return
+        if not self._completion_state.items:
+            self._prompt().action_cursor_up()
+            return
+        self._completion_state = self._completion_state.select_previous()
+        self._refresh_completions()
+
+    def action_cancel(self) -> None:
+        """Esc:先关补全,再取消运行。"""
+        if self._completion_state.items:
+            self._clear_completions()
+            return
+        if self.session.is_running:
+            self.session.cancel()
+            self._notice("(interrupted)")
+
+    def action_edit_queued_message(self) -> bool:
+        return False
+
+    def action_open_command_palette(self) -> None:
+        """把 `/` 写进空输入框即弹出全部命令补全。"""
+        prompt = self._prompt()
+        if not prompt.text:
+            prompt.text = "/"
+            prompt.move_cursor((0, 1))
+
+    def action_open_session_picker(self) -> None:
+        self.action_toggle_sidebar()
+
+    def action_cycle_thinking(self) -> None:
+        self._notice("thinking 档位切换将在阶段 4 提供")
+
+    def action_cycle_model(self) -> None:
+        self.action_model()
+
+    def action_toggle_tool_results(self) -> None:
+        self.state.show_tool_results = not self.state.show_tool_results
+        self._refresh_transcript()
+
+    def action_toggle_thinking(self) -> None:
+        self.state.show_thinking = not self.state.show_thinking
+        self._refresh_transcript()
+
+    async def action_submit_prompt(self) -> None:
+        prompt = self._prompt()
+        text = prompt.text_for_submission().strip()
+        prompt.action_clear_prompt()
+        self._clear_completions()
         if not text:
             return
         if text.startswith("/") and not text.startswith("/skill:"):
             self._dispatch(self.session.handle_command(text))
             return
         if self.session.is_running:
-            self._notice("…agent is working — Esc to abort")
+            # 运行中 Enter = steer 入队。
+            self.run_worker(self._queue_message(text, "steer"), group="queue")
             return
         self.run_worker(self._run_prompt(text), exclusive=True, group="chat")
+
+    async def action_submit_follow_up(self) -> None:
+        prompt = self._prompt()
+        text = prompt.text_for_submission().strip()
+        if not text:
+            return
+        prompt.action_clear_prompt()
+        self._clear_completions()
+        if self.session.is_running:
+            self.run_worker(self._queue_message(text, "follow_up"), group="queue")
+        else:
+            self.run_worker(self._run_prompt(text), exclusive=True, group="chat")
+
+    async def _queue_message(self, text: str, behavior: str) -> None:
+        async for event in self.session.prompt(text, streaming_behavior=behavior):  # type: ignore[arg-type]
+            self.adapter.apply(event)
+        self._notice(f"queued ({behavior}): {text[:60]}")
+
+    # ─── 会话事件流 ──────────────────────────────────────────
 
     async def _run_prompt(self, text: str) -> None:
         transcript = self._transcript()
@@ -387,7 +626,7 @@ class LionTuiApp(App):
         finally:
             self._set_status(running=False)
             await self._reload_sessions()
-            self.query_one(Input).focus()
+            self._prompt().focus()
 
     def _refresh_transcript(self) -> None:
         self._transcript().update_from_state(self.state, theme=self._tui_theme)
@@ -424,7 +663,13 @@ class LionTuiApp(App):
         elif result.theme is not None:
             self._switch_theme(result.theme)
         elif result.theme_picker_requested:
-            self._notice("themes: " + ", ".join(available_tui_theme_names()))
+            self.push_screen(
+                ThemePickerScreen(
+                    current_theme=self.settings.theme,
+                    theme_names=available_tui_theme_names(),
+                ),
+                lambda name: self._switch_theme(name) if name else None,
+            )
         elif result.message:
             self._notice(result.message)
 
@@ -520,11 +765,6 @@ class LionTuiApp(App):
     def action_quit_app(self) -> None:
         self.exit()
 
-    def action_abort(self) -> None:
-        if self.session.is_running:
-            self.session.cancel()
-            self._notice("(interrupted)")
-
     def action_toggle_sidebar(self) -> None:
         sidebar = self.query_one("#sessions")
         sidebar.display = not sidebar.display
@@ -578,6 +818,7 @@ class LionTuiApp(App):
         if self._status_info:
             parts.append(self._status_info)
         self.query_one("#status", Static).update("   ".join(parts))
+        self._sync_prompt_footer()
 
 
 def run_tui_app(session: LionCodingSession, *, resume: bool = False) -> None:

@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import Input, ListView
+from textual.widgets import ListView
 
 from application.test_coding_session import (
     _echo_lion_tool,
@@ -28,6 +28,7 @@ from lion_code.application.session import LionCodingSession
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tui.app import LionTuiApp
+from lion_code.tui.prompt_input import PromptInput
 from lion_code.ui import set_sink
 
 
@@ -61,8 +62,8 @@ def app_factory():
 
 
 async def _submit(app: LionTuiApp, pilot, text: str) -> None:
-    prompt = app.query_one(Input)
-    prompt.value = text
+    prompt = app.query_one("#prompt", PromptInput)
+    prompt.text = text
     prompt.focus()
     await pilot.press("enter")
 
@@ -130,6 +131,48 @@ async def test_clear_command_resets_transcript(app_factory) -> None:
     ]
     assert conversation == []
     assert app.session.messages == ()
+
+
+@pytest.mark.asyncio
+async def test_slash_opens_command_completions(app_factory) -> None:
+    from textual.widgets import Static
+
+    app = app_factory([])
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", PromptInput)
+        prompt.focus()
+        await pilot.press("slash")
+        await pilot.pause()
+
+        displays = [item.display for item in app._completion_state.items]
+        assert "/model" in displays
+        assert "/theme" in displays
+        assert app.query_one("#autocomplete", Static).display
+
+        # Tab 接受选中项写回输入框,Esc 关闭补全。
+        await pilot.press("tab")
+        await pilot.pause()
+        assert prompt.text.startswith("/") and len(prompt.text) > 1
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not app._completion_state.items
+
+
+@pytest.mark.asyncio
+async def test_completion_navigation_moves_selection(app_factory) -> None:
+    app = app_factory([])
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", PromptInput)
+        prompt.focus()
+        await pilot.press("slash")
+        await pilot.pause()
+        first = app._completion_state.selected_index
+        await pilot.press("down")
+        await pilot.pause()
+        assert app._completion_state.selected_index == first + 1
+        await pilot.press("up")
+        await pilot.pause()
+        assert app._completion_state.selected_index == first
 
 
 @pytest.mark.asyncio

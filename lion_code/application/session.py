@@ -28,6 +28,8 @@ from lion_code.core.events import AgentEndEvent, AgentEvent
 from lion_code.core.messages import AgentMessage
 
 from .commands import CommandRegistry, CommandResult, create_default_command_registry
+from .prompt_templates import PromptTemplate
+from .skills import Skill
 from .events import (
     AgentSettledEvent,
     LionSessionEvent,
@@ -57,6 +59,7 @@ class LionCodingSession:
         self._runtime = runtime
         self._running = False
         self._command_registry = create_default_command_registry()
+        self._skills_cache: tuple[Skill, ...] | None = None
 
     # ─── 环境 / 身份 ─────────────────────────────────────────
 
@@ -195,6 +198,31 @@ class LionCodingSession:
     def configure_provider(self, **kwargs: Any) -> None:
         """运行时切换模型/凭证,直接透传 Agent.configure_api。"""
         self._agent.configure_api(**kwargs)
+
+    # ─── 技能 / 模板视图(补全与 picker 消费)─────────────────
+
+    @property
+    def skills(self) -> tuple[Skill, ...]:
+        """用户可调用 Skill 的只读视图;首次访问后缓存(发现要扫盘)。"""
+        if self._skills_cache is None:
+            from lion_code.skills import discover_skills
+
+            self._skills_cache = tuple(
+                Skill(
+                    name=definition.name,
+                    path=Path(definition.skill_dir) if definition.skill_dir else self.cwd,
+                    content=definition.prompt_template,
+                    description=definition.description or None,
+                )
+                for definition in discover_skills()
+                if definition.user_invocable
+            )
+        return self._skills_cache
+
+    @property
+    def prompt_templates(self) -> tuple[PromptTemplate, ...]:
+        """Prompt template 发现按迁移计划在阶段 4 落地;当前恒为空。"""
+        return ()
 
     # ─── 命令 ────────────────────────────────────────────────
 
