@@ -788,7 +788,7 @@ class Agent:
         )
         self._last_stop_reason = None
 
-    def _reset_core_observers(self) -> None:
+    def _reset_core_observers(self, *, preserve_usage: bool = False) -> None:
         """按 Usage → Session → Renderer 顺序重建 Core 观察器。"""
         if self._core_runtime is None:
             return
@@ -796,8 +796,9 @@ class Agent:
             unsubscribe()
         self._observer_unsubscribers.clear()
         self._terminal_renderer = TerminalRenderer()
-        self._usage_observer = UsageObserver()
-        self._last_synced_core_response_count = 0
+        if not preserve_usage or self._usage_observer is None:
+            self._usage_observer = UsageObserver()
+            self._last_synced_core_response_count = 0
         if self.is_sub_agent:
             # 子 Agent 不落盘会话:输出经文本捕获返回父级,避免污染会话列表。
             self._session_recorder = None
@@ -1145,7 +1146,7 @@ class Agent:
                 get_model=lambda: self.model,
             )
             self._resolved_model_limits_for = None
-            self._reset_core_observers()
+            self._reset_core_observers(preserve_usage=True)
             self._schedule_background_operation(previous_runtime.aclose)
 
         # 放在 Provider 重建之后,确保查询服务拿到的是新 Provider。

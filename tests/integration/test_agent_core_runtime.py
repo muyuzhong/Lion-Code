@@ -688,6 +688,33 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         await agent.close()
         self.assertTrue(new_fake.closed)
 
+    async def test_configure_api_keeps_usage_for_cost_budget(self) -> None:
+        registry = ToolRegistry()
+        registry.register(_echo_lion_tool())
+        agent, _old_fake = self._make_agent(
+            [
+                _tooluse_event("c1", usage=Usage(input=1_000)),
+                _stop_event("first done"),
+            ],
+            registry,
+            max_cost_usd=0.0045,
+        )
+        await agent.chat("first")
+
+        new_fake = FakeProvider(
+            [_tooluse_event("c2", usage=Usage(input=1_000))]
+        )
+        with patch("lion_code.agent.create_provider", return_value=new_fake):
+            agent.configure_api(api_key="new-key")
+
+        await agent.chat("second")
+
+        self.assertEqual(agent.total_input_tokens, 2_000)
+        self.assertEqual(agent._last_stop_reason, "max_cost")
+        self.assertEqual(new_fake.call_count, 1)
+        self.assertTrue(agent._core_runtime.messages[-1].is_error)
+        self.assertIn("Cost limit reached", agent._core_runtime.messages[-1].text)
+
     async def test_anthropic_backend_routes_to_core_runtime(self) -> None:
         """Anthropic 后端(无 api_base)同样走 Core Runtime,不再落 legacy。"""
         fake = FakeProvider([_stop_event("done")])
