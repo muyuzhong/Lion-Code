@@ -134,6 +134,27 @@ async def test_clear_command_resets_transcript(app_factory) -> None:
 
 
 @pytest.mark.asyncio
+async def test_slash_command_is_not_dispatched_while_session_runs(app_factory) -> None:
+    app = app_factory([])
+    async with app.run_test() as pilot:
+        app.session._running = True
+        try:
+            with patch.object(
+                app.session,
+                "handle_command",
+                wraps=app.session.handle_command,
+            ) as handle_command:
+                await _submit(app, pilot, "/clear")
+                await pilot.pause()
+                handle_command.assert_not_called()
+        finally:
+            app.session._running = False
+
+    status_texts = [item.text for item in app.state.items if item.role == "status"]
+    assert any("会话运行中" in text for text in status_texts)
+
+
+@pytest.mark.asyncio
 async def test_slash_opens_command_completions(app_factory) -> None:
     from textual.widgets import Static
 

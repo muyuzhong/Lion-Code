@@ -854,12 +854,15 @@ class LionTuiApp(App):
         self._clear_completions()
         if not text:
             return
-        if text.startswith("/") and not text.startswith("/skill:"):
-            self._dispatch(self.session.handle_command(text))
-            return
         if self.session.is_running:
+            if text.startswith("/") and not text.startswith("/skill:"):
+                self._notice("会话运行中，取消当前任务后再执行命令")
+                return
             # 运行中 Enter = steer 入队。
             self.run_worker(self._queue_message(text, "steer"), group="queue")
+            return
+        if text.startswith("/") and not text.startswith("/skill:"):
+            self._dispatch(self.session.handle_command(text))
             return
         self.run_worker(self._run_prompt(text), exclusive=True, group="chat")
 
