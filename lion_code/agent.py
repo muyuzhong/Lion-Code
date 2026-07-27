@@ -37,6 +37,13 @@ from .core.messages import AgentMessage, AssistantMessage, TextContent, UserMess
 from .core.provider_events import TextDeltaEvent
 from .observers import TerminalRenderer, UsageObserver
 from .providers.factory import create_provider
+from .providers.thinking import (
+    ThinkingLevel,
+    coerce_thinking_level,
+    next_thinking_level,
+    normalize_thinking_level,
+    provider_thinking_levels,
+)
 from .memory import (
     start_memory_prefetch,
     format_memories_for_injection,
@@ -352,6 +359,9 @@ class Agent:
 
         # 根据用户开关和模型能力解析实际 Thinking 模式。
         self._thinking_mode = self._resolve_thinking_mode()
+        # Core 路径采用 Tau 6 档词汇(off..xhigh);由 ``thinking`` 开关推导初始档,
+        # 运行中经 set_thinking_level/cycle_thinking_level 调整并热重建 Provider。
+        self._thinking_level: ThinkingLevel = "medium" if thinking else "off"
 
         # 子 Agent 使用缓冲区返回结果；主 Agent 直接输出到终端。
         self._output_buffer: list[str] | None = None
@@ -506,6 +516,7 @@ class Agent:
                 ),
                 api_base=api_base,
                 anthropic_base_url=anthropic_base_url,
+                thinking_level=self._thinking_level,
             )
             self._core_runtime = LionAgentRuntime(
                 provider=provider,
@@ -806,7 +817,7 @@ class Agent:
             self._session_recorder = SessionRecorder(
                 session_id=self.session_id,
                 model=self.model,
-                thinking_level=self._thinking_mode,
+                thinking_level=self._thinking_level,
                 cwd=self.tool_context.cwd,
                 storage=self._session_repository.storage_for(self.session_id),
             )
@@ -1015,7 +1026,9 @@ class Agent:
         分开存储，协议间不做有损转换）；同协议换 key/换模型保留历史。
         """
         previous_model = self.model
-        previous_thinking_level = self._thinking_mode
+        previous_thinking_level = (
+            self._thinking_level if self._use_core_runtime else self._thinking_mode
+        )
         previous_use_openai = self.use_openai
         previous_openai_client = self._openai_client
         previous_anthropic_client = self._anthropic_client
@@ -1115,6 +1128,7 @@ class Agent:
                         else str(getattr(self._openai_client, "base_url", "") or "")
                         or None
                     ),
+                    thinking_level=self._thinking_level,
                 )
             else:
                 provider = create_provider(
@@ -1129,6 +1143,7 @@ class Agent:
                         else str(getattr(self._anthropic_client, "base_url", "") or "")
                         or None
                     ),
+                    thinking_level=self._thinking_level,
                 )
             previous_runtime = self._core_runtime
             messages = previous_runtime.messages
@@ -1154,13 +1169,16 @@ class Agent:
             self._build_core_memory_query_service()
         )
 
+        current_thinking_level = (
+            self._thinking_level if self._use_core_runtime else self._thinking_mode
+        )
         recorder = self._session_recorder
         if recorder is not None and (
             self.model != previous_model
-            or self._thinking_mode != previous_thinking_level
+            or current_thinking_level != previous_thinking_level
         ):
             model_value = self.model
-            thinking_value = self._thinking_mode
+            thinking_value = current_thinking_level
 
             async def persist_configuration() -> object:
                 if model_value != previous_model:
@@ -1183,6 +1201,81 @@ class Agent:
                 lambda: recorder.record_thinking_level_change(thinking_value)
             )
         return self._thinking_mode
+
+    # ─── Core 路径 Thinking 档位(Tau 6 档)─────────────────────
+
+    @property
+    def thinking_level(self) -> str:
+        """Core 路径当前 thinking 档位(off..xhigh)。"""
+        return self._thinking_level
+
+    @property
+    def available_thinking_levels(self) -> tuple[str, ...]:
+        """当前后端支持的 thinking 档位(v1 两后端均返回全 6 档)。"""
+        kind = "openai-compatible" if self.use_openai else "anthropic"
+        return provider_thinking_levels(kind, model=self.model)
+
+    def set_thinking_level(self, level: ThinkingLevel | str) -> ThinkingLevel:
+        """设定 thinking 档位并热重建 Core Provider,持久化档位变更。
+
+        与 legacy ``set_thinking(bool)`` 互不影响:本方法面向 Core 路径,采用
+        Tau 6 档词汇;档位经归一化,未变则直接返回,不重建不落盘。
+        """
+        normalized = normalize_thinking_level(level)
+        if normalized == self._thinking_level:
+            return normalized
+        self._apply_core_thinking_level(normalized)
+        recorder = self._session_recorder
+        if recorder is not None:
+            thinking_value = normalized
+            self._schedule_background_operation(
+                lambda: recorder.record_thinking_level_change(thinking_value)
+            )
+        return normalized
+
+    def cycle_thinking_level(self) -> ThinkingLevel:
+        """循环到下一档并持久化(供 TUI shift+tab 与 /thinking 无参调用)。"""
+        return self.set_thinking_level(
+            next_thinking_level(self._thinking_level, self.available_thinking_levels)
+        )
+
+    def _build_core_provider(self, thinking_level: ThinkingLevel) -> ModelProvider:
+        """用当前凭证与指定档位构建一个新 Core Provider。"""
+        if self.use_openai:
+            return create_provider(
+                api_key=str(getattr(self._openai_client, "api_key", "") or ""),
+                api_base=(
+                    str(getattr(self._openai_client, "base_url", "") or "") or None
+                ),
+                thinking_level=thinking_level,
+            )
+        return create_provider(
+            api_key=str(getattr(self._anthropic_client, "api_key", "") or ""),
+            anthropic_base_url=(
+                str(getattr(self._anthropic_client, "base_url", "") or "") or None
+            ),
+            thinking_level=thinking_level,
+        )
+
+    def _apply_core_thinking_level(self, level: ThinkingLevel) -> None:
+        """设定 ``self._thinking_level`` 并热重建 Core Provider 使档位生效。
+
+        不落盘档位变更(由调用方按需记录):恢复会话时复用本方法仅重建 Provider,
+        避免对已有 entry 重复写。``context_compactor`` 与模型限制缓存一并刷新。
+        """
+        self._thinking_level = level
+        if not (self._use_core_runtime and self._core_runtime is not None):
+            return
+        provider = self._build_core_provider(level)
+        previous = self._core_runtime.replace_provider(provider)
+        self._context_compactor = ProviderContextCompactor(
+            provider=provider,
+            get_model=lambda: self.model,
+        )
+        self._resolved_model_limits_for = None
+        close = getattr(previous, "aclose", None)
+        if close is not None:
+            self._schedule_background_operation(close)
 
     def _active_anthropic_tools(self) -> list[dict]:
         """每次模型调用前读取当前 Registry，避免缓存过期的激活状态。"""
@@ -1940,8 +2033,9 @@ class Agent:
             self._resolved_model_limits_for = None
             self._core_runtime.set_model(self.model)
         if state.thinking_level is not None:
-            self._thinking_mode = state.thinking_level
-            self.thinking = state.thinking_level != "disabled"
+            restored_level = coerce_thinking_level(state.thinking_level)
+            if restored_level != self._thinking_level:
+                self._apply_core_thinking_level(restored_level)
         if state.session_info is not None:
             self.session_start_time = time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ",
@@ -2024,7 +2118,7 @@ class Agent:
         recorder = SessionRecorder(
             session_id=session_id,
             model=str(metadata.get("model") or self.model),
-            thinking_level=self._thinking_mode,
+            thinking_level=self._thinking_level,
             cwd=Path(str(metadata.get("cwd") or self.tool_context.cwd)),
             storage=self._session_repository.storage_for(session_id),
         )

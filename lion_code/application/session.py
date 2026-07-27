@@ -216,6 +216,26 @@ class LionCodingSession:
         """切换活动模型(同 provider),并记入已知模型。"""
         self.configure_provider(model=model)
 
+    # ─── Thinking 档位 ───────────────────────────────────────
+
+    @property
+    def thinking_level(self) -> str:
+        """当前 thinking 档位(off..xhigh)。"""
+        return self._agent.thinking_level
+
+    @property
+    def available_thinking_levels(self) -> tuple[str, ...]:
+        """当前后端支持的 thinking 档位。"""
+        return self._agent.available_thinking_levels
+
+    def set_thinking_level(self, level: str) -> str:
+        """设定 thinking 档位;返回生效档位(未变也返回当前值)。"""
+        return self._agent.set_thinking_level(level)
+
+    def cycle_thinking_level(self) -> str:
+        """循环到下一档;返回生效档位。"""
+        return self._agent.cycle_thinking_level()
+
     # ─── 技能 / 模板视图(补全与 picker 消费)─────────────────
 
     @property

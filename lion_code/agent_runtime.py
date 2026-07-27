@@ -83,6 +83,18 @@ class LionAgentRuntime:
         """更新后续 Provider 请求使用的模型。"""
         self.harness.config.model = model
 
+    def replace_provider(self, provider: ModelProvider) -> ModelProvider:
+        """热替换后续 Provider 请求使用的 provider,返回旧 provider。
+
+        与 ``set_model`` 同理:Harness 每轮 live 读取 ``config.provider``,
+        故直接改 live 配置即生效。旧 provider 的连接资源由调用方负责回收
+        (Agent 用 ``_schedule_background_operation`` 排程其 ``aclose``)。
+        """
+        previous = self._provider
+        self._provider = provider
+        self.harness.config.provider = provider
+        return previous
+
     @property
     def provider(self) -> ModelProvider:
         """返回摘要与模型限制发现所复用的 Provider。"""

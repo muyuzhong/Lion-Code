@@ -834,7 +834,8 @@ class LionTuiApp(App):
         await self._reload_sessions()
 
     def action_cycle_thinking(self) -> None:
-        self._notice("thinking 档位切换将在阶段 4 提供")
+        level = self.session.cycle_thinking_level()
+        self._notice(f"thinking: {level}")
 
     def action_cycle_model(self) -> None:
         self.action_model()
@@ -914,7 +915,7 @@ class LionTuiApp(App):
 
     def _dispatch(self, result: CommandResult) -> None:
         if not result.handled:
-            self._notice("未知命令 — 可用: /model /clear /plan /cost /compact /theme /quit")
+            self._notice("未知命令 — 可用: /model /clear /plan /cost /compact /theme /thinking /quit")
             return
         if result.exit_requested:
             self.exit()
@@ -947,6 +948,8 @@ class LionTuiApp(App):
                 ),
                 lambda name: self._switch_theme(name) if name else None,
             )
+        elif result.thinking_level is not None:
+            self._notice(result.message or f"thinking: {result.thinking_level}")
         elif result.message:
             self._notice(result.message)
         self._set_subtitle()

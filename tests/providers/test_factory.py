@@ -28,5 +28,42 @@ class TestCreateProvider(unittest.TestCase):
         self.assertEqual(provider._config.base_url, "https://custom.test/v1")
 
 
+class TestCreateProviderThinkingLevel(unittest.TestCase):
+    def test_none_leaves_anthropic_thinking_unset(self) -> None:
+        provider = create_provider(api_key="k")
+        self.assertIsNone(provider._config.thinking_budget_tokens)
+        self.assertEqual(provider._config.thinking_mode, "budget")
+
+    def test_anthropic_high_sets_budget_tokens(self) -> None:
+        provider = create_provider(api_key="k", thinking_level="high")
+        self.assertEqual(provider._config.thinking_budget_tokens, 8192)
+        self.assertEqual(provider._config.thinking_mode, "budget")
+
+    def test_anthropic_off_explicitly_disables(self) -> None:
+        provider = create_provider(api_key="k", thinking_level="off")
+        self.assertEqual(provider._config.thinking_mode, "disabled")
+        self.assertIsNone(provider._config.thinking_budget_tokens)
+
+    def test_anthropic_level_is_normalized(self) -> None:
+        provider = create_provider(api_key="k", thinking_level="  Medium ")
+        self.assertEqual(provider._config.thinking_budget_tokens, 4096)
+
+    def test_openai_high_sets_reasoning_effort(self) -> None:
+        provider = create_provider(
+            api_key="k", api_base="https://example.test/v1", thinking_level="high"
+        )
+        self.assertEqual(provider._config.reasoning_effort, "high")
+
+    def test_openai_off_maps_to_none_effort(self) -> None:
+        provider = create_provider(
+            api_key="k", api_base="https://example.test/v1", thinking_level="off"
+        )
+        self.assertEqual(provider._config.reasoning_effort, "none")
+
+    def test_openai_none_leaves_reasoning_effort_unset(self) -> None:
+        provider = create_provider(api_key="k", api_base="https://example.test/v1")
+        self.assertIsNone(provider._config.reasoning_effort)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

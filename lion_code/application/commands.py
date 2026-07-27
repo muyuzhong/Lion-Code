@@ -71,6 +71,10 @@ class CommandSession(Protocol):
 
     def set_model(self, model: str) -> None: ...
 
+    def set_thinking_level(self, level: str) -> str: ...
+
+    def cycle_thinking_level(self) -> str: ...
+
 
 @dataclass(frozen=True, slots=True)
 class CommandResult:
@@ -193,6 +197,15 @@ def _model_command(ctx: CommandContext) -> CommandResult:
     return CommandResult(handled=True, model_picker_requested=True)
 
 
+def _thinking_command(ctx: CommandContext) -> CommandResult:
+    """带参数设定 thinking 档位;无参数循环到下一档。"""
+    if ctx.args:
+        level = ctx.session.set_thinking_level(ctx.args)
+    else:
+        level = ctx.session.cycle_thinking_level()
+    return CommandResult(handled=True, thinking_level=level, message=f"Thinking: {level}")
+
+
 def create_default_command_registry() -> CommandRegistry:
     """注册 Lion 内置 TUI 命令;全部以 CommandResult 意图返回,由前端执行。"""
     registry = CommandRegistry()
@@ -234,6 +247,12 @@ def create_default_command_registry() -> CommandRegistry:
             description="切换模型 / 配置 API",
             usage="/model [name]",
             handler=_model_command,
+        ),
+        SlashCommand(
+            name="thinking",
+            description="切换 thinking 档位",
+            usage="/thinking [off|minimal|low|medium|high|xhigh]",
+            handler=_thinking_command,
         ),
         SlashCommand(
             name="resume",

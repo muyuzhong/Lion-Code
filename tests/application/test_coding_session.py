@@ -267,6 +267,63 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replacement_provider.call_count, 1)
         self.assertEqual(session.messages[-1].text, "new")
 
+    # ─── Thinking 档位 ────────────────────────────────────────
+
+    async def test_thinking_level_defaults_and_available(self) -> None:
+        session, _agent, _fake = self._make_session([_stop_event()])
+        self.assertEqual(session.thinking_level, "off")
+        self.assertEqual(
+            tuple(session.available_thinking_levels),
+            ("off", "minimal", "low", "medium", "high", "xhigh"),
+        )
+
+    async def test_set_thinking_level_rebuilds_provider_with_level(self) -> None:
+        from core.fakes import FakeProvider
+
+        session, agent, _fake = self._make_session([_stop_event()])
+        replacement = FakeProvider([])
+        with patch("lion_code.agent.create_provider", return_value=replacement) as mock:
+            session.set_thinking_level("high")
+
+        # Core 路径按档位热重建 Provider。
+        self.assertEqual(mock.call_args.kwargs.get("thinking_level"), "high")
+        self.assertIs(agent.core_runtime.provider, replacement)
+        self.assertEqual(session.thinking_level, "high")
+
+    async def test_cycle_thinking_level_advances_and_wraps(self) -> None:
+        from core.fakes import FakeProvider
+
+        session, _agent, _fake = self._make_session([_stop_event()])
+        with patch("lion_code.agent.create_provider", return_value=FakeProvider([])):
+            self.assertEqual(session.thinking_level, "off")
+            self.assertEqual(session.cycle_thinking_level(), "minimal")
+            self.assertEqual(session.cycle_thinking_level(), "low")
+            self.assertEqual(session.thinking_level, "low")
+            session.set_thinking_level("xhigh")
+            self.assertEqual(session.cycle_thinking_level(), "off")
+
+    async def test_set_thinking_level_persists_entry(self) -> None:
+        from core.fakes import FakeProvider
+
+        session, agent, _fake = self._make_session([_stop_event("ok")])
+        async for _ in session.prompt("hi"):
+            pass
+        with patch("lion_code.agent.create_provider", return_value=FakeProvider([])):
+            session.set_thinking_level("high")
+        self.assertEqual(session.thinking_level, "high")
+
+        await session.aclose()
+        state = await self._session_repository.load(agent.session_id)
+        self.assertIsNotNone(state)
+        self.assertEqual(state.thinking_level, "high")
+
+    async def test_set_thinking_level_rejects_unknown(self) -> None:
+        session, _agent, _fake = self._make_session([_stop_event()])
+        with self.assertRaises(ValueError):
+            session.set_thinking_level("ultra")
+        # 被拒后档位不变。
+        self.assertEqual(session.thinking_level, "off")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
