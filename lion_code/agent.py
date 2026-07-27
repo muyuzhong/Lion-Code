@@ -651,6 +651,8 @@ class Agent:
         if self._core_runtime is not None:
             # 新路径：取消 harness 信号，同时中断模型流与工具执行
             # （adapt_lion_tool 把 signal.is_cancelled 传给 ToolRuntime 中间件）。
+            self._aborted = True
+            self._last_stop_reason = "aborted"
             self._memory_coordinator.cancel_pending()
             self._core_runtime.cancel()
             return
@@ -731,6 +733,31 @@ class Agent:
             if self._usage_observer.last_response_at is not None:
                 self.last_api_call_time = self._usage_observer.last_response_at
             self._last_synced_core_response_count = response_count
+
+    def _last_core_assistant(self) -> AssistantMessage | None:
+        if self._core_runtime is None:
+            return None
+        return next(
+            (
+                message
+                for message in reversed(self._core_runtime.messages)
+                if isinstance(message, AssistantMessage)
+            ),
+            None,
+        )
+
+    def _sync_core_outcome(self) -> None:
+        """把 Core 的 canonical 终态映射回 Agent 对外状态。"""
+        assistant = self._last_core_assistant()
+        if assistant is None:
+            return
+        if self._aborted or assistant.stop_reason == "aborted":
+            self._aborted = True
+            self._last_stop_reason = "aborted"
+        elif assistant.stop_reason == "error":
+            self._last_stop_reason = "model_error"
+        elif self._last_stop_reason is None:
+            self._last_stop_reason = "completed"
 
     def _before_core_tool_calls(self, _assistant: AssistantMessage) -> str | None:
         """沿用 legacy 契约，在执行工具前累计轮次并检查会话预算。"""
@@ -1195,6 +1222,7 @@ class Agent:
             while await self._apply_pending_core_context_reset():
                 await self._core_runtime.continue_()
             self._sync_core_usage()
+            self._sync_core_outcome()
             self._core_compaction_required = self._context_manager.should_compact(
                 self._context_runtime_state()
             )
@@ -1287,6 +1315,13 @@ class Agent:
         try:
             await self.chat(prompt)
             stop_reason = self._last_stop_reason or "completed"
+            if stop_reason == "model_error":
+                assistant = self._last_core_assistant()
+                error = (
+                    assistant.error_message
+                    if assistant is not None and assistant.error_message
+                    else "Provider error"
+                )
         except asyncio.CancelledError:
             # chat() 已吞掉自身的 CancelledError；到达这里说明取消来自更外层。
             stop_reason = "aborted"

@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, patch
 from lion_code.agent import Agent
 from lion_code.context import SUMMARY_SYSTEM_PROMPT
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
-from lion_code.core.provider_events import AssistantDoneEvent
+from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 from lion_code.providers import RuntimeModelLimits
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
@@ -122,6 +122,18 @@ def _stop_event(text: str = "done", usage: Usage | None = None) -> AssistantDone
     )
 
 
+def _error_event(message: str = "provider failed") -> AssistantErrorEvent:
+    return AssistantErrorEvent(
+        reason="error",
+        error=AssistantMessage(
+            model="fake",
+            content=[],
+            stop_reason="error",
+            error_message=message,
+        ),
+    )
+
+
 def _many_tooluse_event(count: int, usage: Usage) -> AssistantDoneEvent:
     return AssistantDoneEvent(
         reason="toolUse",
@@ -212,6 +224,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         mock_chat.assert_not_called()
         self.assertEqual(agent._core_runtime.messages[-1].text, "done")
         self.assertEqual(fake.call_count, 1)
+        self.assertEqual(agent._last_stop_reason, "completed")
 
     async def test_core_runtime_applies_provider_discovered_model_limits(self) -> None:
         fake = _LimitsFakeProvider(
@@ -232,6 +245,16 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(agent.effective_window, 120_000)
         self.assertEqual(fake.discovered_models, [agent.model])
+
+    async def test_core_run_reports_provider_error(self) -> None:
+        agent, _fake = self._make_agent([_error_event("upstream failed")], ToolRegistry())
+
+        result = await agent.run("hello")
+
+        self.assertEqual(result.stop_reason, "model_error")
+        self.assertEqual(result.error, "upstream failed")
+        self.assertEqual(result.turns, 0)
+        self.assertEqual(agent._last_stop_reason, "model_error")
 
     async def test_tool_loop_through_runtime(self) -> None:
         registry = ToolRegistry()
@@ -440,7 +463,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         async def cancel_after_first_turn(event) -> None:
             if not cancelled["done"] and isinstance(event, TurnEndEvent):
-                agent._core_runtime.cancel()
+                agent.abort()
                 cancelled["done"] = True
 
         agent._core_runtime.subscribe(cancel_after_first_turn)
@@ -448,6 +471,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         # 第一轮工具已执行，第二轮被取消，最终消息为 aborted。
         self.assertEqual(agent._core_runtime.messages[-1].stop_reason, "aborted")
+        self.assertTrue(agent._aborted)
+        self.assertEqual(agent._last_stop_reason, "aborted")
 
         # 再次 chat：不遗留不完整工具调用，能正常收敛到最终文本。
         await agent.chat("again")
