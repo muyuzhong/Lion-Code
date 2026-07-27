@@ -331,3 +331,40 @@ A1:/model 换 Claude Code 式可搜索列表(known_models 用过即记住,累积
 - D 组小项:Windows 拖拽归一化、补全窗口按行测量
 - 阶段5:删 legacy(_chat_*/压缩/legacy_tui/session旧JSON写),pyproject 移除 openai/anthropic
 - B3 在 b3-thinking-tiers 分支(f5fcc06),未合并 master;B4/B5 可基于此分支或先合并再开
+
+
+## Session 7: 阶段4-B4:AgentSettled 终端通知;B5 范围界定
+
+**Date**: 2026-07-27
+**Task**: 阶段4-B4:AgentSettled 终端通知;B5 范围界定
+**Branch**: `master`
+
+### Summary
+
+B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_finished(),按 settings.turn_notification(默认 desktop;bell 写响铃字符,desktop 写 OSC9/99 序列到 sys.__stdout__ 绕过 Textual 捕获直达终端)。app.py __init__ 构造控制器,_run_prompt 事件流识别 AgentSettled 调用。B5 经调研界定范围:Core AgentEvent 联合无 compaction/retry 事件,二者在 agent.py 内部透明编排(_compact_core_context_if_needed 做阈值压缩并记 CompactionEntry;_with_retry 重试经 print_retry sink 报告);且 Lion 压缩为阈值式主动压缩,审计的 overflow->compaction->retry 链尚不存在。B5 需会话事件回调机制 + CompactionStart/End 与 AutoRetryStart/End 上浮 + 可能新增 overflow 触发路径,范围较大,留待下一会话专注实现。B3+B4 已合并 master。
+
+### Main Changes
+
+- tui/app.py:__init__ 用 settings.turn_notification 构造 TerminalNotificationController;_run_prompt 事件流识别 AgentSettledEvent 调 notify_turn_finished()
+- tests/tui/test_tui_app:注入 spy 控制器(enabled 强制开),验证 settle 触发 bell、off 模式不写
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2c43910` | (see git log) |
+
+### Testing
+
+- [OK] [OK] tests/tui 14 passed(含 B4 两例);tests/tui+application 133 passed,13 skipped
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- B5:溢出压缩+AutoRetry 事件链(范围已界定:需会话事件回调机制 + 事件上浮 + 可能 overflow 触发路径)
+- D 组小项:Windows 拖拽归一化、补全窗口按行测量
+- 阶段5:删 legacy(_chat_*/旧压缩/legacy_tui/session旧JSON写),pyproject 移除 openai/anthropic
+- master 领先 origin/master 11 提交(B3+B4+journal),未 push;真机冒烟 thinking 与通知后可 push
