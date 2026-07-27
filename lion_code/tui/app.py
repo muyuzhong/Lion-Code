@@ -38,6 +38,7 @@ from textual.widgets import (
 
 from lion_code import ui
 from lion_code.application.commands import CommandResult
+from lion_code.application.events import AgentSettledEvent
 from lion_code.application.session import LionCodingSession
 from lion_code.config import save_api_config
 
@@ -50,6 +51,7 @@ from .prompt_input import (
 )
 from .state import TuiState
 from .adapter import TuiEventAdapter
+from .terminal_notification import TerminalNotificationController
 from .themes import TuiTheme, available_tui_theme_names, get_tui_theme
 from .widgets import TranscriptView, render_completion_suggestions
 
@@ -632,6 +634,11 @@ class LionTuiApp(App):
         self.session = session
         self.settings = settings or load_tui_settings()
         self._tui_theme: TuiTheme = self.settings.resolved_theme
+        # 一轮彻底归位(AgentSettled)时按设置发出终端通知(bell/desktop),让切走的
+        # 用户知道本轮完成;序列写 sys.__stdout__,绕过 Textual 捕获直达终端。
+        self._notification = TerminalNotificationController(
+            self.settings.turn_notification
+        )
         self.state = TuiState()
         self.adapter = TuiEventAdapter(self.state)
         self._resume_on_mount = resume
@@ -895,6 +902,8 @@ class LionTuiApp(App):
                 self.adapter.apply(event)
                 transcript.update_from_state(self.state, theme=self._tui_theme)
                 self._set_status(running=self.session.is_running)
+                if isinstance(event, AgentSettledEvent):
+                    self._notification.notify_turn_finished()
         except Exception as error:
             self._notice(f"Error: {error}", role="error")
         finally:

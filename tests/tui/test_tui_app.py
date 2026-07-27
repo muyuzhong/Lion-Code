@@ -306,3 +306,39 @@ async def test_sessions_sidebar_lists_new_entry(app_factory) -> None:
         lv = app.query_one("#sessions", ListView)
         names = [item.name for item in lv.children]
     assert "__new__" in names
+
+
+@pytest.mark.asyncio
+async def test_turn_finished_notification_fires_on_settle(app_factory) -> None:
+    from lion_code.tui.terminal_notification import TerminalNotificationController
+
+    app = app_factory([_stop_event("done")])
+    writes: list[str] = []
+    # 注入 spy 控制器(enabled 强制开,绕过测试环境的 isatty/CI 判定)。
+    app._notification = TerminalNotificationController(
+        "bell", enabled=True, writer=writes.append
+    )
+    async with app.run_test() as pilot:
+        await _submit(app, pilot, "hi")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    # AgentSettledEvent 触发通知,bell 模式写 "\a"。
+    assert writes == ["\a"]
+
+
+@pytest.mark.asyncio
+async def test_turn_finished_notification_off_writes_nothing(app_factory) -> None:
+    from lion_code.tui.terminal_notification import TerminalNotificationController
+
+    app = app_factory([_stop_event("done")])
+    writes: list[str] = []
+    app._notification = TerminalNotificationController(
+        "off", enabled=True, writer=writes.append
+    )
+    async with app.run_test() as pilot:
+        await _submit(app, pilot, "hi")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    assert writes == []
