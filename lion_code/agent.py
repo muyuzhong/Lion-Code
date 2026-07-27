@@ -1217,12 +1217,18 @@ class Agent:
             # 新路径接管：消息由 AgentHarness 管理，SessionRecorder 在 MessageEnd
             # 时逐条落盘，退出前不再依赖整体快照 _auto_save()。
             await self._ensure_core_session_ready()
+            if self._aborted:
+                return
             await self._compact_core_context_if_needed()
+            if self._aborted:
+                return
             if not self.is_sub_agent:
                 # 与 legacy 一致:Memory 召回只服务主会话,子 Agent 不预取。
                 self._memory_coordinator.begin_turn(user_message)
             await self._core_runtime.prompt(user_message)
-            while await self._apply_pending_core_context_reset():
+            while not self._aborted and await self._apply_pending_core_context_reset():
+                if self._aborted:
+                    break
                 await self._core_runtime.continue_()
             self._sync_core_usage()
             self._sync_core_outcome()

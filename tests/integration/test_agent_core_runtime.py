@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import tempfile
@@ -245,6 +246,37 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(agent.effective_window, 120_000)
         self.assertEqual(fake.discovered_models, [agent.model])
+
+    async def test_abort_during_core_setup_stops_before_provider(self) -> None:
+        setup_started = asyncio.Event()
+        release_setup = asyncio.Event()
+
+        async def resolve_limits(_provider, _model):
+            setup_started.set()
+            await release_setup.wait()
+            return RuntimeModelLimits(
+                context_window=128_000,
+                max_output_tokens=8_000,
+            )
+
+        resolver = AsyncMock()
+        resolver.resolve.side_effect = resolve_limits
+        agent, fake = self._make_agent(
+            [_stop_event("must not run")],
+            ToolRegistry(),
+            model_limits_resolver=resolver,
+        )
+
+        chat_task = asyncio.create_task(agent.chat("hello"))
+        await setup_started.wait()
+        agent.abort()
+        release_setup.set()
+        await chat_task
+
+        self.assertEqual(fake.call_count, 0)
+        self.assertEqual(agent._last_stop_reason, "aborted")
+        self.assertTrue(agent._aborted)
+        self.assertEqual(agent._core_runtime.messages, ())
 
     async def test_core_run_reports_provider_error(self) -> None:
         agent, _fake = self._make_agent([_error_event("upstream failed")], ToolRegistry())
