@@ -367,6 +367,8 @@ class TestOpenAIRetryAndErrors(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("AssistantDoneEvent", _types(events))
         self.assertNotIn("TextEndEvent", _types(events))
         self.assertIsInstance(events[-1], AssistantErrorEvent)
+        self.assertEqual(events[-1].reason, "aborted")
+        self.assertEqual(events[-1].error.stop_reason, "aborted")
 
 
 if __name__ == "__main__":

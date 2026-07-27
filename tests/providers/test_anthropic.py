@@ -262,6 +262,8 @@ class TestAnthropicErrorsAndCancellation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(deltas, ["hel"])
         self.assertNotIn("AssistantDoneEvent", _types(events))
         self.assertIsInstance(events[-1], AssistantErrorEvent)
+        self.assertEqual(events[-1].reason, "aborted")
+        self.assertEqual(events[-1].error.stop_reason, "aborted")
 
 
 class TestAnthropicThinkingPayload(unittest.IsolatedAsyncioTestCase):

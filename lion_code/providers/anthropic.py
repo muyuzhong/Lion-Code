@@ -75,7 +75,11 @@ class AnthropicProvider:
             model=model, system=system, messages=messages, tools=tools, signal=signal
         )
         return canonicalize_provider_stream(
-            raw, api="anthropic-messages", provider="anthropic", model=model
+            raw,
+            api="anthropic-messages",
+            provider="anthropic",
+            model=model,
+            signal=signal,
         )
 
     def _stream_provider_events(

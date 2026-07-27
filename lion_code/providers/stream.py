@@ -11,6 +11,7 @@ from lion_code.core.messages import (
     ThinkingContent,
     Usage,
 )
+from lion_code.core.provider import CancellationToken
 from ._provider_events import (
     ProviderErrorEvent,
     ProviderEvent,
@@ -91,6 +92,7 @@ async def canonicalize_provider_stream(
     api: str,
     provider: str,
     model: str,
+    signal: CancellationToken | None = None,
 ) -> AsyncIterator[AssistantMessageEvent]:
     """Canonicalize one old internal parser stream.
 
@@ -202,6 +204,11 @@ async def canonicalize_provider_stream(
         yield AssistantStartEvent(partial=_snapshot(partial))
     if not terminal:
         error = partial.model_copy(deep=True)
+        if signal is not None and signal.is_cancelled():
+            error.stop_reason = "aborted"
+            error.usage = Usage()
+            yield AssistantErrorEvent(reason="aborted", error=error)
+            return
         error.stop_reason = "error"
         error.error_message = "Provider stream ended without a terminal event"
         error.usage = Usage()

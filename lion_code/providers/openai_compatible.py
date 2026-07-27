@@ -98,6 +98,7 @@ class OpenAICompatibleProvider:
             api=self._config.api,
             provider=getattr(self._config, "provider_name", "openai-compatible"),
             model=model,
+            signal=signal,
         )
 
     def _stream_provider_events(
