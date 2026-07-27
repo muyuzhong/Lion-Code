@@ -38,6 +38,10 @@ from lion_code.core.provider_events import (
 from lion_code.core.tools import AgentTool, AgentToolResult
 
 BeforeToolCall = Callable[[ToolCall], Awaitable[tuple[bool, str | None]]]
+BeforeToolCalls = Callable[
+    [AssistantMessage],
+    Awaitable[str | None] | str | None,
+]
 AfterToolCall = Callable[
     [ToolCall, AgentToolResult, bool],
     Awaitable[tuple[AgentToolResult, bool]],
@@ -71,6 +75,7 @@ async def run_agent_loop(
     signal: CancellationToken | None = None,
     get_steering_messages: Callable[[], Sequence[AgentMessage]] | None = None,
     get_follow_up_messages: Callable[[], Sequence[AgentMessage]] | None = None,
+    before_tool_calls: BeforeToolCalls | None = None,
     before_tool_call: BeforeToolCall | None = None,
     after_tool_call: AfterToolCall | None = None,
 ) -> AsyncIterator[AgentEvent]:
@@ -171,6 +176,29 @@ async def run_agent_loop(
             tool_results: list[ToolResultMessage] = []
             calls = list(assistant.tool_calls)
             has_more_tools = bool(calls)
+            if calls and before_tool_calls is not None:
+                decision = before_tool_calls(assistant)
+                stop_reason = await decision if isawaitable(decision) else decision
+                if stop_reason:
+                    for call in calls:
+                        message = ToolResultMessage(
+                            tool_call_id=call.id,
+                            tool_name=call.name,
+                            content=[
+                                TextContent(
+                                    text=f"Tool call not executed: {stop_reason}"
+                                )
+                            ],
+                            is_error=True,
+                        )
+                        tool_results.append(message)
+                        messages.append(message)
+                        new_messages.append(message)
+                        yield MessageStartEvent(message=message)
+                        yield MessageEndEvent(message=message)
+                    yield TurnEndEvent(message=assistant, tool_results=tool_results)
+                    yield AgentEndEvent(messages=new_messages)
+                    return
             terminate_flags: list[bool] = []
             for call_batch in _tool_call_batches(calls, tool_by_name):
                 if len(call_batch) == 1:

@@ -96,13 +96,16 @@ def _snippable_lion_tool() -> LionTool:
     )
 
 
-def _tooluse_event() -> AssistantDoneEvent:
+def _tooluse_event(
+    call_id: str = "c1", usage: Usage | None = None
+) -> AssistantDoneEvent:
     return AssistantDoneEvent(
         reason="toolUse",
         message=AssistantMessage(
             model="fake",
-            content=[ToolCall(id="c1", name="echo", arguments={"msg": "hi"})],
+            content=[ToolCall(id=call_id, name="echo", arguments={"msg": "hi"})],
             stop_reason="toolUse",
+            usage=usage or Usage(),
         ),
     )
 
@@ -151,7 +154,12 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         os.environ.pop("LION_CORE_RUNTIME", None)
         self._temp_dir.cleanup()
 
-    def _make_agent(self, events: list, registry: ToolRegistry) -> tuple[Agent, FakeProvider]:
+    def _make_agent(
+        self,
+        events: list,
+        registry: ToolRegistry,
+        **agent_kwargs,
+    ) -> tuple[Agent, FakeProvider]:
         fake = FakeProvider(events)
         os.environ["LION_CORE_RUNTIME"] = "1"
         with patch("lion_code.agent.create_provider", return_value=fake):
@@ -161,6 +169,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 tool_registry=registry,
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                **agent_kwargs,
             )
         # 跳过 MCP 发现，避免测试环境副作用。
         agent._mcp_initialized = True
@@ -245,6 +254,44 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             [message.role for message in state.messages],
             ["user", "assistant", "toolResult", "assistant"],
         )
+
+    async def test_core_budget_keeps_max_turns_across_prompts(self) -> None:
+        registry = ToolRegistry()
+        registry.register(_echo_lion_tool())
+        agent, fake = self._make_agent(
+            [
+                _tooluse_event("c1"),
+                _stop_event("first done"),
+                _tooluse_event("c2"),
+            ],
+            registry,
+            max_turns=2,
+        )
+
+        await agent.chat("first")
+        await agent.chat("second")
+
+        self.assertEqual(fake.call_count, 3)
+        self.assertEqual(agent.current_turns, 2)
+        self.assertEqual(agent._last_stop_reason, "max_turns")
+        self.assertTrue(agent._core_runtime.messages[-1].is_error)
+        self.assertIn("Turn limit reached", agent._core_runtime.messages[-1].text)
+
+    async def test_core_budget_stops_before_tool_when_cost_limit_reached(self) -> None:
+        registry = ToolRegistry()
+        registry.register(_echo_lion_tool())
+        agent, fake = self._make_agent(
+            [_tooluse_event(usage=Usage(input=1_000))],
+            registry,
+            max_cost_usd=0.000_001,
+        )
+
+        await agent.chat("expensive")
+
+        self.assertEqual(fake.call_count, 1)
+        self.assertEqual(agent._last_stop_reason, "max_cost")
+        self.assertTrue(agent._core_runtime.messages[-1].is_error)
+        self.assertIn("Cost limit reached", agent._core_runtime.messages[-1].text)
 
     async def test_provider_gets_projection_while_harness_and_session_stay_full(self) -> None:
         registry = ToolRegistry()

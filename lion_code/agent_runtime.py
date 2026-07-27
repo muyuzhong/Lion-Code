@@ -25,7 +25,7 @@ from lion_code.core import (
     AgentMessage,
     EventListener,
 )
-from lion_code.core.loop import PrepareContext
+from lion_code.core.loop import BeforeToolCalls, PrepareContext
 from lion_code.core.messages import UserMessage
 from lion_code.core.provider import ModelProvider
 from lion_code.tooling import ToolRuntime
@@ -43,6 +43,7 @@ class LionAgentRuntime:
         tool_runtime: ToolRuntime,
         prepare_context: PrepareContext | None = None,
         max_turns: int | None = None,
+        before_tool_calls: BeforeToolCalls | None = None,
     ) -> None:
         self._provider = provider
         self._tool_runtime = tool_runtime
@@ -57,6 +58,7 @@ class LionAgentRuntime:
                 get_tools=lambda: adapt_active_tools(self._tool_runtime),
                 prepare_context=prepare_context,
                 max_turns=max_turns,
+                before_tool_calls=before_tool_calls,
                 # 权限和结果策略由 ToolRuntime 中间件负责，不在运行时层注入。
                 before_tool_call=None,
                 after_tool_call=None,

@@ -15,7 +15,15 @@ from lion_code.core.events import (
     MessageEndEvent,
     MessageStartEvent,
 )
-from lion_code.core.loop import AfterToolCall, BeforeToolCall, GetSystem, GetTools, PrepareContext, run_agent_loop
+from lion_code.core.loop import (
+    AfterToolCall,
+    BeforeToolCall,
+    BeforeToolCalls,
+    GetSystem,
+    GetTools,
+    PrepareContext,
+    run_agent_loop,
+)
 from lion_code.core.messages import (
     AgentMessage,
     AssistantMessage,
@@ -51,6 +59,7 @@ class AgentHarnessConfig:
     prepare_context: PrepareContext | None = None
     max_turns: int | None = None
     queue_mode: QueueMode = "one_at_a_time"
+    before_tool_calls: BeforeToolCalls | None = None
     before_tool_call: BeforeToolCall | None = None
     after_tool_call: AfterToolCall | None = None
 
@@ -187,6 +196,7 @@ class AgentHarness:
                 signal=signal,
                 get_steering_messages=self._drain_steering_messages,
                 get_follow_up_messages=self._drain_follow_up_messages,
+                before_tool_calls=self._config.before_tool_calls,
                 before_tool_call=self._config.before_tool_call,
                 after_tool_call=self._config.after_tool_call,
             ):

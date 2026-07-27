@@ -513,7 +513,7 @@ class Agent:
                 get_system=lambda: self._system_prompt,
                 tool_runtime=self.tool_runtime,
                 prepare_context=self._prepare_core_context,
-                max_turns=self.max_turns,
+                before_tool_calls=self._before_core_tool_calls,
             )
             if self._context_compactor is None:
                 self._context_compactor = ProviderContextCompactor(
@@ -731,6 +731,20 @@ class Agent:
             if self._usage_observer.last_response_at is not None:
                 self.last_api_call_time = self._usage_observer.last_response_at
             self._last_synced_core_response_count = response_count
+
+    def _before_core_tool_calls(self, _assistant: AssistantMessage) -> str | None:
+        """沿用 legacy 契约，在执行工具前累计轮次并检查会话预算。"""
+        self._sync_core_usage()
+        self.current_turns += 1
+        budget = self._check_budget()
+        if not budget["exceeded"]:
+            return None
+        self._last_stop_reason = budget["kind"]
+        try:
+            print_info(f"Budget exceeded: {budget['reason']}")
+        except UnicodeError:
+            pass
+        return budget["reason"]
 
     def _reset_session_counters(self) -> None:
         self.total_input_tokens = 0
@@ -1095,7 +1109,7 @@ class Agent:
                 get_system=lambda: self._system_prompt,
                 tool_runtime=self.tool_runtime,
                 prepare_context=self._prepare_core_context,
-                max_turns=self.max_turns,
+                before_tool_calls=self._before_core_tool_calls,
             )
             self._core_runtime.harness.replace_messages(list(messages))
             self._context_compactor = ProviderContextCompactor(
