@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
+- **Total Sessions**: 6
 - **Last Active**: 2026-07-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~290 | Active |
+| `journal-1.md` | ~333 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-07-27 | 阶段4-B3:thinking 档位(Tau 6 档)接入 Core 路径 | `f5fcc06` | `b3-thinking-tiers` |
 | 5 | 2026-07-27 | 阶段4-C8:side-query 全面迁移 Core Provider | `517fde8` | `master` |
 | 4 | 2026-07-27 | 阶段4-C6/C7:Anthropic 后端与子 Agent 上 Core | `2696819`, `30c788d` | `master` |
 | 3 | 2026-07-27 | 阶段4-A:model/session 列表 picker 落地 | `22a3840`, `b41e64b` | `master` |

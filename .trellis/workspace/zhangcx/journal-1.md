@@ -288,3 +288,46 @@ A1:/model 换 Claude Code 式可搜索列表(known_models 用过即记住,累积
 
 - 剩余阶段4子项:B3 thinking 档位、B4 AgentSettled 终端通知、B5 溢出压缩+AutoRetry 链、D 组小项
 - 阶段5可开:删 legacy _chat_*/压缩/legacy_tui/session旧JSON写,pyproject 移除 openai/anthropic
+
+
+## Session 6: 阶段4-B3:thinking 档位(Tau 6 档)接入 Core 路径
+
+**Date**: 2026-07-27
+**Task**: 阶段4-B3:thinking 档位(Tau 6 档)接入 Core 路径
+**Branch**: `b3-thinking-tiers`
+
+### Summary
+
+此前 Core 路径完全不生效 thinking(factory 不带 thinking 参数,set_thinking 仅 legacy SDK 消费)。新增 providers/thinking.py(Tau 6 档 off..xhigh + 归一化/循环/coerce + Anthropic budget_tokens/OpenAI reasoning_effort 映射);factory.create_provider 增 thinking_level 参数;LionAgentRuntime.replace_provider 热替换 provider;Agent Core 路径 _thinking_level/set_thinking_level/cycle_thinking_level,档位变更热重建 provider+context_compactor 并记 ThinkingLevelChangeEntry,configure_api 透传档位,恢复会话 coerce 旧词汇;LionCodingSession 透传档位 API;/thinking 命令;TUI action_cycle_thinking 去桩(shift+tab)+_dispatch thinking_level 意图。全量 444 passed。
+
+### Main Changes
+
+- providers/thinking.py(新):6 档词汇+normalize/next/coerce(旧 SDK 词汇平滑过渡)+Anthropic budget_tokens/OpenAI reasoning_effort 映射
+- providers/factory.create_provider:增 thinking_level 参数,按后端填 budget_tokens/reasoning_effort;None 保留默认
+- agent_runtime.LionAgentRuntime.replace_provider:热替换 provider(harness 每轮 live 读 config.provider),返回旧 provider 供回收
+- agent.py:Core 路径 _thinking_level/set_thinking_level/cycle_thinking_level/available_thinking_levels;档位变更经 replace_provider 热重建 provider+context_compactor+记 ThinkingLevelChangeEntry;configure_api 重建透传档位、recording 按 Core/legacy 分流;恢复会话 coerce 旧词汇并按档位重建 provider;legacy set_thinking/_thinking_mode 保留(阶段5删)
+- application:LionCodingSession 透传档位 API;commands 注册 /thinking(带参设定/无参循环);Protocol 补 set/cycle;CommandResult.thinking_level 接入 _dispatch
+- tui/app.py:action_cycle_thinking 去桩(shift+tab 真正循环);_dispatch 处理 thinking_level 意图;命令提示补 /thinking
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f5fcc06` | (see git log) |
+
+### Testing
+
+- [OK] [OK] providers/test_thinking 纯逻辑;test_factory 档位->参数映射;application/test_coding_session 档位 API+持久化+热重建+拒绝未知档位;integration 2 例适配
+- [OK] [OK] 全量 444 passed, 18 skipped
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- B4:AgentSettled 终端通知
+- B5:溢出压缩+AutoRetry 事件链
+- D 组小项:Windows 拖拽归一化、补全窗口按行测量
+- 阶段5:删 legacy(_chat_*/压缩/legacy_tui/session旧JSON写),pyproject 移除 openai/anthropic
+- B3 在 b3-thinking-tiers 分支(f5fcc06),未合并 master;B4/B5 可基于此分支或先合并再开
