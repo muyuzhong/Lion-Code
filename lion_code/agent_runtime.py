@@ -104,6 +104,12 @@ class LionAgentRuntime:
         """请求取消当前正在进行的模型流。"""
         self.harness.cancel()
 
+    async def aclose(self) -> None:
+        """关闭由 Provider 持有的连接资源。"""
+        close = getattr(self._provider, "aclose", None)
+        if close is not None:
+            await close()
+
     @property
     def messages(self) -> tuple[AgentMessage, ...]:
         """返回当前对话的消息快照。"""

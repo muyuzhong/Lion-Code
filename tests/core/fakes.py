@@ -27,6 +27,10 @@ class FakeProvider:
         self.received_systems: list[str] = []
         self.received_messages: list[list] = []
         self.received_tools: list[list[str]] = []
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
 
     def stream_response(
         self, *, model, system, messages, tools, signal=None

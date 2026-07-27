@@ -308,8 +308,8 @@ class Agent:
         self.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._session_repository = session_repository or SessionRepository()
         self._session_recorder: SessionRecorder | None = None
-        self._session_write_tasks: set[asyncio.Task] = set()
-        self._session_write_errors: list[BaseException] = []
+        self._background_tasks: set[asyncio.Task] = set()
+        self._background_errors: list[BaseException] = []
         self._model_limits_resolver = model_limits_resolver or ModelLimitsResolver()
         self._resolved_model_limits_for: tuple[int, str] | None = None
         self._last_synced_core_response_count = 0
@@ -824,7 +824,7 @@ class Agent:
         )
 
     async def _ensure_core_session_ready(self) -> None:
-        await self._flush_session_writes()
+        await self._flush_background_operations()
         await self._resolve_core_model_limits()
         if self._session_recorder is not None:
             await self._session_recorder.initialize()
@@ -918,11 +918,11 @@ class Agent:
         self._pending_core_context_reset = None
         return True
 
-    def _schedule_session_write(
+    def _schedule_background_operation(
         self,
         operation: Callable[[], Awaitable[object]],
     ) -> None:
-        """从同步配置入口提交有序写入；下次对话或 close 会等待其完成。"""
+        """从同步入口提交异步操作；下个状态边界或 close 会等待。"""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -930,23 +930,23 @@ class Agent:
             return
 
         task = loop.create_task(operation())
-        self._session_write_tasks.add(task)
+        self._background_tasks.add(task)
 
         def collect_result(done: asyncio.Task) -> None:
-            self._session_write_tasks.discard(done)
+            self._background_tasks.discard(done)
             try:
                 done.result()
             except BaseException as error:
-                self._session_write_errors.append(error)
+                self._background_errors.append(error)
 
         task.add_done_callback(collect_result)
 
-    async def _flush_session_writes(self) -> None:
-        pending = tuple(self._session_write_tasks)
+    async def _flush_background_operations(self) -> None:
+        pending = tuple(self._background_tasks)
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
-        if self._session_write_errors:
-            raise self._session_write_errors.pop(0)
+        if self._background_errors:
+            raise self._background_errors.pop(0)
 
     def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]]) -> None:
         self.confirm_fn = fn
@@ -1129,7 +1129,8 @@ class Agent:
                         or None
                     ),
                 )
-            messages = self._core_runtime.messages
+            previous_runtime = self._core_runtime
+            messages = previous_runtime.messages
             self._core_runtime = LionAgentRuntime(
                 provider=provider,
                 model=self.model,
@@ -1145,6 +1146,7 @@ class Agent:
             )
             self._resolved_model_limits_for = None
             self._reset_core_observers()
+            self._schedule_background_operation(previous_runtime.aclose)
 
         # 放在 Provider 重建之后,确保查询服务拿到的是新 Provider。
         self._memory_coordinator.set_query_service(
@@ -1166,7 +1168,7 @@ class Agent:
                     await recorder.record_thinking_level_change(thinking_value)
                 return None
 
-            self._schedule_session_write(persist_configuration)
+            self._schedule_background_operation(persist_configuration)
 
     def set_thinking(self, enabled: bool) -> str:
         """切换 Thinking，并把实际生效级别写入当前 Core Session。"""
@@ -1176,7 +1178,7 @@ class Agent:
         recorder = self._session_recorder
         if recorder is not None and self._thinking_mode != previous:
             thinking_value = self._thinking_mode
-            self._schedule_session_write(
+            self._schedule_background_operation(
                 lambda: recorder.record_thinking_level_change(thinking_value)
             )
         return self._thinking_mode
@@ -1363,7 +1365,7 @@ class Agent:
 
     async def clear_history(self) -> None:
         """结束当前会话并创建新 Session；旧 append-only 历史保持可恢复。"""
-        await self._flush_session_writes()
+        await self._flush_background_operations()
         self._memory_coordinator.reset()
         self._last_memory_injection = MemoryInjectionReport()
         self.session_id = uuid.uuid4().hex[:8]
@@ -1909,7 +1911,7 @@ class Agent:
         """从 JSONL 重建 Harness 唯一历史，并继续追加同一 Session。"""
         if self._core_runtime is None:
             return False
-        await self._flush_session_writes()
+        await self._flush_background_operations()
         state = await self._session_repository.load(session_id)
         if state is None:
             return False
@@ -2526,12 +2528,16 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
     async def close(self) -> None:
         """释放 MCP 子进程等外部资源，确保进程正常退出（issue #8）。"""
         try:
-            await self._flush_session_writes()
+            await self._flush_background_operations()
         finally:
             try:
                 await self._memory_coordinator.close()
             finally:
-                await self.tool_environment.close()
+                try:
+                    if self._core_runtime is not None:
+                        await self._core_runtime.aclose()
+                finally:
+                    await self.tool_environment.close()
 
     def _consume_memory_prefetch_if_ready(self, messages: list) -> None:
         """非阻塞消费已完成的 Memory 预取，并追加到末条用户消息以保持 role 交替。"""

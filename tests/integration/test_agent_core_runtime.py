@@ -661,7 +661,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
     async def test_configure_api_rebuilds_core_provider(self) -> None:
         """Core 路径下换 key/base 必须重建 Provider,且保留 Harness 消息。"""
-        agent, _fake = self._make_agent([_stop_event("done")], ToolRegistry())
+        agent, old_fake = self._make_agent([_stop_event("done")], ToolRegistry())
         await agent.chat("hello")
         old_runtime = agent._core_runtime
 
@@ -681,8 +681,12 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         # 新 Provider 接管后续请求。
         await agent.chat("second")
+        self.assertTrue(old_fake.closed)
+        self.assertFalse(new_fake.closed)
         self.assertEqual(new_fake.call_count, 1)
         self.assertEqual(agent._core_runtime.messages[-1].text, "again")
+        await agent.close()
+        self.assertTrue(new_fake.closed)
 
     async def test_anthropic_backend_routes_to_core_runtime(self) -> None:
         """Anthropic 后端(无 api_base)同样走 Core Runtime,不再落 legacy。"""
