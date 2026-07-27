@@ -249,6 +249,24 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(state.messages[-1].text, transcript[-1].text)
 
+    async def test_configure_provider_rebinds_rebuilt_runtime(self) -> None:
+        from core.fakes import FakeProvider
+
+        session, agent, original_provider = self._make_session([_stop_event("old")])
+        original_runtime = agent.core_runtime
+        replacement_provider = FakeProvider([_stop_event("new")])
+
+        with patch("lion_code.agent.create_provider", return_value=replacement_provider):
+            session.configure_provider(api_key="new-key")
+
+        self.assertIsNot(agent.core_runtime, original_runtime)
+        self.assertIs(session._runtime, agent.core_runtime)
+        async for _ in session.prompt("hello"):
+            pass
+        self.assertEqual(original_provider.call_count, 0)
+        self.assertEqual(replacement_provider.call_count, 1)
+        self.assertEqual(session.messages[-1].text, "new")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

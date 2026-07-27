@@ -199,6 +199,10 @@ class LionCodingSession:
     def configure_provider(self, **kwargs: Any) -> None:
         """运行时切换模型/凭证,直接透传 Agent.configure_api。"""
         self._agent.configure_api(**kwargs)
+        runtime = self._agent.core_runtime
+        if runtime is None:
+            raise RuntimeError("Provider 配置后 Core Runtime 不可用")
+        self._runtime = runtime
         if kwargs.get("model"):
             remember_model(provider=self.provider_name, model=kwargs["model"])
 
