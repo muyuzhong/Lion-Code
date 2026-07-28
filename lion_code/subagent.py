@@ -195,8 +195,3 @@ def build_agent_descriptions() -> str:
     for t in custom:
         lines.append(f"- **{t['name']}**: {t['description']}")
     return "\n".join(lines)
-
-
-def reset_agent_cache() -> None:
-    global _cached_custom_agents
-    _cached_custom_agents = None
