@@ -3,7 +3,7 @@
   "name": "phase5-legacy-cleanup",
   "title": "阶段5：移除 legacy 路径与 SDK 依赖",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
