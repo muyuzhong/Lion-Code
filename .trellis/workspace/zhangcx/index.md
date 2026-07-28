@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
+- **Total Sessions**: 12
 - **Last Active**: 2026-07-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~502 | Active |
+| `journal-1.md` | ~542 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-07-28 | 阶段5暂停：完成 Core Provider 单路径 | `8e8071a`, `563121f`, `64e25b6` | `master` |
 | 11 | 2026-07-28 | 阶段4完成：TUI 真机验收与流式修复 | `f82959e`, `fa24b1d`, `b802bf1` | `master` |
 | 10 | 2026-07-28 | 阶段4双后端TUI验收：离线通过，真机受阻 | - | `master` |
 | 9 | 2026-07-28 | 阶段4-D组：Windows 拖拽与补全渲染行裁剪 | `82b28d7`, `b29e9fe` | `master` |

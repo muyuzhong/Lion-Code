@@ -500,3 +500,43 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: 阶段5暂停：完成 Core Provider 单路径
+
+**Date**: 2026-07-28
+**Task**: 阶段5暂停：完成 Core Provider 单路径
+**Branch**: `master`
+
+### Summary
+
+阶段5规划已补强并启动；切片1已完成、验证并推送，切片2尚未开始，工作树干净。
+
+### Main Changes
+
+- 补充 Provider 空闲态原子热切换、派生服务刷新、回滚门和无锁文件边界。
+- 完成 Core/Provider 唯一主路径、标量配置、canonical history、空闲态热切换与 child/restore 迁移。
+- 独立检查修复整轮未 settled 时 thinking 热切换可能关闭活跃 Provider 的问题。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8e8071a` | (see git log) |
+| `563121f` | (see git log) |
+| `64e25b6` | (see git log) |
+
+### Testing
+
+- [OK] 目标文件：67 passed。
+- [OK] runtime 与 memory Core 集成：10 passed。
+- [OK] compileall、git diff --check、Core 开关和 legacy chat 主流程残留扫描通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 从切片2开始：删除 LegacySdkTextQueryService、SDK side-query、legacy chat 和旧压缩 pipeline。
+- 保持切片1的热切换、canonical history、overflow recovery 与会话恢复契约。
