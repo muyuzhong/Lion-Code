@@ -405,3 +405,41 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 ### Next Steps
 
 - 继续阶段4剩余 D 组或阶段5迁移清理工作，当前 Trellis 总任务保持 in_progress。
+
+
+## Session 9: 阶段4-D组：Windows 拖拽与补全渲染行裁剪
+
+**Date**: 2026-07-28
+**Task**: 阶段4-D组：Windows 拖拽与补全渲染行裁剪
+**Branch**: `master`
+
+### Summary
+
+完成阶段4最后两个代码子项：Windows 终端拖拽路径跨平台归一化，以及按完整 Rich 表格实际渲染行裁剪补全窗口。阶段4自动化验收已绿，仍待两后端新 TUI 手工冒烟矩阵。
+
+### Main Changes
+
+- D9 复用现有 normalize_dropped_paths，POSIX 解析失败后以 non-POSIX shlex 回退，file URI 使用 url2pathname，保留 Windows 盘符和反斜杠。
+- D10 以 Tau 窗口算法为基础，改为测量完整 Rich 补全表格，覆盖分类标题、列宽挤压、description 换行、非法选中索引与零预算。
+- 补齐 TUI 输入与补全可执行规范，并更新阶段4自动化验收状态。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `82b28d7` | (see git log) |
+| `b29e9fe` | (see git log) |
+
+### Testing
+
+- [OK] python -m pytest -q：474 passed, 6 skipped, 6 subtests passed
+- [OK] D 组目标测试：35 passed, 1 skipped（Windows 上仅跳过 POSIX 专用转义用例）
+- [OK] python -m compileall -q lion_code tests 与 git diff --check 通过；环境未安装 lint/type-check 工具
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 执行 OpenAI-compatible 与 Anthropic 两后端的新 TUI 手工冒烟矩阵；取得证据后归档阶段4，再建立阶段5 legacy 清理任务。

@@ -47,12 +47,12 @@ lion_code/tui/(vendored 组件 + 新 app.py + PromptInput 补全)已接为默认
 
 ## Acceptance Criteria
 
-- [ ] 各项单测 + 集成测试;全量 pytest 绿
+- [x] 各项单测 + 集成测试;全量 pytest 绿
 - [ ] 两后端 × 新 TUI 手工冒烟矩阵(文本/工具/权限/Plan/picker)
-- [ ] A1/A2 后:`/model`、`/resume` 不再出现表单式 Modal
-- [ ] C 完成后:`grep "import openai\|import anthropic" lion_code/` 仅剩
+- [x] A1/A2 后:`/model`、`/resume` 不再出现表单式 Modal
+- [x] C 完成后:`grep "import openai\|import anthropic" lion_code/` 仅剩
       agent.py legacy 对话路径(留给阶段 5 删除)
-- [ ] 每完成一个子项按仓库惯例单独提交并推送,journal 记录
+- [x] 每完成一个子项按仓库惯例单独提交并推送,journal 记录
 
 ## Notes
 
