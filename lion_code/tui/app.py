@@ -17,8 +17,10 @@ Plan 审批、模型热配)。OAuth/供应商目录/扩展 UI 等 Lion 不需要
 from __future__ import annotations
 
 from dataclasses import replace
+from io import StringIO
 from pathlib import Path
 
+from rich.console import Console
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.message import Message
@@ -43,7 +45,7 @@ from lion_code.application.session import LionCodingSession
 from lion_code.config import save_api_config
 
 from .autocomplete import CompletionState, build_completion_state
-from .config import TuiSettings, load_tui_settings, save_tui_settings
+from .config import TAU_DARK_THEME, TuiSettings, load_tui_settings, save_tui_settings
 from .prompt_input import (
     COMPLETION_MAX_VISIBLE_LINES,
     PromptInput,
@@ -117,20 +119,126 @@ def _theme_css_variables(theme: TuiTheme) -> dict[str, str]:
 
 
 def _visible_completion_state(
-    state: CompletionState, *, max_items: int
+    state: CompletionState,
+    *,
+    max_lines: int,
+    width: int | None = None,
 ) -> CompletionState:
-    """以选中项可见为前提裁剪补全窗口。
+    """按实际渲染行裁剪补全窗口，并保证选中项可见。"""
+    if not state.items or max_lines <= 0:
+        return CompletionState()
 
-    ponytail: 简单按条目数开窗;上游按渲染行数(含分类头/换行)精确测量,
-    如果长条目导致建议框溢出再迁上游 _visible_completion_state。
-    """
-    if not state.items or len(state.items) <= max_items:
-        return state
-    start = max(0, min(state.selected_index - max_items // 2, len(state.items) - max_items))
+    state = CompletionState(
+        items=state.items,
+        selected_index=min(max(state.selected_index, 0), len(state.items) - 1),
+    )
+
+    selected_line_limit = max(max_lines - 1, 1)
+    start = 0
+    while start < state.selected_index:
+        candidate = CompletionState(
+            items=state.items[start:],
+            selected_index=state.selected_index - start,
+        )
+        if _completion_selected_render_line(candidate, width=width) < selected_line_limit:
+            break
+        start += 1
+
+    end = len(state.items)
+    while end > state.selected_index + 1:
+        candidate = CompletionState(
+            items=state.items[start:end],
+            selected_index=state.selected_index - start,
+        )
+        if _completion_render_line_count(candidate, width=width) <= max_lines:
+            break
+        end -= 1
+
+    while start < state.selected_index:
+        candidate = CompletionState(
+            items=state.items[start:end],
+            selected_index=state.selected_index - start,
+        )
+        if _completion_render_line_count(candidate, width=width) <= max_lines:
+            break
+        start += 1
+
     return CompletionState(
-        items=state.items[start : start + max_items],
+        items=state.items[start:end],
         selected_index=state.selected_index - start,
     )
+
+
+def _completion_selected_render_line(
+    state: CompletionState, *, width: int | None = None
+) -> int:
+    """返回选中补全项所在的渲染行号。"""
+    if width is not None and width > 0:
+        for line_number, line in enumerate(
+            _rendered_completion_lines(state, width=width)
+        ):
+            if line.startswith("›"):
+                return line_number
+
+    line = 0
+    previous_category: str | None = None
+    for index, item in enumerate(state.items):
+        if item.category != previous_category:
+            if index:
+                line += 1
+            if item.category:
+                line += 1
+            previous_category = item.category
+        if index == state.selected_index:
+            return line
+        line += 1
+    return line
+
+
+def _completion_render_line_count(
+    state: CompletionState, *, width: int | None = None
+) -> int:
+    """返回补全状态实际渲染的总行数。"""
+    if not state.items:
+        return 0
+    if width is not None and width > 0:
+        return len(_rendered_completion_lines(state, width=width))
+
+    line_count = 0
+    previous_category: str | None = None
+    for index, item in enumerate(state.items):
+        if item.category != previous_category:
+            if index:
+                line_count += 1
+            if item.category:
+                line_count += 1
+            previous_category = item.category
+        line_count += 1
+    return line_count
+
+
+def _rendered_completion_lines(
+    state: CompletionState,
+    *,
+    width: int,
+) -> tuple[str, ...]:
+    """按真实表格列宽渲染补全状态并返回各行文本。"""
+    output = StringIO()
+    console = Console(
+        file=output,
+        width=width,
+        force_terminal=False,
+        color_system=None,
+        legacy_windows=False,
+    )
+    console.print(
+        render_completion_suggestions(
+            state,
+            theme=TAU_DARK_THEME,
+        ),
+        end="",
+    )
+    return tuple(output.getvalue().splitlines())
 
 
 class UiSinkEvent(Message):
@@ -725,7 +833,9 @@ class LionTuiApp(App):
         suggestions.update(
             render_completion_suggestions(
                 _visible_completion_state(
-                    self._completion_state, max_items=COMPLETION_MAX_VISIBLE_LINES
+                    self._completion_state,
+                    max_lines=COMPLETION_MAX_VISIBLE_LINES,
+                    width=max(suggestions.content_size.width or suggestions.size.width, 1),
                 ),
                 theme=self._tui_theme,
             )

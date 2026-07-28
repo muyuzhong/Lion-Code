@@ -27,9 +27,148 @@ from lion_code.agent import Agent
 from lion_code.application.session import LionCodingSession
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
-from lion_code.tui.app import LionTuiApp
+from lion_code.tui.app import (
+    LionTuiApp,
+    _completion_render_line_count,
+    _completion_selected_render_line,
+    _visible_completion_state,
+)
+from lion_code.tui.autocomplete import CompletionItem, CompletionState
 from lion_code.tui.prompt_input import PromptInput
 from lion_code.ui import set_sink
+
+
+def test_completion_selected_render_line_accounts_for_group_headers() -> None:
+    state = CompletionState(
+        items=(
+            CompletionItem(
+                display="/session",
+                replacement="/session",
+                start=0,
+                end=2,
+                category="Commands",
+            ),
+            CompletionItem(
+                display="/example",
+                replacement="/example",
+                start=0,
+                end=2,
+                category="Custom prompts",
+            ),
+        ),
+        selected_index=1,
+    )
+
+    assert _completion_selected_render_line(state) == 4
+
+
+def test_visible_completion_state_keeps_selected_item_in_render_window() -> None:
+    items = tuple(
+        CompletionItem(
+            display=f"/prompt-{index:02d}",
+            replacement=f"/prompt-{index:02d}",
+            start=0,
+            end=1,
+            category="Custom prompts",
+        )
+        for index in range(30)
+    )
+    state = CompletionState(items=items, selected_index=24)
+
+    visible = _visible_completion_state(state, max_lines=8)
+
+    assert visible.selected is not None
+    assert visible.selected.display == "/prompt-24"
+    assert 0 <= visible.selected_index < len(visible.items)
+    assert _completion_render_line_count(visible) <= 8
+    assert _completion_selected_render_line(visible) < 7
+
+
+def test_visible_completion_state_accounts_for_wrapped_descriptions() -> None:
+    items = tuple(
+        CompletionItem(
+            display=f"/prompt-{index:02d}",
+            replacement=f"/prompt-{index:02d}",
+            start=0,
+            end=1,
+            description=(
+                "This prompt has a long description that wraps across multiple lines "
+                "inside the completion table."
+            ),
+            category="Custom prompts",
+        )
+        for index in range(12)
+    )
+    state = CompletionState(items=items, selected_index=8)
+
+    visible = _visible_completion_state(state, max_lines=8, width=48)
+
+    assert visible.selected is not None
+    assert visible.selected.display == "/prompt-08"
+    assert _completion_render_line_count(visible, width=48) <= 8
+    assert _completion_selected_render_line(visible, width=48) < 7
+
+
+def test_completion_line_count_uses_full_table_column_width() -> None:
+    state = CompletionState(
+        items=(
+            CompletionItem(
+                display="/a",
+                replacement="/a",
+                start=0,
+                end=1,
+                description=(
+                    "one two three four five six seven eight nine ten eleven twelve"
+                ),
+            ),
+            CompletionItem(
+                display="/" + "x" * 30,
+                replacement="/x",
+                start=0,
+                end=1,
+            ),
+        ),
+        selected_index=0,
+    )
+
+    visible = _visible_completion_state(state, max_lines=4, width=48)
+
+    assert visible.items == state.items[:1]
+    assert visible.selected_index == 0
+    assert _completion_render_line_count(visible, width=48) <= 4
+
+
+@pytest.mark.parametrize(("selected_index", "expected_display"), [(-3, "/a"), (9, "/c")])
+def test_visible_completion_state_clamps_invalid_selection(
+    selected_index: int,
+    expected_display: str,
+) -> None:
+    items = tuple(
+        CompletionItem(
+            display=f"/{letter}",
+            replacement=f"/{letter}",
+            start=0,
+            end=1,
+        )
+        for letter in "abc"
+    )
+
+    visible = _visible_completion_state(
+        CompletionState(items=items, selected_index=selected_index),
+        max_lines=1,
+    )
+
+    assert visible.items == (next(item for item in items if item.display == expected_display),)
+    assert visible.selected_index == 0
+
+
+def test_visible_completion_state_returns_empty_for_non_positive_budget() -> None:
+    item = CompletionItem(display="/a", replacement="/a", start=0, end=1)
+
+    assert _visible_completion_state(
+        CompletionState(items=(item,), selected_index=0),
+        max_lines=0,
+    ) == CompletionState()
 
 
 @pytest.fixture()

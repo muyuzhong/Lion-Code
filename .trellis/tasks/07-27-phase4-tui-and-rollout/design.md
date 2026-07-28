@@ -1,53 +1,36 @@
-# B5 设计：溢出压缩与一次自动重试
+# D 组设计：Windows 文件拖拽与补全渲染行裁剪
 
 ## 当前状态
 
-- `application/events.py` 已定义 `CompactionStart/End`、
-  `AutoRetryStart/End` 与 `SessionAgentEnd.will_retry`，TUI adapter 也已消费
-  `AutoRetryStartEvent`，但运行时没有发出这些事件。
-- Core 将 Provider 失败收敛为
-  `MessageEndEvent(AssistantMessage(stop_reason="error"))`，随后仍发出
-  `AgentEndEvent`；错误消息会由 `SessionRecorder` 持久化。
-- `Agent._compact_core_context_if_needed()` 已能用 Provider-neutral compactor
-  写 `CompactionEntry` 并替换 Harness 活跃上下文，但只受 85% 阈值触发，
-  无法在 Provider 已报告 overflow 后强制执行。
-- `LionCodingSession._drive()` 已是应用级事件与 `AgentSettledEvent` 的唯一
-  owner，适合承接一次溢出恢复；不需要新增 Agent→application 反向回调。
+- `tui/file_drop.py` 先尝试完整路径，再固定使用 `shlex.split(..., posix=True)`。
+  单个裸 Windows 路径通常可用，但带引号或多路径输入会丢失盘符后的反斜杠；
+  `file:///C:/...` 也没有转换为 Windows 本地路径。现有测试因此整文件跳过 Windows。
+- `LionTuiApp._visible_completion_state()` 只按条目数裁剪。分类标题、分类间空行与
+  长 description 换行都不计入预算，建议框可能超过 CSS 的可见高度。
+- Tau 当前版本已经提供按实际渲染行测量的补全裁剪函数；文件拖拽实现则仍与 Lion
+  相同，没有可直接同步的 Windows 修复。
 
-## 数据流与顺序契约
+## D9：Windows 拖拽路径归一化
 
-```text
-Core MessageEnd(error: overflow)
-  → Core AgentEnd
-  → SessionAgentEnd(will_retry=True)
-  → CompactionStart(overflow)
-  → Agent 强制压缩（保留最近成功轮次与本次失败 prompt）
-  → CompactionEnd(will_retry=True)
-  → AutoRetryStart(attempt=1, max_attempts=1, delay_ms=0)
-  → 复用同一 LionAgentRuntime.continue_()
-  → SessionAgentEnd(will_retry=False)
-  → AutoRetryEnd(success=是否正常完成)
-  → AgentSettled
-```
+1. 保留完整路径快速路径和现有 POSIX `shlex` 解析，避免改变单文件与 POSIX 终端行为。
+2. POSIX token 不能全部解析为现存绝对路径时，再用 `shlex` 非 POSIX 模式重试，
+   仅剥离成对的外层单双引号，保留盘符和反斜杠。
+3. `file://` 路径通过标准库 `url2pathname()` 转为当前平台路径。
+4. 输出只为含空白路径补双引号，不重写 Windows 路径分隔符；任一 token 非现存
+   绝对路径时仍返回 `None`，不把普通粘贴误判成拖拽。
 
-## 边界决策
+## D10：补全窗口按渲染行裁剪
 
-1. 溢出识别只读取 canonical `AssistantMessage.error_message`，采用 Tau 已验证的
-   context-length/window/token-limit 文本标记；普通 Provider 错误不触发恢复。
-2. 自动恢复最多一次且无延迟。重试再次失败时发
-   `AutoRetryEnd(success=False)` 后归位，不循环。
-3. 压缩失败或用户在压缩阶段取消时发
-   `CompactionEnd(aborted=True, will_retry=False)`，不启动重试，仍发 Settled。
-4. 原始 overflow error 保留在 append-only history；Core 既有 Provider 投影会
-   过滤空的失败 Assistant 消息，重试请求只看到压缩后的有效上下文。
-5. 不改 Core `AgentEvent` 联合、不实现第二套 Loop/存储、不接管 Provider 内部
-   网络重试，也不扩展 legacy SDK 路径。
+1. 以 Tau 的 `_visible_completion_state()` 为窗口算法基础，并按完整 Rich 表格的实际
+   输出测量分类标题、分类间隔、条目本身和 description 换行；不能逐项测量，因为整表
+   最长命令会改变 description 列宽，且保留分类的单项渲染会重复计算标题。
+2. `LionTuiApp._refresh_completions()` 继续使用既有 16 行上限，只把窗口单位从
+   item 改为 rendered line，并传入当前建议框宽度。
+3. 不迁入 Tau 更大的动态终端高度预算和响应式布局状态；当前 CSS `max-height: 17`
+   已提供稳定容器边界，本子项只修复 PRD 指定的 `_visible_completion_state` 语义。
 
-## 修改面
+## 兼容与验证
 
-- `lion_code/agent.py`：为既有 Core 压缩路径增加 overflow 强制入口；正常阈值
-  压缩行为不变。
-- `lion_code/application/session.py`：识别 overflow 并在同一个 `_drive` 生命周期
-  内完成压缩、一次 continue 与应用事件排序。
-- `tests/application/test_coding_session.py`：覆盖成功恢复、压缩失败/取消、重试失败
-  与非 overflow 不重试。
+- Windows、POSIX、URI、引号、多路径和普通文本粘贴均有回归测试。
+- 补全测试断言选中项可见、总渲染行不超预算、长 description 换行被计数。
+- D9、D10 分别提交并直接推送；完成后运行 TUI 目标测试与全量测试。

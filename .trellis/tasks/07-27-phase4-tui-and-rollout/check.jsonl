@@ -1,2 +1,1 @@
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查溢出事件在 Core、application、SessionRecorder 与 TUI 之间的顺序和终态一致性。"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查实现是否复用现有压缩器、Harness continuation 与事件模型。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复核 D9/D10 仅扩展现有入口并同步必要上游逻辑，没有重复路径解析或布局状态。"}
