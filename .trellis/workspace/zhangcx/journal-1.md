@@ -443,3 +443,37 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 ### Next Steps
 
 - 执行 OpenAI-compatible 与 Anthropic 两后端的新 TUI 手工冒烟矩阵；取得证据后归档阶段4，再建立阶段5 legacy 清理任务。
+
+
+## Session 10: 阶段4双后端TUI验收：离线通过，真机受阻
+
+**Date**: 2026-07-28
+**Task**: 阶段4双后端TUI验收：离线通过，真机受阻
+**Branch**: `master`
+
+### Summary
+
+双协议 Provider、Core 切换、工具/Plan 与新 TUI 文本、picker、补全、通知的离线验收通过；真实 Anthropic 网关已通过认证层但当前返回 503，OpenAI-compatible 未配置凭证，因此不勾选手工冒烟验收、不归档阶段4。
+
+### Main Changes
+
+- 确认当前无 ~/.lion-code/config.json、OPENAI_API_KEY、OPENAI_BASE_URL 或 ANTHROPIC_API_KEY；存在 ANTHROPIC_AUTH_TOKEN 与 AnyRouter Base URL。
+- 最小 Anthropic 请求确认 claude-opus-4-6 已下线；切换 4-7 并启用网关要求的 1M beta 后服务返回 HTTP 503。
+- 未修改产品代码，阶段4 Acceptance Criteria 的两后端真机矩阵保持未完成。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 双协议 Core + 新 TUI 定向矩阵：27 passed, 35 deselected
+- [OK] 上次全量回归仍为 474 passed, 6 skipped, 6 subtests passed；本轮无代码变化
+
+### Status
+
+[!] **Partial — external prerequisites missing**
+
+### Next Steps
+
+- 在本机配置可用的 OPENAI_API_KEY + OPENAI_BASE_URL，并等待或更换可用 Anthropic 网关后完成真机矩阵；随后归档阶段4并进入阶段5 legacy 清理。

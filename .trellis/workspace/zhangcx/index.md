@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 9
+- **Total Sessions**: 10
 - **Last Active**: 2026-07-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~445 | Active |
+| `journal-1.md` | ~479 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 10 | 2026-07-28 | 阶段4双后端TUI验收：离线通过，真机受阻 | - | `master` |
 | 9 | 2026-07-28 | 阶段4-D组：Windows 拖拽与补全渲染行裁剪 | `82b28d7`, `b29e9fe` | `master` |
 | 8 | 2026-07-28 | 阶段4-B5：溢出压缩与一次自动重试 | `7224a0a` | `master` |
 | 7 | 2026-07-27 | 阶段4-B4:AgentSettled 终端通知;B5 范围界定 | `2c43910` | `master` |
