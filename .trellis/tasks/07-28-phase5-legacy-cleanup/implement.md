@@ -1,13 +1,26 @@
 # 阶段 5 实施计划
 
+## 启动基线与交付纪律
+
+1. 启动任务前记录当前禁止符号、`agent.py` 行数、依赖文件和目标测试基线；当前
+   `agent.py` 为 3200 行，仓库只有 `pyproject.toml`、没有依赖锁文件。
+2. 每个切片都从干净 `master` 开始，以“目标测试 + 禁止符号残留扫描 +
+   `git diff --check`”作为提交门；只推送已经验证的中文提交。
+3. 每个已推送切片提交都是下一个切片的回滚点。失败时先在当前切片内修复；需要回滚已推送
+   行为时使用新的中文回滚提交，不改写 `master` 历史。
+
 ## 切片 1：Core/Provider 单路径
 
 1. 将 `Agent` 初始化、`configure_api()`、child agent 配置和 `api_configured` 改为只依赖
-   Agent 保存的 Provider 配置；移除 Core 开关和 optional 分支。
+   Agent 保存的 Provider 配置；移除 Core 开关和 optional 分支。复用
+   `LionAgentRuntime.replace_provider()`，不重建 runtime/Harness。
 2. 把 goal、loop、plan、learning、dream 仍读取协议私有 history 的消费者迁到 canonical
    Core state，保持两协议现有行为。
-3. 更新/补充 Core 双协议、API 热切换、child agent 和状态恢复测试，运行相关目标测试。
-4. 残留扫描确认产品主流程不再进入 SDK chat；使用中文提交并直接推送 `master`。
+3. 补齐 Provider 生命周期：运行中配置切换明确拒绝且不改变状态；空闲切换保留 canonical
+   history，刷新 compactor、文本查询和模型限制缓存，并只在成功替换后关闭旧 Provider。
+4. 更新/补充 Core 双协议、API 热切换、child agent、状态恢复和派生服务刷新测试，运行相关
+   目标测试。
+5. 残留扫描确认产品主流程不再进入 SDK chat；使用中文提交并直接推送 `master`。
 
 ## 切片 2：删除 SDK 查询、legacy chat 与压缩
 
@@ -38,8 +51,8 @@
 
 ## 切片 5：依赖、文档与最终验收
 
-1. 移除 `openai`、`anthropic` 直接依赖并同步锁文件；执行产品代码、测试、配置和文档的
-   legacy 残留扫描，区分应删除的运行引用与应保留的迁移历史说明。
+1. 移除 `openai`、`anthropic` 直接依赖；仅在仓库实际存在锁文件时同步锁文件。执行产品
+   代码、测试、配置和文档的 legacy 残留扫描，区分应删除的运行引用与应保留的迁移历史说明。
 2. 更新 `UPSTREAM.md`、`docs/tui-migration-audit.md`、TUI/CLI 用户文档和 Trellis 规范，
    明确 JSONL-only write + legacy read migration 的最终边界。
 3. 运行全量 pytest、compileall、项目已有 lint/type-check、`git diff --check`；记录

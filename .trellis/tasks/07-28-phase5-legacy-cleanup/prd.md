@@ -19,6 +19,9 @@
    配置，不再先构造或反向读取 OpenAI/Anthropic SDK client。
 3. goal、loop、plan、learning、dream、side-query 等现有能力继续使用 Core canonical
    message/history 与 Provider 服务，不保留协议私有 message 列表作为第二状态源。
+4. Provider/模型热切换只允许在会话空闲时执行；切换必须保留 canonical history，并原子刷新
+   compactor、文本查询和模型限制等 Provider 派生服务。新 Provider 构造失败时保持原状态，旧
+   Provider 不得在活跃流中被关闭。
 
 ### B. 删除 legacy 对话、压缩和查询实现
 
@@ -27,7 +30,7 @@
 2. 删除 `LegacySdkTextQueryService` 及其导出和专用测试，所有文本查询复用
    `ProviderTextQueryService`。
 3. `lion_code/` 中不再导入或调用 `openai`、`anthropic` SDK，`pyproject.toml` 移除这两个
-   直接依赖并同步锁文件。
+   直接依赖；仓库若存在依赖锁文件则同步更新（当前仓库没有锁文件）。
 
 ### C. 删除旧 TUI 与全局 sink 桥
 
@@ -65,6 +68,8 @@
       pipeline、`LegacySdkTextQueryService`、`legacy_tui`、`--legacy-tui` 或 `ui.set_sink`。
 - [ ] OpenAI-compatible 与 Anthropic 的 Core/Provider 自动化矩阵通过；阶段 4 的
       overflow → compaction → auto-retry 顺序契约继续通过。
+- [ ] 空闲态跨协议/凭证热切换保留 canonical history，并刷新所有 Provider 派生服务；运行中
+      切换被明确拒绝且不改变现有 Provider，旧 Provider 不会在活跃流中关闭。
 - [ ] 新 TUI 流式增量渲染、工具状态、错误、重试和子 Agent 可见反馈无回归，正常 delta
       不触发 transcript 全量重绘。
 - [ ] 新会话只写 JSONL；旧 `.json` 会话仍可发现、读取和迁移，且源文件保持不变。

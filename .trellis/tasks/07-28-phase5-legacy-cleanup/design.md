@@ -19,10 +19,16 @@ CLI / TUI
 
 - 移除 `_use_core_runtime` 和 `LION_CORE_RUNTIME` 条件分支。
 - `Agent` 始终由 protocol、model、API key/base URL 构造对应 Provider，再构造
-  `LionAgentRuntime`；Core runtime 类型不再是 optional。
+  `LionAgentRuntime`；Core runtime 类型不再是 optional。运行时配置切换复用已有
+  `LionAgentRuntime.replace_provider()`，不重建 Harness、observer 或会话门面。
 - Agent 保存构造 Provider 所需的最小配置，`configure_api()` 和 child agent 复用这些值。
   不从第三方 SDK client 的私有或半公开属性反向推导配置。
 - `api_configured` 以当前 Provider 所需凭据和配置是否齐全为准。
+- Provider 切换先检查 Harness/会话为空闲态，再用候选配置构造新 Provider；构造成功后才替换
+  live Provider，并同步重建 `ProviderContextCompactor`、`ProviderTextQueryService`，使模型限制
+  缓存失效。任一步失败都不得留下半更新状态。
+- 旧 Provider 只在成功切换且确认没有活跃流之后异步关闭；canonical messages、SessionRecorder、
+  UsageObserver 和 `LionCodingSession` 继续绑定同一个 runtime，不制造第二份状态。
 
 ## 决策 2：canonical history 是唯一消息状态
 
@@ -70,6 +76,9 @@ CLI / TUI
 
 每个中间提交都必须可运行。任何删除都需用“符号残留扫描 + 目标测试”证明消费者已经
 归零；不通过空实现、永久 no-op 或捕获所有异常来制造兼容。
+
+每个切片以前一个已推送提交为回滚点：目标测试、残留扫描或 `git diff --check` 未通过时不得
+提交或推送；若切片在提交后才暴露回归，使用新的修复/回滚提交恢复到上一个可运行边界。
 
 ## 兼容与错误边界
 
