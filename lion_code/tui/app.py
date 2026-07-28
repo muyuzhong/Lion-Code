@@ -40,10 +40,35 @@ from textual.widgets import (
 
 from lion_code import ui
 from lion_code.application.commands import CommandResult
-from lion_code.application.events import AgentSettledEvent
+from lion_code.application.events import (
+    AgentSettledEvent,
+    AutoRetryStartEvent,
+    LionSessionEvent,
+    QueueUpdateEvent,
+    SessionAgentEndEvent,
+)
 from lion_code.application.session import LionCodingSession
 from lion_code.config import save_api_config
+from lion_code.core.events import (
+    AgentEndEvent,
+    AgentStartEvent,
+    MessageEndEvent,
+    MessageStartEvent,
+    MessageUpdateEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
+)
+from lion_code.core.messages import (
+    AssistantMessage,
+    CustomMessage,
+    TextContent,
+    ThinkingContent,
+    UserMessage,
+)
+from lion_code.core.provider_events import TextDeltaEvent, ThinkingDeltaEvent
 
+from .adapter import TuiEventAdapter
 from .autocomplete import CompletionState, build_completion_state
 from .config import TAU_DARK_THEME, TuiSettings, load_tui_settings, save_tui_settings
 from .prompt_input import (
@@ -52,7 +77,6 @@ from .prompt_input import (
     text_end_location,
 )
 from .state import TuiState
-from .adapter import TuiEventAdapter
 from .terminal_notification import TerminalNotificationController
 from .themes import TuiTheme, available_tui_theme_names, get_tui_theme
 from .widgets import TranscriptView, render_completion_suggestions
@@ -780,6 +804,7 @@ class LionTuiApp(App):
         ui.set_sink(lambda kind, payload: self.post_message(UiSinkEvent(kind, payload)))
         self.session.set_confirm_fn(self._confirm)
         self.session.set_plan_approval_fn(self._plan_approval)
+        self._refresh_transcript()
         if self._resume_on_mount:
             try:
                 await self.session.restore_latest()
@@ -1009,8 +1034,12 @@ class LionTuiApp(App):
         self._set_status(running=True)
         try:
             async for event in self.session.prompt(text):
+                previous_item_count = len(self.state.items)
                 self.adapter.apply(event)
-                transcript.update_from_state(self.state, theme=self._tui_theme)
+                await self._apply_streaming_transcript_event(
+                    event,
+                    previous_item_count=previous_item_count,
+                )
                 self._set_status(running=self.session.is_running)
                 if isinstance(event, AgentSettledEvent):
                     self._notification.notify_turn_finished()
@@ -1020,6 +1049,141 @@ class LionTuiApp(App):
             self._set_status(running=False)
             await self._reload_sessions()
             self._prompt().focus()
+
+    async def _apply_streaming_transcript_event(
+        self,
+        event: LionSessionEvent,
+        *,
+        previous_item_count: int,
+    ) -> None:
+        """把单个会话事件增量投影到已挂载 transcript。"""
+        transcript = self._transcript()
+        theme = self._tui_theme
+
+        if isinstance(event, AgentStartEvent | MessageStartEvent | QueueUpdateEvent):
+            return
+        if isinstance(event, AgentEndEvent | SessionAgentEndEvent):
+            await transcript.finish_assistant_message()
+            return
+        if isinstance(event, MessageUpdateEvent):
+            nested = event.assistant_message_event
+            if isinstance(nested, TextDeltaEvent):
+                await transcript.append_assistant_delta(nested.delta, theme=theme)
+            elif isinstance(nested, ThinkingDeltaEvent):
+                await transcript.append_thinking_delta(
+                    nested.delta,
+                    theme=theme,
+                    show_thinking=self.state.show_thinking,
+                )
+            return
+        if isinstance(event, MessageEndEvent):
+            if isinstance(event.message, (UserMessage, CustomMessage)):
+                for item in self.state.items[previous_item_count:]:
+                    expanded = self.state.show_tool_results or item.always_show_tool_result
+                    await transcript.append_item(
+                        item,
+                        theme=theme,
+                        show_tool_results=expanded,
+                        custom_markup=(
+                            self.state.resolve_custom_markup(
+                                item,
+                                expanded=self.state.show_tool_results,
+                            )
+                            if item.role == "custom"
+                            else None
+                        ),
+                    )
+                return
+            if isinstance(event.message, AssistantMessage):
+                if event.message.stop_reason in {"error", "aborted"}:
+                    # 终止错误可能同时投影部分回复和错误行；只在该边界全量校准一次。
+                    self._refresh_transcript()
+                    return
+                visible_blocks = [
+                    block
+                    for block in event.message.content
+                    if (
+                        isinstance(block, TextContent)
+                        and bool(block.text)
+                        or isinstance(block, ThinkingContent)
+                        and bool(block.thinking)
+                    )
+                ]
+                canonical_items = (
+                    self.state.items[-len(visible_blocks) :] if visible_blocks else []
+                )
+                if (
+                    any(isinstance(block, ThinkingContent) for block in visible_blocks)
+                    or len(visible_blocks) > 1
+                ):
+                    await transcript.finish_structured_assistant_message(
+                        canonical_items,
+                        theme=theme,
+                        show_thinking=self.state.show_thinking,
+                    )
+                else:
+                    canonical_item = canonical_items[-1] if canonical_items else None
+                    await transcript.finish_assistant_message(
+                        event.message.text,
+                        item=canonical_item,
+                    )
+                return
+            return
+        if isinstance(event, ToolExecutionStartEvent):
+            await transcript.finish_assistant_message()
+            item = self.state.items[-1]
+            await transcript.append_item(
+                item,
+                theme=theme,
+                show_tool_results=self.state.show_tool_results,
+                invocation=self.state.resolve_tool_invocation(item),
+            )
+            return
+        if isinstance(event, ToolExecutionUpdateEvent):
+            await transcript.finish_assistant_message()
+            updated_item = self.state.find_tool_item(event.tool_call_id)
+            if updated_item is not None:
+                expanded = (
+                    self.state.show_tool_results
+                    or updated_item.always_show_tool_result
+                )
+                await transcript.update_item(
+                    updated_item,
+                    theme=theme,
+                    show_tool_results=expanded,
+                    invocation=self.state.resolve_tool_invocation(updated_item),
+                    result_markup=self.state.resolve_tool_result(
+                        updated_item,
+                        expanded=expanded,
+                    ),
+                )
+            return
+        if isinstance(event, ToolExecutionEndEvent):
+            updated_item = self.state.find_tool_item(event.tool_call_id)
+            if updated_item is not None:
+                expanded = (
+                    self.state.show_tool_results
+                    or updated_item.always_show_tool_result
+                )
+                await transcript.update_item(
+                    updated_item,
+                    theme=theme,
+                    show_tool_results=expanded,
+                    invocation=self.state.resolve_tool_invocation(updated_item),
+                    result_markup=self.state.resolve_tool_result(
+                        updated_item,
+                        expanded=expanded,
+                    ),
+                )
+            return
+        if isinstance(event, AutoRetryStartEvent):
+            await transcript.finish_assistant_message()
+            if len(self.state.items) > previous_item_count:
+                await transcript.append_item(
+                    self.state.items[-1],
+                    theme=theme,
+                    show_tool_results=self.state.show_tool_results,
+                )
 
     def _refresh_transcript(self) -> None:
         self._transcript().update_from_state(self.state, theme=self._tui_theme)

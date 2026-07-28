@@ -34,3 +34,32 @@
 - Windows、POSIX、URI、引号、多路径和普通文本粘贴均有回归测试。
 - 补全测试断言选中项可见、总渲染行不超预算、长 description 换行被计数。
 - D9、D10 分别提交并直接推送；完成后运行 TUI 目标测试与全量测试。
+
+## E11：流式 transcript 无闪烁
+
+### 根因
+
+`LionTuiApp._run_prompt()` 在每个会话事件后调用 `TranscriptView.update_from_state()`；
+该方法进入 `_redraw()`，会卸载并重新挂载窗口内的全部消息。provider 高频 text delta
+因此反复重建 Markdown widget 和布局，造成屏幕闪烁。与此同时，Lion 已从 Tau vendor
+了 `append_assistant_delta()`、`append_thinking_delta()`、`finish_assistant_message()`、
+`append_item()` 与 `update_item()`，只是应用层尚未接线。
+
+### 方案
+
+1. 以 Tau 当前 `_apply_streaming_transcript_event()` 为上游依据，在 Lion 应用层按
+   `MessageUpdate`、`MessageEnd`、`ToolExecution*` 与 retry 边界调用现有增量 API。
+2. text/thinking delta 只向活动 `StreamingTranscriptMessageWidget` 追加 fragment；普通
+   assistant 消息在 `MessageEnd` 绑定 canonical `ChatItem`，结构化 thinking/text 消息
+   仅替换本轮临时尾部。
+3. 工具开始时追加一个工具行，工具进度和结果原位更新；状态栏仍可刷新，但不触碰
+   transcript 历史 DOM。异常终止允许一次全量同步，保证错误项不丢失。
+4. 不新增节流器、渲染队列或第二套状态；复用 adapter 的唯一投影和已 vendor 的 Tau
+   widget API。
+
+### 回归判据
+
+- 两个连续 text delta 必须分别进入 `MarkdownStream.write()`，不得调用整段 Markdown
+  replace/update，也不得调用 `TranscriptView.update_from_state()`。
+- 最终 assistant 文本与 `TuiState` canonical item 一致，既有历史消息 widget 身份不变。
+- thinking、工具开始/进度/结束与异常消息终止覆盖目标测试。

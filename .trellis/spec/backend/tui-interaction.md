@@ -1,11 +1,11 @@
-# TUI Input and Completion Contracts
+# TUI Input, Completion, and Streaming Transcript Contracts
 
 ## 1. Scope / Trigger
 
-Use these contracts when changing terminal file-drop handling or the autocomplete
-window in `lion_code/tui/`. Both paths translate terminal-dependent text or Rich
-rendering into user-visible prompt state, so byte-level parsing and rendered rows
-must be tested rather than inferred from item counts.
+Use these contracts when changing terminal file-drop handling, the autocomplete
+window, or streamed transcript rendering in `lion_code/tui/`. These paths translate
+terminal-dependent input or session events into user-visible state, so parsing,
+rendered rows, and mounted-widget identity must be tested directly.
 
 ## 2. Signatures
 
@@ -18,6 +18,12 @@ def _visible_completion_state(
     max_lines: int,
     width: int | None = None,
 ) -> CompletionState: ...
+
+async def LionTuiApp._apply_streaming_transcript_event(
+    event: LionSessionEvent,
+    *,
+    previous_item_count: int,
+) -> None: ...
 ```
 
 ## 3. Contracts
@@ -43,6 +49,23 @@ def _visible_completion_state(
 - Empty input or a non-positive budget returns an empty state. If the selected item
   alone renders beyond the budget, preserving it takes precedence over the limit.
 
+### Streaming transcript
+
+- Apply every event to `TuiEventAdapter` first; `TuiState` remains the canonical
+  projection used to reconcile final messages and tool results.
+- Append text and thinking deltas through `TranscriptView`'s streaming methods so
+  each fragment reaches `MarkdownStream.write()` without rebuilding transcript
+  history.
+- Reconcile a normal `MessageEndEvent` against canonical items by finalizing the
+  active widget or replacing only the provisional assistant tail. Tool start,
+  update, and end events append or update their row in place.
+- When finalizing a single text block, bind the streamed widget to its canonical
+  `ChatItem` and advance `TranscriptView._window_end` to include that item. Leaving
+  the boundary behind makes the next turn look off-window and drops its live deltas.
+- A terminal error or abort may perform one full state redraw so partial output and
+  the error row cannot be lost. Normal streaming events must not call
+  `TranscriptView.update_from_state()`.
+
 ## 4. Validation and Error Matrix
 
 | Input or state | Result |
@@ -54,6 +77,11 @@ def _visible_completion_state(
 | Empty completion state or `max_lines <= 0` | Empty `CompletionState` |
 | Selected index outside item bounds | Clamp before slicing |
 | Positive width | Measure full rendered table |
+| Text/thinking delta | Append only to the active streaming tail; no full redraw |
+| Normal single-text `MessageEndEvent` | Bind canonical item and advance window end |
+| Structured assistant message | Replace only this turn's provisional tail |
+| Tool progress/result | Update the mounted tool row in place |
+| Error or aborted message end | One terminal full-state reconciliation is allowed |
 
 ## 5. Good / Base / Bad Cases
 
@@ -65,6 +93,12 @@ def _visible_completion_state(
 - Good: a completion table with a long command and long descriptions is sliced by
   the rows produced at the widget width.
 - Bad: slicing 16 items can still render far more than 16 lines.
+- Good: two provider fragments call `MarkdownStream.write()` twice while every
+  historical widget keeps its identity.
+- Base: a normal message end finalizes the active widget, binds its canonical item,
+  and leaves the transcript window at `len(state.items)`.
+- Bad: calling `update_from_state()` for each fragment remounts history; binding the
+  canonical item without advancing `_window_end` suppresses the next turn's stream.
 
 ## 6. Tests Required
 
@@ -73,6 +107,10 @@ def _visible_completion_state(
 - Completion unit tests: category headers, category gaps, selected-item visibility,
   wrapped descriptions, full-table column-width effects, invalid indexes, and zero
   budget.
+- Streaming Textual test: two consecutive text deltas reach `MarkdownStream` as
+  separate fragments, a mounted history widget keeps its identity, no full redraw
+  occurs, `MessageEndEvent` matches the canonical assistant item, and the mounted
+  window end equals the canonical item count.
 - Run `tests/tui/test_tui_file_drop.py`, `tests/tui/test_tui_app.py`, and the full
   test suite before completion.
 
@@ -93,4 +131,17 @@ if paths is None:
     paths = _tokens_to_paths(text, posix=False)
 
 visible = _visible_completion_state(state, max_lines=16, width=widget_width)
+```
+
+```python
+# Wrong: remounts every historical message for each provider fragment.
+adapter.apply(event)
+transcript.update_from_state(state)
+
+# Correct: update canonical state, then mutate only the active transcript tail.
+adapter.apply(event)
+await app._apply_streaming_transcript_event(
+    event,
+    previous_item_count=previous_item_count,
+)
 ```

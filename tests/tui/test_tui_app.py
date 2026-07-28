@@ -35,6 +35,7 @@ from lion_code.tui.app import (
 )
 from lion_code.tui.autocomplete import CompletionItem, CompletionState
 from lion_code.tui.prompt_input import PromptInput
+from lion_code.tui.widgets import TranscriptView
 from lion_code.ui import set_sink
 
 
@@ -219,6 +220,94 @@ async def test_text_message_renders_into_transcript(app_factory) -> None:
     assert ("user", "hi") in roles
     assert any(r == "assistant" and "你好" in t for r, t in roles)
     assert not app.session.is_running
+
+
+@pytest.mark.asyncio
+async def test_streaming_events_append_fragments_without_redrawing_history(app_factory) -> None:
+    from textual.widgets.markdown import MarkdownStream
+
+    from lion_code.application.events import AgentSettledEvent, SessionAgentEndEvent
+    from lion_code.core.events import (
+        AgentStartEvent,
+        MessageEndEvent,
+        MessageStartEvent,
+        MessageUpdateEvent,
+    )
+    from lion_code.core.messages import AssistantMessage, TextContent, UserMessage
+    from lion_code.core.provider_events import TextDeltaEvent
+
+    empty = AssistantMessage(model="fake")
+    first = AssistantMessage(model="fake", content=[TextContent(text="hello ")])
+    final = AssistantMessage(model="fake", content=[TextContent(text="hello world")])
+    events = [
+        AgentStartEvent(),
+        MessageEndEvent(message=UserMessage(content="next")),
+        MessageStartEvent(message=empty),
+        MessageUpdateEvent(
+            message=first,
+            assistant_message_event=TextDeltaEvent(
+                content_index=0,
+                delta="hello ",
+                partial=first,
+            ),
+        ),
+        MessageUpdateEvent(
+            message=final,
+            assistant_message_event=TextDeltaEvent(
+                content_index=0,
+                delta="world",
+                partial=final,
+            ),
+        ),
+        MessageEndEvent(message=final),
+        SessionAgentEndEvent(),
+        AgentSettledEvent(),
+    ]
+
+    async def prompt_events(*_args, **_kwargs):
+        for event in events:
+            yield event
+
+    app = app_factory([])
+    async with app.run_test() as pilot:
+        app.state.add_item("user", "history")
+        app._refresh_transcript()
+        await pilot.pause()
+        transcript = app._transcript()
+        history_item = app.state.items[0]
+        history_widget = transcript._item_widgets[id(history_item)]
+
+        fragments: list[str] = []
+        redraws: list[TranscriptView] = []
+        original_write = MarkdownStream.write
+        original_redraw = TranscriptView.update_from_state
+
+        async def track_write(stream, fragment: str) -> None:
+            fragments.append(fragment)
+            await original_write(stream, fragment)
+
+        def track_redraw(view, state, *, theme):
+            redraws.append(view)
+            return original_redraw(view, state, theme=theme)
+
+        with (
+            patch.object(app.session, "prompt", prompt_events),
+            patch.object(MarkdownStream, "write", track_write),
+            patch.object(TranscriptView, "update_from_state", track_redraw),
+        ):
+            await app._run_prompt("next")
+            await pilot.pause()
+
+        assert fragments == ["hello ", "world"]
+        assert redraws == []
+        assert transcript._item_widgets[id(history_item)] is history_widget
+        assistant_item = next(item for item in app.state.items if item.role == "assistant")
+        assistant_widget = transcript._item_widgets[id(assistant_item)]
+        assert assistant_widget.item is assistant_item
+        assert transcript._window_end == len(app.state.items)
+
+    projected = [(item.role, item.text) for item in app.state.items]
+    assert ("assistant", "hello world") in projected
 
 
 @pytest.mark.asyncio

@@ -45,6 +45,11 @@ lion_code/tui/(vendored 组件 + 新 app.py + PromptInput 补全)已接为默认
 9. Windows 拖拽路径归一化(file_drop 目前只认 POSIX 转义格式)。
 10. 补全窗口溢出时迁上游按渲染行测量的 _visible_completion_state。
 
+### E. 真机冒烟回归
+
+11. LLM 流式输出必须复用已 vendor 的 `MarkdownStream` 增量渲染路径；单个
+    text/thinking delta 不得重建完整 transcript，已挂载的历史消息保持 widget 身份稳定。
+
 ## Acceptance Criteria
 
 - [x] 各项单测 + 集成测试;全量 pytest 绿
@@ -52,6 +57,8 @@ lion_code/tui/(vendored 组件 + 新 app.py + PromptInput 补全)已接为默认
 - [x] A1/A2 后:`/model`、`/resume` 不再出现表单式 Modal
 - [x] C 完成后:`grep "import openai\|import anthropic" lion_code/` 仅剩
       agent.py legacy 对话路径(留给阶段 5 删除)
+- [x] 连续 text/thinking delta 通过增量 widget API 写入，消息终止和工具边界正确收敛为
+      canonical state，历史 transcript 不发生全量卸载/重挂载
 - [x] 每完成一个子项按仓库惯例单独提交并推送,journal 记录
 
 ## Notes
