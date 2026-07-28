@@ -479,49 +479,6 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 - 在本机配置可用的 OPENAI_API_KEY + OPENAI_BASE_URL，并等待或更换可用 Anthropic 网关后完成真机矩阵；随后归档阶段4并进入阶段5 legacy 清理。
 
 
-## Session 11: 阶段4真机回归：修复流式输出闪烁
-
-**Date**: 2026-07-28
-**Task**: 阶段4 E11：流式 transcript 增量渲染
-**Branch**: `master`
-
-### Summary
-
-真机冒烟发现 LLM 流式输出期间屏幕闪烁。根因是应用层在每个 provider delta 后全量
-重绘 transcript；现已接入仓库既有的 Tau `MarkdownStream` 增量路径，并修复流式 widget
-绑定 canonical 消息后窗口边界未推进、可能导致下一轮实时输出被忽略的问题。
-
-### Main Changes
-
-- `LionTuiApp` 先由 adapter 投影 canonical state，再按消息、工具与重试边界调用
-  `TranscriptView` 的增量 append/finalize/update API；仅 error/abort 终止边界允许一次全量校准。
-- 单文本消息结束时保持流式 widget 身份，绑定 canonical `ChatItem` 并同步推进
-  `_window_end`，历史消息不再因 delta 被卸载重挂载。
-- 新增 Textual 回归，验证连续 fragment、零全量 redraw、历史 widget 身份、canonical
-  绑定与窗口边界收敛；补充 TUI 流式交互代码规范。
-
-### Git Commits
-
-| Hash | Message |
-|------|---------|
-| `f82959e` | `fix: 修复流式输出闪烁` |
-
-### Testing
-
-- [OK] python -m pytest -q：475 passed, 6 skipped, 6 subtests passed
-- [OK] TUI app + adapter：34 passed；E11 专项：1 passed
-- [OK] compileall、git diff --check 通过；Ruff 排除仓库既有 I001/RUF012/BLE001/RUF100 后通过
-
-### Status
-
-[OK] **Implemented and regression-tested; pending post-fix visual smoke**
-
-### Next Steps
-
-- 用已配置后端复验流式显示并继续完成两后端文本/工具/权限/Plan/picker 真机矩阵；通过后归档阶段4。
-- 下一阶段为阶段5 legacy 清理：删除旧双后端与 legacy TUI/session JSON 写入，移除 SDK 依赖。
-
-
 ## Session 11: 阶段4完成：TUI 真机验收与流式修复
 
 **Date**: 2026-07-28
