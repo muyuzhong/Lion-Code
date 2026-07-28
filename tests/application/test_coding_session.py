@@ -17,6 +17,10 @@ from unittest.mock import patch
 from lion_code.agent import Agent
 from lion_code.application import (
     AgentSettledEvent,
+    AutoRetryEndEvent,
+    AutoRetryStartEvent,
+    CompactionEndEvent,
+    CompactionStartEvent,
     LionCodingSession,
     QueueUpdateEvent,
     SessionAgentEndEvent,
@@ -28,7 +32,7 @@ from lion_code.core.events import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
-from lion_code.core.provider_events import AssistantDoneEvent
+from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
@@ -76,6 +80,18 @@ def _stop_event(text: str = "done") -> AssistantDoneEvent:
             model="fake",
             content=[TextContent(text=text)],
             stop_reason="stop",
+        ),
+    )
+
+
+def _error_event(message: str) -> AssistantErrorEvent:
+    return AssistantErrorEvent(
+        reason="error",
+        error=AssistantMessage(
+            model="fake",
+            content=[],
+            stop_reason="error",
+            error_message=message,
         ),
     )
 
@@ -227,6 +243,233 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(session.is_running)
         # 取消后可以继续下一轮(队列/状态未泄漏)。
         self.assertEqual(session.queued_steering_messages, ())
+
+    # ─── 溢出压缩与一次自动重试 ───────────────────────────────
+
+    async def _prime_overflow_history(self, session: LionCodingSession) -> None:
+        async for _ in session.prompt("old prompt"):
+            pass
+        async for _ in session.prompt("keep recent turn"):
+            pass
+
+    async def test_context_overflow_compacts_and_retries_once(self) -> None:
+        session, agent, fake = self._make_session([
+            _stop_event("old answer"),
+            _stop_event("recent answer"),
+            _error_event("This model's maximum context length was exceeded."),
+            _stop_event("recovery summary"),
+            _stop_event("recovered answer"),
+        ])
+        await self._prime_overflow_history(session)
+
+        events = [event async for event in session.prompt("trigger overflow")]
+
+        recovery_events = [
+            event
+            for event in events
+            if isinstance(
+                event,
+                (
+                    SessionAgentEndEvent,
+                    CompactionStartEvent,
+                    CompactionEndEvent,
+                    AutoRetryStartEvent,
+                    AutoRetryEndEvent,
+                    AgentSettledEvent,
+                ),
+            )
+        ]
+        self.assertEqual(
+            [event.type for event in recovery_events],
+            [
+                "session_agent_end",
+                "compaction_start",
+                "compaction_end",
+                "auto_retry_start",
+                "session_agent_end",
+                "auto_retry_end",
+                "agent_settled",
+            ],
+        )
+        self.assertTrue(recovery_events[0].will_retry)
+        self.assertFalse(recovery_events[4].will_retry)
+        self.assertTrue(recovery_events[2].will_retry)
+        self.assertTrue(recovery_events[5].success)
+        self.assertEqual(fake.call_count, 5)
+        self.assertEqual(
+            [message.text for message in fake.received_messages[4]],
+            [
+                "Previous conversation summary:\nrecovery summary",
+                "keep recent turn",
+                "recent answer",
+                "trigger overflow",
+            ],
+        )
+
+        entries = await self._session_repository.storage_for(
+            agent.session_id
+        ).read_all()
+        compactions = [entry for entry in entries if entry.type == "compaction"]
+        self.assertEqual(len(compactions), 1)
+        self.assertEqual(compactions[0].summary, "recovery summary")
+        self.assertEqual(
+            sum(
+                entry.type == "message"
+                and isinstance(entry.message, AssistantMessage)
+                and entry.message.stop_reason == "error"
+                for entry in entries
+            ),
+            1,
+        )
+
+    async def test_context_overflow_compaction_failure_settles(self) -> None:
+        session, _agent, fake = self._make_session([
+            _stop_event("old answer"),
+            _stop_event("recent answer"),
+            _error_event("context window exceeded"),
+            _error_event("summary unavailable"),
+        ])
+        await self._prime_overflow_history(session)
+
+        events = [event async for event in session.prompt("trigger overflow")]
+
+        compaction_end = next(
+            event for event in events if isinstance(event, CompactionEndEvent)
+        )
+        self.assertTrue(compaction_end.aborted)
+        self.assertFalse(compaction_end.will_retry)
+        self.assertIn("summary unavailable", compaction_end.error_message or "")
+        self.assertFalse(any(isinstance(event, AutoRetryStartEvent) for event in events))
+        self.assertIsInstance(events[-1], AgentSettledEvent)
+        self.assertEqual(fake.call_count, 4)
+
+    async def test_context_overflow_without_old_context_does_not_compact(self) -> None:
+        session, agent, fake = self._make_session([
+            _stop_event("only prior answer"),
+            _error_event("context window exceeded"),
+        ])
+        async for _ in session.prompt("only prior prompt"):
+            pass
+
+        events = [event async for event in session.prompt("trigger overflow")]
+
+        compaction_end = next(
+            event for event in events if isinstance(event, CompactionEndEvent)
+        )
+        self.assertTrue(compaction_end.aborted)
+        self.assertFalse(compaction_end.will_retry)
+        self.assertFalse(any(isinstance(event, AutoRetryStartEvent) for event in events))
+        self.assertIsInstance(events[-1], AgentSettledEvent)
+        self.assertEqual(fake.call_count, 2)
+        state = await self._session_repository.load(agent.session_id)
+        self.assertIsNotNone(state)
+        self.assertEqual(len(state.compaction_entries), 0)
+
+    async def test_cancel_during_overflow_compaction_does_not_retry(self) -> None:
+        session, agent, fake = self._make_session([
+            _stop_event("old answer"),
+            _stop_event("recent answer"),
+            _error_event("context length exceeded"),
+        ])
+        await self._prime_overflow_history(session)
+
+        compaction_started = asyncio.Event()
+
+        class BlockingCompactor:
+            async def summarize(self, _messages) -> str:
+                compaction_started.set()
+                await asyncio.Event().wait()
+                raise AssertionError("取消后不应继续摘要")
+
+        agent._context_compactor = BlockingCompactor()
+
+        async def collect_events():
+            return [event async for event in session.prompt("trigger overflow")]
+
+        collector = asyncio.create_task(collect_events())
+        await asyncio.wait_for(compaction_started.wait(), timeout=1)
+        session.cancel()
+        events = await asyncio.wait_for(collector, timeout=1)
+
+        compaction_end = next(
+            event for event in events if isinstance(event, CompactionEndEvent)
+        )
+        self.assertTrue(compaction_end.aborted)
+        self.assertFalse(compaction_end.will_retry)
+        self.assertFalse(any(isinstance(event, AutoRetryStartEvent) for event in events))
+        self.assertIsInstance(events[-1], AgentSettledEvent)
+        self.assertEqual(fake.call_count, 3)
+        state = await self._session_repository.load(agent.session_id)
+        self.assertIsNotNone(state)
+        self.assertEqual(len(state.compaction_entries), 0)
+
+    async def test_context_overflow_retry_failure_is_terminal(self) -> None:
+        session, _agent, fake = self._make_session([
+            _stop_event("old answer"),
+            _stop_event("recent answer"),
+            _error_event("too many tokens"),
+            _stop_event("recovery summary"),
+            _error_event("context limit still exceeded"),
+        ])
+        await self._prime_overflow_history(session)
+
+        events = [event async for event in session.prompt("trigger overflow")]
+
+        retry_starts = [
+            event for event in events if isinstance(event, AutoRetryStartEvent)
+        ]
+        retry_end = next(
+            event for event in events if isinstance(event, AutoRetryEndEvent)
+        )
+        agent_ends = [
+            event for event in events if isinstance(event, SessionAgentEndEvent)
+        ]
+        self.assertEqual(len(retry_starts), 1)
+        self.assertFalse(retry_end.success)
+        self.assertEqual(retry_end.final_error, "context limit still exceeded")
+        self.assertEqual([event.will_retry for event in agent_ends], [True, False])
+        self.assertIsInstance(events[-1], AgentSettledEvent)
+        self.assertEqual(fake.call_count, 5)
+
+    async def test_non_overflow_provider_error_does_not_retry(self) -> None:
+        session, _agent, fake = self._make_session([
+            _error_event("service unavailable"),
+        ])
+
+        events = [event async for event in session.prompt("hello")]
+
+        self.assertFalse(
+            any(
+                isinstance(event, (CompactionStartEvent, AutoRetryStartEvent))
+                for event in events
+            )
+        )
+        agent_end = next(
+            event for event in events if isinstance(event, SessionAgentEndEvent)
+        )
+        self.assertFalse(agent_end.will_retry)
+        self.assertIsInstance(events[-1], AgentSettledEvent)
+        self.assertEqual(fake.call_count, 1)
+
+    async def test_generic_limit_error_does_not_trigger_overflow_recovery(self) -> None:
+        session, _agent, fake = self._make_session([
+            _error_event("Requests per minute exceeded the limit"),
+        ])
+
+        events = [event async for event in session.prompt("hello")]
+
+        agent_end = next(
+            event for event in events if isinstance(event, SessionAgentEndEvent)
+        )
+        self.assertFalse(agent_end.will_retry)
+        self.assertFalse(
+            any(
+                isinstance(event, (CompactionStartEvent, AutoRetryStartEvent))
+                for event in events
+            )
+        )
+        self.assertIsInstance(events[-1], AgentSettledEvent)
+        self.assertEqual(fake.call_count, 1)
 
     # ─── Durable Session 一致性 ──────────────────────────────
 

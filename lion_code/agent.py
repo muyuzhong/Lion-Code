@@ -182,11 +182,19 @@ def _get_max_output_tokens(model: str) -> int:
     return 16384
 
 
-def _recent_context_boundary(messages: tuple[AgentMessage, ...]) -> int:
-    """保留最近一个完整用户轮次，避免把 ToolCall 与 ToolResult 拆开。"""
+def _recent_context_boundary(
+    messages: tuple[AgentMessage, ...],
+    *,
+    keep_user_boundaries: int = 1,
+) -> int:
+    """按用户边界保留最近轮次，避免把 ToolCall 与 ToolResult 拆开。"""
 
+    found = 0
     for index in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[index], UserMessage) and index > 0:
+        if not isinstance(messages[index], UserMessage):
+            continue
+        found += 1
+        if found == keep_user_boundaries:
             return index
     return len(messages)
 
@@ -343,6 +351,7 @@ class Agent:
         # 当前异步任务用于把 Ctrl+C 传播到正在等待的模型或工具调用。
         self._aborted = False
         self._current_task: asyncio.Task | None = None
+        self._core_compaction_task: asyncio.Task[str] | None = None
         self._early_tool_tasks: set[asyncio.Task] = set()
         # 最近一次 chat/run 的终止原因，供 run() 结构化返回；chat 自身不读取。
         self._last_stop_reason: str | None = None
@@ -587,6 +596,12 @@ class Agent:
         return self._current_task is not None and not self._current_task.done()
 
     @property
+    def is_aborted(self) -> bool:
+        """最近一次运行是否已收到取消请求。"""
+
+        return self._aborted
+
+    @property
     def core_runtime(self) -> LionAgentRuntime | None:
         """Core Runtime 灰度路径的运行时;未启用(旧路径)时为 None。
 
@@ -666,6 +681,9 @@ class Agent:
             self._last_stop_reason = "aborted"
             self._memory_coordinator.cancel_pending()
             self._core_runtime.cancel()
+            compaction_task = getattr(self, "_core_compaction_task", None)
+            if compaction_task is not None:
+                compaction_task.cancel()
             return
         self._aborted = True
         if self._current_task and not self._current_task.done():
@@ -862,7 +880,12 @@ class Agent:
             now=time.time(),
         )
 
-    async def _compact_core_context_if_needed(self) -> bool:
+    async def _compact_core_context_if_needed(
+        self,
+        *,
+        force: bool = False,
+        keep_user_boundaries: int = 1,
+    ) -> bool:
         """在新用户轮次前写入 CompactionEntry，并重放新的活跃上下文。"""
 
         if (
@@ -873,7 +896,9 @@ class Agent:
             return False
 
         self._sync_core_usage()
-        if not self._context_manager.should_compact(self._context_runtime_state()):
+        if not force and not self._context_manager.should_compact(
+            self._context_runtime_state()
+        ):
             return False
 
         messages = self._core_runtime.messages
@@ -881,16 +906,31 @@ class Agent:
         if len(entry_ids) != len(messages):
             raise RuntimeError("Session context does not match active Harness messages")
 
-        boundary = _recent_context_boundary(messages)
+        boundary = _recent_context_boundary(
+            messages,
+            keep_user_boundaries=keep_user_boundaries,
+        )
         replaced_ids = list(entry_ids[:boundary])
         summary_messages = tuple(messages[:boundary])
         if not replaced_ids:
+            if force:
+                return False
             replaced_ids = list(entry_ids)
             summary_messages = messages
         if not replaced_ids:
             return False
 
-        summary = await self._context_compactor.summarize(summary_messages)
+        if self._aborted:
+            raise asyncio.CancelledError
+        task = asyncio.create_task(self._context_compactor.summarize(summary_messages))
+        self._core_compaction_task = task
+        try:
+            summary = await task
+        finally:
+            if self._core_compaction_task is task:
+                self._core_compaction_task = None
+        if self._aborted:
+            raise asyncio.CancelledError
         await self._session_recorder.record_compaction(
             summary=summary,
             replaces_entry_ids=replaced_ids,
@@ -904,6 +944,14 @@ class Agent:
         self._last_context_actions = ()
         self._core_compaction_required = False
         return True
+
+    async def compact_core_context_for_overflow(self) -> bool:
+        """强制压缩旧上下文，并保留最近成功轮次与本次失败 prompt。"""
+
+        return await self._compact_core_context_if_needed(
+            force=True,
+            keep_user_boundaries=2,
+        )
 
     async def _apply_pending_core_context_reset(self) -> bool:
         """把 Plan 批准结果写成 Compaction，再从该摘要继续 Core Loop。"""

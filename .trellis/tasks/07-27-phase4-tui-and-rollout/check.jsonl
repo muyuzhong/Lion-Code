@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查溢出事件在 Core、application、SessionRecorder 与 TUI 之间的顺序和终态一致性。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查实现是否复用现有压缩器、Harness continuation 与事件模型。"}

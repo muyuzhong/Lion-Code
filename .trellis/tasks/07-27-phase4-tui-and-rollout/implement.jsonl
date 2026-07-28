@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "B5 横跨 Core 事件、应用会话编排、持久化与 TUI 事件消费，需要核对完整事件数据流。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用既有 Compaction/Event/Runtime 能力，避免新增第二套 Loop 或重复事件契约。"}

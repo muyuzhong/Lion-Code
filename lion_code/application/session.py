@@ -24,8 +24,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from lion_code.core.events import AgentEndEvent, AgentEvent
-from lion_code.core.messages import AgentMessage
+from lion_code.core.events import AgentEndEvent, AgentEvent, MessageEndEvent
+from lion_code.core.messages import AgentMessage, AssistantMessage
 
 from .commands import CommandRegistry, CommandResult, create_default_command_registry
 from .prompt_templates import PromptTemplate
@@ -33,6 +33,10 @@ from .provider_settings import ModelChoice, load_model_choices, remember_model
 from .skills import Skill
 from .events import (
     AgentSettledEvent,
+    AutoRetryEndEvent,
+    AutoRetryStartEvent,
+    CompactionEndEvent,
+    CompactionStartEvent,
     LionSessionEvent,
     QueueUpdateEvent,
     SessionAgentEndEvent,
@@ -42,6 +46,28 @@ if TYPE_CHECKING:
     from lion_code.agent import Agent
 
 type StreamingBehavior = Literal["steer", "follow_up"]
+
+_CONTEXT_OVERFLOW_MARKERS = (
+    "context length",
+    "context window",
+    "context limit",
+    "maximum context",
+    "max context",
+    "input is too long",
+    "input length",
+    "prompt is too long",
+    "too many tokens",
+    "token limit",
+)
+
+
+def _is_context_overflow_error(message: AssistantMessage | None) -> bool:
+    """只依据 canonical Assistant 错误文本识别上下文溢出。"""
+
+    if message is None or message.stop_reason != "error":
+        return False
+    normalized = (message.error_message or "").lower()
+    return any(marker in normalized for marker in _CONTEXT_OVERFLOW_MARKERS)
 
 
 
@@ -298,22 +324,137 @@ class LionCodingSession:
         queue: asyncio.Queue[AgentEvent] = asyncio.Queue()
         unsubscribe = self._runtime.subscribe(queue.put_nowait)
         task = asyncio.ensure_future(run)
+        retry_started = False
+        terminal_assistant: AssistantMessage | None = None
         self._running = True
         try:
             while True:
-                get_event = asyncio.ensure_future(queue.get())
-                done, _ = await asyncio.wait(
-                    {get_event, task}, return_when=asyncio.FIRST_COMPLETED
+                terminal_assistant = None
+                while True:
+                    get_event = asyncio.ensure_future(queue.get())
+                    done, _ = await asyncio.wait(
+                        {get_event, task}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if get_event in done:
+                        event = get_event.result()
+                        if isinstance(event, MessageEndEvent) and isinstance(
+                            event.message, AssistantMessage
+                        ):
+                            terminal_assistant = event.message
+                        yield self._map_event(
+                            event,
+                            will_retry=(
+                                not retry_started
+                                and isinstance(event, AgentEndEvent)
+                                and _is_context_overflow_error(terminal_assistant)
+                            ),
+                        )
+                        continue
+                    get_event.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await get_event
+                    break
+                while not queue.empty():
+                    event = queue.get_nowait()
+                    if isinstance(event, MessageEndEvent) and isinstance(
+                        event.message, AssistantMessage
+                    ):
+                        terminal_assistant = event.message
+                    yield self._map_event(
+                        event,
+                        will_retry=(
+                            not retry_started
+                            and isinstance(event, AgentEndEvent)
+                            and _is_context_overflow_error(terminal_assistant)
+                        ),
+                    )
+
+                task.result()
+                if retry_started:
+                    success = (
+                        terminal_assistant is not None
+                        and terminal_assistant.stop_reason not in {"error", "aborted"}
+                    )
+                    final_error = None
+                    if not success:
+                        final_error = (
+                            terminal_assistant.error_message
+                            if terminal_assistant is not None
+                            else None
+                        ) or (
+                            terminal_assistant.stop_reason
+                            if terminal_assistant is not None
+                            else "Provider produced no assistant message"
+                        )
+                    yield AutoRetryEndEvent(
+                        success=success,
+                        attempt=1,
+                        final_error=final_error,
+                    )
+                    break
+
+                if not _is_context_overflow_error(terminal_assistant):
+                    break
+
+                yield CompactionStartEvent(reason="overflow")
+                try:
+                    compacted = await self._agent.compact_core_context_for_overflow()
+                except asyncio.CancelledError:
+                    yield CompactionEndEvent(
+                        reason="overflow",
+                        aborted=True,
+                        will_retry=False,
+                    )
+                    break
+                except Exception as exc:  # 自动恢复失败不能遮蔽原始 overflow
+                    yield CompactionEndEvent(
+                        reason="overflow",
+                        aborted=True,
+                        will_retry=False,
+                        error_message=str(exc) or exc.__class__.__name__,
+                    )
+                    break
+
+                if not compacted:
+                    yield CompactionEndEvent(
+                        reason="overflow",
+                        aborted=True,
+                        will_retry=False,
+                        error_message="没有可安全压缩的旧上下文",
+                    )
+                    break
+
+                if self._agent.is_aborted:
+                    yield CompactionEndEvent(
+                        reason="overflow",
+                        aborted=True,
+                        will_retry=False,
+                    )
+                    break
+
+                yield CompactionEndEvent(
+                    reason="overflow",
+                    aborted=False,
+                    will_retry=True,
                 )
-                if get_event in done:
-                    yield self._map_event(get_event.result())
-                    continue
-                get_event.cancel()
-                with suppress(asyncio.CancelledError):
-                    await get_event
-                break
-            while not queue.empty():
-                yield self._map_event(queue.get_nowait())
+
+                retry_started = True
+                yield AutoRetryStartEvent(
+                    attempt=1,
+                    max_attempts=1,
+                    delay_ms=0,
+                    error_message=(
+                        terminal_assistant.error_message or "Context overflow"
+                    ),
+                )
+                if self._agent.is_aborted:
+                    yield AutoRetryEndEvent(
+                        success=False,
+                        attempt=1,
+                        final_error="aborted",
+                    )
+                    break
+                task = asyncio.ensure_future(self._runtime.continue_())
         finally:
             unsubscribe()
             if task.done():
@@ -322,13 +463,19 @@ class LionCodingSession:
                 # 前端提前关闭事件流不会取消运行(取消需显式 cancel());
                 # 任务真正结束时归位 is_running,并取回异常避免 asyncio 告警。
                 task.add_done_callback(self._finalize_orphaned_run)
-        # 协程异常(排空事件后)原样上抛;正常结束才算归位。
-        task.result()
         yield AgentSettledEvent()
 
-    def _map_event(self, event: AgentEvent) -> LionSessionEvent:
+    def _map_event(
+        self,
+        event: AgentEvent,
+        *,
+        will_retry: bool = False,
+    ) -> LionSessionEvent:
         if isinstance(event, AgentEndEvent):
-            return SessionAgentEndEvent(messages=event.messages)
+            return SessionAgentEndEvent(
+                messages=event.messages,
+                will_retry=will_retry,
+            )
         return event
 
     def _finalize_orphaned_run(self, task: asyncio.Task[None]) -> None:
