@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-07-27
+- **Total Sessions**: 8
+- **Last Active**: 2026-07-28
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~370 | Active |
+| `journal-1.md` | ~407 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-07-28 | 阶段4-B5：溢出压缩与一次自动重试 | `7224a0a` | `master` |
 | 7 | 2026-07-27 | 阶段4-B4:AgentSettled 终端通知;B5 范围界定 | `2c43910` | `master` |
 | 6 | 2026-07-27 | 阶段4-B3:thinking 档位(Tau 6 档)接入 Core 路径 | `f5fcc06` | `b3-thinking-tiers` |
 | 5 | 2026-07-27 | 阶段4-C8:side-query 全面迁移 Core Provider | `517fde8` | `master` |

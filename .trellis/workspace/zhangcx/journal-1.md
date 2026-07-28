@@ -368,3 +368,40 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 - D 组小项:Windows 拖拽归一化、补全窗口按行测量
 - 阶段5:删 legacy(_chat_*/旧压缩/legacy_tui/session旧JSON写),pyproject 移除 openai/anthropic
 - master 领先 origin/master 11 提交(B3+B4+journal),未 push;真机冒烟 thinking 与通知后可 push
+
+
+## Session 8: 阶段4-B5：溢出压缩与一次自动重试
+
+**Date**: 2026-07-28
+**Task**: 阶段4-B5：溢出压缩与一次自动重试
+**Branch**: `master`
+
+### Summary
+
+完成 Core overflow 识别、强制压缩与应用层单次自动重试闭环，并补齐严格事件顺序和失败分支回归测试。
+
+### Main Changes
+
+- Agent 复用既有上下文压缩路径，新增可取消的 overflow 强制压缩入口并保护最近成功轮次与失败提示。
+- LionCodingSession 在同一 drive 生命周期内发出 Compaction、AutoRetry、SessionAgentEnd 和唯一 AgentSettled 事件。
+- 补齐 B5 设计、实施计划与 error-handling 可执行规范。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7224a0a` | (see git log) |
+
+### Testing
+
+- [OK] python -m pytest -q：453 passed, 18 skipped, 6 subtests passed
+- [OK] python -m pytest tests/memory_runtime/test_lifecycle.py tests/application/test_coding_session.py -q：24 passed
+- [OK] python -m compileall -q lion_code tests 与 git diff --check 通过；当前环境未安装 ruff
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 继续阶段4剩余 D 组或阶段5迁移清理工作，当前 Trellis 总任务保持 in_progress。
