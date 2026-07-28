@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "阶段5跨 Agent、Provider、会话与 TUI 后端边界，需遵循项目后端规范索引。"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "删除旧压缩与重试路径时必须保持 Core overflow 恢复顺序和单次重试契约。"}
+{"file": ".trellis/spec/backend/tui-interaction.md", "reason": "移除 UI sink 和旧 TUI 时必须保持新 TUI 流式增量渲染契约。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "运行时事件、会话存储和 TUI 显示跨层收敛需要逐边界验证。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "优先复用已有 Core、Provider、structured event 和 JSONL 路径，不新增替代兼容层。"}
+{"file": ".trellis/tasks/07-28-phase5-legacy-cleanup/research/current-state.md", "reason": "提供 legacy 消费者、保留边界和主要回归风险的当前代码调研。"}

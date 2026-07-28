@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "复核 legacy 删除后 overflow compaction 与 auto-retry 终端顺序没有回归。"}
+{"file": ".trellis/spec/backend/tui-interaction.md", "reason": "复核 UI sink 清理后正常流式 delta 不全量重绘且终端状态完整。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查 Core、Provider、session 和 TUI 各层只保留单一契约所有者。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查实现是否真正删除兼容路径并复用现有能力，而非换名重建。"}
+{"file": ".trellis/tasks/07-28-phase5-legacy-cleanup/research/current-state.md", "reason": "按调研中的 legacy 残留、保留项和风险逐项核验。"}
