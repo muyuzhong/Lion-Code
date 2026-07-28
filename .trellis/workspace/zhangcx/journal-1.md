@@ -520,3 +520,26 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 
 - 用已配置后端复验流式显示并继续完成两后端文本/工具/权限/Plan/picker 真机矩阵；通过后归档阶段4。
 - 下一阶段为阶段5 legacy 清理：删除旧双后端与 legacy TUI/session JSON 写入，移除 SDK 依赖。
+
+
+## Session 11: 阶段4完成：TUI 真机验收与流式修复
+
+**Date**: 2026-07-28
+**Task**: 阶段4完成：TUI 真机验收与流式修复
+**Branch**: `master`
+
+### Summary
+
+完成阶段4 TUI 能力补齐与 Core 灰度扩围；修复流式 transcript 全量重绘闪烁及 canonical 窗口边界问题，全量 475 项通过，用户真机确认后批准进入阶段5。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f82959e` | (see git log) |
+| `fa24b1d` | (see git log) |
+| `b802bf1` | (see git log) |
+
+### Status
+
+[OK] **Completed**
