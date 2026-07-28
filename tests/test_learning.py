@@ -5,10 +5,12 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from lion_code import skills
 from lion_code.agent import Agent, LEARN_META_SKILL_PROMPT
+from lion_code.core.messages import AssistantMessage, TextContent, UserMessage
 
 
 class TestCreateSkill(unittest.TestCase):
@@ -46,13 +48,13 @@ class TestCreateSkill(unittest.TestCase):
 class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
     async def test_create_decision_uses_one_meta_skill_call(self):
         agent = Agent.__new__(Agent)
-        agent.use_openai = True
-        agent._openai_messages = [
-            {"role": "system", "content": "ordinary prompt"},
-            {"role": "user", "content": "fix the build"},
-            {"role": "assistant", "content": "fixed and verified"},
-        ]
-        agent._anthropic_messages = []
+        agent._core_runtime = SimpleNamespace(messages=(
+            UserMessage(content="fix the build"),
+            AssistantMessage(
+                model="test",
+                content=[TextContent(text="fixed and verified")],
+            ),
+        ))
         decision = {
             "create": True,
             "reason": "reusable",
@@ -82,9 +84,9 @@ class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
 
     async def test_rejected_decision_does_not_write(self):
         agent = Agent.__new__(Agent)
-        agent.use_openai = False
-        agent._openai_messages = []
-        agent._anthropic_messages = [{"role": "user", "content": "hello"}]
+        agent._core_runtime = SimpleNamespace(
+            messages=(UserMessage(content="hello"),)
+        )
         agent._run_evaluator_query = AsyncMock(
             return_value='{"create": false, "reason": "only small talk"}'
         )

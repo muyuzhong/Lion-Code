@@ -51,7 +51,6 @@ from .memory import (
     MemoryPrefetch,
 )
 from .memory_runtime import (
-    LegacySdkTextQueryService,
     MemoryContextInjector,
     MemoryCoordinator,
     MemoryInjectionReport,
@@ -310,10 +309,12 @@ class Agent:
         self.model = model
         self.use_openai = bool(api_base)
         self.is_sub_agent = is_sub_agent
-        # 灰度开关:根与子 Agent、两种后端(OpenAI-compatible/Anthropic)
-        # 都走新 Core Runtime,旧 _chat_* 保留为回退;子 Agent 的文本经
-        # _capture_core_text 捕获,不落盘会话。
-        self._use_core_runtime = os.environ.get("LION_CORE_RUNTIME") == "1"
+        self._api_key = api_key or os.environ.get(
+            "OPENAI_API_KEY" if self.use_openai else "ANTHROPIC_API_KEY",
+            "",
+        )
+        self._api_base = api_base
+        self._anthropic_base_url = anthropic_base_url
         self._pre_tool_use_hooks = load_pre_tool_use_hooks()
         self.max_cost_usd = max_cost_usd
         self.max_turns = max_turns
@@ -481,70 +482,57 @@ class Agent:
         # 缺少凭证时保留 None 客户端而非构造失败：TUI 允许先启动、再由 /model 配置。
         if self.use_openai:
             self._openai_client = (
-                openai.AsyncOpenAI(base_url=api_base, api_key=api_key, **_sdk_retries)
-                if api_key or os.environ.get("OPENAI_API_KEY")
+                openai.AsyncOpenAI(
+                    base_url=self._api_base,
+                    api_key=self._api_key,
+                    **_sdk_retries,
+                )
+                if self._api_key
                 else None
             )
             self._anthropic_client = None
             self._openai_messages.append({"role": "system", "content": self._system_prompt})
         else:
             kwargs: dict[str, Any] = {}
-            if api_key:
-                kwargs["api_key"] = api_key
-            if anthropic_base_url:
-                kwargs["base_url"] = anthropic_base_url
+            if self._api_key:
+                kwargs["api_key"] = self._api_key
+            if self._anthropic_base_url:
+                kwargs["base_url"] = self._anthropic_base_url
             kwargs.update(_sdk_retries)
             self._anthropic_client = (
                 anthropic.AsyncAnthropic(**kwargs)
-                if api_key or os.environ.get("ANTHROPIC_API_KEY")
+                if self._api_key
                 else None
             )
             self._openai_client = None
 
-        self._memory_coordinator = MemoryCoordinator(
-            query_service=self._build_core_memory_query_service()
-        )
+        self._memory_coordinator = MemoryCoordinator(query_service=None)
         self._memory_injector = MemoryContextInjector()
         self._last_memory_injection = MemoryInjectionReport()
 
-        # 灰度：LION_CORE_RUNTIME=1 且 OpenAI-compatible 时，用 LionAgentRuntime
-        # 接管主循环；旧 _chat_openai() 保留为回退。对话消息以 AgentHarness.messages
-        # 为唯一来源，不再向 self._openai_messages 追加，避免双写。
-        self._core_runtime: LionAgentRuntime | None = None
+        # Provider/Core 是唯一主路径；协议私有历史仅待后续切片整块删除。
+        self._core_runtime: LionAgentRuntime
         self._terminal_renderer: TerminalRenderer | None = None
         self._usage_observer: UsageObserver | None = None
         self._observer_unsubscribers: list[Callable[[], None]] = []
-        if self._use_core_runtime:
-            provider = create_provider(
-                api_key=(
-                    api_key
-                    or os.environ.get(
-                        "OPENAI_API_KEY" if self.use_openai else "ANTHROPIC_API_KEY"
-                    )
-                    or ""
-                ),
-                api_base=api_base,
-                anthropic_base_url=anthropic_base_url,
-                thinking_level=self._thinking_level,
-            )
-            self._core_runtime = LionAgentRuntime(
+        provider = self._build_core_provider(self._thinking_level)
+        self._core_runtime = LionAgentRuntime(
+            provider=provider,
+            model=self.model,
+            get_system=lambda: self._system_prompt,
+            tool_runtime=self.tool_runtime,
+            prepare_context=self._prepare_core_context,
+            before_tool_calls=self._before_core_tool_calls,
+        )
+        if self._context_compactor is None:
+            self._context_compactor = ProviderContextCompactor(
                 provider=provider,
-                model=self.model,
-                get_system=lambda: self._system_prompt,
-                tool_runtime=self.tool_runtime,
-                prepare_context=self._prepare_core_context,
-                before_tool_calls=self._before_core_tool_calls,
+                get_model=lambda: self.model,
             )
-            if self._context_compactor is None:
-                self._context_compactor = ProviderContextCompactor(
-                    provider=provider,
-                    get_model=lambda: self.model,
-                )
-            self._reset_core_observers()
-            # MemoryCoordinator 先于 Core Runtime 构造,这里补挂 Provider 查询服务。
-            self._memory_coordinator.set_query_service(
-                self._build_core_memory_query_service()
-            )
+        self._reset_core_observers()
+        self._memory_coordinator.set_query_service(
+            self._build_core_memory_query_service()
+        )
 
     # ─── Anthropic 前缀缓存 ──────────────────────────────────
     def _build_anthropic_system(self) -> list[dict]:
@@ -591,9 +579,7 @@ class Agent:
 
     @property
     def is_processing(self) -> bool:
-        if self._core_runtime is not None:
-            return self._core_runtime.harness.is_running
-        return self._current_task is not None and not self._current_task.done()
+        return self._core_runtime.harness.is_running
 
     @property
     def is_aborted(self) -> bool:
@@ -602,12 +588,8 @@ class Agent:
         return self._aborted
 
     @property
-    def core_runtime(self) -> LionAgentRuntime | None:
-        """Core Runtime 灰度路径的运行时;未启用(旧路径)时为 None。
-
-        供应用会话层(LionCodingSession)订阅事件与读取消息快照,
-        不是给前端直接使用的接口。
-        """
+    def core_runtime(self) -> LionAgentRuntime:
+        """返回供应用会话层订阅事件与读取消息快照的 Core Runtime。"""
         return self._core_runtime
 
     def _build_side_query(self):
@@ -655,39 +637,21 @@ class Agent:
         return None
 
     def _build_core_memory_query_service(self):
-        """Core 路径用 Provider 直连的查询服务;SDK Adapter 仅剩迁移期兜底。"""
+        """构建绑定当前 Core Provider 的文本查询服务。"""
 
-        if not self._use_core_runtime:
-            return None
-        runtime = getattr(self, "_core_runtime", None)
-        if runtime is not None:
-            return ProviderTextQueryService(
-                provider=runtime.provider,
-                model=lambda: self.model,
-            )
-        if self._openai_client is None and self._anthropic_client is None:
-            return None
-        return LegacySdkTextQueryService(
-            openai_client=self._openai_client,
-            anthropic_client=self._anthropic_client,
+        return ProviderTextQueryService(
+            provider=self._core_runtime.provider,
             model=lambda: self.model,
         )
 
     def abort(self) -> None:
-        if self._core_runtime is not None:
-            # 新路径：取消 harness 信号，同时中断模型流与工具执行
-            # （adapt_lion_tool 把 signal.is_cancelled 传给 ToolRuntime 中间件）。
-            self._aborted = True
-            self._last_stop_reason = "aborted"
-            self._memory_coordinator.cancel_pending()
-            self._core_runtime.cancel()
-            compaction_task = getattr(self, "_core_compaction_task", None)
-            if compaction_task is not None:
-                compaction_task.cancel()
-            return
         self._aborted = True
-        if self._current_task and not self._current_task.done():
-            self._current_task.cancel()
+        self._last_stop_reason = "aborted"
+        self._memory_coordinator.cancel_pending()
+        self._core_runtime.cancel()
+        compaction_task = getattr(self, "_core_compaction_task", None)
+        if compaction_task is not None:
+            compaction_task.cancel()
 
     async def _cancel_early_tool_tasks(self) -> None:
         """取消并回收流式响应期间提前启动、但尚未归属主等待链的工具任务。"""
@@ -764,8 +728,6 @@ class Agent:
             self._last_synced_core_response_count = response_count
 
     def _last_core_assistant(self) -> AssistantMessage | None:
-        if self._core_runtime is None:
-            return None
         return next(
             (
                 message
@@ -819,8 +781,6 @@ class Agent:
 
     def _reset_core_observers(self, *, preserve_usage: bool = False) -> None:
         """按 Usage → Session → Renderer 顺序重建 Core 观察器。"""
-        if self._core_runtime is None:
-            return
         for unsubscribe in self._observer_unsubscribers:
             unsubscribe()
         self._observer_unsubscribers.clear()
@@ -860,8 +820,6 @@ class Agent:
             await self._session_recorder.initialize()
 
     async def _resolve_core_model_limits(self) -> None:
-        if self._core_runtime is None:
-            return
         key = (id(self._core_runtime.provider), self.model)
         if self._resolved_model_limits_for == key:
             return
@@ -889,8 +847,7 @@ class Agent:
         """在新用户轮次前写入 CompactionEntry，并重放新的活跃上下文。"""
 
         if (
-            self._core_runtime is None
-            or self._session_recorder is None
+            self._session_recorder is None
             or self._context_compactor is None
         ):
             return False
@@ -958,7 +915,6 @@ class Agent:
         summary = self._pending_core_context_reset
         if (
             summary is None
-            or self._core_runtime is None
             or self._session_recorder is None
         ):
             return False
@@ -1047,16 +1003,20 @@ class Agent:
 
     @property
     def api_configured(self) -> bool:
-        return self._openai_client is not None or self._anthropic_client is not None
+        return bool(
+            self._api_key
+            and (not self.use_openai or self._api_base)
+        )
 
     def get_api_config(self) -> dict:
-        """当前模型与凭证快照，供配置界面预填；不含任何客户端内部状态。"""
-        client = self._openai_client or self._anthropic_client
+        """返回 Agent 自己持有的当前 Provider 配置。"""
         return {
             "use_openai": self.use_openai,
             "model": self.model,
-            "api_key": getattr(client, "api_key", "") or "",
-            "base_url": str(getattr(client, "base_url", "") or ""),
+            "api_key": self._api_key,
+            "base_url": (
+                self._api_base if self.use_openai else self._anthropic_base_url
+            ) or "",
         }
 
     def configure_api(
@@ -1068,165 +1028,114 @@ class Agent:
         anthropic_base_url: str | None = None,
         use_openai: bool | None = None,
     ) -> None:
-        """运行时配置/切换模型与凭证，无需重建 Agent。
+        """在空闲态原子切换模型/凭证，并保留 canonical history。"""
+        if self.is_processing:
+            raise RuntimeError("Agent 运行中，无法切换 Provider 或模型")
 
-        跨协议切换时目标后端的消息历史为空、相当于新会话（两种后端的历史本就
-        分开存储，协议间不做有损转换）；同协议换 key/换模型保留历史。
-        """
         previous_model = self.model
-        previous_thinking_level = (
-            self._thinking_level if self._use_core_runtime else self._thinking_mode
+        previous_thinking_level = self._thinking_level
+        target_model = model or self.model
+        target_use_openai = self.use_openai if use_openai is None else use_openai
+        same_protocol = target_use_openai == self.use_openai
+        target_api_key = (
+            api_key
+            if api_key is not None
+            else (
+                self._api_key
+                if same_protocol
+                else os.environ.get(
+                    "OPENAI_API_KEY" if target_use_openai else "ANTHROPIC_API_KEY",
+                    "",
+                )
+            )
         )
-        previous_use_openai = self.use_openai
-        previous_openai_client = self._openai_client
-        previous_anthropic_client = self._anthropic_client
-        if model:
-            self.model = model
-            self.effective_window = effective_window_tokens(fallback_model_limits(model))
-            self._resolved_model_limits_for = None
-            self._core_compaction_required = False
-            self._thinking_mode = self._resolve_thinking_mode()
-            if self._core_runtime is not None:
-                self._core_runtime.set_model(model)
-        if use_openai is not None:
-            self.use_openai = use_openai
-        if self.use_openai:
-            if (
-                previous_use_openai
-                and previous_openai_client is not None
-                and api_key is None
-                and api_base is None
-            ):
-                self._openai_client = previous_openai_client
-            else:
-                inherited_key = (
-                    getattr(previous_openai_client, "api_key", None)
-                    if previous_use_openai
-                    else None
-                )
-                inherited_base = (
-                    str(getattr(previous_openai_client, "base_url", "") or "")
-                    if previous_use_openai
-                    else ""
-                )
-                self._openai_client = openai.AsyncOpenAI(
-                    base_url=api_base if api_base is not None else (inherited_base or None),
-                    api_key=api_key if api_key is not None else inherited_key,
-                )
-            self._anthropic_client = None
-            if not self._openai_messages:
-                self._openai_messages.append({"role": "system", "content": self._system_prompt})
-        else:
-            if (
-                not previous_use_openai
-                and previous_anthropic_client is not None
-                and api_key is None
-                and anthropic_base_url is None
-            ):
-                self._anthropic_client = previous_anthropic_client
-            else:
-                kwargs: dict[str, Any] = {}
-                inherited_key = (
-                    getattr(previous_anthropic_client, "api_key", None)
-                    if not previous_use_openai
-                    else None
-                )
-                inherited_base = (
-                    str(getattr(previous_anthropic_client, "base_url", "") or "")
-                    if not previous_use_openai
-                    else ""
-                )
-                resolved_key = api_key if api_key is not None else inherited_key
-                resolved_base = (
-                    anthropic_base_url
-                    if anthropic_base_url is not None
-                    else (inherited_base or None)
-                )
-                if resolved_key is not None:
-                    kwargs["api_key"] = resolved_key
-                if resolved_base is not None:
-                    kwargs["base_url"] = resolved_base
-                self._anthropic_client = anthropic.AsyncAnthropic(**kwargs)
-            self._openai_client = None
+        target_api_base = (
+            api_base
+            if api_base is not None
+            else (
+                self._api_base
+                if same_protocol and target_use_openai
+                else os.environ.get("OPENAI_BASE_URL")
+            )
+        )
+        if target_use_openai and not target_api_base:
+            target_api_base = "https://api.openai.com/v1"
+        target_anthropic_base_url = (
+            anthropic_base_url
+            if anthropic_base_url is not None
+            else (
+                self._anthropic_base_url
+                if same_protocol and not target_use_openai
+                else os.environ.get("ANTHROPIC_BASE_URL")
+            )
+        )
 
-        # Core 路径:key/base/协议变更时重建 Provider 与 Runtime,否则模型热配
-        # 只换了 SDK 客户端,真实请求路径(httpx Provider)仍用旧凭证。
-        # Canonical 消息与协议无关,跨协议切换也保留 Harness messages;
-        # observers 按恢复会话的既有流程重建。
-        if (
-            self._use_core_runtime
-            and self._core_runtime is not None
-            and (
-                api_key is not None
-                or api_base is not None
-                or anthropic_base_url is not None
-                or self.use_openai != previous_use_openai
+        provider_changed = (
+            target_use_openai != self.use_openai
+            or target_api_key != self._api_key
+            or (
+                target_api_base != self._api_base
+                if target_use_openai
+                else target_anthropic_base_url != self._anthropic_base_url
             )
-        ):
-            if self.use_openai:
+        )
+        provider: ModelProvider | None = None
+        compactor: ProviderContextCompactor | None = None
+        query_service: ProviderTextQueryService | None = None
+        if provider_changed:
+            if target_use_openai:
                 provider = create_provider(
-                    api_key=(
-                        api_key
-                        if api_key is not None
-                        else str(getattr(self._openai_client, "api_key", "") or "")
-                    ),
-                    api_base=(
-                        api_base
-                        if api_base is not None
-                        else str(getattr(self._openai_client, "base_url", "") or "")
-                        or None
-                    ),
+                    api_key=target_api_key,
+                    api_base=target_api_base,
                     thinking_level=self._thinking_level,
                 )
             else:
                 provider = create_provider(
-                    api_key=(
-                        api_key
-                        if api_key is not None
-                        else str(getattr(self._anthropic_client, "api_key", "") or "")
-                    ),
-                    anthropic_base_url=(
-                        anthropic_base_url
-                        if anthropic_base_url is not None
-                        else str(getattr(self._anthropic_client, "base_url", "") or "")
-                        or None
-                    ),
+                    api_key=target_api_key,
+                    anthropic_base_url=target_anthropic_base_url,
                     thinking_level=self._thinking_level,
                 )
-            previous_runtime = self._core_runtime
-            messages = previous_runtime.messages
-            self._core_runtime = LionAgentRuntime(
-                provider=provider,
-                model=self.model,
-                get_system=lambda: self._system_prompt,
-                tool_runtime=self.tool_runtime,
-                prepare_context=self._prepare_core_context,
-                before_tool_calls=self._before_core_tool_calls,
-            )
-            self._core_runtime.harness.replace_messages(list(messages))
-            self._context_compactor = ProviderContextCompactor(
+            compactor = ProviderContextCompactor(
                 provider=provider,
                 get_model=lambda: self.model,
             )
+            query_service = ProviderTextQueryService(
+                provider=provider,
+                model=lambda: self.model,
+            )
+
+        previous_provider: ModelProvider | None = None
+        if provider is not None:
+            previous_provider = self._core_runtime.replace_provider(provider)
+        self.use_openai = target_use_openai
+        self._api_key = target_api_key
+        self._api_base = target_api_base if target_use_openai else None
+        self._anthropic_base_url = (
+            target_anthropic_base_url if not target_use_openai else None
+        )
+        self.model = target_model
+        self._core_runtime.set_model(target_model)
+        if target_model != previous_model or provider_changed:
+            self.effective_window = effective_window_tokens(
+                fallback_model_limits(target_model)
+            )
             self._resolved_model_limits_for = None
-            self._reset_core_observers(preserve_usage=True)
-            self._schedule_background_operation(previous_runtime.aclose)
+            self._core_compaction_required = False
+        if compactor is not None and query_service is not None:
+            self._context_compactor = compactor
+            self._memory_coordinator.set_query_service(query_service)
+        if previous_provider is not None:
+            close = getattr(previous_provider, "aclose", None)
+            if close is not None:
+                self._schedule_background_operation(close)
 
-        # 放在 Provider 重建之后,确保查询服务拿到的是新 Provider。
-        self._memory_coordinator.set_query_service(
-            self._build_core_memory_query_service()
-        )
-
-        current_thinking_level = (
-            self._thinking_level if self._use_core_runtime else self._thinking_mode
-        )
         recorder = self._session_recorder
         if recorder is not None and (
             self.model != previous_model
-            or current_thinking_level != previous_thinking_level
+            or self._thinking_level != previous_thinking_level
         ):
             model_value = self.model
-            thinking_value = current_thinking_level
+            thinking_value = self._thinking_level
 
             async def persist_configuration() -> object:
                 if model_value != previous_model:
@@ -1291,17 +1200,13 @@ class Agent:
         """用当前凭证与指定档位构建一个新 Core Provider。"""
         if self.use_openai:
             return create_provider(
-                api_key=str(getattr(self._openai_client, "api_key", "") or ""),
-                api_base=(
-                    str(getattr(self._openai_client, "base_url", "") or "") or None
-                ),
+                api_key=self._api_key,
+                api_base=self._api_base,
                 thinking_level=thinking_level,
             )
         return create_provider(
-            api_key=str(getattr(self._anthropic_client, "api_key", "") or ""),
-            anthropic_base_url=(
-                str(getattr(self._anthropic_client, "base_url", "") or "") or None
-            ),
+            api_key=self._api_key,
+            anthropic_base_url=self._anthropic_base_url,
             thinking_level=thinking_level,
         )
 
@@ -1311,15 +1216,21 @@ class Agent:
         不落盘档位变更(由调用方按需记录):恢复会话时复用本方法仅重建 Provider,
         避免对已有 entry 重复写。``context_compactor`` 与模型限制缓存一并刷新。
         """
-        self._thinking_level = level
-        if not (self._use_core_runtime and self._core_runtime is not None):
-            return
+        if self.is_processing:
+            raise RuntimeError("Agent 运行中，无法切换 thinking 档位")
         provider = self._build_core_provider(level)
-        previous = self._core_runtime.replace_provider(provider)
-        self._context_compactor = ProviderContextCompactor(
+        compactor = ProviderContextCompactor(
             provider=provider,
             get_model=lambda: self.model,
         )
+        query_service = ProviderTextQueryService(
+            provider=provider,
+            model=lambda: self.model,
+        )
+        previous = self._core_runtime.replace_provider(provider)
+        self._thinking_level = level
+        self._context_compactor = compactor
+        self._memory_coordinator.set_query_service(query_service)
         self._resolved_model_limits_for = None
         close = getattr(previous, "aclose", None)
         if close is not None:
@@ -1353,50 +1264,31 @@ class Agent:
 
         self._aborted = False
         self._last_stop_reason = None
-
-        if self._core_runtime is not None:
-            # 新路径接管：消息由 AgentHarness 管理，SessionRecorder 在 MessageEnd
-            # 时逐条落盘，退出前不再依赖整体快照 _auto_save()。
-            await self._ensure_core_session_ready()
-            if self._aborted:
-                return
-            await self._compact_core_context_if_needed()
-            if self._aborted:
-                return
-            if not self.is_sub_agent:
-                # 与 legacy 一致:Memory 召回只服务主会话,子 Agent 不预取。
-                self._memory_coordinator.begin_turn(user_message)
-            await self._core_runtime.prompt(user_message)
-            while not self._aborted and await self._apply_pending_core_context_reset():
-                if self._aborted:
-                    break
-                await self._core_runtime.continue_()
-            self._sync_core_usage()
-            self._sync_core_outcome()
-            self._core_compaction_required = self._context_manager.should_compact(
-                self._context_runtime_state()
-            )
-            return
-
-        if self._openai_client is None and self._anthropic_client is None:
+        if not self.api_configured:
             print_error(
                 "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
                 "或在 TUI 中用 /model 配置。"
             )
             return
-        coro = self._chat_openai(user_message) if self.use_openai else self._chat_anthropic(user_message)
-        self._current_task = asyncio.current_task()
-        try:
-            await coro
-        except asyncio.CancelledError:
-            self._aborted = True
-            self._last_stop_reason = "aborted"
-        finally:
-            await self._cancel_early_tool_tasks()
-            self._current_task = None
+
+        await self._ensure_core_session_ready()
+        if self._aborted:
+            return
+        await self._compact_core_context_if_needed()
+        if self._aborted:
+            return
         if not self.is_sub_agent:
-            print_divider()
-            self._auto_save()
+            self._memory_coordinator.begin_turn(user_message)
+        await self._core_runtime.prompt(user_message)
+        while not self._aborted and await self._apply_pending_core_context_reset():
+            if self._aborted:
+                break
+            await self._core_runtime.continue_()
+        self._sync_core_usage()
+        self._sync_core_outcome()
+        self._core_compaction_required = self._context_manager.should_compact(
+            self._context_runtime_state()
+        )
 
     # ─── 子 Agent 单次运行入口 ───────────────────────────────
 
@@ -1406,7 +1298,7 @@ class Agent:
         prev_out = self.total_output_tokens
         await self.chat(prompt)
         text = "".join(self._output_buffer)
-        if not text and self._core_runtime is not None:
+        if not text:
             # Provider 可能不发文本增量(整段消息一次到达),从 canonical
             # transcript 兜底取最近一轮 assistant 文本。
             for message in reversed(self._core_runtime.messages):
@@ -1529,11 +1421,10 @@ class Agent:
         self._openai_messages = []
         if self.use_openai:
             self._openai_messages.append({"role": "system", "content": self._system_prompt})
-        if self._core_runtime is not None:
-            self._core_runtime.harness.clear_queues()
-            self._core_runtime.harness.replace_messages([])
-            self._reset_core_observers()
-            await self._ensure_core_session_ready()
+        self._core_runtime.harness.clear_queues()
+        self._core_runtime.harness.replace_messages([])
+        self._reset_core_observers()
+        await self._ensure_core_session_ready()
         self.tool_context.plan_file_path = self._plan_file_path
         self._reset_session_counters()
         print_info("Conversation cleared.")
@@ -1570,7 +1461,9 @@ class Agent:
         return {"exceeded": False}
 
     async def compact(self) -> None:
-        await self._compact_conversation()
+        await self._ensure_core_session_ready()
+        if await self._compact_core_context_if_needed(force=True):
+            print_info("Conversation compacted.")
 
     async def dream(self) -> str:
         """显式整合当前项目 Memory，并返回本次文件变更摘要。"""
@@ -1605,14 +1498,14 @@ class Agent:
         self._dynamic_system_context = build_dynamic_system_context()
         self._base_system_prompt = self._static_system_prompt + "\n\n" + self._dynamic_system_context
         self._system_prompt = self._base_system_prompt
-        if self.use_openai and self._openai_messages and self._openai_messages[0].get("role") == "system":
-            self._openai_messages[0]["content"] = self._system_prompt
 
     async def learn_from_current_session(self) -> str:
         """运行一次内置 Meta-Skill，并按其结论直接沉淀当前会话经验。"""
-        history = self._openai_messages if self.use_openai else self._anthropic_messages
         transcript = json.dumps(
-            [message for message in history if message.get("role") != "system"],
+            [
+                message.model_dump(mode="json", by_alias=True)
+                for message in self._core_runtime.messages
+            ],
             ensure_ascii=False,
             default=str,
         )
@@ -1801,22 +1694,9 @@ class Agent:
 
     def _extract_last_assistant_text(self) -> str:
         """提取最近一轮 assistant 文本，确保评估目标只覆盖刚完成的动作。"""
-        if self.use_openai:
-            for m in reversed(self._openai_messages):
-                if m.get("role") == "assistant" and isinstance(m.get("content"), str):
-                    return m["content"]
-            return ""
-        for m in reversed(self._anthropic_messages):
-            if m.get("role") != "assistant":
-                continue
-            content = m.get("content")
-            if isinstance(content, str):
-                return content
-            if isinstance(content, list):
-                return "".join(
-                    b.get("text", "") for b in content
-                    if isinstance(b, dict) and b.get("type") == "text"
-                )
+        for message in reversed(self._core_runtime.messages):
+            if isinstance(message, AssistantMessage):
+                return message.text
         return ""
 
     # ─── /loop：定时或自主节奏 ───────────────────────────────
@@ -1968,12 +1848,14 @@ class Agent:
         except LookupError:
             pass
 
-        if not self._anthropic_client and not self._openai_client:
+        if not self.api_configured:
             # 没有可用模型时 fail-closed：交互环境转人工，headless 直接拒绝。
             return self._auto_fallback(f"{tool_name} (auto-mode classifier unavailable)")
         try:
             rules = load_auto_mode_rules()
-            history = self._openai_messages if self.use_openai else self._anthropic_messages
+            history = list(self._core_runtime.messages)
+            if history and isinstance(history[-1], AssistantMessage):
+                history.pop()
             transcript = build_classifier_transcript(history, {"tool_name": tool_name, "input": inp})
             system = build_classifier_system(rules)
             # CLAUDE.md 是不可信仓库内容，只能放在 user 消息，不能获得 system 权威。
@@ -2020,18 +1902,16 @@ class Agent:
         fork 出的子 Agent 是无凭证的。
         """
         if self.use_openai:
-            client = self._openai_client
             return {
                 "model": self.model,
-                "api_base": str(client.base_url) if client else None,
-                "api_key": getattr(client, "api_key", None),
+                "api_base": self._api_base,
+                "api_key": self._api_key,
             }
-        client = self._anthropic_client
         return {
             "model": self.model,
             "api_base": None,
-            "anthropic_base_url": str(client.base_url) if client else None,
-            "api_key": getattr(client, "api_key", None),
+            "anthropic_base_url": self._anthropic_base_url,
+            "api_key": self._api_key,
         }
 
     def _child_permission_mode(self) -> str:
@@ -2057,8 +1937,6 @@ class Agent:
 
     async def restore_core_session(self, session_id: str) -> bool:
         """从 JSONL 重建 Harness 唯一历史，并继续追加同一 Session。"""
-        if self._core_runtime is None:
-            return False
         await self._flush_background_operations()
         state = await self._session_repository.load(session_id)
         if state is None:
@@ -2097,37 +1975,18 @@ class Agent:
 
     async def restore_session_id(self, session_id: str) -> bool:
         """优先恢复 JSONL；Core 遇到旧 JSON 时原地迁移且保留源文件。"""
-        if self._core_runtime is not None:
-            if self._session_repository.exists(session_id):
-                restored = await self.restore_core_session(session_id)
-                if restored:
-                    return True
-            legacy = load_legacy_session(
-                self._session_repository.session_dir,
-                session_id,
-            )
-            if legacy is None:
-                return False
-            await self._migrate_legacy_core_session(session_id, legacy)
-            return await self.restore_core_session(session_id)
-
         if self._session_repository.exists(session_id):
-            print_info(
-                f"Session {session_id} uses append-only JSONL; "
-                "enable LION_CORE_RUNTIME=1 to restore it."
-            )
-            return False
+            restored = await self.restore_core_session(session_id)
+            if restored:
+                return True
         legacy = load_legacy_session(
             self._session_repository.session_dir,
             session_id,
         )
         if legacy is None:
             return False
-        self.session_id = session_id
-        self.tool_context.session_id = session_id
-        self.restore_session(legacy)
-        self._reset_session_counters()
-        return True
+        await self._migrate_legacy_core_session(session_id, legacy)
+        return await self.restore_core_session(session_id)
 
     async def list_sessions(self) -> list[dict[str, Any]]:
         """统一枚举新 JSONL 与尚未迁移的旧 JSON Session。"""
@@ -2175,9 +2034,7 @@ class Agent:
             await recorder.record_message(message)
 
     def _get_message_count(self) -> int:
-        if self._core_runtime is not None:
-            return len(self._core_runtime.messages)
-        return len(self._openai_messages) if self.use_openai else len(self._anthropic_messages)
+        return len(self._core_runtime.messages)
 
     def _auto_save(self) -> None:
         try:
@@ -2594,14 +2451,10 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                 self.tool_context.plan_file_path = self._plan_file_path
 
                 if choice == "clear-and-execute":
-                    if self._core_runtime is not None:
-                        self._pending_core_context_reset = (
-                            f"Approved plan:\n{plan_content}\n\n"
-                            "Proceed with implementation."
-                        )
-                    else:
-                        self._clear_history_keep_system()
-                        self._context_cleared = True
+                    self._pending_core_context_reset = (
+                        f"Approved plan:\n{plan_content}\n\n"
+                        "Proceed with implementation."
+                    )
                     print_info(f"Plan approved. Context cleared, executing in {target_mode} mode.")
                     return (
                         f"User approved the plan. Context was cleared. Permission mode: {target_mode}\n\n"
@@ -2683,8 +2536,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                 await self._memory_coordinator.close()
             finally:
                 try:
-                    if self._core_runtime is not None:
-                        await self._core_runtime.aclose()
+                    await self._core_runtime.aclose()
                 finally:
                     await self.tool_environment.close()
 

@@ -318,8 +318,6 @@ class TestAgentDreamRefresh(unittest.TestCase):
             agent._static_system_prompt = "static"
             agent._base_system_prompt = "old base"
             agent._system_prompt = "old system"
-            agent.use_openai = True
-            agent._openai_messages = [{"role": "system", "content": "old system"}]
 
             with (
                 patch("lion_code.agent.get_memory_dir", return_value=memory_dir),
@@ -335,7 +333,7 @@ class TestAgentDreamRefresh(unittest.TestCase):
         self.assertNotIn(changed_path, agent._already_surfaced_memories)
         self.assertIn("other.md", agent._already_surfaced_memories)
         self.assertEqual(agent._base_system_prompt, "static\n\nnew dynamic")
-        self.assertEqual(agent._openai_messages[0]["content"], "static\n\nnew dynamic")
+        self.assertEqual(agent._system_prompt, "static\n\nnew dynamic")
 
 
 if __name__ == "__main__":

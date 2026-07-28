@@ -7,7 +7,10 @@
 import json
 import math
 import re
+from collections.abc import Iterable
 from pathlib import Path
+
+from .core.messages import AgentMessage, AssistantMessage, UserMessage
 
 # ─── /goal：基于提示词的 Stop-hook 评估器 ───────────────────
 # /goal 在每轮结束后交给独立的小模型判断停止条件：未满足时把原因反馈给下一轮，
@@ -307,51 +310,34 @@ def project_action_for_classifier(tool_name: str, inp: dict) -> str:
     return _clip(_cjson(inp or {}))
 
 
-def build_classifier_transcript(history: list, pending: dict) -> str:
+def build_classifier_transcript(
+    history: Iterable[AgentMessage],
+    pending: dict,
+) -> str:
     """构建不含推理的分类器 transcript：用户文本加 assistant 工具调用。
 
     assistant 自然语言由模型生成，可能刻意影响分类器，因此全部丢弃；待判定且尚未
     写入 history 的 `pending` 动作最后追加，确保它是当前审查目标。
     """
     lines: list[str] = []
-    for m in history:
-        role = m.get("role")
-        if role == "user":
-            content = m.get("content")
-            if isinstance(content, str):
-                text = content
-            elif isinstance(content, list):
-                text = " ".join(
-                    b.get("text", "") for b in content
-                    if isinstance(b, dict) and b.get("type") == "text"
-                )
-            else:
-                text = ""
+    for message in history:
+        if isinstance(message, UserMessage):
+            text = message.text
             # 先移除前置 reminder，再用转义尖括号的 JSON 编码，防止内容伪造
             # transcript 行或闭合标签。
             text = _strip_reminder(text)
             if text.strip():
                 lines.append(_cjson({"user": text.strip()[:2000]}))
-        elif role == "assistant":
-            # Anthropic 使用 tool_use block，OpenAI 使用 tool_calls；两种格式都只
-            # 保留工具调用，不纳入 assistant 自然语言。
-            content = m.get("content")
-            if isinstance(content, list):
-                for b in content:
-                    if isinstance(b, dict) and b.get("type") == "tool_use":
-                        lines.append(_cjson({b["name"]: project_action_for_classifier(b["name"], b.get("input", {}))}))
-            tool_calls = m.get("tool_calls")
-            if isinstance(tool_calls, list):
-                for tc in tool_calls:
-                    fn = (tc or {}).get("function") or {}
-                    name = fn.get("name")
-                    if not name:
-                        continue
-                    try:
-                        args = json.loads(fn.get("arguments") or "{}")
-                    except Exception:
-                        args = {}
-                    lines.append(_cjson({name: project_action_for_classifier(name, args)}))
+        elif isinstance(message, AssistantMessage):
+            for call in message.tool_calls:
+                lines.append(
+                    _cjson({
+                        call.name: project_action_for_classifier(
+                            call.name,
+                            call.arguments,
+                        )
+                    })
+                )
     lines.append(_cjson({pending["tool_name"]: project_action_for_classifier(pending["tool_name"], pending["input"])}))
     return "\n".join(lines)
 

@@ -12,8 +12,7 @@
 - 运行中再次 ``prompt`` 必须显式指定 ``streaming_behavior``,消息进入
   Harness 的 steering / follow-up 队列并发出 ``QueueUpdateEvent``。
 
-仅支持启用 Core Runtime 的 Agent:旧 SDK 路径没有结构化事件流,
-无法支撑本层契约。
+``Agent`` 始终提供 Core Runtime；本层不再承担新旧运行时选择。
 """
 
 from __future__ import annotations
@@ -76,14 +75,8 @@ class LionCodingSession:
     """把 ``Agent``(Core Runtime 路径)包装为前端可消费的会话门面。"""
 
     def __init__(self, agent: Agent) -> None:
-        runtime = agent.core_runtime
-        if runtime is None:
-            raise ValueError(
-                "LionCodingSession 需要启用 Core Runtime"
-                "(LION_CORE_RUNTIME=1 且 OpenAI-compatible 后端)"
-            )
         self._agent = agent
-        self._runtime = runtime
+        self._runtime = agent.core_runtime
         self._running = False
         self._command_registry = create_default_command_registry()
         self._skills_cache: tuple[Skill, ...] | None = None
@@ -223,12 +216,11 @@ class LionCodingSession:
         return self._agent.get_api_config()
 
     def configure_provider(self, **kwargs: Any) -> None:
-        """运行时切换模型/凭证,直接透传 Agent.configure_api。"""
+        """仅在会话空闲时切换模型或凭证。"""
+        if self._running:
+            raise RuntimeError("会话运行中，无法切换 Provider 或模型")
         self._agent.configure_api(**kwargs)
-        runtime = self._agent.core_runtime
-        if runtime is None:
-            raise RuntimeError("Provider 配置后 Core Runtime 不可用")
-        self._runtime = runtime
+        self._runtime = self._agent.core_runtime
         if kwargs.get("model"):
             remember_model(provider=self.provider_name, model=kwargs["model"])
 
@@ -256,10 +248,14 @@ class LionCodingSession:
 
     def set_thinking_level(self, level: str) -> str:
         """设定 thinking 档位;返回生效档位(未变也返回当前值)。"""
+        if self._running:
+            raise RuntimeError("会话运行中，无法切换 thinking 档位")
         return self._agent.set_thinking_level(level)
 
     def cycle_thinking_level(self) -> str:
         """循环到下一档;返回生效档位。"""
+        if self._running:
+            raise RuntimeError("会话运行中，无法切换 thinking 档位")
         return self._agent.cycle_thinking_level()
 
     # ─── 技能 / 模板视图(补全与 picker 消费)─────────────────

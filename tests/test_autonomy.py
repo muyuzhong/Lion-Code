@@ -3,6 +3,7 @@
 import unittest
 
 from lion_code import autonomy as a
+from lion_code.core.messages import AssistantMessage, ToolCall, UserMessage
 
 
 class TestAutonomy(unittest.TestCase):
@@ -65,17 +66,18 @@ class TestAutonomy(unittest.TestCase):
 
     def test_build_classifier_transcript(self):
         history = [
-            {"role": "user", "content": "hello"},
-            {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "tool_use",
-                        "name": "read_file",
-                        "input": {"file_path": "a.txt"},
-                    }
+            UserMessage(content="hello"),
+            AssistantMessage(
+                model="test",
+                content=[
+                    ToolCall(
+                        id="read-1",
+                        name="read_file",
+                        arguments={"file_path": "a.txt"},
+                    )
                 ],
-            },
+                stop_reason="toolUse",
+            ),
         ]
         result = a.build_classifier_transcript(
             history,

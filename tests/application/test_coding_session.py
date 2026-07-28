@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -105,14 +104,12 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self) -> None:
         set_sink(self._prev_sink)
-        os.environ.pop("LION_CORE_RUNTIME", None)
         self._temp_dir.cleanup()
 
     def _make_session(self, events: list, registry: ToolRegistry | None = None):
         from core.fakes import FakeProvider
 
         fake = FakeProvider(events)
-        os.environ["LION_CORE_RUNTIME"] = "1"
         with patch("lion_code.agent.create_provider", return_value=fake):
             agent = Agent(
                 api_base="https://example.test/v1",
@@ -126,15 +123,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
     # ─── 构造约束 ────────────────────────────────────────────
 
-    async def test_requires_core_runtime(self) -> None:
-        os.environ["LION_CORE_RUNTIME"] = "0"
-        agent = Agent(
-            api_base="https://example.test/v1",
-            api_key="test-key",
-            custom_system_prompt="test",
-        )
-        with self.assertRaises(ValueError):
-            LionCodingSession(agent)
+    async def test_uses_required_core_runtime(self) -> None:
+        session, agent, _fake = self._make_session([])
+        self.assertIs(session._runtime, agent.core_runtime)
 
     # ─── 文本闭环与事件次序 ──────────────────────────────────
 
@@ -492,7 +483,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(state.messages[-1].text, transcript[-1].text)
 
-    async def test_configure_provider_rebinds_rebuilt_runtime(self) -> None:
+    async def test_configure_provider_keeps_runtime_binding(self) -> None:
         from core.fakes import FakeProvider
 
         session, agent, original_provider = self._make_session([_stop_event("old")])
@@ -502,13 +493,30 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         with patch("lion_code.agent.create_provider", return_value=replacement_provider):
             session.configure_provider(api_key="new-key")
 
-        self.assertIsNot(agent.core_runtime, original_runtime)
+        self.assertIs(agent.core_runtime, original_runtime)
         self.assertIs(session._runtime, agent.core_runtime)
         async for _ in session.prompt("hello"):
             pass
         self.assertEqual(original_provider.call_count, 0)
         self.assertEqual(replacement_provider.call_count, 1)
         self.assertEqual(session.messages[-1].text, "new")
+
+    async def test_configure_provider_rejects_unsettled_session(self) -> None:
+        session, agent, provider = self._make_session([])
+        config = agent.get_api_config()
+        session._running = True
+        try:
+            with (
+                patch("lion_code.agent.create_provider") as create,
+                self.assertRaisesRegex(RuntimeError, "会话运行中"),
+            ):
+                session.configure_provider(api_key="new-key")
+        finally:
+            session._running = False
+
+        create.assert_not_called()
+        self.assertIs(agent.core_runtime.provider, provider)
+        self.assertEqual(agent.get_api_config(), config)
 
     # ─── Thinking 档位 ────────────────────────────────────────
 
@@ -565,6 +573,22 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             session.set_thinking_level("ultra")
         # 被拒后档位不变。
+        self.assertEqual(session.thinking_level, "off")
+
+    async def test_thinking_switch_rejects_unsettled_session(self) -> None:
+        session, agent, provider = self._make_session([])
+        session._running = True
+        try:
+            with patch("lion_code.agent.create_provider") as create:
+                with self.assertRaisesRegex(RuntimeError, "会话运行中"):
+                    session.set_thinking_level("high")
+                with self.assertRaisesRegex(RuntimeError, "会话运行中"):
+                    session.cycle_thinking_level()
+        finally:
+            session._running = False
+
+        create.assert_not_called()
+        self.assertIs(agent.core_runtime.provider, provider)
         self.assertEqual(session.thinking_level, "off")
 
 

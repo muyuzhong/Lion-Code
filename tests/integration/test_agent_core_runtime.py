@@ -1,15 +1,13 @@
-"""Agent 入口灰度切换集成测试：证明真实 ``Agent.chat`` 已切到新 Core Runtime。
+"""Agent Core Runtime 单路径集成测试。
 
 通过 patch ``lion_code.agent.create_provider`` 注入脚本化 ``FakeProvider``，
-验证 ``LION_CORE_RUNTIME=1`` 时 ``chat`` 走 LionAgentRuntime 而非旧
-``_chat_openai``，并覆盖工具闭环、动态 system、动态工具、取消后继续会话。
-``LION_CORE_RUNTIME=0`` 时仍走旧路径。
+验证 ``chat`` 始终走 LionAgentRuntime，并覆盖工具闭环、动态 system、
+动态工具、取消后继续会话和 Provider 热切换。
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 import json
 import tempfile
 import unittest
@@ -164,7 +162,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self) -> None:
         set_sink(self._prev_sink)
-        os.environ.pop("LION_CORE_RUNTIME", None)
         self._temp_dir.cleanup()
 
     def _make_agent(
@@ -174,7 +171,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         **agent_kwargs,
     ) -> tuple[Agent, FakeProvider]:
         fake = FakeProvider(events)
-        os.environ["LION_CORE_RUNTIME"] = "1"
         with patch("lion_code.agent.create_provider", return_value=fake):
             agent = Agent(
                 api_base="https://example.test/v1",
@@ -188,28 +184,26 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         agent._mcp_initialized = True
         return agent, fake
 
-    async def test_grayscale_off_uses_old_path(self) -> None:
-        os.environ["LION_CORE_RUNTIME"] = "0"
+    async def test_chat_always_uses_core_runtime(self) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
-        agent = Agent(
-            api_base="https://example.test/v1",
-            api_key="test-key",
-            tool_registry=registry,
-            custom_system_prompt="test",
-        )
+        fake = FakeProvider([_stop_event("done")])
+        with patch("lion_code.agent.create_provider", return_value=fake):
+            agent = Agent(
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                tool_registry=registry,
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+            )
         agent._mcp_initialized = True
 
-        self.assertIsNone(agent._core_runtime)
-        self.assertFalse(agent._use_core_runtime)
-
-        with (
-            patch.object(Agent, "_chat_openai", new_callable=AsyncMock) as mock_chat,
-            patch.object(Agent, "_auto_save", lambda self: None),
-        ):
+        with patch.object(Agent, "_chat_openai", new_callable=AsyncMock) as mock_chat:
             await agent.chat("hello")
 
-        mock_chat.assert_called_once_with("hello")
+        mock_chat.assert_not_called()
+        self.assertEqual(fake.call_count, 1)
+        self.assertEqual(agent.core_runtime.messages[-1].text, "done")
 
     async def test_grayscale_on_routes_to_core_runtime(self) -> None:
         registry = ToolRegistry()
@@ -232,7 +226,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             [_stop_event("done")],
             RuntimeModelLimits(context_window=128_000, max_output_tokens=8_000),
         )
-        os.environ["LION_CORE_RUNTIME"] = "1"
         with patch("lion_code.agent.create_provider", return_value=fake):
             agent = Agent(
                 api_base="https://example.test/v1",
@@ -650,7 +643,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 _stop_event("implemented"),
             ]
         )
-        os.environ["LION_CORE_RUNTIME"] = "1"
         with patch("lion_code.agent.create_provider", return_value=fake):
             agent = Agent(
                 permission_mode="plan",
@@ -692,11 +684,13 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(state.entries), len(state.messages))
 
 
-    async def test_configure_api_rebuilds_core_provider(self) -> None:
-        """Core 路径下换 key/base 必须重建 Provider,且保留 Harness 消息。"""
+    async def test_configure_api_replaces_provider_in_existing_runtime(self) -> None:
+        """换 key/base 原位替换 Provider，并保留 Harness 与 canonical history。"""
         agent, old_fake = self._make_agent([_stop_event("done")], ToolRegistry())
         await agent.chat("hello")
         old_runtime = agent._core_runtime
+        old_compactor = agent._context_compactor
+        old_query = agent._memory_coordinator._query_service
 
         new_fake = FakeProvider([_stop_event("again")])
         with patch(
@@ -707,10 +701,15 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         mock_create.assert_called_once_with(
             api_key="new-key", api_base="https://new.test/v1", thinking_level="off"
         )
-        self.assertIsNot(agent._core_runtime, old_runtime)
+        self.assertIs(agent._core_runtime, old_runtime)
         self.assertEqual(
             [m.role for m in agent._core_runtime.messages], ["user", "assistant"]
         )
+        self.assertIsNot(agent._context_compactor, old_compactor)
+        self.assertIs(agent._context_compactor._provider, new_fake)
+        self.assertIsNot(agent._memory_coordinator._query_service, old_query)
+        self.assertIs(agent._memory_coordinator._query_service._provider, new_fake)
+        self.assertIsNone(agent._resolved_model_limits_for)
 
         # 新 Provider 接管后续请求。
         await agent.chat("second")
@@ -720,6 +719,50 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent._core_runtime.messages[-1].text, "again")
         await agent.close()
         self.assertTrue(new_fake.closed)
+
+    async def test_configure_api_failure_keeps_complete_state(self) -> None:
+        agent, provider = self._make_agent([], ToolRegistry())
+        runtime = agent.core_runtime
+        compactor = agent._context_compactor
+        query_service = agent._memory_coordinator._query_service
+        config = agent.get_api_config()
+
+        with (
+            patch(
+                "lion_code.agent.create_provider",
+                side_effect=RuntimeError("bad provider config"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "bad provider config"),
+        ):
+            agent.configure_api(
+                model="new-model",
+                api_key="new-key",
+                api_base="https://new.test/v1",
+            )
+
+        self.assertIs(agent.core_runtime, runtime)
+        self.assertIs(agent.core_runtime.provider, provider)
+        self.assertIs(agent._context_compactor, compactor)
+        self.assertIs(agent._memory_coordinator._query_service, query_service)
+        self.assertEqual(agent.get_api_config(), config)
+        self.assertFalse(provider.closed)
+
+    async def test_configure_api_rejects_busy_runtime_without_changes(self) -> None:
+        agent, provider = self._make_agent([], ToolRegistry())
+        config = agent.get_api_config()
+        agent.core_runtime.harness._running = True
+        try:
+            with (
+                patch("lion_code.agent.create_provider") as create,
+                self.assertRaisesRegex(RuntimeError, "运行中"),
+            ):
+                agent.configure_api(api_key="new-key")
+        finally:
+            agent.core_runtime.harness._running = False
+
+        create.assert_not_called()
+        self.assertIs(agent.core_runtime.provider, provider)
+        self.assertEqual(agent.get_api_config(), config)
 
     async def test_configure_api_keeps_usage_for_cost_budget(self) -> None:
         registry = ToolRegistry()
@@ -751,7 +794,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_anthropic_backend_routes_to_core_runtime(self) -> None:
         """Anthropic 后端(无 api_base)同样走 Core Runtime,不再落 legacy。"""
         fake = FakeProvider([_stop_event("done")])
-        os.environ["LION_CORE_RUNTIME"] = "1"
         with patch("lion_code.agent.create_provider", return_value=fake):
             agent = Agent(
                 api_key="ak",
@@ -795,7 +837,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
     async def test_sub_agent_runs_on_core_runtime(self) -> None:
         """子 Agent 也走 Core:凭证随 fork 传递,文本经 canonical 兜底捕获。"""
-        os.environ["LION_CORE_RUNTIME"] = "1"
         parent_fake = FakeProvider(
             [
                 AssistantDoneEvent(
@@ -822,7 +863,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         sub_fake = FakeProvider([_stop_event("sub says hi")])
         with patch(
             "lion_code.agent.create_provider", side_effect=[parent_fake, sub_fake]
-        ):
+        ) as create:
             agent = Agent(
                 api_base="https://example.test/v1",
                 api_key="test-key",
@@ -833,6 +874,14 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             await agent.chat("hello")
 
         self.assertEqual(sub_fake.call_count, 1)
+        self.assertEqual(
+            create.call_args_list[1].kwargs,
+            {
+                "api_key": "test-key",
+                "api_base": "https://example.test/v1",
+                "thinking_level": "off",
+            },
+        )
         self.assertEqual(
             [m.role for m in agent._core_runtime.messages],
             ["user", "assistant", "toolResult", "assistant"],
