@@ -1,23 +1,14 @@
 """Tests for drag-and-drop file insertion in the TUI prompt."""
 
-import sys
 from pathlib import Path
 
 import pytest
-
-# 上游用例基于 POSIX 终端的拖拽转义格式(反斜杠转义空格),与 Windows
-# 路径分隔符冲突;Windows 下的拖拽归一化在阶段 3 接线 PromptInput 时处理。
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="POSIX terminal drop format"
-)
-
-from textual import events
 
 from lion_code.tui.file_drop import normalize_dropped_paths
 
 
 def _escaped(path: Path) -> str:
-    """Render a path the way terminals do when a file is dropped."""
+    """Render a path the way POSIX terminals do when a file is dropped."""
     return str(path).replace(" ", "\\ ")
 
 
@@ -29,6 +20,8 @@ class TestNormalizeDroppedPaths:
         assert normalize_dropped_paths(str(file)) == str(file)
 
     def test_escaped_spaces_are_unescaped_and_quoted(self, tmp_path: Path) -> None:
+        if Path("C:/").is_absolute():
+            pytest.skip("POSIX terminal escape format")
         file = tmp_path / "my file.png"
         file.touch()
 
@@ -52,7 +45,7 @@ class TestNormalizeDroppedPaths:
         first.touch()
         second.touch()
 
-        dropped = f"{first} {_escaped(second)}"
+        dropped = f'{first} "{second}"'
 
         assert normalize_dropped_paths(dropped) == f'{first} "{second}"'
 
@@ -68,14 +61,37 @@ class TestNormalizeDroppedPaths:
         directory = tmp_path / "some dir"
         directory.mkdir()
 
-        assert normalize_dropped_paths(_escaped(directory)) == f'"{directory}"'
+        dropped = str(directory) if Path("C:/").is_absolute() else _escaped(directory)
+
+        assert normalize_dropped_paths(dropped) == f'"{directory}"'
 
     def test_file_uri_is_converted_to_local_path(self, tmp_path: Path) -> None:
         file = tmp_path / "my file.png"
         file.touch()
-        uri = "file://" + str(file).replace(" ", "%20")
 
-        assert normalize_dropped_paths(uri) == f'"{file}"'
+        assert normalize_dropped_paths(file.as_uri()) == f'"{file}"'
+
+    def test_windows_quoted_multiple_paths_preserve_separators(self, tmp_path: Path) -> None:
+        if not Path("C:/").is_absolute():
+            pytest.skip("Windows terminal drop format")
+        first = tmp_path / "first file.txt"
+        second = tmp_path / "second.txt"
+        first.touch()
+        second.touch()
+
+        dropped = f'"{first}" "{second}"'
+
+        assert normalize_dropped_paths(dropped) == f'"{first}" {second}'
+
+    def test_windows_unquoted_multiple_paths_use_non_posix_parsing(self, tmp_path: Path) -> None:
+        if not Path("C:/").is_absolute():
+            pytest.skip("Windows terminal drop format")
+        first = tmp_path / "first.txt"
+        second = tmp_path / "second.txt"
+        first.touch()
+        second.touch()
+
+        assert normalize_dropped_paths(f"{first} {second}") == f"{first} {second}"
 
     def test_missing_path_is_not_a_drop(self, tmp_path: Path) -> None:
         assert normalize_dropped_paths(str(tmp_path / "missing.txt")) is None

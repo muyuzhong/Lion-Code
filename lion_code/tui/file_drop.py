@@ -23,7 +23,8 @@ from __future__ import annotations
 
 import shlex
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 __all__ = ["normalize_dropped_paths"]
 
@@ -45,8 +46,18 @@ def normalize_dropped_paths(text: str) -> str | None:
     if whole is not None:
         return _quote_path(whole)
 
+    paths = _tokens_to_paths(stripped, posix=True)
+    if paths is None:
+        paths = _tokens_to_paths(stripped, posix=False)
+    if paths is None:
+        return None
+    return " ".join(_quote_path(path) for path in paths)
+
+
+def _tokens_to_paths(text: str, *, posix: bool) -> list[str] | None:
+    """按指定 shlex 模式把整段输入解析为现存绝对路径。"""
     try:
-        tokens = shlex.split(stripped, posix=True)
+        tokens = shlex.split(text, posix=posix)
     except ValueError:
         return None
     if not tokens:
@@ -54,11 +65,13 @@ def normalize_dropped_paths(text: str) -> str | None:
 
     paths: list[str] = []
     for token in tokens:
+        if not posix and len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+            token = token[1:-1]
         path = _token_to_path(token)
         if path is None:
             return None
         paths.append(path)
-    return " ".join(_quote_path(path) for path in paths)
+    return paths
 
 
 def _token_to_path(token: str) -> str | None:
@@ -68,7 +81,7 @@ def _token_to_path(token: str) -> str | None:
         parsed = urlparse(candidate)
         if parsed.netloc not in ("", "localhost"):
             return None
-        candidate = unquote(parsed.path)
+        candidate = url2pathname(parsed.path)
     path = Path(candidate)
     if not path.is_absolute() or not path.exists():
         return None
@@ -79,5 +92,5 @@ def _quote_path(path: str) -> str:
     """Quote *path* with double quotes when it contains whitespace."""
     if not any(char.isspace() for char in path):
         return path
-    escaped = path.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = path.replace('"', '\\"')
     return f'"{escaped}"'
