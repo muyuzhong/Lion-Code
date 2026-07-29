@@ -32,7 +32,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api-base", default=None, help="OpenAI-compatible API base URL")
     parser.add_argument("--resume", action="store_true", help="Resume last session")
     parser.add_argument("--repl", action="store_true", help="Use the plain REPL instead of the default TUI")
-    parser.add_argument("--legacy-tui", action="store_true", help="Use the legacy TUI instead of the new one")
     parser.add_argument("--max-cost", type=float, default=None, help="Max USD spend")
     parser.add_argument("--max-turns", type=int, default=None, help="Max agentic turns")
     parser.add_argument("--help", "-h", action="store_true", help="Show help")
@@ -319,7 +318,7 @@ Examples:
     prompt = " ".join(args.prompt) if args.prompt else None
     use_tui = not prompt and not args.repl
 
-    if use_tui and not args.legacy_tui:
+    if use_tui:
         # 完全未配置凭证时使用 OpenAI-compatible 占位端点，
         # 由新 TUI 承载 /model 首跑配置。
         if not resolved_api_key and not resolved_use_openai:
@@ -348,15 +347,10 @@ Examples:
 
     if use_tui:
         # TUI 内自带输入循环，one-shot prompt 不适用。
-        if not args.legacy_tui:
-            from .application.session import LionCodingSession
-            from .tui.app import run_tui_app
+        from .application.session import LionCodingSession
+        from .tui.app import run_tui_app
 
-            run_tui_app(LionCodingSession(agent), resume=args.resume)
-        else:
-            from .legacy_tui import run_tui
-
-            run_tui(agent, resume=args.resume)
+        run_tui_app(LionCodingSession(agent), resume=args.resume)
         return
 
     async def run_cli() -> None:

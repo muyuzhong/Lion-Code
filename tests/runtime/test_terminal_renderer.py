@@ -1,12 +1,14 @@
 """``TerminalRenderer`` 事件->终端输出映射测试。
 
-通过 ``lion_code.ui.set_sink`` 捕获 Renderer 委托给 ui 的 print_* / spinner
-调用，验证各 Agent 事件被正确渲染，且不实际写 stdout。
+直接替换 Renderer 导入的 print_* / spinner 函数，验证各 Agent 事件被正确
+映射，且不实际写 stdout。
 """
 
 from __future__ import annotations
 
 import unittest
+from contextlib import ExitStack
+from unittest.mock import patch
 
 from lion_code.core import (
     AgentEndEvent,
@@ -21,17 +23,66 @@ from lion_code.core import (
 )
 from lion_code.core.provider_events import AssistantErrorEvent, TextDeltaEvent
 from lion_code.observers import TerminalRenderer
-from lion_code.ui import set_sink
 
 
 class TestTerminalRenderer(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self._collected: list[tuple[str, dict]] = []
-        self._prev_sink = set_sink(lambda kind, data: self._collected.append((kind, data)))
+        self._patches = ExitStack()
+        self._patches.enter_context(
+            patch(
+                "lion_code.observers.terminal.start_spinner",
+                side_effect=lambda label="Thinking": self._collected.append(
+                    ("spinner", {"on": True, "label": label})
+                ),
+            )
+        )
+        self._patches.enter_context(
+            patch(
+                "lion_code.observers.terminal.stop_spinner",
+                side_effect=lambda: self._collected.append(("spinner", {"on": False})),
+            )
+        )
+        self._patches.enter_context(
+            patch(
+                "lion_code.observers.terminal.print_assistant_text",
+                side_effect=lambda text: self._collected.append(("text", {"text": text})),
+            )
+        )
+        self._patches.enter_context(
+            patch(
+                "lion_code.observers.terminal.print_tool_call",
+                side_effect=lambda name, inp: self._collected.append(
+                    ("tool_call", {"name": name, "input": inp})
+                ),
+            )
+        )
+        self._patches.enter_context(
+            patch(
+                "lion_code.observers.terminal.print_tool_result",
+                side_effect=lambda name, text: self._collected.append(
+                    ("tool_result", {"name": name, "text": text})
+                ),
+            )
+        )
+        self._patches.enter_context(
+            patch(
+                "lion_code.observers.terminal.print_error",
+                side_effect=lambda message: self._collected.append(
+                    ("error", {"message": message})
+                ),
+            )
+        )
+        self._patches.enter_context(
+            patch(
+                "lion_code.observers.terminal.print_divider",
+                side_effect=lambda: self._collected.append(("divider", {})),
+            )
+        )
         self._renderer = TerminalRenderer()
 
     def tearDown(self) -> None:
-        set_sink(self._prev_sink)
+        self._patches.close()
 
     def _events_of(self, kind: str) -> list[dict]:
         return [data for k, data in self._collected if k == kind]

@@ -74,8 +74,9 @@ def _is_context_overflow_error(message: AssistantMessage | None) -> bool:
 class LionCodingSession:
     """把 ``Agent``(Core Runtime 路径)包装为前端可消费的会话门面。"""
 
-    def __init__(self, agent: Agent) -> None:
+    def __init__(self, agent: Agent, *, terminal_output: bool = False) -> None:
         self._agent = agent
+        self._agent.set_terminal_output(terminal_output)
         self._runtime = agent.core_runtime
         self._running = False
         self._command_registry = create_default_command_registry()
@@ -303,6 +304,14 @@ class LionCodingSession:
         self, fn: Callable[[str], Awaitable[dict]] | None
     ) -> None:
         self._agent.set_plan_approval_fn(fn)
+
+    def set_notice_fn(
+        self,
+        fn: Callable[[str, Literal["info", "error"]], None] | None,
+    ) -> None:
+        """把 Agent 的非对话状态交给当前前端实例。"""
+
+        self._agent.set_notice_fn(fn)
 
     def toggle_plan_mode(self) -> None:
         self._agent.toggle_plan_mode()

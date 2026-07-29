@@ -281,6 +281,7 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
                     "model": "test-model",
                     "api_base": "https://example.test/v1",
                     "api_key": "test-key",
+                    "terminal_output": False,
                 },
                 tool_registry=registry,
                 tool_environment=environment,
@@ -297,6 +298,7 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(kwargs["tool_environment"], child_environment)
         self.assertTrue(kwargs["is_sub_agent"])
+        self.assertFalse(kwargs["terminal_output"])
         self.assertEqual(kwargs["max_turns"], dream.DREAM_MAX_TURNS)
 
     async def test_coordinator_runs_isolated_agent_once_and_applies_plan(self):

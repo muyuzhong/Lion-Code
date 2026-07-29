@@ -6,12 +6,13 @@ Lion 需要的最小应用壳,并移植 legacy TUI 的三个交互 Modal(权限�
 Plan 审批、模型热配)。OAuth/供应商目录/扩展 UI 等 Lion 不需要的能力
 不迁入;autocomplete/steering 输入等增强按迁移计划在阶段 4 接线。
 
-事件来源有两条,职责不重叠:
+可见反馈来自两个实例级入口,职责不重叠:
 
 - LionCodingSession.prompt() 的结构化事件流 → TuiEventAdapter → transcript
   (根 Agent 的全部对话内容);
-- ui.set_sink 路由器 → 仅消费子 Agent 输出与 info/error/retry 等状态行
-  (legacy 路径的打印),根 Agent 的 text/tool 打印会与核心事件重复,丢弃。
+- LionCodingSession notice callback → 非对话的 info/error 状态行。
+
+子 Agent 复用根调用的 tool start/end 行及 tool result,不维护第二份输出缓冲。
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ from pathlib import Path
 from rich.console import Console
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.message import Message
 from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.widgets import (
@@ -38,7 +38,6 @@ from textual.widgets import (
     Static,
 )
 
-from lion_code import ui
 from lion_code.application.commands import CommandResult
 from lion_code.application.events import (
     AgentSettledEvent,
@@ -263,15 +262,6 @@ def _rendered_completion_lines(
         end="",
     )
     return tuple(output.getvalue().splitlines())
-
-
-class UiSinkEvent(Message):
-    """ui sink 事件到 Textual 消息泵的桥(仅子 Agent 与状态行)。"""
-
-    def __init__(self, kind: str, payload: dict) -> None:
-        super().__init__()
-        self.kind = kind
-        self.payload = payload
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -774,9 +764,6 @@ class LionTuiApp(App):
         self.state = TuiState()
         self.adapter = TuiEventAdapter(self.state)
         self._resume_on_mount = resume
-        self._subagent_depth = 0
-        self._subagent_buffer = ""
-        self._status_info = ""
         self._completion_state = CompletionState()
         keys = self.settings.keybindings
         self._bindings.bind(keys.quit, "quit_app", "quit", priority=True)
@@ -801,7 +788,7 @@ class LionTuiApp(App):
 
     async def on_mount(self) -> None:
         self._set_subtitle()
-        ui.set_sink(lambda kind, payload: self.post_message(UiSinkEvent(kind, payload)))
+        self.session.set_notice_fn(self._on_session_notice)
         self.session.set_confirm_fn(self._confirm)
         self.session.set_plan_approval_fn(self._plan_approval)
         self._refresh_transcript()
@@ -818,7 +805,7 @@ class LionTuiApp(App):
             self.call_after_refresh(self.action_model)
 
     async def on_unmount(self) -> None:
-        ui.set_sink(None)
+        self.session.set_notice_fn(None)
         await self.session.aclose()
 
     def _set_subtitle(self) -> None:
@@ -1207,7 +1194,6 @@ class LionTuiApp(App):
         elif result.plan_toggle_requested:
             self.session.toggle_plan_mode()
             self._set_subtitle()
-            self._notice(f"permission mode: {self.session.permission_mode}")
         elif result.cost_requested:
             usage = self.session.token_usage()
             self._notice(
@@ -1246,7 +1232,6 @@ class LionTuiApp(App):
     async def _compact(self) -> None:
         try:
             await self.session.compact()
-            self._notice("context compacted")
         except Exception as error:
             self._notice(f"Error: {error}", role="error")
 
@@ -1262,42 +1247,6 @@ class LionTuiApp(App):
             self.theme = name
         self._refresh_transcript()
         self._notice(f"theme: {name}")
-
-    # ─── ui sink 路由(子 Agent 与状态行)─────────────────────
-
-    def on_ui_sink_event(self, event: UiSinkEvent) -> None:
-        kind, p = event.kind, event.payload
-        if kind == "sub_agent_start":
-            self._subagent_depth += 1
-            self._subagent_buffer = ""
-            self._notice(f"┌─ Sub-agent [{p['agent_type']}]: {p['description']}")
-        elif kind == "sub_agent_end":
-            self._subagent_depth = max(0, self._subagent_depth - 1)
-            if self._subagent_buffer.strip():
-                self._notice(self._subagent_buffer.strip())
-            self._subagent_buffer = ""
-            self._notice(f"└─ Sub-agent [{p['agent_type']}] completed")
-        elif kind in ("text", "tool_call", "tool_result"):
-            # 根 Agent 的打印与核心事件重复,丢弃;子 Agent 输出缓冲后
-            # 在结束时作为一条状态行展示,工具调用即时显示。
-            if self._subagent_depth > 0:
-                if kind == "text":
-                    self._subagent_buffer += p.get("text", "")
-                elif kind == "tool_call":
-                    self._notice(
-                        f"  {p.get('icon', '·')} {p.get('name', '')}  {p.get('summary', '')}"
-                    )
-        elif kind == "info":
-            self._notice(f"ℹ {p['message']}")
-        elif kind == "error":
-            self._notice(f"Error: {p['message']}", role="error")
-        elif kind == "retry":
-            self._notice(f"↻ Retry {p['attempt']}/{p['max_retries']}: {p['reason']}")
-        elif kind == "confirmation":
-            self._notice(f"⚠ Dangerous command: {p['command']}", role="error")
-        elif kind == "cost":
-            self._status_info = f"{p['input']} in / {p['output']} out · ~${p['total']:.4f}"
-            self._set_status(running=self.session.is_running)
 
     # ─── 会话侧边栏 ──────────────────────────────────────────
 
@@ -1389,6 +1338,16 @@ class LionTuiApp(App):
     async def _plan_approval(self, plan: str) -> dict:
         return await self.push_screen_wait(PlanScreen(plan))
 
+    def _on_session_notice(self, text: str, role: str) -> None:
+        rendered = text if role == "info" else f"Error: {text}"
+        # Agent 的同步状态回调可能发生在 clear/restore 的状态替换中；排到当前
+        # Textual 消息之后，避免通知先被 reconcile 清除，也保证每次只渲染一次。
+        self.call_later(
+            self._notice,
+            rendered,
+            role="error" if role == "error" else "status",
+        )
+
     # ─── 渲染辅助 ────────────────────────────────────────────
 
     def _transcript(self) -> TranscriptView:
@@ -1402,12 +1361,9 @@ class LionTuiApp(App):
         parts = []
         if running:
             parts.append("⠋ Thinking…")
-        if not self._status_info:
-            usage = self.session.token_usage()
-            if usage.get("input") or usage.get("output"):
-                self._status_info = f"{usage['input']} in / {usage['output']} out"
-        if self._status_info:
-            parts.append(self._status_info)
+        usage = self.session.token_usage()
+        if usage.get("input") or usage.get("output"):
+            parts.append(f"{usage['input']} in / {usage['output']} out")
         self.query_one("#status", Static).update("   ".join(parts))
         self._sync_prompt_footer()
 

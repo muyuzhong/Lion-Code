@@ -22,7 +22,6 @@ from lion_code.providers import RuntimeModelLimits
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
-from lion_code.ui import set_sink
 
 from core.fakes import FakeProvider
 
@@ -154,14 +153,10 @@ def _many_tooluse_event(count: int, usage: Usage) -> AssistantDoneEvent:
 
 class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        # 捕获所有 ui 输出，避免测试污染 stdout。
-        self._collected: list[tuple[str, dict]] = []
-        self._prev_sink = set_sink(lambda kind, data: self._collected.append((kind, data)))
         self._temp_dir = tempfile.TemporaryDirectory()
         self._session_repository = SessionRepository(Path(self._temp_dir.name))
 
     def tearDown(self) -> None:
-        set_sink(self._prev_sink)
         self._temp_dir.cleanup()
 
     def _make_agent(
@@ -178,6 +173,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 tool_registry=registry,
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                terminal_output=False,
                 **agent_kwargs,
             )
         # 跳过 MCP 发现，避免测试环境副作用。
@@ -195,6 +191,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 tool_registry=registry,
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                terminal_output=False,
             )
         agent._mcp_initialized = True
 
@@ -228,6 +225,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 api_key="test-key",
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                terminal_output=False,
             )
         agent._mcp_initialized = True
 
@@ -690,6 +688,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 api_key="test-key",
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                terminal_output=False,
             )
         agent._mcp_initialized = True
         agent.tool_registry.activate("exit_plan_mode")
@@ -840,6 +839,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 tool_registry=ToolRegistry(),
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                terminal_output=False,
             )
         agent._mcp_initialized = True
 
@@ -898,19 +898,24 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             ]
         )
         sub_fake = FakeProvider([_stop_event("sub says hi")])
-        with patch(
-            "lion_code.agent.create_provider", side_effect=[parent_fake, sub_fake]
-        ) as create:
+        with (
+            patch(
+                "lion_code.agent.create_provider", side_effect=[parent_fake, sub_fake]
+            ) as create,
+            patch("lion_code.agent.TerminalRenderer") as terminal_renderer,
+        ):
             agent = Agent(
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                terminal_output=False,
             )
             agent._mcp_initialized = True
             await agent.chat("hello")
 
         self.assertEqual(sub_fake.call_count, 1)
+        terminal_renderer.assert_not_called()
         self.assertEqual(
             create.call_args_list[1].kwargs,
             {

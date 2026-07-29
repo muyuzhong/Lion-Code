@@ -67,3 +67,18 @@ def test_save_api_config_preserves_known_models(isolated_config) -> None:
     data = json.loads(isolated_config.read_text(encoding="utf-8"))
     assert data["model"] == "m-new"
     assert [entry["model"] for entry in data["known_models"]] == ["m-keep"]
+
+
+def test_api_config_round_trip_and_invalid_json_fallback(isolated_config) -> None:
+    config_module.save_api_config(
+        provider="openai", model="m", api_key="k", base_url="https://x/v1"
+    )
+    assert config_module.load_api_config() == {
+        "provider": "openai",
+        "model": "m",
+        "api_key": "k",
+        "base_url": "https://x/v1",
+    }
+
+    isolated_config.write_text("{bad json", encoding="utf-8")
+    assert config_module.load_api_config() == {}

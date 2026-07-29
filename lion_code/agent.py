@@ -223,12 +223,15 @@ class Agent:
         context_compactor: ContextCompactor | None = None,
         model_limits_resolver: ModelLimitsResolver | None = None,
         is_sub_agent: bool = False,
+        terminal_output: bool = True,
     ):
         self.permission_mode = permission_mode
         self.thinking = thinking
         self.model = model
         self.use_openai = bool(api_base)
         self.is_sub_agent = is_sub_agent
+        self._terminal_output = terminal_output
+        self._notice_fn: Callable[[str, Literal["info", "error"]], None] | None = None
         self._api_key = api_key or os.environ.get(
             "OPENAI_API_KEY" if self.use_openai else "ANTHROPIC_API_KEY",
             "",
@@ -385,6 +388,7 @@ class Agent:
         # Provider/Core 是唯一主路径，Harness messages 是唯一活跃历史。
         self._core_runtime: LionAgentRuntime
         self._terminal_renderer: TerminalRenderer | None = None
+        self._terminal_renderer_unsubscribe: Callable[[], None] | None = None
         self._usage_observer: UsageObserver | None = None
         self._observer_unsubscribers: list[Callable[[], None]] = []
         provider = self._build_core_provider(self._thinking_level)
@@ -474,8 +478,8 @@ class Agent:
     async def _capture_core_text(self, event: AgentEvent) -> None:
         """为 run_once/run 捕获助手文本增量到输出缓冲区（评测与子 Agent 依赖）。
 
-        正常 chat 时 _output_buffer 为 None，本监听器空操作；TerminalRenderer
-        负责终端渲染，二者不冲突。
+        正常 chat 时 _output_buffer 为 None，本监听器空操作；终端模式由
+        TerminalRenderer 渲染，结构化前端自行消费事件流。
         """
         if self._output_buffer is None:
             return
@@ -549,7 +553,7 @@ class Agent:
             return None
         self._last_stop_reason = budget["kind"]
         try:
-            print_info(f"Budget exceeded: {budget['reason']}")
+            self._emit_notice(f"Budget exceeded: {budget['reason']}")
         except UnicodeError:
             pass
         return budget["reason"]
@@ -569,15 +573,15 @@ class Agent:
         )
         self._last_stop_reason = None
 
-    def _reset_core_observers(self, *, preserve_usage: bool = False) -> None:
-        """按 Usage → Session → Renderer 顺序重建 Core 观察器。"""
+    def _reset_core_observers(self) -> None:
+        """按 Usage → Session → 可选 Renderer 顺序重建 Core 观察器。"""
         for unsubscribe in self._observer_unsubscribers:
             unsubscribe()
         self._observer_unsubscribers.clear()
-        self._terminal_renderer = TerminalRenderer()
-        if not preserve_usage or self._usage_observer is None:
-            self._usage_observer = UsageObserver()
-            self._last_synced_core_response_count = 0
+        self._terminal_renderer_unsubscribe = None
+        self._terminal_renderer = TerminalRenderer() if self._terminal_output else None
+        self._usage_observer = UsageObserver()
+        self._last_synced_core_response_count = 0
         if self.is_sub_agent:
             # 子 Agent 不落盘会话:输出经文本捕获返回父级,避免污染会话列表。
             self._session_recorder = None
@@ -596,9 +600,11 @@ class Agent:
             self._observer_unsubscribers.append(
                 self._core_runtime.subscribe(self._session_recorder.handle)
             )
-        self._observer_unsubscribers.append(
-            self._core_runtime.subscribe(self._terminal_renderer.handle)
-        )
+        if self._terminal_renderer is not None:
+            self._terminal_renderer_unsubscribe = self._core_runtime.subscribe(
+                self._terminal_renderer.handle
+            )
+            self._observer_unsubscribers.append(self._terminal_renderer_unsubscribe)
         self._observer_unsubscribers.append(
             self._core_runtime.subscribe(self._capture_core_text)
         )
@@ -754,10 +760,69 @@ class Agent:
         if self._background_errors:
             raise self._background_errors.pop(0)
 
-    def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]]) -> None:
+    def set_terminal_output(self, enabled: bool) -> None:
+        """切换终端观察器；结构化前端在开始运行前关闭它。"""
+
+        if enabled == self._terminal_output:
+            return
+        if self.is_processing:
+            raise RuntimeError("Agent 运行中，无法切换终端输出")
+        if enabled:
+            self._terminal_output = True
+            self._terminal_renderer = TerminalRenderer()
+            self._terminal_renderer_unsubscribe = self._core_runtime.subscribe(
+                self._terminal_renderer.handle
+            )
+            self._observer_unsubscribers.append(self._terminal_renderer_unsubscribe)
+            return
+
+        unsubscribe = self._terminal_renderer_unsubscribe
+        if unsubscribe is not None:
+            unsubscribe()
+            self._observer_unsubscribers.remove(unsubscribe)
+        self._terminal_renderer_unsubscribe = None
+        self._terminal_renderer = None
+        self._terminal_output = False
+
+    def set_notice_fn(
+        self,
+        fn: Callable[[str, Literal["info", "error"]], None] | None,
+    ) -> None:
+        """设置实例级状态通知回调；未设置时继续直接输出到终端。"""
+
+        self._notice_fn = fn
+
+    def _emit_notice(
+        self,
+        message: str,
+        *,
+        role: Literal["info", "error"] = "info",
+    ) -> None:
+        if self._notice_fn is not None:
+            self._notice_fn(message, role)
+        elif self._terminal_output:
+            (print_error if role == "error" else print_info)(message)
+
+    def _emit_subagent_status(
+        self,
+        agent_type: str,
+        description: str,
+        *,
+        started: bool,
+    ) -> None:
+        if not self._terminal_output:
+            return
+        if started:
+            print_sub_agent_start(agent_type, description)
+        else:
+            print_sub_agent_end(agent_type, description)
+
+    def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]] | None) -> None:
         self.confirm_fn = fn
 
-    def set_plan_approval_fn(self, fn: Callable[[str], Awaitable[dict]]) -> None:
+    def set_plan_approval_fn(
+        self, fn: Callable[[str], Awaitable[dict]] | None
+    ) -> None:
         self._plan_approval_fn = fn
 
     # ─── Plan 模式切换 ───────────────────────────────────────
@@ -770,7 +835,7 @@ class Agent:
             self._system_prompt = self._base_system_prompt
             self.tool_context.permission_mode = self.permission_mode
             self.tool_context.plan_file_path = self._plan_file_path
-            print_info(f"Exited plan mode → {self.permission_mode} mode")
+            self._emit_notice(f"Exited plan mode → {self.permission_mode} mode")
             return self.permission_mode
         else:
             self._pre_plan_mode = self.permission_mode
@@ -779,7 +844,7 @@ class Agent:
             self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt()
             self.tool_context.permission_mode = self.permission_mode
             self.tool_context.plan_file_path = self._plan_file_path
-            print_info(f"Entered plan mode. Plan file: {self._plan_file_path}")
+            self._emit_notice(f"Entered plan mode. Plan file: {self._plan_file_path}")
             return "plan"
 
     def get_token_usage(self) -> dict:
@@ -1039,14 +1104,15 @@ class Agent:
                         create_mcp_tool(self._mcp_manager, definition)
                     )
             except Exception as e:
-                print_info(f"[mcp] Init failed: {e}")
+                self._emit_notice(f"[mcp] Init failed: {e}")
 
         self._aborted = False
         self._last_stop_reason = None
         if not self.api_configured:
-            print_error(
+            self._emit_notice(
                 "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
-                "或在 TUI 中用 /model 配置。"
+                "或在 TUI 中用 /model 配置。",
+                role="error",
             )
             return
 
@@ -1197,7 +1263,7 @@ class Agent:
         await self._ensure_core_session_ready()
         self.tool_context.plan_file_path = self._plan_file_path
         self._reset_session_counters()
-        print_info("Conversation cleared.")
+        self._emit_notice("Conversation cleared.")
 
     def show_cost(self) -> None:
         total = self._get_current_cost_usd()
@@ -1210,7 +1276,7 @@ class Agent:
             f"\n  Cache: {cached} read / {self.total_cache_creation_tokens} write ({hit_rate}% of input from cache)"
             if (cached or self.total_cache_creation_tokens) else ""
         )
-        print_info(f"Tokens: {self.total_input_tokens} in / {self.total_output_tokens} out{cache_info}\n  Estimated cost: ${total:.4f}{budget_info}{turn_info}")
+        self._emit_notice(f"Tokens: {self.total_input_tokens} in / {self.total_output_tokens} out{cache_info}\n  Estimated cost: ${total:.4f}{budget_info}{turn_info}")
 
     def _get_current_cost_usd(self) -> float:
         # 统一按基础输入 $3/Mtok、缓存读取 0.1 倍、缓存写入 1.25 倍估算；
@@ -1233,7 +1299,7 @@ class Agent:
     async def compact(self) -> None:
         await self._ensure_core_session_ready()
         if await self._compact_core_context_if_needed(force=True):
-            print_info("Conversation compacted.")
+            self._emit_notice("Conversation compacted.")
 
     async def dream(self) -> str:
         """显式整合当前项目 Memory，并返回本次文件变更摘要。"""
@@ -1242,11 +1308,15 @@ class Agent:
 
         from .dream import DreamCoordinator
 
-        print_sub_agent_start("dream", "consolidate project memory")
+        self._emit_subagent_status(
+            "dream", "consolidate project memory", started=True
+        )
         try:
             result = await DreamCoordinator(self).run()
         finally:
-            print_sub_agent_end("dream", "consolidate project memory")
+            self._emit_subagent_status(
+                "dream", "consolidate project memory", started=False
+            )
         if result.created or result.updated or result.deleted:
             self._refresh_memory_context_after_dream(
                 result.created + result.updated + result.deleted
@@ -1306,17 +1376,17 @@ class Agent:
     def set_goal(self, condition: str) -> str:
         """设置活动目标并返回首轮执行指令。"""
         self.active_goal = {"condition": condition, "iterations": 0, "started_at": time.time(), "last_reason": None}
-        print_info(f'◎ /goal active — Stop hook condition: "{condition}"')
+        self._emit_notice(f'◎ /goal active — Stop hook condition: "{condition}"')
         return goal_directive(condition)
 
     def show_goal(self) -> None:
         """处理无参数 `/goal`，显示当前目标状态。"""
         if not self.active_goal:
-            print_info("No active goal. Set one with /goal <condition>.")
+            self._emit_notice("No active goal. Set one with /goal <condition>.")
             return
         secs = time.time() - self.active_goal["started_at"]
         last = f"\n  last reason: {self.active_goal['last_reason']}" if self.active_goal["last_reason"] else ""
-        print_info(
+        self._emit_notice(
             f"◎ /goal active\n  condition: {self.active_goal['condition']}\n"
             f"  iterations: {self.active_goal['iterations']}\n  elapsed: {secs:.1f}s{last}"
         )
@@ -1335,25 +1405,25 @@ class Agent:
                     turns = self.active_goal["iterations"] + 1
                     secs = time.time() - self.active_goal["started_at"]
                     plural = "" if turns == 1 else "s"
-                    print_info(f"✓ Goal achieved ({turns} turn{plural}, {secs:.1f}s): {verdict['reason']}")
+                    self._emit_notice(f"✓ Goal achieved ({turns} turn{plural}, {secs:.1f}s): {verdict['reason']}")
                     break
                 if verdict.get("impossible"):
-                    print_info(f"Hooks: Prompt hook condition judged impossible: {verdict['reason']}")
+                    self._emit_notice(f"Hooks: Prompt hook condition judged impossible: {verdict['reason']}")
                     break
 
                 # 未满足时记录原因，再检查预算和硬上限是否允许继续。
                 self.active_goal["iterations"] += 1
                 self.active_goal["last_reason"] = verdict["reason"]
-                print_info(f"Hooks: Prompt hook condition was not met: {verdict['reason']}")
+                self._emit_notice(f"Hooks: Prompt hook condition was not met: {verdict['reason']}")
 
                 budget = self._check_budget()
                 if budget["exceeded"]:
-                    print_info(f"Goal stopped: {budget['reason']}")
+                    self._emit_notice(f"Goal stopped: {budget['reason']}")
                     break
                 # --max-turns 只统计执行工具的轮次；纯文本目标循环可能永远不触发它，
                 # 因此仍需独立的无条件硬上限。
                 if self.active_goal["iterations"] >= GOAL_MAX_ITERATIONS:
-                    print_info(f"Goal stopped: reached {GOAL_MAX_ITERATIONS} iterations without meeting the condition.")
+                    self._emit_notice(f"Goal stopped: reached {GOAL_MAX_ITERATIONS} iterations without meeting the condition.")
                     break
                 if self.goal_stop or self._aborted:
                     break
@@ -1362,7 +1432,7 @@ class Agent:
                     f"Hooks: Prompt hook condition was not met: {verdict['reason']}\n\nKeep working toward the goal."
                 )
             if self.goal_stop or self._aborted:
-                print_info("Goal pursuit interrupted.")
+                self._emit_notice("Goal pursuit interrupted.")
         finally:
             # 无论满足、不可能、超限还是中断都清除状态，避免旧目标污染后续对话；
             # 当前实现不支持恢复进行中的 /goal。
@@ -1440,7 +1510,7 @@ class Agent:
         """解析 /loop 输入并驱动对应模式；格式错误时直接返回。"""
         spec = parse_loop_input(raw_input)
         if "error" in spec:
-            print_info(spec["error"])
+            self._emit_notice(spec["error"])
             return
         # 长间隔或 daily 措辞在真实客户端会触发持久化云计划建议；教学版没有云端，
         # 这里只显式告知差异，仍在当前进程内运行。
@@ -1449,7 +1519,7 @@ class Agent:
             or is_daily_wording(raw_input)
         )
         if wants_cloud:
-            print_info(
+            self._emit_notice(
                 "(Real Claude Code would offer to convert this to a persistent cloud schedule "
                 "that keeps running after the session ends. This teaching build has no cloud "
                 "backend — continuing in-session.)"
@@ -1462,37 +1532,37 @@ class Agent:
             else:
                 await self._run_loop_dynamic(spec)
         except asyncio.CancelledError:
-            print_info("Loop interrupted.")
+            self._emit_notice("Loop interrupted.")
 
     async def _run_loop_interval(self, spec: dict) -> None:
         """按固定秒数重复提示词，直到中断、预算或迭代上限。
 
         这是仅会话内生效的简化计时器，不提供 Cron/KAIROS 的持久化能力。
         """
-        print_info(
+        self._emit_notice(
             f"⟳ /loop scheduled every {spec['interval_label']} (session-only, not persisted — "
             "dies when this process exits). Ctrl+C to stop."
         )
         iterations = 0
         while not self.loop_stop and not self._aborted:
             iterations += 1
-            print_info(f"⟳ loop tick {iterations}")
+            self._emit_notice(f"⟳ loop tick {iterations}")
             await self.chat(spec["prompt"])
 
             budget = self._check_budget()
             if budget["exceeded"]:
-                print_info(f"Loop stopped: {budget['reason']}")
+                self._emit_notice(f"Loop stopped: {budget['reason']}")
                 break
             # 工具轮次计数无法约束纯文本 loop，因此这里同时把 --max-turns 解释为 tick 上限。
             if self.max_turns is not None and iterations >= self.max_turns:
-                print_info(f"Loop stopped: tick limit reached ({iterations} >= {self.max_turns}).")
+                self._emit_notice(f"Loop stopped: tick limit reached ({iterations} >= {self.max_turns}).")
                 break
             if iterations >= LOOP_MAX_ITERATIONS:
-                print_info(f"Loop stopped: reached {LOOP_MAX_ITERATIONS} ticks.")
+                self._emit_notice(f"Loop stopped: reached {LOOP_MAX_ITERATIONS} ticks.")
                 break
             interrupted = await self._interruptible_sleep(spec["interval_seconds"])
             if interrupted:
-                print_info("Loop stopped.")
+                self._emit_notice("Loop stopped.")
                 break
 
     async def _run_loop_dynamic(self, spec: dict) -> None:
@@ -1501,7 +1571,7 @@ class Agent:
         有唤醒计划则等待裁剪后的延迟并复用回传提示词；没有计划即视为收敛。动态节奏
         不使用独立评估器，schedule_wakeup 也只在 loop 生命周期内暴露。
         """
-        print_info(
+        self._emit_notice(
             "⟳ /loop dynamic (self-paced) — the model schedules its own next run, or ends the "
             "loop. Ctrl+C to stop."
         )
@@ -1516,24 +1586,24 @@ class Agent:
 
                     if not self.pending_wakeup:
                         plural = "" if iterations == 1 else "s"
-                        print_info(f"⟳ Loop converged after {iterations} tick{plural} (model scheduled no wakeup).")
+                        self._emit_notice(f"⟳ Loop converged after {iterations} tick{plural} (model scheduled no wakeup).")
                         break
                     budget = self._check_budget()
                     if budget["exceeded"]:
-                        print_info(f"Loop stopped: {budget['reason']}")
+                        self._emit_notice(f"Loop stopped: {budget['reason']}")
                         break
                     if self.max_turns is not None and iterations >= self.max_turns:
-                        print_info(f"Loop stopped: tick limit reached ({iterations} >= {self.max_turns}).")
+                        self._emit_notice(f"Loop stopped: tick limit reached ({iterations} >= {self.max_turns}).")
                         break
                     if iterations >= LOOP_MAX_ITERATIONS:
-                        print_info(f"Loop stopped: reached {LOOP_MAX_ITERATIONS} ticks.")
+                        self._emit_notice(f"Loop stopped: reached {LOOP_MAX_ITERATIONS} ticks.")
                         break
                     delay = self.pending_wakeup["delay_seconds"]
-                    print_info(f"⟳ next run in {delay}s — {self.pending_wakeup['reason']}")
+                    self._emit_notice(f"⟳ next run in {delay}s — {self.pending_wakeup['reason']}")
                     prompt = self.pending_wakeup["prompt"] or prompt
                     interrupted = await self._interruptible_sleep(delay)
                     if interrupted:
-                        print_info("Loop stopped.")
+                        self._emit_notice("Loop stopped.")
                         break
             finally:
                 self.pending_wakeup = None
@@ -1619,7 +1689,7 @@ class Agent:
             or self.auto_total_denials >= DENIAL_LIMITS["max_total"]
         ):
             # 拒绝过多说明分类器可能卡住：交互环境转人工，headless 环境继续拒绝。
-            print_info("Auto Mode: denial limit reached — handing back to manual confirmation.")
+            self._emit_notice("Auto Mode: denial limit reached — handing back to manual confirmation.")
             return self._auto_fallback(f"[Auto Mode blocked] {verdict['reason']}")
         return {"action": "deny", "message": f"[Auto Mode] {verdict['reason']}"}
 
@@ -1640,12 +1710,14 @@ class Agent:
                 "model": self.model,
                 "api_base": self._api_base,
                 "api_key": self._api_key,
+                "terminal_output": self._terminal_output,
             }
         return {
             "model": self.model,
             "api_base": None,
             "anthropic_base_url": self._anthropic_base_url,
             "api_key": self._api_key,
+            "terminal_output": self._terminal_output,
         }
 
     def _child_permission_mode(self) -> str:
@@ -1697,7 +1769,7 @@ class Agent:
         self._reset_core_observers()
         await self._ensure_core_session_ready()
         self._reset_session_counters()
-        print_info(f"Session restored ({len(state.messages)} messages).")
+        self._emit_notice(f"Session restored ({len(state.messages)} messages).")
         return True
 
     async def restore_session_id(self, session_id: str) -> bool:
@@ -1735,11 +1807,11 @@ class Agent:
     async def restore_latest_session(self) -> bool:
         session_id = await self.latest_session_id()
         if session_id is None:
-            print_info("No previous sessions found.")
+            self._emit_notice("No previous sessions found.")
             return False
         restored = await self.restore_session_id(session_id)
         if not restored:
-            print_info(f"Session {session_id} could not be restored in this runtime.")
+            self._emit_notice(f"Session {session_id} could not be restored in this runtime.")
         return restored
 
     async def _migrate_legacy_core_session(
@@ -1838,7 +1910,9 @@ class Agent:
                     exclude_names=frozenset({"agent", "schedule_wakeup"}),
                 )
             child_registry = select_tools(self.tool_registry, policy)
-            print_sub_agent_start("skill-fork", inp.get("skill_name", ""))
+            self._emit_subagent_status(
+                "skill-fork", inp.get("skill_name", ""), started=True
+            )
             sub_agent = Agent(
                 **self._child_api_kwargs(),
                 custom_system_prompt=result["prompt"],
@@ -1851,10 +1925,14 @@ class Agent:
                 sub_result = await sub_agent.run_once(inp.get("args") or "Execute this skill task.")
                 self.total_input_tokens += sub_result["tokens"]["input"]
                 self.total_output_tokens += sub_result["tokens"]["output"]
-                print_sub_agent_end("skill-fork", inp.get("skill_name", ""))
+                self._emit_subagent_status(
+                    "skill-fork", inp.get("skill_name", ""), started=False
+                )
                 return sub_result["text"] or "(Skill produced no output)"
             except Exception as e:
-                print_sub_agent_end("skill-fork", inp.get("skill_name", ""))
+                self._emit_subagent_status(
+                    "skill-fork", inp.get("skill_name", ""), started=False
+                )
                 return f"Skill fork error: {e}"
             finally:
                 await sub_agent.close()
@@ -1899,7 +1977,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt()
             self.tool_context.permission_mode = self.permission_mode
             self.tool_context.plan_file_path = self._plan_file_path
-            print_info("Entered plan mode (read-only). Plan file: " + self._plan_file_path)
+            self._emit_notice("Entered plan mode (read-only). Plan file: " + self._plan_file_path)
             return f"Entered plan mode. You are now in read-only mode.\n\nYour plan file: {self._plan_file_path}\nWrite your plan to this file. This is the only file you can edit.\n\nWhen your plan is complete, call exit_plan_mode."
 
         if name == "exit_plan_mode":
@@ -1944,7 +2022,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                         f"Approved plan:\n{plan_content}\n\n"
                         "Proceed with implementation."
                     )
-                    print_info(f"Plan approved. Context cleared, executing in {target_mode} mode.")
+                    self._emit_notice(f"Plan approved. Context cleared, executing in {target_mode} mode.")
                     return (
                         f"User approved the plan. Context was cleared. Permission mode: {target_mode}\n\n"
                         f"Plan file: {saved_plan_path}\n\n"
@@ -1952,7 +2030,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                         f"Proceed with implementation."
                     )
 
-                print_info(f"Plan approved. Executing in {target_mode} mode.")
+                self._emit_notice(f"Plan approved. Executing in {target_mode} mode.")
                 return (
                     f"User approved the plan. Permission mode: {target_mode}\n\n"
                     f"## Approved Plan:\n{plan_content}\n\n"
@@ -1966,7 +2044,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             self._system_prompt = self._base_system_prompt
             self.tool_context.permission_mode = self.permission_mode
             self.tool_context.plan_file_path = self._plan_file_path
-            print_info("Exited plan mode. Restored to " + self.permission_mode + " mode.")
+            self._emit_notice("Exited plan mode. Restored to " + self.permission_mode + " mode.")
             return f"Exited plan mode. Permission mode restored to: {self.permission_mode}\n\n## Your Plan:\n{plan_content}"
 
         return f"Unknown plan mode tool: {name}"
@@ -1976,7 +2054,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
         description = inp.get("description", "sub-agent task")
         prompt = inp.get("prompt", "")
 
-        print_sub_agent_start(agent_type, description)
+        self._emit_subagent_status(agent_type, description, started=True)
 
         config = get_sub_agent_config(agent_type)
         child_registry = select_tools(
@@ -1996,10 +2074,10 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             result = await sub_agent.run_once(prompt)
             self.total_input_tokens += result["tokens"]["input"]
             self.total_output_tokens += result["tokens"]["output"]
-            print_sub_agent_end(agent_type, description)
+            self._emit_subagent_status(agent_type, description, started=False)
             return result["text"] or "(Sub-agent produced no output)"
         except Exception as e:
-            print_sub_agent_end(agent_type, description)
+            self._emit_subagent_status(agent_type, description, started=False)
             return f"Sub-agent error: {e}"
         finally:
             await sub_agent.close()
@@ -2026,7 +2104,8 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
         return await self._confirm_dangerous(message)
 
     async def _confirm_dangerous(self, command: str) -> bool:
-        print_confirmation(command)
+        if self._terminal_output:
+            print_confirmation(command)
         if self.confirm_fn:
             return await self.confirm_fn(command)
         # 无异步回调时退回阻塞式终端输入，仅用于直接嵌入 Agent 的场景。

@@ -35,7 +35,6 @@ from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEve
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
-from lion_code.ui import set_sink
 
 
 def _echo_lion_tool(gate: "asyncio.Event | None" = None) -> LionTool:
@@ -97,13 +96,10 @@ def _error_event(message: str) -> AssistantErrorEvent:
 
 class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self._collected: list[tuple[str, dict]] = []
-        self._prev_sink = set_sink(lambda kind, data: self._collected.append((kind, data)))
         self._temp_dir = tempfile.TemporaryDirectory()
         self._session_repository = SessionRepository(Path(self._temp_dir.name))
 
     def tearDown(self) -> None:
-        set_sink(self._prev_sink)
         self._temp_dir.cleanup()
 
     def _make_session(self, events: list, registry: ToolRegistry | None = None):
@@ -126,6 +122,72 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
     async def test_uses_required_core_runtime(self) -> None:
         session, agent, _fake = self._make_session([])
         self.assertIs(session._runtime, agent.core_runtime)
+        self.assertIsNone(agent._terminal_renderer)
+
+    async def test_structured_session_only_unsubscribes_terminal_renderer(self) -> None:
+        from core.fakes import FakeProvider
+
+        fake = FakeProvider([_stop_event("before"), _stop_event("after")])
+        with (
+            patch("lion_code.agent.create_provider", return_value=fake),
+            patch("lion_code.agent.TerminalRenderer") as renderer_factory,
+        ):
+            agent = Agent(
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+            )
+            agent._mcp_initialized = True
+            await agent.chat("first")
+
+            recorder = agent._session_recorder
+            usage = agent._usage_observer
+            self.assertIsNotNone(recorder)
+            self.assertTrue(recorder.initialized)
+            self.assertEqual(usage.response_count, 1)
+
+            session = LionCodingSession(agent)
+            self.assertIs(agent._session_recorder, recorder)
+            self.assertIs(agent._usage_observer, usage)
+            self.assertIsNone(agent._terminal_renderer)
+            renderer_factory.assert_called_once_with()
+
+            [event async for event in session.prompt("second")]
+
+        entries = await self._session_repository.storage_for(agent.session_id).read_all()
+        self.assertEqual(sum(entry.type == "session_info" for entry in entries), 1)
+        self.assertEqual(sum(entry.type == "message" for entry in entries), 4)
+        self.assertEqual(usage.response_count, 2)
+        await session.aclose()
+
+    async def test_unconfigured_agent_reports_error_through_session_notice(self) -> None:
+        from core.fakes import FakeProvider
+
+        fake = FakeProvider([])
+        with (
+            patch.dict(
+                "os.environ",
+                {"ANTHROPIC_API_KEY": "", "OPENAI_API_KEY": ""},
+            ),
+            patch("lion_code.agent.create_provider", return_value=fake),
+        ):
+            agent = Agent(
+                api_key=None,
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+            )
+        agent._mcp_initialized = True
+        session = LionCodingSession(agent)
+        notices: list[tuple[str, str]] = []
+        session.set_notice_fn(lambda message, role: notices.append((message, role)))
+
+        events = [event async for event in session.prompt("hi")]
+
+        self.assertTrue(
+            any(role == "error" and "API 未配置" in message for message, role in notices)
+        )
+        self.assertIsInstance(events[-1], AgentSettledEvent)
 
     # ─── 文本闭环与事件次序 ──────────────────────────────────
 

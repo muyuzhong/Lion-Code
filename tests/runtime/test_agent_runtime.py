@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from lion_code.agent_runtime import LionAgentRuntime
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
@@ -18,7 +19,6 @@ from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
-from lion_code.ui import set_sink
 
 from core.fakes import FakeProvider
 
@@ -213,23 +213,25 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
 
         renderer = TerminalRenderer()
         usage = UsageObserver()
-        collected: list[tuple[str, dict]] = []
-        prev_sink = set_sink(lambda kind, data: collected.append((kind, data)))
-        try:
+        with (
+            patch("lion_code.observers.terminal.start_spinner"),
+            patch("lion_code.observers.terminal.stop_spinner"),
+            patch("lion_code.observers.terminal.print_assistant_text"),
+            patch("lion_code.observers.terminal.print_tool_call") as tool_call,
+            patch("lion_code.observers.terminal.print_tool_result") as tool_result,
+            patch("lion_code.observers.terminal.print_divider") as divider,
+        ):
             runtime.subscribe(renderer.handle)
             runtime.subscribe(usage.handle)
             await runtime.prompt("hello")
-        finally:
-            set_sink(prev_sink)
 
-        # UsageObserver 累计了最终助手消息的用量。
-        self.assertEqual(usage.totals.input_tokens, 10)
-        self.assertEqual(usage.totals.output_tokens, 5)
-        # TerminalRenderer 渲染了工具调用、结果与结束分隔线。
-        kinds = [kind for kind, _ in collected]
-        self.assertIn("tool_call", kinds)
-        self.assertIn("tool_result", kinds)
-        self.assertIn("divider", kinds)
+            # UsageObserver 累计了最终助手消息的用量。
+            self.assertEqual(usage.totals.input_tokens, 10)
+            self.assertEqual(usage.totals.output_tokens, 5)
+            # TerminalRenderer 仍委托终端函数渲染工具与结束分隔线。
+            tool_call.assert_called_once()
+            tool_result.assert_called_once()
+            divider.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -142,6 +142,32 @@ def test_tui_adapter_records_tool_progress_and_result() -> None:
     ] == [("tool", "→ read notes.md", "✓ read\ndone", None)]
 
 
+def test_subagent_feedback_reuses_tool_row_and_result() -> None:
+    state = TuiState()
+    adapter = TuiEventAdapter(state)
+
+    adapter.apply(
+        ToolExecutionStartEvent(
+            tool_call_id="sub-1",
+            tool_name="agent",
+            args={"type": "explore", "description": "find the call path"},
+        )
+    )
+    adapter.apply(
+        ToolExecutionEndEvent(
+            tool_call_id="sub-1",
+            tool_name="agent",
+            result=AgentToolResult(content="found it"),
+            is_error=False,
+        )
+    )
+
+    assert len(state.items) == 1
+    assert state.items[0].role == "tool"
+    assert "agent" in state.items[0].text
+    assert state.items[0].tool_result_text == "✓ agent\nfound it"
+
+
 def test_tui_adapter_renders_skill_file_reads_with_skill_style() -> None:
     skill = Skill(
         name="review",

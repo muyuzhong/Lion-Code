@@ -36,7 +36,6 @@ from lion_code.tui.app import (
 from lion_code.tui.autocomplete import CompletionItem, CompletionState
 from lion_code.tui.prompt_input import PromptInput
 from lion_code.tui.widgets import TranscriptView
-from lion_code.ui import set_sink
 
 
 def test_completion_selected_render_line_accounts_for_group_headers() -> None:
@@ -174,10 +173,9 @@ def test_visible_completion_state_returns_empty_for_non_positive_budget() -> Non
 
 @pytest.fixture()
 def app_factory():
-    """构造 LionTuiApp 的工厂;负责 sink/环境变量/临时会话目录的隔离。"""
+    """构造 LionTuiApp 的工厂;负责环境变量和临时会话目录的隔离。"""
     from core.fakes import FakeProvider
 
-    prev_sink = set_sink(lambda *_: None)
     temp_dir = tempfile.TemporaryDirectory()
     repository = SessionRepository(Path(temp_dir.name))
 
@@ -196,7 +194,6 @@ def app_factory():
         return LionTuiApp(LionCodingSession(agent))
 
     yield factory
-    set_sink(prev_sink)
     os.environ.pop("LION_CORE_RUNTIME", None)
     temp_dir.cleanup()
 
@@ -236,36 +233,48 @@ async def test_streaming_events_append_fragments_without_redrawing_history(app_f
     from lion_code.core.messages import AssistantMessage, TextContent, UserMessage
     from lion_code.core.provider_events import TextDeltaEvent
 
-    empty = AssistantMessage(model="fake")
-    first = AssistantMessage(model="fake", content=[TextContent(text="hello ")])
-    final = AssistantMessage(model="fake", content=[TextContent(text="hello world")])
-    events = [
-        AgentStartEvent(),
-        MessageEndEvent(message=UserMessage(content="next")),
-        MessageStartEvent(message=empty),
-        MessageUpdateEvent(
-            message=first,
-            assistant_message_event=TextDeltaEvent(
-                content_index=0,
-                delta="hello ",
-                partial=first,
+    def streamed_turn(user_text: str, first_text: str, second_text: str):
+        empty = AssistantMessage(model="fake")
+        first = AssistantMessage(
+            model="fake", content=[TextContent(text=first_text)]
+        )
+        final = AssistantMessage(
+            model="fake", content=[TextContent(text=first_text + second_text)]
+        )
+        return [
+            AgentStartEvent(),
+            MessageEndEvent(message=UserMessage(content=user_text)),
+            MessageStartEvent(message=empty),
+            MessageUpdateEvent(
+                message=first,
+                assistant_message_event=TextDeltaEvent(
+                    content_index=0,
+                    delta=first_text,
+                    partial=first,
+                ),
             ),
-        ),
-        MessageUpdateEvent(
-            message=final,
-            assistant_message_event=TextDeltaEvent(
-                content_index=0,
-                delta="world",
-                partial=final,
+            MessageUpdateEvent(
+                message=final,
+                assistant_message_event=TextDeltaEvent(
+                    content_index=0,
+                    delta=second_text,
+                    partial=final,
+                ),
             ),
-        ),
-        MessageEndEvent(message=final),
-        SessionAgentEndEvent(),
-        AgentSettledEvent(),
-    ]
+            MessageEndEvent(message=final),
+            SessionAgentEndEvent(),
+            AgentSettledEvent(),
+        ]
+
+    turns = iter(
+        (
+            streamed_turn("next", "hello ", "world"),
+            streamed_turn("again", "second ", "turn"),
+        )
+    )
 
     async def prompt_events(*_args, **_kwargs):
-        for event in events:
+        for event in next(turns):
             yield event
 
     app = app_factory([])
@@ -297,17 +306,31 @@ async def test_streaming_events_append_fragments_without_redrawing_history(app_f
         ):
             await app._run_prompt("next")
             await pilot.pause()
+            first_assistant_item = next(
+                item
+                for item in app.state.items
+                if item.role == "assistant" and item.text == "hello world"
+            )
+            first_assistant_widget = transcript._item_widgets[id(first_assistant_item)]
+            await app._run_prompt("again")
+            await pilot.pause()
 
-        assert fragments == ["hello ", "world"]
+        assert fragments == ["hello ", "world", "second ", "turn"]
         assert redraws == []
         assert transcript._item_widgets[id(history_item)] is history_widget
-        assistant_item = next(item for item in app.state.items if item.role == "assistant")
-        assistant_widget = transcript._item_widgets[id(assistant_item)]
-        assert assistant_widget.item is assistant_item
+        assert (
+            transcript._item_widgets[id(first_assistant_item)]
+            is first_assistant_widget
+        )
+        for assistant_item in (
+            item for item in app.state.items if item.role == "assistant"
+        ):
+            assert transcript._item_widgets[id(assistant_item)].item is assistant_item
         assert transcript._window_end == len(app.state.items)
 
     projected = [(item.role, item.text) for item in app.state.items]
     assert ("assistant", "hello world") in projected
+    assert ("assistant", "second turn") in projected
 
 
 @pytest.mark.asyncio
@@ -316,14 +339,26 @@ async def test_tool_loop_renders_tool_item(app_factory) -> None:
     registry.register(_echo_lion_tool())
     app = app_factory([_tooluse_event(), _stop_event("done")], registry)
     async with app.run_test() as pilot:
-        await _submit(app, pilot, "hi")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
+        widget_pairs = []
+        original_update = TranscriptView.update_item
+
+        async def track_update(view, item, **kwargs):
+            before = view._item_widgets.get(id(item))
+            result = await original_update(view, item, **kwargs)
+            widget_pairs.append((before, view._item_widgets.get(id(item))))
+            return result
+
+        with patch.object(TranscriptView, "update_item", track_update):
+            await _submit(app, pilot, "hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
 
     tool_items = [item for item in app.state.items if item.role == "tool"]
     assert len(tool_items) == 1
     assert tool_items[0].tool_name == "echo"
     assert "echo:hi" in (tool_items[0].tool_result_text or "")
+    assert widget_pairs
+    assert all(before is after for before, after in widget_pairs)
 
 
 @pytest.mark.asyncio
@@ -348,17 +383,51 @@ async def test_clear_command_resets_transcript(app_factory) -> None:
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert app.state.items
-        await _submit(app, pilot, "/clear")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
+        notices = []
+        original_notice = app._notice
 
-    # /clear 后 Agent 会经 sink 发一条 "Conversation cleared." 状态行;
-    # 对话内容(user/assistant/tool)必须清空。
+        def record_notice(text: str, *, role: str = "status") -> None:
+            notices.append((text, role))
+            original_notice(text, role=role)
+
+        with patch.object(app, "_notice", record_notice):
+            await _submit(app, pilot, "/clear")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    # /clear 后可保留状态通知,但对话内容(user/assistant/tool)必须清空。
     conversation = [
         item for item in app.state.items if item.role in ("user", "assistant", "tool")
     ]
     assert conversation == []
+    assert any(item.text == "Conversation cleared." for item in app.state.items)
+    assert notices.count(("Conversation cleared.", "status")) == 1
     assert app.session.messages == ()
+    assert app.session._agent._terminal_renderer is None
+
+
+@pytest.mark.asyncio
+async def test_compact_notice_is_forwarded_once(app_factory) -> None:
+    app = app_factory([])
+    async with app.run_test() as pilot:
+        notices = []
+        original_notice = app._notice
+
+        def record_notice(text: str, *, role: str = "status") -> None:
+            notices.append((text, role))
+            original_notice(text, role=role)
+
+        async def compact() -> None:
+            app.session._agent._emit_notice("Conversation compacted.")
+
+        with (
+            patch.object(app, "_notice", record_notice),
+            patch.object(app.session, "compact", compact),
+        ):
+            await app._compact()
+            await pilot.pause()
+
+    assert notices == [("Conversation compacted.", "status")]
 
 
 @pytest.mark.asyncio
@@ -518,12 +587,21 @@ async def test_resume_picker_restores_previous_session(app_factory) -> None:
         search.value = old_id
         await pilot.pause()
         assert [m.get("id") for m in app.screen.visible_sessions] == [old_id]
-        await pilot.press("enter")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
+        notices = []
+        original_notice = app._notice
+
+        def record_notice(text: str, *, role: str = "status") -> None:
+            notices.append((text, role))
+            original_notice(text, role=role)
+
+        with patch.object(app, "_notice", record_notice):
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
 
     assert app.session.session_id == old_id
     assert [m.role for m in app.session.messages] == ["user", "assistant"]
+    assert sum("restored" in text.lower() for text, _role in notices) == 1
 
 
 @pytest.mark.asyncio
