@@ -19,7 +19,6 @@ from collections.abc import Callable, Sequence
 
 from lion_code.adapters import adapt_active_tools
 from lion_code.core import (
-    AgentEvent,
     AgentHarness,
     AgentHarnessConfig,
     AgentMessage,

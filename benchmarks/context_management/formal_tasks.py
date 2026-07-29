@@ -473,10 +473,12 @@ def evaluate_files(fixture_id: str, candidate_files: dict[str, Any], timeout_sec
         test_path = workspace / "_acceptance.py"
         test_path.write_text(fixture.test_code, encoding="utf-8")
         completed = subprocess.run(
-            [sys.executable, "-I", str(test_path)],
+            [sys.executable, "-I", "-X", "utf8", str(test_path)],
             cwd=workspace,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout_seconds,
             check=False,
         )

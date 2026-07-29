@@ -9,9 +9,7 @@
 ## 候选范围
 | id    | 路径                                     | 描述                                                         | 预估风险 |
 | ----- | ---------------------------------------- | ------------------------------------------------------------ | -------- |
-| m-009 | lion_code/session.py                     | load_session/get_latest_session_id 零引用，但审计把 session.py 处置排在阶段5，等阶段5 一并做 | 低       |
-| m-010 | lion_code/tui/（state.py、terminal_notification.py、terminal_title.py） | format_terminal_command_result_block、TerminalNotificationController、TerminalTitleController 零引用，但阶段4 TUI 在途，可能是待接线组件 | 中       |
-| m-011 | lion_code/legacy_tui.py、ui.py、agent.py 旧流式/压缩管线 | docs/tui-migration-audit.md 已排定阶段5 删除，不提前动       | 低       |
+| m-010 | lion_code/tui/（state.py、terminal_title.py） | format_terminal_command_result_block、TerminalTitleController 仍零引用；与阶段5 legacy 删除无关 | 中       |
 
 ## 瘦身账
 | 轮次  | commit  | 文件数 | 净行数 | 测试数 | benchmark |
@@ -20,6 +18,16 @@
 | m-008 | 2d092d3 | 4      | −115   | 238    | 18/18     |
 
 ## 完成
+### m-011 · 2026-07-29 · commits 9e92d09 / 3370351
+- 范围：旧 SDK 对话/压缩、legacy TUI 与全局 UI sink。
+- 做了：删除协议专用 chat/stream/压缩路径、旧 TUI/CLI 回退和全局 sink；新 TUI 复用 Core/application 事件与会话 notice，REPL 保留直接 stdout。
+- 验证：双协议/provider/application/session/TUI/CLI 矩阵 277 passed、1 skipped；产品禁止符号扫描零命中。
+
+### m-009 · 2026-07-29 · commit 1f95fb0
+- 范围：旧 `lion_code/session.py` JSON writer。
+- 做了：新会话只写 JSONL；保留旧 `.json` 的只读发现、恢复和迁移，源文件不变。
+- 验证：session/runtime/application 目标测试纳入阶段5矩阵。
+
 ### m-008 · 2026-07-27 · commit 2d092d3
 - 范围：零引用死函数清理（Tau 移植残留），分支 slim/round-2
 - 做了：删 providers/config.py 的 openai_compatible_config_from_env 及仅被它调用的三个私有 env helper（连带孤立的 environ 导入）；删 providers/http.py 的 get_json；删 memory.py 的 save_memory/delete_memory（连带孤立的 _slugify 与 format_frontmatter 导入）；删 subagent.py 的 reset_agent_cache

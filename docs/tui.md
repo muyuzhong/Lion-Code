@@ -1,95 +1,93 @@
-# Lion Code TUI 设计方案与开发清单
+# Lion Code TUI 使用说明与运行边界
 
-## 设计原则：TUI 与 Agent 核心完全分离
+Lion Code 只有一个 Textual TUI。裸运行 `lion-code` 启动 TUI；`--repl` 启动纯文本
+REPL；传入位置参数时执行 one-shot prompt。旧前端和进程级 UI sink 已删除。
 
-Agent 核心（`agent.py`）对 TUI 零感知。分离依靠三条已有/新增的边界，核心代码不需要 import 任何 TUI 模块：
+## 启动方式
 
-```
-用户输入 ──► LionTUI ──► agent.chat(text)                （调用边界：公开方法）
-Agent 输出 ──► ui.print_* ──► set_sink ──► AgentEvent ──► Textual 消息泵 （输出边界：事件汇）
-交互请求 ──► set_confirm_fn / set_plan_approval_fn ──► 模态弹窗        （交互边界：回调注入）
-```
-
-1. **输出边界（事件汇）**：`ui.py` 是 Agent 核心唯一的输出口（核心不直接写 stdout）。
-   `ui.set_sink(fn)` 注册后，Agent 运行时输出与 spinner 改为发射结构化事件
-   `(kind, payload)`，不再写终端；welcome、用户输入提示和 CLI Plan 选项属于
-   REPL 自身界面，不进入事件汇。未注册时 REPL 行为完全不变。
-2. **调用边界**：TUI 只调用 Agent 的公开方法（`chat / clear_history /
-   toggle_plan_mode / show_cost / compact / restore_session / abort / close`），
-   与 REPL 使用的是同一组。
-3. **交互边界**：危险确认、Plan 审批本就是注入式回调，TUI 换成模态弹窗即可。
-
-Agent 运行时事件种类：`text`（流式增量）、`tool_call`、
-`tool_result`、`info`、`error`、`retry`、`confirmation`、`cost`、`spinner`、
-`divider`、`sub_agent_start/end`；TUI 侧另加内部事件 `chat_done`。
-
-## 启动与凭证
-
-- `lion-code` 裸启动 = TUI；`--repl` 回到旧 REPL；one-shot prompt 不变。
-- TUI 不做启动前 API 检查：无凭证可进界面，首条消息会提示，用 `/model`
-  （或 `ctrl+m`）在模态框里配置 provider/model/key/base url，保存即生效
-  （`Agent.configure_api` 运行时换客户端，无需重启）并持久化到
-  `~/.lion-code/config.json`。
-- 凭证三级回退：CLI 参数 > 环境变量 > `/model` 保存的配置。one-shot 与
-  REPL 仍需预先配置（硬检查保留）。
-- Agent 侧支撑：无凭证时客户端为 `None`（`api_configured`），`chat()` 短路
-  报错事件；跨协议切换时目标后端历史清空，同协议换 key/换模型保留历史。
-
-## 配置系统（种子）
-
-`~/.lion-code/tui.json`，缺失/损坏时静默回退默认：
-
-```json
-{
-  "theme": "textual-dark",
-  "keys": {
-    "quit": "ctrl+q",
-    "abort": "escape",
-    "toggle_sidebar": "ctrl+b",
-    "new_session": "ctrl+n",
-    "model": "ctrl+m"
-  }
-}
+```powershell
+lion-code                         # Textual TUI
+lion-code --resume                # TUI 启动后恢复最近会话
+lion-code --repl                  # 纯文本 REPL
+lion-code "检查当前项目"          # one-shot prompt
 ```
 
-主题取 Textual 内置主题名；键位在 App 初始化时经 `BindingsMap.bind` 动态绑定。
-新增动作的约定：动作方法 `action_<name>` + 配置 `keys.<name>`，无需改绑定代码。
+TUI 允许在没有凭证时启动，并自动打开 `/model` 配置表单。one-shot 与 REPL 必须预先
+提供凭证。启动配置优先级为：CLI 参数、环境变量、`~/.lion-code/config.json` 中由
+`/model` 保存的配置。
 
-## 文件
+- Anthropic：`ANTHROPIC_API_KEY`，可选 `ANTHROPIC_BASE_URL`。
+- OpenAI-compatible：`OPENAI_API_KEY` 与 `OPENAI_BASE_URL`，也可用 `--api-base`。
+- `--model` 或 `LION_CODE_MODEL` 选择模型。
 
-| 文件 | 作用 |
+`openai-compatible` 与 `anthropic` 在这里是 Provider 协议名。运行时直接使用 Lion
+内置的 HTTP Provider，不依赖 OpenAI 或 Anthropic Python SDK。
+
+## 唯一运行链路
+
+```text
+Textual TUI
+  → LionCodingSession
+  → Agent + LionAgentRuntime
+  → OpenAICompatibleProvider / AnthropicProvider
+  → canonical Core messages/events
+     ├→ TuiEventAdapter / TranscriptView
+     └→ SessionRecorder / JSONL
+```
+
+TUI 通过 `LionCodingSession` 消费 Core/application 事件。文本与 thinking delta 直接追加到
+活动的 Markdown stream，工具状态原位更新；正常流式事件不会重建整个 transcript。错误或
+中止允许在终止边界做一次全量校准。
+
+非流式 info/error 通过会话级 notice callback 进入 Textual 消息泵；权限确认和 Plan 审批
+继续使用注入式异步回调。TUI 创建会话门面时会关闭 Agent 的终端 renderer，因此不会与
+Textual 争用 stdout。REPL 则保留 `ui.print_*` 的直接终端输出。两种前端之间不存在全局
+可变 sink。
+
+## TUI 命令
+
+| 命令 | 作用 |
 |---|---|
-| `lion_code/ui.py` | 输出边界 + `set_sink`（改） |
-| `lion_code/tui.py` | TUI 全部实现（新，单文件） |
-| `lion_code/config.py` | `/model` 凭证持久化（新） |
-| `lion_code/agent.py` | 无凭证构建 + `configure_api` 运行时配置（改） |
-| `lion_code/__main__.py` | 默认 TUI / `--repl` / 凭证三级回退（改） |
-| `tests/test_tui.py` | sink 单测 + Pilot 冒烟 + 配置流（新） |
+| `/model [name]` | 选择模型；无参数时打开模型/API 配置 |
+| `/clear`、`/new` | 清空当前 transcript 并开始新会话 |
+| `/resume [session-id]` | 恢复指定会话；无参数时打开会话选择器 |
+| `/plan` | 切换 Plan 模式 |
+| `/cost` | 显示本会话输入/输出 Token |
+| `/compact` | 使用当前 Provider 压缩上下文 |
+| `/thinking [level]` | 切换 `off/minimal/low/medium/high/xhigh` 档位 |
+| `/theme [name]` | 切换 TUI 主题；无参数时打开选择器 |
+| `/quit`、`/exit` | 退出 TUI |
 
-## 开发清单
+输入框支持命令、Skill、模型、主题和本地路径补全。Agent 运行中按 Enter 会把消息作为
+steer 入队，按 Alt+Enter 作为 follow-up 入队；运行中的 slash command 会被拒绝，先按
+Esc 中止当前任务。
 
-### v1 已交付（最小可观测）
-- [x] 流式对话记录（text 事件增量渲染，工具调用/结果/子 Agent 分块显示）
-- [x] 会话侧边栏（当前项目会话按时间排序，点击恢复，`＋ New session`）
-- [x] 危险确认弹窗（y/n/Esc，接通 `set_confirm_fn`）
-- [x] Plan 审批弹窗（1-4 与 REPL 选项一致）
-- [x] 快捷键与主题配置（`tui.json`，五个动作 + 内置主题名）
-- [x] 状态栏（spinner / token 用量 / 成本）
-- [x] 裸启动即 TUI、无凭证可进界面、`/model` 模态配置并持久化
-- [x] Esc 中断（`agent.abort()`）
+## 默认快捷键
 
-### v2（交互补全）
-- [ ] 输入自动补全：`/` 命令与 skill 名（Textual `AutoComplete` 或候选浮层）
-- [ ] 权限模式切换（运行时，复用 ModalScreen）
-- [ ] `/model` 常用模型候选列表（Select 预选 + 自定义输入）
-- [ ] 多行输入（TextArea，Enter 发送 / Shift+Enter 换行，键位可配）
-- [ ] 会话历史回放（恢复会话时把消息渲染进聊天区，需 session 消息提取）
-- [ ] 工具结果折叠/展开、diff 着色（复用 ui.py 的 diff 分行逻辑下沉为共享函数）
-- [ ] Markdown 流式渲染（Textual `Markdown` + 增量 append）
-- [ ] 其余 REPL 命令映射（`/dream /learn /goal /loop /memory /skills`）
+| 快捷键 | 作用 |
+|---|---|
+| `Esc` | 关闭补全或中止当前任务 |
+| `Ctrl+K` | 打开命令补全 |
+| `Ctrl+R` | 打开会话选择器 |
+| `Alt+Enter` | 提交 follow-up |
+| `Tab` / `↑` / `↓` | 接受或移动补全选择 |
+| `Shift+Tab` | 循环 thinking 档位 |
+| `Ctrl+P` | 打开模型选择器 |
+| `Ctrl+T` | 显示/隐藏 thinking |
+| `Ctrl+O` | 展开/折叠工具结果 |
+| `Ctrl+B` | 显示/隐藏会话侧栏 |
+| `Ctrl+N` | 新建会话 |
+| `Ctrl+M` | 打开模型/API 配置 |
+| `Ctrl+D` | 退出 TUI |
 
-### v3（配置完善）
-- [ ] 自定义主题（tui.json 内嵌颜色表 → 注册 Textual Theme 对象）
-- [ ] 键位冲突检测与 `/keys` 查看命令
-- [ ] 配置热重载（watch tui.json）
-- [ ] 每动作多键位（`"abort": ["escape", "ctrl+c"]`）
+可配置快捷键、主题和完成通知保存在 `~/.lion-code/tui.json`。当前真正接线的顶层设置为
+`theme`、`turn_notification`（`off`、`bell` 或 `desktop`）和 `keybindings`；未知字段会被
+忽略，已识别字段仍会严格校验。
+
+## 会话持久化
+
+新会话只写入 `~/.lion-code/sessions/<session-id>.jsonl`。`SessionRecorder` 按 canonical
+完成态事件追加消息、模型/thinking 变更和压缩记录。
+
+同目录下旧版本的 `<session-id>.json` 仅用于发现、读取和迁移。首次恢复旧会话时会生成
+对应 JSONL，此后继续写 JSONL；原 `.json` 文件不会被覆盖、改名或删除。

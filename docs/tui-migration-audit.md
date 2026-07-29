@@ -1,7 +1,8 @@
 # Tau TUI 融合:架构审计与迁移边界
 
-> 审计基线:Lion-Code master `0e31f3b`(PR #12 之后)× Tau `d597a8a`(Release 0.3.3,2026-07-25)。
-> 本文是下一阶段(引入 Tau Textual TUI + 建立 Lion 应用会话层)的唯一设计输入,先于任何大规模编码。
+> 初始审计基线:Lion-Code master `0e31f3b`(PR #12 之后)× Tau `d597a8a`
+> (Release 0.3.3,2026-07-25)。阶段 5 复核基线为 Lion master `3370351`
+> (2026-07-29,依赖与文档收尾前)。§1–9 保留迁移决策历史,§10–12 描述当前落地状态。
 
 ---
 
@@ -23,8 +24,8 @@
 
 - 已 vendor 且等价(仅改名):`openai_compatible`、`anthropic`、`stream`、`retry`、`http`、`http_errors`、`model_limits`、`_provider_events`、`events`、`provider`;`env.py` → `config.py`。
 - Lion 新增:`factory.py`(不读环境变量的纯组装)。
-- **未 vendor**:`google.py`、`mistral.py`、`openai_codex.py`、`fake.py`。`fake.py`(38 行)对 TUI/应用层测试很有价值,建议阶段 0 补进。
-- **上游反向差异**(待同步项):上游 anthropic.py 支持 `thinking_mode == "disabled"` 显式 payload,Lion 副本缺此分支。
+- **未 vendor**:`google.py`、`mistral.py`、`openai_codex.py`;`fake.py` 已在阶段 0 吸收用于应用层/TUI 测试。
+- 上游 anthropic.py 的 `thinking_mode == "disabled"` 显式 payload 已在阶段 0 同步。
 
 ### 1.3 tau_coding → Lion 既有能力(不 vendor,已有等价物)
 
@@ -41,6 +42,9 @@
 | session.py 的 CodingSession 本体 | **缺口 → application/session.py(LionCodingSession,本次核心工作)** |
 
 Lion 独有、Tau 无对应:权限系统、中间件、Hooks、Read Freshness、Result Policy、Memory(coordinator/injector/dream)、Plan、子 Agent、Goal/Loop/Auto、MCP 客户端。
+
+阶段 1–4 已补齐上表当时标记的 `LionCodingSession`、SessionManager、Provider 配置和
+Textual 前端缺口；这些“缺口”仅作为初始审计判断保留,不再表示当前待办。
 
 ---
 
@@ -229,35 +233,32 @@ LionSessionEvent = AgentEvent | SessionOwnEvent     # AgentEvent 来自 lion_cod
 
 ---
 
-## 10. Lion 现有代码需要调整的边界
+## 10. 阶段 5 后的实际运行边界
 
-### agent.py(2835 行,God object)
+### Agent / Core / Provider
 
-- 灰度条件现为 `LION_CORE_RUNTIME=1 且 use_openai 且非子 Agent`(agent.py:298)。**新 TUI 只面向 Core Runtime 路径**;为此灰度需扩展:(a) Anthropic 后端接 Core(factory 已支持 AnthropicProvider,主要是 Agent 接线+验证);(b) 子 Agent 上 Core(文本捕获已有 `_capture_core_text` 可复用)。
-- side-query 三处(`_build_side_query`/`_run_evaluator_query`/`_run_classifier_query`)无视灰度直用 SDK——迁移到 Provider 层(`stream_response` 的一次性消费封装)。
-- `dream.py:514-518` 直接读 `agent._openai_client/_anthropic_client` 私有属性——改为注入配置。
-- `LegacySdkTextQueryService`(memory_runtime/query.py)→ 基于 Provider 的实现替换。
-- TUI 依赖的公开面(§1.4 现状审计)已够 LionCodingSession 组合使用,不需要 TUI 直触 Agent 私有字段。
+- `Agent` 始终构造 Provider 与 `LionAgentRuntime`;OpenAI-compatible、Anthropic、子 Agent、
+  side-query、dream/learning/goal/loop 都复用 canonical Core messages。
+- Provider 配置由 Agent 自己保存。空闲态切换会保留 canonical history,原子替换 Provider
+  并刷新 compactor、文本查询和模型限制;活动流中拒绝切换。
+- 产品代码不导入第三方 OpenAI/Anthropic SDK。两个协议由 `lion_code/providers/` 中基于
+  httpx 的实现直接访问。
+- `agent.py` 在阶段 5 收敛为 2116 行,没有为行数目标增加包装层。
 
-### tui.py(500 行)
+### TUI / CLI
 
-- 改名 `legacy_tui.py`,保留到阶段 5;`__main__.py` 提供 `--legacy-tui` 逃生口。
-- 其权限确认/Plan 审批/模型热配三个 Modal 移植进新 tui/app.py。
-- `ui.set_sink` 桥仅 legacy 使用;新 TUI 只消费结构化事件,不接 sink。
+- 裸运行进入唯一的 `lion_code/tui/` Textual 应用;`--repl` 进入纯文本 REPL;带 prompt
+  时执行 one-shot。
+- TUI 通过 `LionCodingSession` 消费 Core/application typed events,文本 delta 追加到活动
+  stream,工具行原位更新。命令 notice 使用会话级 callback;权限与 Plan 审批使用注入式回调。
+- TUI 会关闭 Agent 的终端 renderer,REPL 保留 `ui.print_*` 直写 stdout;不存在进程级
+  全局输出 sink。
 
-### session_runtime/
+### Session
 
-- SessionRepository 保持纯存储职责;索引/标题/touch/多会话语义放 application/session_manager.py(包装 Repository,而非并存第二套存储)。
-- `list_sessions` 返回字典 → 升级为 `SessionRecord` 数据类(id/model/cwd/title/updated_at/format)。
-
-### providers/factory.py
-
-- 维持"不读环境变量"的纯组装;签名扩展出 thinking/model 感知参数由 application/provider_settings.py 解析后传入。
-- 补 vendor `fake.py` 供应用层/ TUI 测试。
-
-### __main__.py
-
-- 默认 TUI 切到新 `lion_code/tui/`;装配顺序变为:解析配置 → 建 Agent(或未来直接建组件) → 包 LionCodingSession → `run_tui_app(session)`。
+- `SessionRecorder` / `JsonlSessionStorage` 是唯一写入路径,新会话只生成 `.jsonl`。
+- `session_runtime/legacy.py` 只负责发现、读取并迁移旧 `.json`;迁移输出 JSONL,源文件不
+  覆盖、不改名、不删除。
 
 ---
 
@@ -280,8 +281,8 @@ lion_code/
 │   ├── config.py file_drop.py markup.py
 │   ├── terminal_title.py terminal_notification.py
 │   └── themes/(含 3 个 json)
-├── agent_runtime.py agent.py legacy_tui.py(过渡) __main__.py
-└── skills.py subagent.py autonomy.py dream.py memory.py prompt.py ui.py …
+├── agent_runtime.py agent.py __main__.py ui.py
+└── skills.py subagent.py autonomy.py dream.py memory.py prompt.py …
 ```
 
 依赖单向(违反即架构缺陷):
@@ -294,11 +295,17 @@ tui → application → agent_runtime → core → (Provider 协议)
       tui→providers, tui→Agent 私有字段, session→SDK 消息格式, context→SDK
 ```
 
-依赖版本(pyproject 目标):`textual>=8.2.8`(现 `>=0.86`,**必须升**)、`pygments>=2.18`(新增,widgets 需要)、anyio/httpx/pydantic/rich 维持;`openai`/`anthropic` 保留为 Legacy 依赖至阶段 5。
+最终产品依赖:`pydantic>=2.11`、`rich>=13`、`textual>=8.2.8`、`pygments>=2.18`、
+`anyio>=4`、`httpx[socks]>=0.27`。仓库没有依赖锁文件。独立在线 benchmark 的
+`benchmark` optional extra 保留 OpenAI SDK,只在显式 `--online` 时惰性导入；基础安装、
+离线评测与 `lion_code/` 运行路径不依赖它。Anthropic SDK 不再声明。
 
 ---
 
 ## 12. 迁移顺序与验收标准
+
+阶段 0–4 已完成并通过各阶段自动化/真机验收。下面保留原迁移顺序作为追溯记录；其中
+“legacy”“灰度”和“待补”描述的是当时的中间状态,不表示这些路径仍存在。
 
 ### 阶段 0:准备(小 PR)
 
@@ -329,11 +336,19 @@ tui → application → agent_runtime → core → (Provider 协议)
 - 灰度扩围:Anthropic 后端上 Core;子 Agent 上 Core;side-query 迁 Provider;`LegacySdkTextQueryService` 替换;dream.py 解除私有客户端读取。
 - **验收**:各能力单测+集成测试;两后端 × 新 TUI 手工矩阵;评审"`LION_CORE_RUNTIME` 默认开启"。
 
-### 阶段 5:清理
+### 阶段 5:清理(实现完成,待最终 Trellis check 与用户验收)
 
-- 删除:`_chat_openai/_chat_anthropic/_call_*_stream/_compact_openai/_compact_anthropic/旧压缩流水线`、side-query SDK 调用、`LegacySdkTextQueryService`、`legacy_tui.py`、`session.py` 旧 JSON 写路径(保留读迁移)、`ui.set_sink` 桥。
-- pyproject 移除 `openai`/`anthropic`;最终依赖 = anyio/httpx[socks]/pydantic/rich/textual>=8.2.8/pygments。
-- **验收**:`grep -r "import openai\|import anthropic" lion_code/` 零命中;全测试绿;agent.py 显著瘦身;UPSTREAM.md 更新同步记录。
+- `64e25b6`:Core/Provider 单路径、canonical history 与原子热切换。
+- `9e92d09`:删除 SDK 对话、旧压缩和旧查询路径。
+- `1f95fb0`:删除旧 JSON writer,收敛 JSONL-only write + legacy read/migrate。
+- `3370351`:删除旧 TUI、CLI 回退和全局输出 bridge。
+- 收尾切片移除产品 SDK 直接依赖并同步本文、`UPSTREAM.md`、`docs/tui.md` 与 README；
+  在线 benchmark 依赖隔离到 optional extra。
+- 双协议/provider/application/session/TUI 自动化矩阵:277 passed、1 skipped;最终独立关键
+  矩阵 183 passed;全量 pytest 473 passed、6 skipped、6 subtests passed。
+- `compileall`、CLI help、依赖解析、产品禁止符号扫描、阶段范围 Ruff F 与
+  `git diff --check` 通过。仓库没有项目级 mypy 配置;临时 mypy 诊断作为既有基线记录。
+  Trellis check 已完成,任务在用户验收前保持 `in_progress`。
 
 ---
 

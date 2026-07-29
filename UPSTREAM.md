@@ -9,7 +9,7 @@ Lion-Code 以「源码吸收 + 本地演化」方式引入 Hugging Face Tau 的�
 - 仓库:<https://github.com/huggingface/tau>
 - License:MIT(全文见 [`licenses/TAU_LICENSE`](licenses/TAU_LICENSE))
 - 当前同步基线:`d597a8a`(Release 0.3.3,2026-07-25)
-- 最近比对时间:2026-07-27(逐文件 `git diff --no-index`,详见
+- 最近比对时间:2026-07-27(逐文件 `git diff --no-index`);阶段 5 边界复核时间:2026-07-29(详见
   [`docs/tui-migration-audit.md`](docs/tui-migration-audit.md) §1)
 
 ## 导入模块映射
@@ -18,7 +18,7 @@ Lion-Code 以「源码吸收 + 本地演化」方式引入 Hugging Face Tau 的�
 |---|---|---|
 | `src/tau_agent/` | `lion_code/core/` | 已吸收(PR #7) |
 | `src/tau_ai/` 子集 | `lion_code/providers/` | 已吸收(PR #8);`env.py` → `config.py` |
-| `src/tau_coding/tui/` | `lion_code/tui/` | 迁移中(见审计文档阶段 2-3) |
+| `src/tau_coding/tui/` | `lion_code/tui/` | 已吸收通用组件；`app.py` 按 LionCodingSession 重构 |
 | `src/tau_coding/` 其余业务层 | 不引入 | Lion 使用自有 tooling/context/session_runtime/application |
 
 未吸收的 tau_ai 模块:`google.py`、`mistral.py`、`openai_codex.py`
@@ -41,8 +41,20 @@ Lion-Code 以「源码吸收 + 本地演化」方式引入 Hugging Face Tau 的�
 `lion_code/providers/`:
 
 - 新增 `factory.py`(不读环境变量的 Provider 组装)。
+- OpenAI-compatible 与 Anthropic 都由内置 httpx Provider 直接实现；产品运行与基础安装
+  不依赖两家的 Python SDK。独立的在线 context benchmark 在显式安装 `benchmark` extra
+  且传入 `--online` 时才惰性使用 OpenAI SDK。
 - `fake.py`:吸收自上游,供应用层/TUI 测试。
 - 其余文件仅 import 路径改名与 docstring 本地化;`config.py` 对应上游 `env.py`。
+
+`lion_code/application/` 与 `lion_code/tui/`:
+
+- `LionCodingSession` 把 Core Runtime 的 canonical messages/events、Provider 配置、会话与
+  前端交互收敛为单一应用边界。
+- Textual TUI 只消费 Core/application 事件与会话级 notice/确认回调；旧 TUI 与全局
+  `ui.set_sink` bridge 已删除。
+- 新会话只写 JSONL；旧 `.json` 会话只在 `session_runtime/legacy.py` 读取并迁移，源文件
+  保持不变。
 
 ## 同步流程
 

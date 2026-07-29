@@ -23,4 +23,5 @@ def test_help_describes_default_tui_without_legacy_option(monkeypatch, capsys) -
     assert exit_info.value.code == 0
     output = capsys.readouterr().out
     assert "启动 TUI" in output
+    assert "Enable extended thinking for supported models" in output
     assert "--legacy-tui" not in output

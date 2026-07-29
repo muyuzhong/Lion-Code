@@ -156,7 +156,7 @@
       "tool_payload_bytes": 30000,
       "large_result_turns": [2, 5, 8],
       "large_tool_payload_bytes": 48000,
-      "source_files": ["lion_code/agent.py", "lion_code/session.py"],
+      "source_files": ["lion_code/agent.py", "lion_code/session_runtime/recorder.py"],
       "contract_turns": {
         "1": "压缩契约：结果顺序必须是 system、summary user、ack assistant、latest plain user，不得遗留孤立 tool 消息。",
         "5": "边界契约：plain user 的 content 必须是字符串；空历史返回空列表，最新普通用户请求不得丢失。"

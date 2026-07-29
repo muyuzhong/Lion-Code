@@ -45,7 +45,9 @@ Lion Code 的目标是提供一个规模可读、行为可验证的 Agent Runtim
 
 ```mermaid
 flowchart LR
-    U["用户 / CLI / REPL"] --> A["Agent 主循环"]
+    U["用户 / Textual TUI"] --> S["LionCodingSession"]
+    S --> A["Agent + Core Runtime"]
+    C["one-shot CLI / REPL"] --> A
     A <--> M["Anthropic / OpenAI-compatible 模型"]
     M -->|"tool call"| P{"权限模式 / Auto 分类器"}
     P -->|"拒绝"| A
@@ -271,10 +273,15 @@ lion-code --plan "设计一个重构方案"
 lion-code --accept-edits "修复测试并说明原因"
 lion-code --max-cost 0.50 --max-turns 20 "完成任务 X"
 lion-code --resume
-lion-code
+lion-code                 # 启动 Textual TUI
+lion-code --repl          # 启动纯文本 REPL
 ```
 
-交互式 REPL 支持：
+TUI 支持模型/API 配置、会话选择、主题、thinking 档位、命令/Skill/路径补全、流式
+Markdown、工具卡片和运行中 steer/follow-up。完整命令与快捷键见
+[`docs/tui.md`](docs/tui.md)。
+
+纯文本 REPL 支持：
 
 | 命令 | 作用 |
 |---|---|
@@ -307,14 +314,18 @@ lion-code
 ```text
 Lion-Code/
 ├── lion_code/
-│   ├── __main__.py     # CLI 与 REPL 入口
-│   ├── agent.py        # Agent 主循环、工具路由与上下文管线
+│   ├── __main__.py     # CLI、TUI 与 REPL 入口
+│   ├── agent.py        # Agent 组装、工具路由与宿主能力
+│   ├── core/           # canonical messages、Harness、Loop 与 JSONL 协议
+│   ├── providers/      # 内置 OpenAI-compatible / Anthropic HTTP Provider
+│   ├── application/    # LionCodingSession 与前端事件/命令边界
+│   ├── tui/            # 唯一 Textual 前端
+│   ├── session_runtime/ # JSONL Repository/Recorder 与旧 JSON 只读迁移
 │   ├── tools.py        # 内置工具与静态权限规则
 │   ├── autonomy.py     # Auto、Goal 与 Loop 契约
 │   ├── hooks.py        # PreToolUse Command Hook
 │   ├── memory.py       # 项目 Memory
 │   ├── dream.py        # Memory 整合与安全应用
-│   ├── session.py      # 会话持久化
 │   ├── skills.py       # Skill 发现、解析与创建
 │   ├── subagent.py     # Sub-agent 配置
 │   └── mcp_client.py   # MCP 客户端
@@ -329,7 +340,7 @@ Lion-Code/
 
 ```text
 ~/.lion-code/
-├── sessions/       # 会话记录
+├── sessions/       # 新会话 JSONL；旧 JSON 只读发现/迁移
 ├── projects/       # 按项目隔离的 Memory
 ├── tool-results/   # 超大工具结果全文
 └── trusted-hooks.json  # 项目 Hook 指纹信任记录
@@ -338,7 +349,7 @@ Lion-Code/
 ## 测试
 
 ```powershell
-python -m unittest discover -s tests -p "test_*.py" -v
+python -m pytest -q
 python -m compileall -q lion_code tests
 python benchmarks/context_management/formal_benchmark.py
 ```

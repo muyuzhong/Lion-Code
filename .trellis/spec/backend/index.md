@@ -17,7 +17,8 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
 | [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
 | [Error Handling](./error-handling.md) | Error types, handling strategies | Active |
-| [TUI Interaction](./tui-interaction.md) | File-drop parsing and rendered-line completion contracts | Active |
+| [TUI Interaction](./tui-interaction.md) | Input, completion, streaming, and frontend ownership contracts | Active |
+| [Runtime Boundaries](./runtime-boundaries.md) | Core/Provider, session persistence, and frontend ownership contracts | Active |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
 

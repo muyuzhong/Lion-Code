@@ -245,7 +245,7 @@ Options:
   --accept-edits      Auto-approve file edits, still confirm dangerous shell
   --dont-ask          Auto-deny anything needing confirmation (for CI)
   --auto              Auto Mode: an LLM classifier judges each action instead of asking
-  --thinking          Enable extended thinking (Anthropic only)
+  --thinking          Enable extended thinking for supported models
   --model, -m         Model to use (default: claude-opus-4-6, or LION_CODE_MODEL env)
   --api-base URL      Use OpenAI-compatible API endpoint (key via env var)
   --resume            Resume the last session

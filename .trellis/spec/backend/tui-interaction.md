@@ -24,6 +24,16 @@ async def LionTuiApp._apply_streaming_transcript_event(
     *,
     previous_item_count: int,
 ) -> None: ...
+
+def LionCodingSession.__init__(
+    agent: Agent,
+    *,
+    terminal_output: bool = False,
+) -> None: ...
+
+def LionCodingSession.set_notice_fn(
+    fn: Callable[[str, Literal["info", "error"]], None] | None,
+) -> None: ...
 ```
 
 ## 3. Contracts
@@ -66,6 +76,23 @@ async def LionTuiApp._apply_streaming_transcript_event(
   the error row cannot be lost. Normal streaming events must not call
   `TranscriptView.update_from_state()`.
 
+### Frontend output ownership
+
+- Textual owns rendering through Core/application events and constructs
+  `LionCodingSession(agent, terminal_output=False)`. It must not capture stdout or
+  install a process-global UI sink.
+- Non-streaming info/error state enters the app through the session's instance-level
+  notice callback. Queue synchronous notices with Textual `call_later()` when the
+  originating action also reconciles transcript state; otherwise the reconciliation
+  can erase a notice that was rendered too early.
+- Clear the notice callback before the app closes its session on unmount. Confirmation
+  and Plan callbacks are instance-owned and are reclaimed with that closed session;
+  they do not require a separate process-global cleanup path. Direct Agent/REPL use
+  keeps terminal rendering enabled.
+- Enabling or disabling terminal rendering subscribes or unsubscribes only the
+  `TerminalRenderer`; it must preserve `UsageObserver`, `SessionRecorder`, and their
+  accumulated state.
+
 ## 4. Validation and Error Matrix
 
 | Input or state | Result |
@@ -82,6 +109,9 @@ async def LionTuiApp._apply_streaming_transcript_event(
 | Structured assistant message | Replace only this turn's provisional tail |
 | Tool progress/result | Update the mounted tool row in place |
 | Error or aborted message end | One terminal full-state reconciliation is allowed |
+| TUI session construction | Terminal renderer disabled; Core/application events remain authoritative |
+| Clear/restore/compact notice | Queue once after the state-changing message; do not also render at the command site |
+| Terminal-output toggle | Preserve usage and recorder identity; reject while Agent is processing |
 
 ## 5. Good / Base / Bad Cases
 
@@ -111,6 +141,10 @@ async def LionTuiApp._apply_streaming_transcript_event(
   separate fragments, a mounted history widget keeps its identity, no full redraw
   occurs, `MessageEndEvent` matches the canonical assistant item, and the mounted
   window end equals the canonical item count.
+- Frontend ownership tests: two streaming turns cause zero normal full redraws, a
+  mounted tool row updates in place, clear/restore/compact each produce one notice,
+  TUI output does not reach stdout, and terminal toggling preserves recorder/usage
+  identity.
 - Run `tests/tui/test_tui_file_drop.py`, `tests/tui/test_tui_app.py`, and the full
   test suite before completion.
 
@@ -144,4 +178,14 @@ await app._apply_streaming_transcript_event(
     event,
     previous_item_count=previous_item_count,
 )
+```
+
+```python
+# Wrong: process-global output ownership and duplicate command-site notices.
+ui.set_sink(app_sink)
+app._notice("Conversation compacted.")
+
+# Correct: instance-scoped ownership; Agent is the single notice source.
+session = LionCodingSession(agent, terminal_output=False)
+session.set_notice_fn(app._on_session_notice)
 ```

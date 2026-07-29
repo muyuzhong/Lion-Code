@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import sys
 from pathlib import Path
@@ -105,6 +106,18 @@ def test_benchmarks_no_longer_import_agent_private_context_helpers():
         assert "_budget_tool_results" not in source
         assert "_snip_stale_results" not in source
         assert "_microcompact" not in source
+
+
+def test_offline_benchmarks_do_not_import_optional_sdk_at_module_scope():
+    for path in (BASE_MODULE_PATH, MODULE_PATH):
+        module = ast.parse(path.read_text(encoding="utf-8"))
+        assert not any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "openai"
+            or isinstance(node, ast.Import)
+            and any(alias.name == "openai" for alias in node.names)
+            for node in module.body
+        )
 
 
 def test_offline_probes_run_through_context_manager():

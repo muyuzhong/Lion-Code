@@ -19,10 +19,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
-
-from openai import OpenAI
-
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -39,12 +36,12 @@ from benchmark import (  # noqa: E402
     api_call,
     apply_pipeline,
     compact_with_metrics,
+    create_benchmark_client,
     expand_to_bytes,
     process_tool_result,
     ratio,
     source_snapshot,
     sum_usage,
-    tool_content_stats,
     usage_cost,
 )
 from formal_tasks import (  # noqa: E402
@@ -275,7 +272,7 @@ def fill_payload(prefix: str, seed: str, target_bytes: int, marker: str) -> str:
 
 
 def record_api_call(
-    client: OpenAI,
+    client: Any,
     result: FormalResult,
     *,
     model: str,
@@ -315,7 +312,7 @@ def record_api_call(
 
 
 def maybe_compact(
-    client: OpenAI,
+    client: Any,
     context: BenchmarkContext,
     result: FormalResult,
     *,
@@ -372,7 +369,7 @@ def contract_for_turn(task: dict[str, Any], turn: int) -> str:
 
 
 def run_session(
-    client: OpenAI,
+    client: Any,
     task: dict[str, Any],
     *,
     policy: str,
@@ -1000,7 +997,7 @@ def main() -> int:
 
     budget = Budget(args.budget_cny, price)
     budget.spent_cny = float(payload["metadata"].get("benchmark_spend_cny", 0.0))
-    client = OpenAI(
+    client = create_benchmark_client(
         api_key=api_key,
         base_url=args.base_url,
         timeout=args.timeout_seconds,

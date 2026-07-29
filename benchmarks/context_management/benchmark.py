@@ -21,9 +21,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from openai import OpenAI
-
-
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -425,6 +422,29 @@ def usage_from_response(response: Any) -> dict[str, int]:
     }
 
 
+def create_benchmark_client(
+    *,
+    api_key: str,
+    base_url: str,
+    timeout: float,
+    max_retries: int,
+) -> Any:
+    """仅为在线研究基准加载可选 SDK，基础安装和离线校验不依赖它。"""
+
+    try:
+        from openai import OpenAI
+    except ImportError as error:
+        raise SystemExit(
+            '在线基准需要可选依赖，请先运行 python -m pip install -e ".[benchmark]"'
+        ) from error
+    return OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
+
+
 def usage_cost(usage: dict[str, int], price: Price) -> float:
     return (
         usage["cache_hit_tokens"] / 1_000_000 * price.cache_hit_input
@@ -451,7 +471,7 @@ def prompt_chars(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | N
 
 
 def api_call(
-    client: OpenAI,
+    client: Any,
     *,
     model: str,
     messages: list[dict[str, Any]],
@@ -503,7 +523,7 @@ def record_call(
 
 
 def compact_with_metrics(
-    client: OpenAI,
+    client: Any,
     context: BenchmarkContext,
     result: ReplayResult,
     *,
@@ -550,7 +570,7 @@ def compact_with_metrics(
 
 
 def maybe_compact(
-    client: OpenAI,
+    client: Any,
     context: BenchmarkContext,
     result: ReplayResult,
     *,
@@ -595,7 +615,7 @@ def normalize_fact(value: str) -> str:
 
 
 def evaluate_retention(
-    client: OpenAI,
+    client: Any,
     context: BenchmarkContext,
     scenario: dict[str, Any],
     result: ReplayResult,
@@ -669,7 +689,7 @@ def evaluate_retention(
 
 
 def run_replay(
-    client: OpenAI,
+    client: Any,
     scenario: dict[str, Any],
     *,
     variant: str,
@@ -1018,7 +1038,7 @@ def render_report(payload: dict[str, Any]) -> str:
         f"- 测试模式：{'真实 API 回放' if meta['online'] else '仅离线探针'}",
         f"- 当前代码模型窗口：{meta['code_model_context_tokens']:,} token",
         f"- 本次有效窗口：{meta['effective_window_tokens']:,} token",
-        f"- API Key：未写入报告",
+        "- API Key：未写入报告",
         "",
         "## 分层离线探针",
         "",
@@ -1166,7 +1186,7 @@ def main() -> int:
             raise SystemExit(f"缺少环境变量 {args.api_key_env}；密钥不会从文件或参数读取。")
         price = Price(**dataset["pricing_cny_per_million_tokens"])
         budget = Budget(args.budget_cny, price)
-        client = OpenAI(
+        client = create_benchmark_client(
             api_key=api_key,
             base_url=args.base_url,
             timeout=args.timeout_seconds,

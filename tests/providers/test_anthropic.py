@@ -17,7 +17,6 @@ from lion_code.core.provider_events import (
     AssistantDoneEvent,
     AssistantErrorEvent,
     TextDeltaEvent,
-    ThinkingDeltaEvent,
     ThinkingEndEvent,
     ToolCallEndEvent,
 )

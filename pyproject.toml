@@ -9,8 +9,6 @@ description = "一个用 Python 构建的轻量级编码 Agent"
 requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
-    "anthropic>=0.40.0",
-    "openai>=1.50.0",
     "pydantic>=2.11",
     "rich>=13.0.0",
     "textual>=8.2.8",
@@ -18,6 +16,9 @@ dependencies = [
     "anyio>=4.0",
     "httpx[socks]>=0.27",
 ]
+
+[project.optional-dependencies]
+benchmark = ["openai>=1.50.0"]
 
 [project.scripts]
 lion-code = "lion_code.__main__:main"

@@ -10,7 +10,6 @@ transcript、命令分发、会话侧边栏加载。
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -181,7 +180,6 @@ def app_factory():
 
     def factory(events: list, registry: ToolRegistry | None = None) -> LionTuiApp:
         fake = FakeProvider(events)
-        os.environ["LION_CORE_RUNTIME"] = "1"
         with patch("lion_code.agent.create_provider", return_value=fake):
             agent = Agent(
                 api_base="https://example.test/v1",
@@ -194,7 +192,6 @@ def app_factory():
         return LionTuiApp(LionCodingSession(agent))
 
     yield factory
-    os.environ.pop("LION_CORE_RUNTIME", None)
     temp_dir.cleanup()
 
 
