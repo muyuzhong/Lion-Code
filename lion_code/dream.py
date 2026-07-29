@@ -8,14 +8,16 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .agent import Agent
+from .core import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
 from .frontmatter import format_frontmatter, parse_frontmatter
 from .memory import VALID_TYPES, _update_memory_index, get_memory_dir, load_memory_index
-from .session import SESSION_DIR
+from .session_runtime import SessionRepository
 from .tooling.selection import ToolSelectionPolicy, select_tools
 
 
@@ -140,68 +142,33 @@ def _strip_system_reminders(value: str) -> str:
     ).strip()
 
 
-def _text_content(content: Any) -> str:
-    if isinstance(content, str):
-        return _strip_system_reminders(content)
-    if not isinstance(content, list):
-        return ""
-    texts: list[str] = []
-    for block in content:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") == "text" and isinstance(block.get("text"), str):
-            text = _strip_system_reminders(block["text"])
-            if text:
-                texts.append(text)
-    return "\n".join(texts)
-
-
-def _tool_result_content(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(
-            block.get("text", "")
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-        )
-    return ""
-
-
-def _project_session_messages(data: dict[str, Any]) -> list[dict[str, str]]:
-    raw_messages = data.get("openaiMessages") or data.get("anthropicMessages") or []
+def _project_session_messages(
+    messages: Sequence[AgentMessage],
+) -> list[dict[str, str]]:
     projected: list[dict[str, str]] = []
-    for message in raw_messages:
-        if not isinstance(message, dict):
-            continue
-        role = message.get("role")
-        content = message.get("content")
-        if role == "user":
-            text = _text_content(content)
+    for message in messages:
+        if isinstance(message, UserMessage):
+            text = _strip_system_reminders(message.text)
             if text:
                 projected.append({
-                    "role": "summary" if text.startswith("[Previous conversation summary]") else "user",
+                    "role": (
+                        "summary"
+                        if text.startswith(
+                            (
+                                "Previous conversation summary:",
+                                "[Previous conversation summary]",
+                            )
+                        )
+                        else "user"
+                    ),
                     "content": text,
                 })
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "tool_result":
-                        result = _tool_result_content(block.get("content"))
-                        if result:
-                            projected.append({
-                                "role": "tool",
-                                "content": _clip(result, MAX_TOOL_RESULT_CHARS),
-                            })
-        elif role == "assistant":
-            has_tool_call = bool(message.get("tool_calls")) or (
-                isinstance(content, list)
-                and any(isinstance(block, dict) and block.get("type") == "tool_use" for block in content)
-            )
-            text = _text_content(content)
-            if text and not has_tool_call:
+        elif isinstance(message, AssistantMessage):
+            text = _strip_system_reminders(message.text)
+            if text and not message.tool_calls:
                 projected.append({"role": "assistant", "content": text})
-        elif role == "tool":
-            result = _tool_result_content(content)
+        elif isinstance(message, ToolResultMessage):
+            result = message.text
             if result:
                 projected.append({
                     "role": "tool",
@@ -210,47 +177,43 @@ def _project_session_messages(data: dict[str, Any]) -> list[dict[str, str]]:
 
     selected: list[dict[str, str]] = []
     used = 0
-    for message in reversed(projected):
+    for projected_message in reversed(projected):
         remaining = MAX_SESSION_CHARS - used
         if remaining <= 0:
             break
-        item = {**message, "content": _clip(message["content"], remaining)}
+        item = {
+            **projected_message,
+            "content": _clip(projected_message["content"], remaining),
+        }
         selected.append(item)
         used += len(item["content"])
     selected.reverse()
     return selected
 
 
-def _recent_project_sessions(project_root: Path) -> list[dict[str, Any]]:
-    if not SESSION_DIR.is_dir():
-        return []
+async def _recent_project_sessions(
+    project_root: Path,
+    repository: SessionRepository | None = None,
+) -> list[dict[str, Any]]:
+    repository = repository or SessionRepository()
     project_key = _path_key(project_root)
-    def mtime(path: Path) -> float:
-        try:
-            return path.stat().st_mtime
-        except OSError:
-            return 0
-
-    paths = sorted(SESSION_DIR.glob("*.json"), key=mtime, reverse=True)
     sessions: list[dict[str, Any]] = []
-    for path in paths:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            metadata = data.get("metadata", {})
-            session_cwd = metadata.get("cwd")
-            if not isinstance(session_cwd, str) or not session_cwd:
-                continue
-            if _path_key(session_cwd) != project_key:
-                continue
-            sessions.append({
-                "id": metadata.get("id"),
-                "startTime": metadata.get("startTime"),
-                "messages": _project_session_messages(data),
-            })
-            if len(sessions) == DREAM_SESSION_LIMIT:
-                break
-        except (OSError, json.JSONDecodeError, TypeError):
+    for metadata in await repository.list_sessions():
+        session_cwd = metadata.get("cwd")
+        if not isinstance(session_cwd, str) or not session_cwd:
             continue
+        if _path_key(session_cwd) != project_key:
+            continue
+        state = await repository.load(str(metadata["id"]))
+        if state is None:
+            continue
+        sessions.append({
+            "id": metadata["id"],
+            "startTime": metadata["startTime"],
+            "messages": _project_session_messages(state.messages),
+        })
+        if len(sessions) == DREAM_SESSION_LIMIT:
+            break
     return sessions
 
 
@@ -263,7 +226,9 @@ def _memory_snapshot(memory_dir: Path) -> dict[str, str]:
     return snapshot
 
 
-def build_dream_context() -> DreamContext:
+async def build_dream_context(
+    repository: SessionRepository | None = None,
+) -> DreamContext:
     """收集当前 Memory 清单、并发快照和最近五个同项目 Session。"""
     project_root = Path.cwd().resolve()
     memory_dir = get_memory_dir().resolve()
@@ -285,7 +250,7 @@ def build_dream_context() -> DreamContext:
         memory_dir=memory_dir,
         memory_index=load_memory_index(),
         memory_manifest=manifest,
-        sessions=_recent_project_sessions(project_root),
+        sessions=await _recent_project_sessions(project_root, repository),
         memory_snapshot=snapshot,
     )
 
@@ -517,7 +482,7 @@ class DreamCoordinator:
         return _DreamAgent(**kwargs)
 
     async def run(self) -> DreamResult:
-        context = build_dream_context()
+        context = await build_dream_context(self.agent._session_repository)
         if not context.memory_manifest and not context.sessions:
             return DreamResult([], [], [], "没有可供整理的 Memory 或项目 Session。")
 

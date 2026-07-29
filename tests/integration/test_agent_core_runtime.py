@@ -506,11 +506,18 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         first, _ = self._make_agent([_stop_event("first answer")], registry)
         await first.chat("first question")
         session_id = first.session_id
+        session_path = self._session_repository.storage_for(session_id).path
 
         second, fake = self._make_agent([_stop_event("second answer")], registry)
         self.assertTrue(await second.restore_core_session(session_id))
         await second.chat("second question")
 
+        self.assertEqual(second.session_id, session_id)
+        self.assertEqual(
+            list(self._session_repository.session_dir.glob("*.jsonl")),
+            [session_path],
+        )
+        self.assertEqual(list(self._session_repository.session_dir.glob("*.json")), [])
         self.assertEqual(
             [message.text for message in fake.received_messages[0]],
             ["first question", "first answer", "second question"],
@@ -562,56 +569,93 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_legacy_json_is_migrated_without_deleting_source(self) -> None:
         session_id = "legacy01"
         legacy_path = self._session_repository.session_dir / f"{session_id}.json"
-        legacy_path.write_text(
-            json.dumps(
-                {
-                    "metadata": {
-                        "id": session_id,
-                        "model": "legacy-model",
-                        "cwd": str(Path.cwd().resolve()),
-                        "startTime": "2026-01-01T00:00:00Z",
+        legacy_source = json.dumps(
+            {
+                "metadata": {
+                    "id": session_id,
+                    "model": "legacy-model",
+                    "cwd": str(Path.cwd().resolve()),
+                    "startTime": "2026-01-01T00:00:00Z",
+                },
+                "openaiMessages": [
+                    {"role": "system", "content": "old system"},
+                    {"role": "user", "content": "old question"},
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "old-call",
+                                "type": "function",
+                                "function": {
+                                    "name": "echo",
+                                    "arguments": '{"msg":"legacy"}',
+                                },
+                            }
+                        ],
                     },
-                    "openaiMessages": [
-                        {"role": "system", "content": "old system"},
-                        {"role": "user", "content": "old question"},
-                        {
-                            "role": "assistant",
-                            "content": "",
-                            "tool_calls": [
-                                {
-                                    "id": "old-call",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "echo",
-                                        "arguments": '{"msg":"legacy"}',
-                                    },
-                                }
-                            ],
-                        },
-                        {
-                            "role": "tool",
-                            "tool_call_id": "old-call",
-                            "content": "legacy result",
-                        },
-                        {"role": "assistant", "content": "old answer"},
-                    ],
-                    "anthropicMessages": None,
-                }
-            ),
-            encoding="utf-8",
+                    {
+                        "role": "tool",
+                        "tool_call_id": "old-call",
+                        "content": "legacy result",
+                    },
+                    {"role": "assistant", "content": "old answer"},
+                ],
+                "anthropicMessages": None,
+            }
+        )
+        legacy_path.write_text(legacy_source, encoding="utf-8")
+        legacy_file_state = (
+            legacy_path.name,
+            legacy_path.read_bytes(),
+            legacy_path.stat().st_mtime_ns,
         )
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
         agent, fake = self._make_agent([_stop_event("new answer")], registry)
 
-        self.assertTrue(await agent.restore_session_id(session_id))
-        self.assertTrue(legacy_path.exists())
-        self.assertTrue(self._session_repository.storage_for(session_id).path.exists())
+        discovered = await agent.list_sessions()
+        self.assertEqual(
+            [(item["id"], item["format"]) for item in discovered],
+            [(session_id, "json")],
+        )
+        self.assertEqual(await agent.latest_session_id(), session_id)
+        self.assertTrue(await agent.restore_latest_session())
+        jsonl_path = self._session_repository.storage_for(session_id).path
+        self.assertEqual(
+            (legacy_path.name, legacy_path.read_bytes(), legacy_path.stat().st_mtime_ns),
+            legacy_file_state,
+        )
+        self.assertTrue(jsonl_path.exists())
         await agent.chat("continue")
 
         self.assertEqual(
+            (legacy_path.name, legacy_path.read_bytes(), legacy_path.stat().st_mtime_ns),
+            legacy_file_state,
+        )
+        self.assertEqual(
+            list(self._session_repository.session_dir.glob("*.json")),
+            [legacy_path],
+        )
+        self.assertEqual(
+            list(self._session_repository.session_dir.glob("*.jsonl")),
+            [jsonl_path],
+        )
+        self.assertEqual(
             [message.role for message in fake.received_messages[0]],
             ["user", "assistant", "toolResult", "assistant", "user"],
+        )
+        state = await self._session_repository.load(session_id)
+        self.assertEqual(
+            [message.text for message in state.messages],
+            [
+                "old question",
+                "",
+                "legacy result",
+                "old answer",
+                "continue",
+                "new answer",
+            ],
         )
         sessions = [
             item for item in await agent.list_sessions() if item["id"] == session_id

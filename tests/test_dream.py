@@ -1,7 +1,6 @@
 """显式 `/dream` Memory 整合闭环测试。"""
 
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,7 +9,18 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from lion_code import dream
 from lion_code.agent import Agent
+from lion_code.core import (
+    AssistantMessage,
+    CompactionEntry,
+    MessageEntry,
+    SessionInfoEntry,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
 from lion_code.frontmatter import format_frontmatter, parse_frontmatter
+from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.builtin import create_builtin_tools
 from lion_code.tooling.registry import ToolRegistry
 
@@ -25,52 +35,72 @@ def _write_memory(path: Path, name: str, memory_type: str, body: str) -> None:
     )
 
 
-class TestDreamSessions(unittest.TestCase):
-    def test_uses_latest_five_project_sessions_and_projects_messages(self):
+class TestDreamSessions(unittest.IsolatedAsyncioTestCase):
+    async def test_uses_latest_five_project_sessions_and_projects_messages(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             project = root / "project"
             sessions = root / "sessions"
             project.mkdir()
             sessions.mkdir()
+            repository = SessionRepository(sessions)
 
             for index in range(7):
-                data = {
-                    "metadata": {
-                        "id": f"session-{index}",
-                        "cwd": str(project),
-                        "startTime": f"2026-07-2{index}T00:00:00Z",
-                    },
-                    "openaiMessages": [
-                        {"role": "system", "content": "ordinary system prompt"},
-                        {
-                            "role": "user",
-                            "content": (
-                                "<system-reminder>project instructions</system-reminder>\n\n"
-                                f"remember preference {index}"
-                            ),
-                        },
-                        {
-                            "role": "assistant",
-                            "content": "intermediate text",
-                            "tool_calls": [{"id": "call"}],
-                        },
-                        {"role": "tool", "content": "x" * 2_000},
-                        {"role": "assistant", "content": f"final answer {index}"},
-                    ],
-                }
-                path = sessions / f"session-{index}.json"
-                path.write_text(json.dumps(data), encoding="utf-8")
-                os.utime(path, (index + 1, index + 1))
+                session_id = f"session-{index}"
+                storage = repository.storage_for(session_id)
+                parent = SessionInfoEntry(
+                    id=f"{session_id}-info",
+                    created_at=index + 1,
+                    cwd=str(project),
+                )
+                await storage.append(parent)
+                messages = [
+                    UserMessage(
+                        content=(
+                            "<system-reminder>project instructions</system-reminder>\n\n"
+                            f"remember preference {index}"
+                        )
+                    ),
+                    AssistantMessage(
+                        content=[
+                            TextContent(text="intermediate text"),
+                            ToolCall(id="call", name="read_file", arguments={}),
+                        ],
+                        stop_reason="toolUse",
+                    ),
+                    ToolResultMessage(
+                        tool_call_id="call",
+                        tool_name="read_file",
+                        content="x" * 2_000,
+                    ),
+                    AssistantMessage(content=f"final answer {index}"),
+                ]
+                parent_id = parent.id
+                message_entry_ids: list[str] = []
+                for message_index, message in enumerate(messages):
+                    entry = MessageEntry(
+                        id=f"{session_id}-message-{message_index}",
+                        parent_id=parent_id,
+                        message=message,
+                    )
+                    await storage.append(entry)
+                    parent_id = entry.id
+                    message_entry_ids.append(entry.id)
+                await storage.append(
+                    CompactionEntry(
+                        id=f"{session_id}-compaction",
+                        parent_id=parent_id,
+                        summary=f"remember preference {index}",
+                        replaces_entry_ids=[message_entry_ids[0]],
+                    )
+                )
 
-            (sessions / "other.json").write_text(json.dumps({
-                "metadata": {"id": "other", "cwd": str(root / "other")},
-                "openaiMessages": [{"role": "user", "content": "ignore"}],
-            }), encoding="utf-8")
-            (sessions / "broken.json").write_text("not json", encoding="utf-8")
+            await repository.storage_for("other").append(
+                SessionInfoEntry(id="other-info", cwd=str(root / "other"))
+            )
+            (sessions / "broken.jsonl").write_text("not json\n", encoding="utf-8")
 
-            with patch.object(dream, "SESSION_DIR", sessions):
-                result = dream._recent_project_sessions(project)
+            result = await dream._recent_project_sessions(project, repository)
 
         self.assertEqual(
             [session["id"] for session in result],
@@ -80,7 +110,11 @@ class TestDreamSessions(unittest.TestCase):
         combined = "\n".join(message["content"] for message in messages)
         self.assertIn("remember preference 6", combined)
         self.assertIn("final answer 6", combined)
-        self.assertNotIn("ordinary system prompt", combined)
+        summary = next(message for message in messages if message["role"] == "summary")
+        self.assertEqual(
+            summary["content"],
+            "Previous conversation summary:\nremember preference 6",
+        )
         self.assertNotIn("project instructions", combined)
         self.assertNotIn("intermediate text", combined)
         tool = next(message for message in messages if message["role"] == "tool")
@@ -279,6 +313,7 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
             parent = SimpleNamespace(
                 total_input_tokens=10,
                 total_output_tokens=20,
+                _session_repository=Mock(),
             )
             child = SimpleNamespace(
                 run_once=AsyncMock(return_value={
@@ -290,13 +325,19 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
             coordinator = dream.DreamCoordinator(parent)
             coordinator._create_agent = lambda _: child
 
+            build_context = AsyncMock(return_value=context)
             with (
-                patch.object(dream, "build_dream_context", return_value=context),
+                patch.object(
+                    dream,
+                    "build_dream_context",
+                    new=build_context,
+                ),
                 patch.object(dream, "apply_dream_plan", return_value=dream.DreamResult([], [], [], "done")) as apply,
             ):
                 result = await coordinator.run()
 
         self.assertEqual(result.reason, "done")
+        build_context.assert_awaited_once_with(parent._session_repository)
         child.run_once.assert_awaited_once()
         child.close.assert_awaited_once()
         self.assertEqual(parent.total_input_tokens, 13)
