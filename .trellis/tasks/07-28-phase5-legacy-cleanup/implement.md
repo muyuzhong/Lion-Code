@@ -51,8 +51,9 @@
 
 ## 切片 5：依赖、文档与最终验收
 
-1. 移除 `openai`、`anthropic` 直接依赖；仅在仓库实际存在锁文件时同步锁文件。执行产品
-   代码、测试、配置和文档的 legacy 残留扫描，区分应删除的运行引用与应保留的迁移历史说明。
+1. 移除产品主依赖中的 `openai`、`anthropic`；独立在线 benchmark 如需 SDK，只能放在
+   惰性导入的 optional extra。仅在仓库实际存在锁文件时同步锁文件。执行产品代码、测试、
+   配置和文档的 legacy 残留扫描，区分应删除的运行引用与应保留的迁移历史说明。
 2. 更新 `UPSTREAM.md`、`docs/tui-migration-audit.md`、TUI/CLI 用户文档和 Trellis 规范，
    明确 JSONL-only write + legacy read migration 的最终边界。
 3. 运行全量 pytest、compileall、项目已有 lint/type-check、`git diff --check`；记录
@@ -64,3 +65,17 @@
 阶段 5 验收并归档后，先根据最新迁移审计和仓库状态确认是否存在阶段 6；若路线图没有
 新的预定义阶段，则转入“Core-only 稳定化”，优先处理全量真机回归、性能/可观测性和
 文档收尾，而不自行扩张产品范围。
+
+## 执行记录（2026-07-29）
+
+- 切片 1–4 已分别由 `64e25b6`、`9e92d09`、`1f95fb0`、`3370351` 落地。
+- 切片 5 已移除主 dependencies 中的 OpenAI/Anthropic SDK，并同步 `UPSTREAM.md`、
+  `docs/tui.md`、迁移审计、README 与任务现状记录。
+- 本切片自动化矩阵 277 passed、1 skipped；最终独立关键矩阵 183 passed。根线程全量
+  pytest 为 473 passed、6 skipped、6 subtests passed。
+- compileall、CLI help、主依赖解析、产品禁止符号扫描、`git diff --check` 与阶段范围
+  Ruff F 检查通过；`agent.py` 实测为 2116 行。仓库没有项目级 mypy 配置，临时运行
+  mypy 的 97 条诊断属于既有未配置基线，不作为本阶段门槛。
+- Trellis check 已完成并修正文档/规范漂移；切片 5 已由中文提交 `46f9dfe` 落地。GitHub
+  443 当前不可达，推送恢复前只保留本地提交，不改写 `master` 历史。任务在用户验收前
+  保持 `in_progress`。

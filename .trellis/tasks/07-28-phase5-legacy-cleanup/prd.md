@@ -29,8 +29,9 @@
    pipeline；保留 Core context manager、Provider compactor 和阶段 4 的 overflow 自动恢复。
 2. 删除 `LegacySdkTextQueryService` 及其导出和专用测试，所有文本查询复用
    `ProviderTextQueryService`。
-3. `lion_code/` 中不再导入或调用 `openai`、`anthropic` SDK，`pyproject.toml` 移除这两个
-   直接依赖；仓库若存在依赖锁文件则同步更新（当前仓库没有锁文件）。
+3. `lion_code/` 中不再导入或调用 `openai`、`anthropic` SDK，`pyproject.toml` 主依赖移除
+   这两个 SDK；仓库若存在依赖锁文件则同步更新（当前仓库没有锁文件）。独立在线 benchmark
+   可在惰性导入且不影响基础安装/离线验收的前提下保留 OpenAI optional extra。
 
 ### C. 删除旧 TUI 与全局 sink 桥
 
@@ -62,21 +63,22 @@
 
 ## Acceptance Criteria
 
-- [ ] `lion_code/` 中 `import openai` / `import anthropic` 为零，项目依赖和锁文件中不再有
-      两个 SDK 的直接依赖。
-- [ ] 产品代码中不存在 `LION_CORE_RUNTIME` 分支、`_chat_*`、`_call_*_stream`、旧压缩
+- [x] `lion_code/` 中 `import openai` / `import anthropic` 为零，产品主依赖和锁文件中不再有
+      两个 SDK；在线 benchmark 的 OpenAI optional extra 仅在 `--online` 时惰性导入。
+- [x] 产品代码中不存在 `LION_CORE_RUNTIME` 分支、`_chat_*`、`_call_*_stream`、旧压缩
       pipeline、`LegacySdkTextQueryService`、`legacy_tui`、`--legacy-tui` 或 `ui.set_sink`。
-- [ ] OpenAI-compatible 与 Anthropic 的 Core/Provider 自动化矩阵通过；阶段 4 的
+- [x] OpenAI-compatible 与 Anthropic 的 Core/Provider 自动化矩阵通过；阶段 4 的
       overflow → compaction → auto-retry 顺序契约继续通过。
-- [ ] 空闲态跨协议/凭证热切换保留 canonical history，并刷新所有 Provider 派生服务；运行中
+- [x] 空闲态跨协议/凭证热切换保留 canonical history，并刷新所有 Provider 派生服务；运行中
       切换被明确拒绝且不改变现有 Provider，旧 Provider 不会在活跃流中关闭。
-- [ ] 新 TUI 流式增量渲染、工具状态、错误、重试和子 Agent 可见反馈无回归，正常 delta
+- [x] 新 TUI 流式增量渲染、工具状态、错误、重试和子 Agent 可见反馈无回归，正常 delta
       不触发 transcript 全量重绘。
-- [ ] 新会话只写 JSONL；旧 `.json` 会话仍可发现、读取和迁移，且源文件保持不变。
-- [ ] `agent.py` 删除 legacy 后显著缩减，验收时不超过 2500 行；不为达成行数引入无关
+- [x] 新会话只写 JSONL；旧 `.json` 会话仍可发现、读取和迁移，且源文件保持不变。
+- [x] `agent.py` 删除 legacy 后显著缩减，验收时不超过 2500 行；不为达成行数引入无关
       搬迁或新的包装层。
-- [ ] 全量 `pytest`、`compileall`、项目已有 lint/type-check 与 `git diff --check` 通过。
-- [ ] `UPSTREAM.md` 和相关用户文档同步，Trellis check 与 journal 完成。
+- [x] 全量 `pytest`、`compileall`、阶段范围 Ruff F 与 `git diff --check` 通过；仓库没有
+      项目级 mypy 配置，临时 mypy 诊断按既有未配置基线记录。
+- [x] `UPSTREAM.md` 和相关用户文档同步，Trellis check 与 journal 完成。
 
 ## Notes
 

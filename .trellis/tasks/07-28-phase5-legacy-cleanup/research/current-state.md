@@ -1,62 +1,69 @@
-# 阶段 5 当前状态调研
+# 阶段 5 当前状态
+
+> 复核时间：2026-07-29。代码基线：`46f9dfe`；依赖与文档收尾及最终 Trellis check
+> 已完成。任务保持 `in_progress`，等待推送与用户验收。
 
 ## 结论
 
-阶段 4 已经让双协议 Provider/Core、新 TUI、Provider side-query 和 overflow 自动恢复
-具备替代能力，但 legacy 代码仍与 `Agent` 初始化、配置、会话历史和 UI 状态反馈交织。
-本阶段不能只删除文件，必须先把剩余消费者收敛到已有 canonical 路径，再删除旧实现。
+阶段 5 的四个运行时删除切片已经落地，Core Runtime、Provider、canonical history、
+JSONL Session 与 Textual TUI 已成为产品唯一运行路径。切片 5 已移除主运行时的 SDK
+依赖并同步用户文档；没有为兼容旧路径增加新 adapter、no-op 或第二状态源。
 
-## 运行时与 SDK
+## 已落地切片
 
-- `lion_code/agent.py` 约 3200 行，仍在模块顶层导入 `anthropic` 和 `openai`。
-- `Agent.__init__` 仍根据 `LION_CORE_RUNTIME` 决定是否构造 Core，并同时维护
-  `_anthropic_messages`、`_openai_messages` 与两个 SDK client。
-- `chat()` 仍可分流到 `_chat_openai` / `_chat_anthropic`；文件后部保留
-  `_call_*_stream`、协议专用压缩及旧手工压缩 pipeline。
-- `configure_api()` 先重建 SDK client，再重建 Provider/Core；子 Agent 参数也会从 SDK
-  client 反向读取。阶段 5 应由 Agent 自己保存的 Provider 配置成为唯一来源。
-- goal、loop、plan、learning、dream 和部分测试仍直接使用协议私有 messages，需要迁到
-  Core canonical history，不能直接删字段。
+| 切片 | 提交 | 当前结果 |
+|---|---|---|
+| Core/Provider 单路径 | `64e25b6` | 双协议、子 Agent、side-query 与热切换统一到 Core |
+| SDK 对话/查询/压缩删除 | `9e92d09` | legacy chat、手工压缩、协议私有 history 与 SDK query 删除 |
+| JSONL-only Session | `1f95fb0` | 旧 writer 删除；旧 `.json` 只读发现/迁移保留 |
+| TUI/sink 删除 | `3370351` | Textual TUI 唯一；REPL 直写 stdout；会话 notice 补足非流式反馈 |
+| 依赖/文档收尾 | `46f9dfe` | 主 dependencies 移除 SDK；用户文档、规范与迁移审计已同步 |
 
-## 文本查询
+## 当前运行边界
 
-- `memory_runtime/query.py` 同时存在 `ProviderTextQueryService` 与
-  `LegacySdkTextQueryService`。
-- `_build_core_memory_query_service()` 和 `_build_side_query()` 仍保留 SDK fallback；阶段 4
-  的 Core/Provider 路径已经覆盖双协议，可删除 fallback、导出和专用测试。
+- `Agent` 始终持有 `LionAgentRuntime`，消息唯一状态是 Core canonical history。
+- OpenAI-compatible 与 Anthropic 均由 `lion_code/providers/` 内置 HTTP Provider 实现；
+  `lion_code/` 不导入第三方 `openai` / `anthropic` 包。
+- Provider/模型切换仅允许在空闲态执行，保留 history 并刷新 compactor、文本查询与模型
+  限制；活动流中拒绝切换。
+- TUI 只消费 Core/application typed events 与会话级 notice/确认回调；正常 delta 增量追加，
+  工具行原位更新。REPL 使用 `ui.print_*` 直接输出，不存在全局 sink。
+- 新会话只写 `~/.lion-code/sessions/*.jsonl`。旧 `.json` 只用于读取和迁移；生成 JSONL
+  后源文件保持不变。
+- `lion_code/agent.py` 当前实测为 2116 行，低于 2500 行验收上限。
 
-## TUI 与 UI sink
+## 残留扫描分类
 
-- `legacy_tui.py` 仍由 `__main__.py --legacy-tui` 引用，可连同参数和回退分支删除。
-- 当前新 TUI 在 mount/unmount 时仍注册 `ui.set_sink`，接收 subagent、info、error、retry、
-  status；`TerminalRenderer` 和测试也依赖该全局桥。
-- 因此不能直接删除 sink 后丢弃事件。实施时需逐类确认是否已有 Core/application 结构化
-  事件覆盖；只对真实缺口增加最小 typed 事件或 session callback，REPL 继续直接 stdout。
-- 阶段 4 的 streaming transcript 已有独立规范，任何 sink 清理都必须保持增量 widget
-  身份和禁止 delta 全量重绘的契约。
+### 产品代码必须为零
 
-## 会话
+以下模式在 `lion_code/` 中扫描为零：第三方 SDK import、`LION_CORE_RUNTIME`、legacy chat/
+stream/compaction、`LegacySdkTextQueryService`、旧 TUI 入口、全局 UI sink。协议模块名
+`providers/openai_compatible.py`、`providers/anthropic.py` 是当前内置 Provider，不属于残留。
 
-- `SessionRecorder` / `JsonlSessionStorage` 是当前写入路径。
-- `session_runtime/legacy.py` 是旧 `.json` 的只读发现与迁移路径，必须保留；已有测试验证
-  迁移兼容。
-- `lion_code/session.py` 仍包含旧 JSON writer，Agent 也保留旧 serialize/restore 分支，均可
-  在 JSONL-only 接线完成后删除。
+### 有意保留
 
-## 依赖、测试和文档
+- `session_runtime/legacy.py` 中 `_openai_messages` / `_anthropic_messages` 只解析用户已有的旧
+  `.json`，不参与新会话写入或模型调用。
+- `tests/` 中对已删除符号的否定断言与 CLI 拒绝测试用于防回归。
+- `docs/tui-migration-audit.md`、Trellis PRD/design/implement 与历史 journal 中的旧符号用于
+  记录迁移决策，不是可执行路径。
+- 在线 context benchmark 是独立研究工具；若保留 OpenAI SDK，只能放在惰性导入的
+  benchmark optional extra，基础安装、离线评测和产品运行不能依赖它。
 
-- `pyproject.toml` 仍声明 `anthropic>=0.40.0`、`openai>=1.50.0`。
-- `tests/test_agent_run.py` 大量覆盖 legacy `_call_*_stream`，应删除或以 Core 行为测试替换。
-- `tests/test_legacy_tui.py` 同时覆盖旧 TUI 和 sink；应删除旧 TUI 用例并把仍有价值的状态
-  可见性断言迁到 application/TUI 测试。
-- `tests/test_learning.py`、`tests/test_dream.py` 等直接操作协议私有 messages，需要改用
-  canonical state。
-- `UPSTREAM.md` 与 `docs/tui-migration-audit.md` 必须在完成后记录删除边界和保留的旧会话
-  只读迁移。
+### 最终检查结论
 
-## 关键风险
+- 根线程全量 pytest：473 passed、6 skipped、6 subtests passed；独立关键矩阵：183 passed。
+- compileall、CLI help、TOML/JSON 解析、产品禁止符号扫描、阶段范围 Ruff F 与
+  `git diff --check` 通过。
+- 仓库没有项目级 mypy 配置；临时运行 mypy 的 97 条诊断属于既有未配置基线，不为本阶段
+  扩张重构。任务在用户验收前不得归档。
 
-1. 先删 SDK 字段会破坏 child agent、API 热切换或目标/学习路径。
-2. 把只读旧会话迁移误当成旧写入一起删除，会让已有用户无法恢复历史。
-3. 直接移除 `ui.set_sink` 会让新 TUI 的非流式状态反馈静默消失。
-4. legacy 测试直接删除而不补 Core 等价断言，会造成表面绿、覆盖面下降。
+## 本切片验证
+
+- 双协议/provider/application/session/TUI/CLI 矩阵：277 passed、1 skipped。
+- 全量回归：473 passed、6 skipped、6 subtests passed。
+- `python -m compileall -q lion_code tests`：通过。
+- `python -m ruff check lion_code tests benchmarks --select F`：通过。
+- `python -m lion_code --help`：通过；帮助中不存在旧 TUI 参数。
+- 主依赖 TOML 解析：仅 pydantic、rich、textual、pygments、anyio、httpx。
+- 产品禁止符号扫描：零命中。

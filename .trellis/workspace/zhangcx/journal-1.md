@@ -540,3 +540,41 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 
 - 从切片2开始：删除 LegacySdkTextQueryService、SDK side-query、legacy chat 和旧压缩 pipeline。
 - 保持切片1的热切换、canonical history、overflow recovery 与会话恢复契约。
+
+## Session 13: 阶段5完成，等待用户验收
+
+**Date**: 2026-07-29
+**Task**: 阶段5：移除 legacy 路径与 SDK 依赖
+**Branch**: `master`
+
+### Summary
+
+阶段5切片1–5已实现：Core/Provider、canonical history、JSONL Session 与 Textual TUI
+成为产品唯一运行路径；旧 SDK 对话/压缩、旧 JSON writer、旧 TUI 与全局输出 bridge 已删除，
+主运行依赖不再包含 OpenAI/Anthropic SDK。最终 Trellis check、全量验证和中文工作提交已
+完成；任务保持 in_progress，等待推送与用户验收。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `64e25b6` | Core Provider 单路径 |
+| `9e92d09` | 删除 SDK 对话与旧压缩路径 |
+| `1f95fb0` | 收敛 JSONL 会话单一路径 |
+| `3370351` | 删除旧 TUI 与全局输出桥 |
+| `46f9dfe` | 完成阶段5依赖与文档收敛 |
+
+### Testing
+
+- [OK] 双协议/provider/application/session/TUI/CLI 目标矩阵：277 passed、1 skipped。
+- [OK] compileall、CLI help、主依赖解析、产品禁止符号扫描通过。
+- [OK] `agent.py` 实测 2116 行，低于 2500 行验收上限。
+- [OK] 全量 pytest：473 passed、6 skipped、6 subtests passed；独立关键矩阵：183 passed。
+- [OK] compileall、CLI help、依赖/JSON 解析、产品禁止符号扫描、阶段范围 Ruff F 与
+  `git diff --check` 通过。
+- [INFO] 仓库没有项目级 mypy 配置；临时 mypy 的 97 条诊断属于既有未配置基线。
+- [OK] Trellis check 与中文工作提交完成；推送和用户验收仍待处理。
+
+### Status
+
+[WIP] **Implementation, final check, and work commit complete; push and user acceptance pending**
