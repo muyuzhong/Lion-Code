@@ -48,7 +48,7 @@ class MemoryCoordinator:
         return frozenset(self._already_surfaced)
 
     def set_query_service(self, service: TextQueryService | None) -> None:
-        """替换 Side Query 实现，并取消仍引用旧 Client 的预取。"""
+        """替换 Side Query 实现，并取消仍引用旧 Provider 的预取。"""
 
         self.cancel_pending()
         self._query_service = service

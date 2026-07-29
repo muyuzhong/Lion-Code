@@ -58,13 +58,14 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
     def test_model_schema_comes_from_agent_registry(self):
         agent = self._agent()
         read_tool = agent.tool_registry.resolve("read_file")
-
-        schemas = {
-            schema["name"]: schema
-            for schema in agent._active_anthropic_tools()
+        core_tools = {
+            tool.name: tool
+            for tool in agent.core_runtime.harness.config.get_tools()
         }
+        schema = read_tool.to_anthropic_schema()
 
-        self.assertEqual(schemas["read_file"], read_tool.to_anthropic_schema())
+        self.assertEqual(core_tools["read_file"].description, schema["description"])
+        self.assertEqual(dict(core_tools["read_file"].parameters), schema["input_schema"])
 
     def test_custom_tools_limit_registry(self):
         agent = self._agent(
@@ -82,7 +83,7 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
             ["read_file"],
         )
         self.assertEqual(
-            [schema["name"] for schema in agent._active_anthropic_tools()],
+            [tool.name for tool in agent.core_runtime.harness.config.get_tools()],
             ["read_file"],
         )
 

@@ -126,16 +126,16 @@ class TestMcpAdapter(unittest.IsolatedAsyncioTestCase):
                 api_key="test-key",
                 tool_environment=environment,
             )
-        agent._chat_anthropic = AsyncMock()
-        agent._auto_save = lambda: None
+        agent._ensure_core_session_ready = AsyncMock()
+        agent.core_runtime.prompt = AsyncMock()
 
-        with patch("lion_code.agent.print_divider"):
-            await agent.chat("first")
-            await agent.chat("second")
+        await agent.chat("first")
+        await agent.chat("second")
         await agent.close()
         await agent.close()
 
         manager.discover_tools.assert_awaited_once_with()
+        self.assertEqual(agent.core_runtime.prompt.await_count, 2)
         self.assertEqual(
             agent.tool_registry.resolve("mcp__docs__search__pages").label,
             "search__pages",

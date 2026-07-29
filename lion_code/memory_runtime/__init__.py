@@ -2,7 +2,6 @@
 
 from lion_code.memory_runtime.coordinator import MemoryCoordinator
 from lion_code.memory_runtime.query import (
-    LegacySdkTextQueryService,
     ProviderTextQueryService,
     TextQueryService,
 )
@@ -14,7 +13,6 @@ from lion_code.memory_runtime.types import (
 )
 
 __all__ = [
-    "LegacySdkTextQueryService",
     "MemoryCoordinator",
     "MemoryContextInjector",
     "MemoryContextPolicy",

@@ -257,7 +257,8 @@ def test_configure_api_runtime_switch(no_api_env):
     )
     assert agent.use_openai
     assert agent.model == "gpt-x"
-    assert agent._openai_messages[0]["role"] == "system"
+    assert agent.core_runtime.harness.config.model == "gpt-x"
+    assert agent.core_runtime.messages == ()
 
 
 def test_api_config_roundtrip(tmp_path, monkeypatch):

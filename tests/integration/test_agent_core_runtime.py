@@ -198,25 +198,21 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             )
         agent._mcp_initialized = True
 
-        with patch.object(Agent, "_chat_openai", new_callable=AsyncMock) as mock_chat:
-            await agent.chat("hello")
+        await agent.chat("hello")
 
-        mock_chat.assert_not_called()
+        self.assertFalse(hasattr(Agent, "_chat_openai"))
         self.assertEqual(fake.call_count, 1)
         self.assertEqual(agent.core_runtime.messages[-1].text, "done")
 
-    async def test_grayscale_on_routes_to_core_runtime(self) -> None:
+    async def test_core_runtime_updates_completed_outcome(self) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
         agent, fake = self._make_agent([_stop_event("done")], registry)
 
         self.assertIsNotNone(agent._core_runtime)
 
-        with patch.object(Agent, "_chat_openai", new_callable=AsyncMock) as mock_chat:
-            await agent.chat("hello")
+        await agent.chat("hello")
 
-        # 不再调用旧路径。
-        mock_chat.assert_not_called()
         self.assertEqual(agent._core_runtime.messages[-1].text, "done")
         self.assertEqual(fake.call_count, 1)
         self.assertEqual(agent._last_stop_reason, "completed")
@@ -547,9 +543,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         registry = ToolRegistry()
         agent, _ = self._make_agent([_stop_event()], registry)
         await agent.chat("hello")
-        previous_client = agent._openai_client
+        previous_provider = agent.core_runtime.provider
         agent.configure_api(model="claude-sonnet-4-6")
-        self.assertIs(agent._openai_client, previous_client)
+        self.assertIs(agent.core_runtime.provider, previous_provider)
         self.assertEqual(agent.set_thinking(True), "adaptive")
         await agent.close()
 
@@ -806,12 +802,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(agent.use_openai)
         self.assertIsNotNone(agent.core_runtime)
 
-        with patch.object(
-            Agent, "_chat_anthropic", new_callable=AsyncMock
-        ) as mock_legacy:
-            await agent.chat("hello")
+        await agent.chat("hello")
 
-        mock_legacy.assert_not_called()
+        self.assertFalse(hasattr(Agent, "_chat_anthropic"))
         self.assertEqual(agent._core_runtime.messages[-1].text, "done")
         self.assertEqual(fake.call_count, 1)
 

@@ -27,13 +27,17 @@ class TestAgentInternalRuntime(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_search_updates_model_schema_from_registry(self):
         agent = self._agent()
-        before = {schema["name"] for schema in agent._active_anthropic_tools()}
+        before = {
+            tool.name for tool in agent.core_runtime.harness.config.get_tools()
+        }
 
         result = await agent._execute_tool_call(
             "tool_search",
             {"query": "enter plan"},
         )
-        after = {schema["name"] for schema in agent._active_anthropic_tools()}
+        after = {
+            tool.name for tool in agent.core_runtime.harness.config.get_tools()
+        }
 
         self.assertNotIn("enter_plan_mode", before)
         self.assertIn("enter_plan_mode", after)

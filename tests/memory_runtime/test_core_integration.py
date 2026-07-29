@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -91,7 +91,6 @@ def _make_agent(
 ) -> tuple[Agent, FakeProvider, SessionRepository]:
     fake = FakeProvider(events)
     repository = SessionRepository(tmp_path)
-    monkeypatch.setenv("LION_CORE_RUNTIME", "1")
     monkeypatch.setattr("lion_code.agent.create_provider", lambda **_kwargs: fake)
     agent = Agent(
         api_base="https://example.test/v1",
@@ -212,7 +211,6 @@ async def test_clear_and_restore_drop_previous_overlay(monkeypatch, tmp_path) ->
 @pytest.mark.asyncio
 async def test_sub_agent_on_core_skips_memory_prefetch(monkeypatch, tmp_path) -> None:
     """子 Agent 也走 Core(阶段4-C7),但 Memory 召回仍只服务主会话。"""
-    monkeypatch.setenv("LION_CORE_RUNTIME", "1")
     fake = FakeProvider([_stop_event("sub done")])
     with patch("lion_code.agent.create_provider", return_value=fake):
         agent = Agent(
@@ -224,15 +222,13 @@ async def test_sub_agent_on_core_skips_memory_prefetch(monkeypatch, tmp_path) ->
         )
     agent._mcp_initialized = True
 
-    with (
-        patch.object(agent, "_chat_openai", new_callable=AsyncMock) as old_chat,
-        patch.object(
-            agent._memory_coordinator, "begin_turn", wraps=agent._memory_coordinator.begin_turn
-        ) as begin_turn,
-    ):
+    with patch.object(
+        agent._memory_coordinator,
+        "begin_turn",
+        wraps=agent._memory_coordinator.begin_turn,
+    ) as begin_turn:
         await agent.chat("sub question")
 
-    old_chat.assert_not_awaited()
     begin_turn.assert_not_called()
     assert agent._core_runtime is not None
     assert agent._core_runtime.messages[-1].text == "sub done"

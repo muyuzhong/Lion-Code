@@ -305,33 +305,23 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
 
 
 class TestAgentDreamRefresh(unittest.TestCase):
-    def test_refreshes_index_and_invalidates_changed_memory_prefetch(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            memory_dir = Path(tmp)
-            changed_path = str(memory_dir / "project_changed.md")
-            pending = SimpleNamespace(settled=False, task=Mock())
-            agent = Agent.__new__(Agent)
-            agent._memory_coordinator = Mock()
-            agent._memory_prefetch = pending
-            agent._already_surfaced_memories = {changed_path, "other.md"}
-            agent._dynamic_system_context = "old dynamic"
-            agent._static_system_prompt = "static"
-            agent._base_system_prompt = "old base"
-            agent._system_prompt = "old system"
+    def test_refreshes_index_and_invalidates_core_memory_context(self):
+        agent = Agent.__new__(Agent)
+        agent._memory_coordinator = Mock()
+        agent._dynamic_system_context = "old dynamic"
+        agent._static_system_prompt = "static"
+        agent._base_system_prompt = "old base"
+        agent._system_prompt = "old system"
 
-            with (
-                patch("lion_code.agent.get_memory_dir", return_value=memory_dir),
-                patch("lion_code.agent.build_dynamic_system_context", return_value="new dynamic"),
-            ):
-                agent._refresh_memory_context_after_dream(["project_changed.md"])
+        with patch(
+            "lion_code.agent.build_dynamic_system_context",
+            return_value="new dynamic",
+        ):
+            agent._refresh_memory_context_after_dream(["project_changed.md"])
 
         agent._memory_coordinator.invalidate.assert_called_once_with(
             ["project_changed.md"]
         )
-        pending.task.cancel.assert_called_once()
-        self.assertIsNone(agent._memory_prefetch)
-        self.assertNotIn(changed_path, agent._already_surfaced_memories)
-        self.assertIn("other.md", agent._already_surfaced_memories)
         self.assertEqual(agent._base_system_prompt, "static\n\nnew dynamic")
         self.assertEqual(agent._system_prompt, "static\n\nnew dynamic")
 

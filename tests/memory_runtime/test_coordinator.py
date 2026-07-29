@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 
 import lion_code.memory_runtime.coordinator as coordinator_module
 from lion_code.memory import MemoryPrefetch, RelevantMemory
 from lion_code.memory_runtime import (
-    LegacySdkTextQueryService,
     MemoryContextPolicy,
     MemoryCoordinator,
 )
@@ -99,38 +96,3 @@ async def test_failed_prefetch_is_non_blocking(monkeypatch) -> None:
     coordinator.collect_ready()
 
     assert coordinator.active_overlays == ()
-
-
-@pytest.mark.asyncio
-async def test_legacy_query_adapter_supports_both_sdks() -> None:
-    openai_create = AsyncMock(
-        return_value=SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="openai"))]
-        )
-    )
-    openai_client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=openai_create))
-    )
-    openai_service = LegacySdkTextQueryService(
-        openai_client=openai_client,
-        model=lambda: "dynamic-model",
-    )
-    assert await openai_service.complete(system="system", user="user") == "openai"
-    assert openai_create.await_args.kwargs["model"] == "dynamic-model"
-
-    anthropic_create = AsyncMock(
-        return_value=SimpleNamespace(
-            content=[
-                SimpleNamespace(type="text", text="anthropic"),
-                SimpleNamespace(type="tool", text="ignored"),
-            ]
-        )
-    )
-    anthropic_client = SimpleNamespace(
-        messages=SimpleNamespace(create=anthropic_create)
-    )
-    anthropic_service = LegacySdkTextQueryService(
-        anthropic_client=anthropic_client,
-        model="fixed-model",
-    )
-    assert await anthropic_service.complete(system="system", user="user") == "anthropic"
