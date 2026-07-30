@@ -1,7 +1,7 @@
 # 阶段 5 当前状态
 
-> 复核时间：2026-07-29。代码基线：`46f9dfe`；依赖与文档收尾及最终 Trellis check
-> 已完成。任务保持 `in_progress`，等待推送与用户验收。
+> 复核时间：2026-07-30。依赖与文档收尾、最终 Trellis check 及远端同步均已完成；
+> 用户已确认验收，本次收尾将任务归档。
 
 ## 结论
 
@@ -56,7 +56,7 @@ stream/compaction、`LegacySdkTextQueryService`、旧 TUI 入口、全局 UI sin
 - compileall、CLI help、TOML/JSON 解析、产品禁止符号扫描、阶段范围 Ruff F 与
   `git diff --check` 通过。
 - 仓库没有项目级 mypy 配置；临时运行 mypy 的 97 条诊断属于既有未配置基线，不为本阶段
-  扩张重构。任务在用户验收前不得归档。
+  扩张重构。用户已于 2026-07-30 确认验收。
 
 ## 本切片验证
 

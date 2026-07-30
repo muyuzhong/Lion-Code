@@ -336,7 +336,7 @@ tui → application → agent_runtime → core → (Provider 协议)
 - 灰度扩围:Anthropic 后端上 Core;子 Agent 上 Core;side-query 迁 Provider;`LegacySdkTextQueryService` 替换;dream.py 解除私有客户端读取。
 - **验收**:各能力单测+集成测试;两后端 × 新 TUI 手工矩阵;评审"`LION_CORE_RUNTIME` 默认开启"。
 
-### 阶段 5:清理(实现完成,待最终 Trellis check 与用户验收)
+### 阶段 5:清理(实现、Trellis check 与用户验收均完成)
 
 - `64e25b6`:Core/Provider 单路径、canonical history 与原子热切换。
 - `9e92d09`:删除 SDK 对话、旧压缩和旧查询路径。
@@ -348,7 +348,7 @@ tui → application → agent_runtime → core → (Provider 协议)
   矩阵 183 passed;全量 pytest 473 passed、6 skipped、6 subtests passed。
 - `compileall`、CLI help、依赖解析、产品禁止符号扫描、阶段范围 Ruff F 与
   `git diff --check` 通过。仓库没有项目级 mypy 配置;临时 mypy 诊断作为既有基线记录。
-  Trellis check 已完成,任务在用户验收前保持 `in_progress`。
+  Trellis check 已完成；用户于 2026-07-30 确认验收，任务进入归档。
 
 ---
 
