@@ -80,6 +80,34 @@ def validate_materialized_dataset_snapshot(
     dataset_jsonl: str | Path,
 ) -> None: ...
 
+def evaluate_regression_gate(
+    baseline: EvaluationReport,
+    candidate: EvaluationReport,
+    *,
+    declared_changes: Iterable[ChangeKind],
+    policy: RegressionGatePolicy | None = None,
+    waiver_reason: str | None = None,
+    calibration: CalibrationReport | None = None,
+) -> RegressionGateDecision: ...
+
+def classify_failure(
+    task_result: TaskResult,
+    trace_events: Sequence[TraceEvent],
+    *,
+    allowed_tool_names: Iterable[str] | None,
+    reproduction_command: str,
+    triage_owner: str | None = None,
+) -> FailureRecord: ...
+
+def admit_failure_to_regression(
+    triage: FailureTriage,
+    *,
+    source_task: TaskSpec,
+    feedback_task: TaskSpec,
+    active_holdout_task_ids: Iterable[str],
+    retired_holdout_task_ids: Iterable[str],
+) -> FeedbackAdmission: ...
+
 class ContainerBackend(Protocol):
     @property
     def available(self) -> bool: ...
@@ -157,6 +185,32 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   requires at least five unique frozen profiles: one baseline, at least three candidates, and
   one deliberately degraded profile; it accepts external validity only at Spearman rho >= .70
   and pairwise direction agreement >= 80%.
+- `evaluate_regression_gate` compares only two complete official reports with the same frozen
+  catalog ID/version/SHA/task IDs, seed, repeats, timeout, budget, platform, agent/verifier
+  image digests, evaluator code, resume state, and resource-related extensions. Model, provider,
+  thinking, permission, maximum turns, credential-variable names, and profile extensions must
+  also be equal. The only permitted profile differences are explicitly declared prompt,
+  compression, and tool-policy version changes; corresponding Agent code may change with them.
+- The V1 gate rejects a drop greater than 10 percentage points and unconditionally rejects a
+  three-task `3/3 -> 0/3` catastrophe. A waiver requires an explicit reason after comparability
+  succeeds. Only `reject && !merged` contributes to `RegressionGateLedger.intercepted_count`.
+  Missing tasks, unequal denominators, blocked/offline/invalid reports, or non-official results
+  are `invalid`, not a score delta.
+- A passed gate is `self_only` until an accepted external calibration both satisfies the five-profile
+  threshold and covers the baseline and candidate profile fingerprints. It may then be labelled
+  `external_calibrated`; no calibration or a non-covering calibration cannot support a
+  generalization claim.
+- `classify_failure` consumes only redacted `TraceEvent` metadata and emits candidate labels plus
+  event sequence offsets. Three consecutive identical tool/argument/workspace fingerprints are
+  `loop`; typed context/compaction signals are `context_decay`; a disallowed tool or typed
+  tool/permission error is `tool_misuse`; max-turn/cost, abort/cancel, or timeout signals are
+  `premature_termination`. A blocked, invalid, or offline result is `infrastructure` and has
+  precedence over Agent-behaviour labels.
+- Candidate labels are not final attribution. A feedback task can enter the next catalog only after
+  `FailureTriage` records reproduction and Agent responsibility, the failure is not deduplicated,
+  and the new task has a distinct active `regression` ID. If the source is holdout, it must be put
+  in the retired-holdout list and be absent from the next active holdout list. Do not mutate the
+  V1 historical corpus in place.
 - `TaskVerdict.PASSED` and `FAILED` require `official=True`, `validity=VALID`,
   a patch SHA, and a verifier outcome that agrees with the verdict. Only a
   backend with `supports_official_scores=True` may produce them.
@@ -182,6 +236,12 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 | Official model evaluator omits a stable ID, lacks a boolean `resolved`, or cannot resolve its image digest | external `invalid` report; no external success rate |
 | Dataset revision/file, evaluator revision, platform, selected IDs, or image digest differs | `ExternalAnchorDriftError`; reject baseline comparison/calibration |
 | Fewer than five calibration profiles, no degraded profile, or constant rank vector | `ExternalAnchorError` or non-accepted calibration; do not claim external validity |
+| Gate catalog/profile/resource invariants, frozen task/repeat coverage, or official denominators differ | `GateStatus.INVALID`; do not compute delta or count an interception |
+| Candidate falls below the V1 non-inferiority bound or changes `3/3` to `0/3` | `GateStatus.REJECT`; add one ledger interception only if it remains unmerged |
+| Candidate is comparable but needs an approved exception | `GateStatus.WAIVED` with a non-empty waiver reason |
+| Trace has a loop/context/tool/premature candidate | `FailureRecord` with only redacted metadata, stable signature, and evidence offsets; require human triage |
+| Blocked, invalid, or offline task is classified | `FailureMode.INFRASTRUCTURE`; do not attribute it to the Agent |
+| A reproduced Agent failure originated from holdout | retire the source ID before admitting a distinct regression feedback task |
 | `mcp_enabled=True` reaches `run_agent_worker` | Raise `ValueError`; a worker must not discover machine/project MCP servers |
 | Docker/backend unavailable | `TaskResult(verdict=blocked, validity=blocked, official=False)` |
 | Fake backend completes worker/verifier lifecycle | `TaskResult(verdict=blocked, validity=offline_only, official=False)` |
@@ -215,6 +275,16 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   after every remaining official report has an image digest.
 - Bad: treating a Docker-less fake result as an external failure/pass rate, keeping the raw
   prediction patch in a report, or comparing results after the evaluator image changed.
+- Good: a declared prompt-version candidate replays every frozen task and repeat under the same
+  evaluator, resources, images, model, and permissions; its complete official score stays within
+  the non-inferiority boundary before merge.
+- Bad: changing the model or task selection while claiming a prompt-only gate pass, or writing a
+  delta from blocked/offline results. Both are `invalid`, not successful experimentation.
+- Good: a repeated `read_file` call with identical argument and workspace digests is classified as
+  a loop candidate, then a reviewer reproduces it and records Agent responsibility before adding
+  a new regression task.
+- Bad: copying a holdout failure into regression while leaving the source task active in holdout,
+  or automatically treating a timeout/invalid verifier as an Agent failure.
 
 ## 6. Tests Required
 
@@ -235,6 +305,9 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   offline blocked behavior, three-run gold denominator, official result normalization,
   missing image invalidation, prediction-ID boundary, artifact redaction, environment drift,
   and five-profile calibration thresholds.
+- `tests/benchmarks/test_regression_feedback.py`: pass/reject/invalid/waived decisions,
+  deliberate `3/3 -> 0/3` ledger interception, self-only scope, four trace failure rules,
+  infrastructure priority, signature deduplication, and reviewed holdout-to-regression retirement.
 - Before handoff run focused evaluation tests, `python -m pytest -q`,
   `python -m compileall -q lion_code benchmarks tests`, and `git diff --check`.
 
@@ -306,4 +379,33 @@ report = run_external_anchor_evaluation(
 )
 if report.status is AnchorRunStatus.COMPLETED:
     require_comparable_external_reports(baseline, report)
+```
+
+### Wrong
+
+```python
+# Offline evidence is not an eligible gate score, and this silently leaks a holdout sample.
+candidate_rate = blocked_report.extensions["estimated_rate"]
+next_catalog.tasks += [holdout_failure_as_regression]
+```
+
+### Correct
+
+```python
+decision = evaluate_regression_gate(
+    baseline_report,
+    candidate_report,
+    declared_changes=(ChangeKind.PROMPT,),
+)
+if decision.gate.status is GateStatus.REJECT:
+    ledger = ledger.record(decision)
+
+admission = admit_failure_to_regression(
+    triage,
+    source_task=holdout_task,
+    feedback_task=next_catalog_regression_task,
+    active_holdout_task_ids=active_holdouts,
+    retired_holdout_task_ids=(holdout_task.task_id,),
+)
+assert holdout_task.task_id not in admission.active_holdout_task_ids_after_feedback
 ```

@@ -13,10 +13,10 @@
 
 ## Acceptance Criteria
 
-- [ ] 规则测试覆盖四类失败、基础设施隔离、判定状态和账本计数。
-- [ ] 一次故意劣化候选被 gate 拒绝并写入可审计 ledger。
-- [ ] 至少一条已复现失败通过审查后回流为 regression，且无法继续作为 holdout。
-- [ ] 未完成外部校准时，报告不会把 self-only gate 宣称为泛化质量证明。
+- [x] 规则测试覆盖四类失败、基础设施隔离、判定状态和账本计数。
+- [x] 一次故意劣化候选被 gate 拒绝并写入可审计 ledger。
+- [x] 至少一条已复现失败通过审查后回流为 regression，且无法继续作为 holdout。
+- [x] 未完成外部校准时，报告不会把 self-only gate 宣称为泛化质量证明。
 
 ## Dependency
 

@@ -413,7 +413,7 @@ class FailureMode(str, Enum):
 
 
 class FailureRecord(VersionedModel):
-    """失败回流子任务可复用的严格证据索引，暂不执行自动归因。"""
+    """受控规则可生成候选标签，但是否回流仍须经人工复现与审查。"""
 
     task_id: str = Field(min_length=1, max_length=128)
     attempt: int = Field(ge=1)
@@ -430,7 +430,7 @@ class FailureRecord(VersionedModel):
 
 
 class GateStatus(str, Enum):
-    """为后续 gate 子任务预留的可序列化状态。"""
+    """回归门禁的可序列化结论。"""
 
     PASS = "pass"
     REJECT = "reject"

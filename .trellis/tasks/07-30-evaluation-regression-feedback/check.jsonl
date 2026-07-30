@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/backend/agent-e2e-evaluation.md","reason":"Use the isolation and no-fabricated-score contract to review gate verdicts and failure feedback."}
+{"file":".trellis/tasks/07-30-evaluation-regression-feedback/design.md","reason":"Use the frozen comparability, catastrophe, calibration and holdout-retirement cases as acceptance checks."}

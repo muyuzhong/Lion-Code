@@ -3,7 +3,7 @@
   "name": "evaluation-regression-feedback",
   "title": "建立回归门禁与失败回流",
   "description": "实现配置差分门禁、拦截记账、失败分类和样本回流。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
