@@ -641,3 +641,24 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 16: 建立自建编码任务集与准入证据
+
+**Date**: 2026-07-31
+**Task**: 建立自建编码任务集与准入证据
+**Branch**: `master`
+
+### Summary
+
+基于 Lion 真实历史提交建立 30 条任务卡、18/12 split、冻结 catalog/lock 与三次 Git provenance 准入；明确历史回放不是官方语义成绩。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `67d0333` | (see git log) |
+
+### Status
+
+[OK] **Completed**
