@@ -1,6 +1,7 @@
 # Backend Development Guidelines
 
-> Best practices for backend development in this project.
+> Current Lion Code runtime development conventions. These files describe the
+> repository as it exists today, rather than a generic web-service architecture.
 
 ---
 
@@ -14,19 +15,19 @@ This directory contains guidelines for backend development. Fill in each file wi
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
+| [Directory Structure](./directory-structure.md) | Runtime module organization and file layout | Active |
+| [Database Guidelines](./database-guidelines.md) | Local JSONL persistence and legacy migration boundary | Active |
 | [Error Handling](./error-handling.md) | Error types, handling strategies | Active |
 | [TUI Interaction](./tui-interaction.md) | Input, completion, streaming, and frontend ownership contracts | Active |
 | [Runtime Boundaries](./runtime-boundaries.md) | Core/Provider, session persistence, and frontend ownership contracts | Active |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
+| [Quality Guidelines](./quality-guidelines.md) | Code standards, testing, and review checks | Active |
+| [Logging Guidelines](./logging-guidelines.md) | Event-based observability and terminal presentation | Active |
 
 ---
 
-## How to Fill These Guidelines
+## How to Use These Guidelines
 
-For each guideline file:
+When updating a guideline file:
 
 1. Document your project's **actual conventions** (not ideals)
 2. Include **code examples** from your codebase
