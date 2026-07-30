@@ -1,16 +1,17 @@
-"""离线评测 CLI；online/Docker 命令在 foundation 阶段明确拒绝执行。"""
+"""离线评测 CLI；真实容器运行仍必须通过显式的官方 runner。"""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from .backend import unavailable_backend_for_host
 from .catalog import load_catalog, load_catalog_lock, validate_catalog
 from .checkpoint import JsonCheckpointStore
+from .external_anchor import validate_bundled_external_anchor_manifest
 from .models import ExperimentManifest
 from .orchestrator import SingleTaskOrchestrator
 from .report import build_report, write_report
@@ -45,6 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="预留的真实容器入口；foundation 阶段始终 blocked",
     )
     online.add_argument("--manifest", type=Path, required=True)
+
+    anchor_validate = commands.add_parser(
+        "external-anchor-validate",
+        help="校验仓库内冻结的 SWE-bench-Live 外部锚点清单，不访问网络或 Docker",
+    )
+    anchor_validate.add_argument(
+        "--show-instance-ids",
+        action="store_true",
+        help="在受控 JSON 中输出冻结的 20 个 instance ID",
+    )
     return parser
 
 
@@ -82,6 +93,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         return 2
+    if args.command == "external-anchor-validate":
+        manifest = validate_bundled_external_anchor_manifest()
+        payload = {
+            "status": "valid",
+            "anchor_id": manifest.anchor_id,
+            "manifest_fingerprint": manifest.fingerprint(),
+            "dataset_revision": manifest.dataset_revision,
+            "evaluator_revision": manifest.evaluator_revision,
+            "instance_count": len(manifest.instances),
+        }
+        if args.show_instance_ids:
+            payload["instance_ids"] = manifest.instance_ids
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 0
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

@@ -5,7 +5,7 @@
 Apply this contract when adding a coding-Agent evaluation task, changing an
 evaluation manifest/result schema, wiring an Agent worker, or implementing a
 container backend. It also applies when adding a historical-replay task card or
-changing corpus admission evidence. The evaluation system is a separate orchestration boundary:
+changing corpus admission evidence, or adding a SWE-bench-Live external anchor. The evaluation system is a separate orchestration boundary:
 it reuses `Agent.run()` and typed Core events but must not create a second Agent
 history, session writer, provider path, or stdout-log parser.
 
@@ -41,6 +41,44 @@ def run_historical_preflight(
     repository_root: str | Path,
     repeats: int = 3,
 ) -> HistoricalPreflight: ...
+
+def run_gold_preflight(
+    manifest: ExternalAnchorManifest,
+    *,
+    runner: OfficialSWEbenchLiveRunner,
+    output_root: str | Path,
+    workers: int = 1,
+) -> GoldPreflightReport: ...
+
+def run_external_anchor_evaluation(
+    manifest: ExternalAnchorManifest,
+    *,
+    runner: OfficialSWEbenchLiveRunner,
+    prediction_path: str | Path,
+    output_root: str | Path,
+    workers: int = 1,
+) -> ExternalAnchorReport: ...
+
+def require_comparable_external_reports(
+    baseline: ExternalAnchorReport,
+    candidate: ExternalAnchorReport,
+) -> None: ...
+
+def calibrate_external_anchor(
+    points: Iterable[CalibrationPoint],
+) -> CalibrationReport: ...
+
+def write_materialized_dataset_snapshot(
+    manifest: ExternalAnchorManifest,
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    output_path: str | Path,
+) -> Path: ...
+
+def validate_materialized_dataset_snapshot(
+    manifest: ExternalAnchorManifest,
+    dataset_jsonl: str | Path,
+) -> None: ...
 
 class ContainerBackend(Protocol):
     @property
@@ -96,6 +134,29 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   differs from the gold tree and the Git binary diff is clean, hash-matched, and
   stable for exactly three repeats. It is not a semantic hidden-test pass and
   cannot yield an official score.
+- The V1 external anchor is a committed, Python-only `SWE-bench-Live/SWE-bench-Live`
+  `verified` manifest at one dataset revision and one evaluator revision. It has exactly 20
+  IDs: five per `difficulty.files` stratum (1, 2, 3--4, 5+) and no repeated repository.
+  The Agent never receives its gold patch, test patch, full dataset, evaluator checkout, or
+  output directory.
+- Official SWE-bench-Live scoring starts with exactly three official `gold` evaluator runs
+  per frozen instance. An instance enters this machine's denominator only when all three
+  records are completed and `resolved=true`. A gold failure, missing report, image failure,
+  or runner error is excluded/invalid infrastructure evidence, never a model failure.
+- `SubprocessOfficialSWEbenchLiveRunner` must call the frozen official entrypoint on Linux
+  with only frozen IDs and a host-controlled result directory. Because the official evaluator has
+  no dataset-revision argument, it must receive a host-materialized local JSONL of exactly the
+  frozen 20 full rows. Its canonical selected-row SHA-256 must match the manifest before every
+  run; passing the mutable Hugging Face dataset name directly is forbidden. `UnavailableOfficialSWEbenchLiveRunner`
+  and test fakes may prove lifecycle behavior only; they cannot create an external score.
+- A completed external report has an `ExternalAnchorEnvironment` containing the manifest,
+  dataset revision/file SHA, evaluator revision, platform, and a resolved image digest for
+  every denominator instance. If any digest is unavailable, the report is invalid and has no
+  `success_rate`.
+- Compare external success rates only after exact environment-fingerprint equality. Calibration
+  requires at least five unique frozen profiles: one baseline, at least three candidates, and
+  one deliberately degraded profile; it accepts external validity only at Spearman rho >= .70
+  and pairwise direction agreement >= 80%.
 - `TaskVerdict.PASSED` and `FAILED` require `official=True`, `validity=VALID`,
   a patch SHA, and a verifier outcome that agrees with the verdict. Only a
   backend with `supports_official_scores=True` may produce them.
@@ -114,6 +175,13 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 | Corpus has wrong family/split count, missing/private hash mismatch, or unstable evidence | `CorpusAdmissionError`; reject admission |
 | Feedback-derived task is in holdout, or base/gold commit occurs across splits | `CorpusAdmissionError`; preserve the original holdout boundary |
 | Historical commit is unavailable or its recomputed patch hash differs | `CorpusAdmissionError`; report blocked provenance rather than inventing gold evidence |
+| External manifest has not exactly 20 unique IDs, five per stratum, or unique repositories | `ExternalAnchorError`; reject before evaluator execution |
+| Docker daemon or frozen official evaluator checkout unavailable | external `blocked` report and blocked `TaskResult`s; no external success rate |
+| Local materialized JSONL is absent, not exactly 20 frozen IDs, or its canonical full-row SHA differs | `ExternalAnchorDriftError`; do not invoke the official evaluator against a mutable dataset name |
+| A gold preflight record is false, incomplete, missing, or errors | exclude that instance from the actual denominator; do not call it a model failure |
+| Official model evaluator omits a stable ID, lacks a boolean `resolved`, or cannot resolve its image digest | external `invalid` report; no external success rate |
+| Dataset revision/file, evaluator revision, platform, selected IDs, or image digest differs | `ExternalAnchorDriftError`; reject baseline comparison/calibration |
+| Fewer than five calibration profiles, no degraded profile, or constant rank vector | `ExternalAnchorError` or non-accepted calibration; do not claim external validity |
 | `mcp_enabled=True` reaches `run_agent_worker` | Raise `ValueError`; a worker must not discover machine/project MCP servers |
 | Docker/backend unavailable | `TaskResult(verdict=blocked, validity=blocked, official=False)` |
 | Fake backend completes worker/verifier lifecycle | `TaskResult(verdict=blocked, validity=offline_only, official=False)` |
@@ -142,6 +210,11 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 - Bad: copying the full historical catalog or `.git` object store into the
   Agent workspace; an adjacent task's public base can reveal another task's
   gold commit.
+- Good: the host runs `gold` three times through the official SWE-bench-Live evaluator,
+  drops one unstable instance from the denominator, and reports `passed / stable_count` only
+  after every remaining official report has an image digest.
+- Bad: treating a Docker-less fake result as an external failure/pass rate, keeping the raw
+  prediction patch in a report, or comparing results after the evaluator image changed.
 
 ## 6. Tests Required
 
@@ -158,6 +231,10 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 - `tests/benchmarks/test_corpus.py`: thirty-card quotas, public/private asset
   correspondence, feedback/holdout and commit-chain rejection, plus three-run
   provenance evidence for every bundled task.
+- `tests/benchmarks/test_external_anchor.py`: frozen 20-card stratification and fingerprint,
+  offline blocked behavior, three-run gold denominator, official result normalization,
+  missing image invalidation, prediction-ID boundary, artifact redaction, environment drift,
+  and five-profile calibration thresholds.
 - Before handoff run focused evaluation tests, `python -m pytest -q`,
   `python -m compileall -q lion_code benchmarks tests`, and `git diff --check`.
 
@@ -207,4 +284,26 @@ base_snapshot = export_base_tree(public_card.base_revision)
 provenance = run_historical_preflight(public_card, private_evidence, repo_root)
 assert provenance.stable
 # Keep the report offline until an isolated semantic verifier runs.
+```
+
+### Wrong
+
+```python
+# A current Hugging Face row order and a Docker tag are not a frozen external baseline.
+external_rate = fake_runner.score(live_dataset.sample(20))
+```
+
+### Correct
+
+```python
+gold = run_gold_preflight(manifest, runner=official_runner, output_root=host_results)
+assert gold.status is AnchorRunStatus.COMPLETED
+report = run_external_anchor_evaluation(
+    manifest,
+    runner=official_runner,
+    prediction_path=prediction_json,
+    output_root=host_results,
+)
+if report.status is AnchorRunStatus.COMPLETED:
+    require_comparable_external_reports(baseline, report)
 ```

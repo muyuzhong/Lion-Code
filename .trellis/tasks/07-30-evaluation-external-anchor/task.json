@@ -3,7 +3,7 @@
   "name": "evaluation-external-anchor",
   "title": "接入 SWE-bench-Live 外部锚点",
   "description": "实现锁定抽样、gold 稳定性预检、patch 评估与外部校准报告。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

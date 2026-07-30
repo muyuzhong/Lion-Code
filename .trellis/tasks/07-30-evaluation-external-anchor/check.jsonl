@@ -1,1 +1,3 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/backend/agent-e2e-evaluation.md","reason":"Verification must preserve the evaluation boundary and reject non-official external scores or environment drift."}
+{"file":".trellis/tasks/07-30-evaluation-external-anchor/design.md","reason":"Use the frozen input, denominator, reporting and calibration criteria as completion checks."}
+{"file":"docs/agent-e2e-external-anchor.md","reason":"Use the documented local snapshot and no-fabricated-score procedure when verifying the handoff."}

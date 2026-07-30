@@ -13,11 +13,16 @@
 
 ## Acceptance Criteria
 
-- [ ] Docker/数据集不可用时返回 blocked，绝不构造外部通过率。
-- [ ] 选择、gold 预检、实际 denominator、patch evaluator 输出均可复跑。
-- [ ] 报告给出外部通过率、区间、无效项、profile 指纹和校准结论。
-- [ ] 数据集/镜像/平台漂移阻止与旧 baseline 的错误比较。
+- [x] Docker/数据集不可用时返回 blocked，绝不构造外部通过率。
+- [x] 选择、gold 预检、实际 denominator、patch evaluator 输出均可复跑。
+- [x] 报告给出外部通过率、区间、无效项、profile 指纹和校准结论。
+- [x] 数据集/镜像/平台漂移阻止与旧 baseline 的错误比较。
 
 ## Dependency
 
 依赖 foundation；正式运行还依赖可用 Docker daemon 与显式预算/凭证。
+
+## 本机执行状态
+
+实现、静态清单与回归已完成；本机 Docker daemon 不可用，因此没有真实外部通过率。该状态由
+`UnavailableOfficialSWEbenchLiveRunner` 明确表示为 `blocked`，不是 0% 或失败结果。
