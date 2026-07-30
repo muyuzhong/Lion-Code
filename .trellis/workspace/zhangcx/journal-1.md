@@ -737,6 +737,7 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 |------|---------|
 | `2ddbf66` | 建立评测回归门禁与失败回流 |
 | `95d1b73` | chore(task): archive 07-30-evaluation-regression-feedback |
+| `fe72cf7` | chore(task): archive 07-30-coding-agent-evaluation-loop |
 
 ### Testing
 
@@ -748,4 +749,4 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 
 ### Status
 
-[OK] **Completed — 外部通过率仍保持 blocked，需受控 Linux Docker host 和批准预算后才可真实执行**
+[OK] **Completed — 编码 Agent 评测闭环父任务已归档；外部通过率仍保持 blocked，需受控 Linux Docker host 和批准预算后才可真实执行**
