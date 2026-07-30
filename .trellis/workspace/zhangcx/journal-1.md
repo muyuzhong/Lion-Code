@@ -599,3 +599,24 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 14: 补齐 Lion 后端开发规范
+
+**Date**: 2026-07-30
+**Task**: 补齐 Lion 后端开发规范
+**Branch**: `master`
+
+### Summary
+
+完成 Bootstrap Guidelines：以当前 Lion 代码为依据补齐后端规范、同步索引和任务验收，并通过任务、编译与差异检查。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `81d1cfd` | (see git log) |
+
+### Status
+
+[OK] **Completed**
