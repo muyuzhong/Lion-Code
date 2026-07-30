@@ -9,7 +9,7 @@
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
 - **Total Sessions**: 18
-- **Last Active**: 2026-07-30
+- **Last Active**: 2026-07-31
 <!-- @@@/auto:current-status -->
 
 ---
@@ -29,7 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 18 | 2026-07-30 | 建立评测回归门禁与失败回流 | `2ddbf66` | `master` |
+| 18 | 2026-07-31 | 建立评测回归门禁与失败回流 | `2ddbf66` | `master` |
 | 17 | 2026-07-30 | 建立 SWE-bench-Live 外部锚点评测 | `5a4b26f` | `master` |
 | 16 | 2026-07-31 | 建立自建编码任务集与准入证据 | `67d0333` | `master` |
 | 15 | 2026-07-31 | 建立编码 Agent 评测基础设施 | `8bc7673` | `master` |

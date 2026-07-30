@@ -715,7 +715,7 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 
 ## Session 18: 建立评测回归门禁与失败回流
 
-**Date**: 2026-07-30
+**Date**: 2026-07-31
 **Task**: 建立回归门禁与失败回流
 **Branch**: `master`
 
