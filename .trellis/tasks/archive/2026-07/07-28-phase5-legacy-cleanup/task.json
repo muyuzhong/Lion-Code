@@ -3,7 +3,7 @@
   "name": "phase5-legacy-cleanup",
   "title": "阶段5：移除 legacy 路径与 SDK 依赖",
   "description": "",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "zhangcx",
   "assignee": "zhangcx",
   "createdAt": "2026-07-28",
-  "completedAt": null,
+  "completedAt": "2026-07-30",
   "branch": null,
   "base_branch": "master",
   "worktree_path": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "切片1-5与最终Trellis check已完成，工作提交46f9dfe；等待推送与用户验收，任务保持in_progress。",
+  "notes": "切片1-5、最终Trellis check、远端同步与用户验收均已完成；2026-07-30归档。",
   "meta": {}
 }
