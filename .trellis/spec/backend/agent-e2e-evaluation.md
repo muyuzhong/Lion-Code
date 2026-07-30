@@ -4,7 +4,8 @@
 
 Apply this contract when adding a coding-Agent evaluation task, changing an
 evaluation manifest/result schema, wiring an Agent worker, or implementing a
-container backend. The evaluation system is a separate orchestration boundary:
+container backend. It also applies when adding a historical-replay task card or
+changing corpus admission evidence. The evaluation system is a separate orchestration boundary:
 it reuses `Agent.run()` and typed Core events but must not create a second Agent
 history, session writer, provider path, or stdout-log parser.
 
@@ -25,6 +26,21 @@ async def run_agent_worker(
     agent_factory: AgentFactory = Agent,
     trace_recorder: TraceRecorder | None = None,
 ) -> WorkerResult: ...
+
+def validate_corpus(
+    catalog: Catalog,
+    evidence: Mapping[str, PrivateEvidence],
+    *,
+    feedback_task_ids: Iterable[str] = (),
+) -> None: ...
+
+def run_historical_preflight(
+    task: TaskSpec,
+    evidence: PrivateEvidence,
+    *,
+    repository_root: str | Path,
+    repeats: int = 3,
+) -> HistoricalPreflight: ...
 
 class ContainerBackend(Protocol):
     @property
@@ -66,6 +82,20 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 - `IsolationReport.official_safe` requires workspaces that do not overlap in
   either direction and `private_assets_visible_to_agent=False`. Equal or nested
   Agent/verifier paths are unsafe because the Agent could read verifier files.
+- Historical-replay tasks must give the Agent only the selected public card and
+  a base-tree snapshot. Do not mount the evaluator repository, a full catalog,
+  or a `.git` object database that contains the gold commit; a normal worktree
+  from the source repository leaks future history even when verifier files are
+  elsewhere.
+- The V1 Lion historical corpus has exactly 30 active cards: ten
+  `cross_file_refactor`, ten `bugfix`, and ten `feature`; its split is 18
+  regression / 12 holdout. Public cards contain the base revision and gold patch
+  SHA-256 only. `PrivateEvidence.gold_revision` and provenance details remain on
+  the evaluator side and must agree with the public hash.
+- Historical `base=fail` / `gold=pass` is provenance language: the base tree
+  differs from the gold tree and the Git binary diff is clean, hash-matched, and
+  stable for exactly three repeats. It is not a semantic hidden-test pass and
+  cannot yield an official score.
 - `TaskVerdict.PASSED` and `FAILED` require `official=True`, `validity=VALID`,
   a patch SHA, and a verifier outcome that agrees with the verdict. Only a
   backend with `supports_official_scores=True` may produce them.
@@ -81,6 +111,9 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 |---|---|
 | Unknown top-level schema field or incompatible version | Pydantic validation error or `SchemaVersionError`; do not coerce it |
 | Catalog ID/hash/task selection mismatch | `CatalogValidationError`; do not run the task |
+| Corpus has wrong family/split count, missing/private hash mismatch, or unstable evidence | `CorpusAdmissionError`; reject admission |
+| Feedback-derived task is in holdout, or base/gold commit occurs across splits | `CorpusAdmissionError`; preserve the original holdout boundary |
+| Historical commit is unavailable or its recomputed patch hash differs | `CorpusAdmissionError`; report blocked provenance rather than inventing gold evidence |
 | `mcp_enabled=True` reaches `run_agent_worker` | Raise `ValueError`; a worker must not discover machine/project MCP servers |
 | Docker/backend unavailable | `TaskResult(verdict=blocked, validity=blocked, official=False)` |
 | Fake backend completes worker/verifier lifecycle | `TaskResult(verdict=blocked, validity=offline_only, official=False)` |
@@ -96,11 +129,19 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 - Base: the current offline command validates a frozen manifest and emits one
   blocked report without reading credentials, starting Docker, or claiming a
   success rate.
+- Good: the historical corpus sends one task's public card to an isolated base
+  snapshot, while `PrivateEvidence` checks its gold revision on the evaluator
+  host.
+- Base: a three-run Git provenance check proves a patch source is reproducible,
+  then records `fail/pass` only as provenance evidence.
 - Bad: treating two paths as isolated merely because their strings differ. A
   verifier directory inside the Agent workspace is still visible to the Agent.
 - Bad: using a host worktree plus `bypassPermissions` as an official run; the
   Agent can access paths outside the worktree and the verifier assets are not
   protected by a container boundary.
+- Bad: copying the full historical catalog or `.git` object store into the
+  Agent workspace; an adjacent task's public base can reveal another task's
+  gold commit.
 
 ## 6. Tests Required
 
@@ -112,8 +153,11 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   Core output is captured, and the JSONL session remains outside the task workspace.
 - `tests/benchmarks/test_trace.py`: secret/path/session/prompt redaction and loop
   fingerprint evidence.
-- `tests/benchmarks/test_cli.py`: the online command remains explicitly blocked
+- `tests/benchmarks/test_evaluation_cli.py`: the online command remains explicitly blocked
   and never emits `task_resolved`.
+- `tests/benchmarks/test_corpus.py`: thirty-card quotas, public/private asset
+  correspondence, feedback/holdout and commit-chain rejection, plus three-run
+  provenance evidence for every bundled task.
 - Before handoff run focused evaluation tests, `python -m pytest -q`,
   `python -m compileall -q lion_code benchmarks tests`, and `git diff --check`.
 
@@ -145,4 +189,22 @@ worker = await backend.run_agent(request)
 verifier = await backend.run_verifier(verifier_request)
 # Only a real container backend with supports_official_scores=True may write
 # passed/failed after the verifier outcome is available.
+```
+
+### Wrong
+
+```python
+# This publishes an implementation clue and treats provenance as a score.
+agent_workspace = source_repository_worktree
+report.official_score = score_from_historical_patch_hashes()
+```
+
+### Correct
+
+```python
+public_card = select_one_public_task(task_id)
+base_snapshot = export_base_tree(public_card.base_revision)
+provenance = run_historical_preflight(public_card, private_evidence, repo_root)
+assert provenance.stable
+# Keep the report offline until an isolated semantic verifier runs.
 ```

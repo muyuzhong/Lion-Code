@@ -3,7 +3,7 @@
   "name": "evaluation-task-corpus",
   "title": "构建自建端到端任务集",
   "description": "构建跨文件重构、缺陷修复和特性开发任务的任务卡、gold 验证与 split。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
