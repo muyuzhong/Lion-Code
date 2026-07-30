@@ -2,77 +2,83 @@
 
 ## Goal
 
-为 Lion 建立一个可复现、可归因的编码 Agent 评测闭环：自建跨文件任务衡量日常回归敏感度，SWE-bench-Live 抽样作为外部锚点校验自建分数的有效性；任何提示词、上下文压缩策略或工具能力变更都必须经过同一基线的回归判定；可复现实例化的失败轨迹要转化为后续评测样本。
+为 Lion 建立可复现、可归因、可持续校准的编码 Agent 评测闭环。它用自建跨文件任务保障日常变更质量，用 SWE-bench-Live 外部锚点检验自建分数是否真的反映泛化能力，并把被验证的失败轨迹转化为新的回归样本。
 
-成功不以预先填写的百分比包装，而以锁定受测配置后的真实基线 X、目标 Y、实际自建/外部样本数 N，以及可审计的拦截记录为准。
+## Approved Decisions
 
-## Confirmed Facts
+- 受测对象是 Lion 的当前生产 Agent 配置。每次运行从显式 profile 解析 model、provider、thinking、turn/cost 上限和工具策略，并把最终配置指纹写入实验清单；不在代码中固化某个 API Key、模型或供应商。
+- V1 自建 30 题：跨文件重构、缺陷修复、特性开发各 10 题。其中 18 题为 regression split，12 题为 holdout split。自建题每题 3 次 rollout，以多数结果决定该题通过。
+- V1 外部锚点为 20 条锁定的 SWE-bench-Live Python 实例。每条先执行 gold patch 三次，只有本机三次都有效的实例进入当次分母；首轮每题运行 1 次 Agent，方差或结论不稳定才扩展重复。
+- 首次完整锁定运行得到真实基线 X。成功目标为：不降低外部锚点表现、无灾难性回退时，使自建 holdout 成功率达到 Y 大于等于 X 加 10 个百分点。若外部校准否定自建集的预测力，优先修正评测集，不以追逐 Y 代替校准。
+- 在线运行必须由调用者显式传入正的预算上限和凭证环境变量；计划和结果都不保存密钥。实际预算不是实现阻塞项，而是每次付费执行的操作前置条件。
 
-- 当前仓库只有 benchmarks/context_management：它以 9 项仓库派生任务比较上下文压缩策略，能够保存 JSON/中文报告、预算、断点续跑和质量护栏，但它直接调用 OpenAI 兼容客户端，不执行完整 Lion Agent、隔离工作区、补丁验收或失败轨迹归因。
-- lion_code.agent.Agent.run() 已经提供非终端消费者可用的结构化结果：停止原因、轮次、耗时、token、缓存 token、近似成本和错误；产品运行时还具有 typed event 与 JSONL session 两条既有观测通道。新的评测诊断不能把 stdout 或 JSONL session 当成无约束日志。
-- 现有常规测试通过 fake provider/mock 保持确定性；真实在线调用只应在显式评测入口发生，现有 benchmark extra 也是惰性加载的。
-- SWE-bench-Live 官方评测以 Agent 产出的 git diff HEAD --text 为输入，并建议先用 gold patch 连续运行 3 次筛掉本机不稳定实例；实际分母应记录为当次环境中 gold patch 可通过的实例数。数据集会更新，因此必须记录数据集版本、抽样 seed、实例清单、平台和镜像信息。
+## Confirmed Constraints
+
+- 现有 benchmarks/context_management 是 9 项仓库派生的上下文压缩 A/B/C 基准，已具备 JSON/中文报告、checkpoint、预算和质量护栏；它直接调用 OpenAI 兼容客户端，不执行完整 Lion Agent、隔离工作区、补丁验收或失败归因。
+- Agent.run() 已提供 final text、stop reason、turns、耗时、token、缓存 token、近似成本和错误；Agent.core_runtime 可订阅 typed Core events。评测应使用这些边界，而非抓取 stdout 或把 JSONL session 当诊断日志。
+- Agent 的 ToolContext 当前取进程 cwd。Agent 在 bypassPermissions 下允许 shell 和文件工具，因此 Git worktree 只解决污染，不能保护 hidden verifier 或 host 文件。
+- Agent 已可接收独立 SessionRepository，因此评测 session 可以放到工作区之外，不污染待测 patch。
+- 当前工作站有 Python 3.13 与 Git worktree，但 Docker daemon 未启动。Docker 缺失必须使正式端到端/外部锚点运行以可解释的 blocked 状态退出，不能产生成绩。
 
 ## Requirements
 
 ### R1. 任务集与防泄漏
 
-- 自建任务必须覆盖三类端到端工作：跨文件重构、缺陷修复、特性开发；每题有固定基线提交、面向 Agent 的任务描述、独立工作区、隐藏验收命令、gold 修复/可追溯证据和难度/涉及文件标签。
-- 任务入库前必须证明“基线失败、gold 修复通过”，并记录依赖、环境、验收耗时和稳定性。已被用来修改提示词、压缩或工具实现的题进入 regression split，不得再作为报告任务成功率的 holdout。
-- 外部锚点从锁定版本的 SWE-bench-Live Python 数据集中按预先写入的分层规则和 seed 抽样；先 gold patch 三次预检，再以有效实例为分母。不得在查看 Agent 结果后替换题目。
+- 每条自建题必须包含固定 base revision、Agent 可见的任务说明、任务分类、公开 setup、独立工作区规则、私有 verifier/gold 证据、涉及文件和难度标签。
+- 入库前必须证明 base revision 失败、gold 修复通过，并记录环境、验收命令、耗时、稳定性和证据哈希。
+- 被用于提示词、压缩策略或工具修复的题自动进入 regression split，永远不能同时作为无偏 holdout。失败回流也遵循相同规则。
+- 外部锚点按版本、分层规则和 seed 在运行前冻结；不得看过候选结果后替换实例。
 
-### R2. 可复现实验
+### R2. 可复现实验与隔离
 
-- 每次运行生成不可变的 experiment manifest：Agent/model/provider 配置、prompt SHA、压缩策略版本、工具注册表/权限版本、代码提交、任务集版本、随机 seed、重试/超时/预算和运行平台。
-- 每个任务从干净的 Git worktree 或等价隔离环境启动；评测器只收集最终 patch、验收结果和受控轨迹，不允许一次任务污染下一次。
-- 主指标为隐藏验收通过的 task_resolved；同时报告 apply、测试前后状态、耗时、轮次、token/缓存/费用、stop reason、重试和无效实例数。基础设施/镜像/提供商故障必须单列，不能悄悄计为 Agent 失败。
+- 每次运行生成不可变 experiment manifest，至少含 agent/runtime/evaluator code SHA、catalog SHA、profile 指纹、任务选择、seed、重复、超时、预算、平台、镜像和实际有效分母。
+- 正式成绩只由容器化的 Agent workspace 与独立 verifier 产生。gold patch、hidden tests、宿主机结果目录和凭证不得挂载到 Agent 容器。
+- 评测捕获受控轨迹、最终 patch、验收输出和结构化 AgentRunResult。提供商、镜像、Docker 和 verifier 故障必须单列为 invalid 或 blocked，而不是计为 Agent 失败。
 
-### R3. 外部有效性校验
+### R3. 指标与外部有效性
 
-- 对一组预先定义的 Agent 配置变体（基线、候选改动和有意劣化的对照）同时运行自建 holdout 与外部锚点，比较配置排序和“提升/回退”方向的一致性，而不是把两套不同题目逐题硬配对。
-- 校验报告至少给出：两套任务集上的通过率及区间、变体排名相关性、方向一致率、显著分歧实例/轨迹，以及“自建评分是否足以预测外部锚点变化”的结论。若一致性不达预先锁定阈值，自建集只能作诊断集，不能单独作为合入门禁。
+- 主指标是 hidden verifier 通过的 task_resolved。辅助指标包括 patch apply、测试前后状态、耗时、轮次、token、缓存 token、费用、stop reason、重试和无效原因。
+- 用至少五个预注册配置变体（基线、三类受控变更、一个有意劣化对照）同时评估自建 holdout 与外部锚点，比较排名相关性和提升/回退方向一致率。
+- 校准阈值写入版本化 evaluation lock；V1 推荐 Spearman 相关系数不低于 0.70 且方向一致率不低于 80%。不足时，自建集只能用作诊断而不能单独构成合入门禁。
 
-### R4. 变更回归门禁
+### R4. 回归门禁
 
-- prompt、压缩策略和工具注册表/权限/执行策略的任何变更必须带配置指纹，并对冻结 regression split 与当前批准基线执行候选对照。
-- 门禁至少包含：主成功率的配对非劣判定、稳定成功任务的灾难性回退检查、关键安全/权限测试，以及运行可复现性检查。门禁拒绝、基础设施无效和人工豁免必须是三种不同状态。
-- “累计拦截次数”只计实际被门禁判为回退且未合入的候选变更，并保留对应基线/候选报告；不把执行故障或手工撤回误记为效果回退。
+- prompt、压缩、工具注册表、权限或执行策略变更必须声明其 profile 指纹，并对冻结 regression split 与批准基线进行同任务、同 seed、同资源限制的比较。
+- V1 门禁通过条件是：有效分母一致；不存在关键任务从基线 3/3 成功到候选 0/3 成功的灾难性回退；配对成功率下界不低于 evaluation lock 中的非劣界。建议初始非劣界为负 10 个百分点。
+- 结果状态必须区分 pass、reject、invalid 和 waived。累计拦截数只计 reject 且该候选未合入；invalid 和 waived 必须保留原因但不计为回退。
 
-### R5. 失败归因与样本回流
+### R5. 失败归因与回流
 
-- 对可重放的失败轨迹进行证据化归因，首批 taxonomy 为：死循环、上下文腐烂、工具误用、过早终止；允许“基础设施/提供商故障”和“待分类”作为非 Agent 行为的隔离状态。
-- 每条归因记录必须连接到配置指纹、事件/工具序列、关键上下文证据、最终 patch、验收输出、责任判断和复现命令。自动分类只能提出候选标签，入库需要可验证证据。
-- 经过复现、去重、基线/gold 校验和泄漏审查的失败，转为新的 regression 样本或保留为未来 holdout；同一失败不能既指导修复又继续充当无偏最终指标。
+- 首批 primary failure mode 为死循环、上下文腐烂、工具误用、过早终止；基础设施/提供商故障和待分类是隔离状态，不进入 Agent 失败率。
+- 自动规则只能提出候选标签；入库前必须有轨迹、最终 diff、验收输出和可复现命令支持的人工/规则复核。
+- 一条通过复现、去重、base/gold 校验与泄漏审查的失败，可以成为 regression 样本，或被隔离为未来 holdout；不能同时用于调优和无偏最终度量。
 
-## Proposed V1 Scope
+## Task Map
 
-- 建议先建立 30 条自建任务（每类 10 条；18 条 regression、12 条 holdout），并以 20 条经 gold 三次预检的 SWE-bench-Live Python 外部锚点完成首次校准。
-- 自建任务使用 3 次 rollout 并以多数结果判题；外部锚点先运行 1 次 Agent rollout 作为成本受控的首轮校准，只有在方差或结论不稳定时才扩展重复次数。
-- 首次锁定运行产生真实基线 X。建议目标写为：在未降低外部锚点通过率、未触发灾难性回退的条件下，使自建 holdout 成功率达到 Y 大于等于 X 加 10 个百分点；若外部校验显示自建集不能预测外部变化，则先修正任务集而不是追逐 Y。
-- 回归分为快速门禁（小而高信号的 regression 子集）和完整门禁（全部 regression split）；SWE-bench-Live 锚点用于每个基线版本/发布候选的校准审计，不应冒充每次小改动的低成本 CI。
+| Child task | Responsibility | Depends on | Completion evidence |
+|---|---|---|---|
+| 07-30-evaluation-foundation | 运行器、容器边界、数据契约、受控轨迹、报告骨架 | 无 | fake provider/假 Docker 的离线测试和契约校验 |
+| 07-30-evaluation-task-corpus | 30 条自建任务、gold/base 稳定性与 split 防泄漏 | foundation 的 catalog 契约 | 每题 base 失败/gold 通过证据与 catalog 校验 |
+| 07-30-evaluation-external-anchor | SWE-bench-Live 锁定抽样、gold 三次预检和外部校准 | foundation；Docker 可用时运行 | 可复跑 selection manifest、有效分母与校准报告 |
+| 07-30-evaluation-regression-feedback | 配置比较门禁、拦截账本、失败 taxonomy 与样本回流 | foundation、task corpus；校准后启用强制门禁 | 判定测试、failure evidence 和至少一次安全回流 |
 
-## Acceptance Criteria
+## Parent Acceptance Criteria
 
-- [ ] 自建、regression、holdout 与外部锚点的任务 manifest、版本和抽样规则可被独立复跑；每题都有基线失败/gold 通过证据。
-- [ ] 评测器能在干净隔离环境中跑完整 Lion Agent、收集 patch/验收/结构化运行结果/必要事件证据，并生成 JSON 与中文报告。
-- [ ] 报告能给出真实 N、X、Y、成本、有效分母、重复次数、置信区间和所有配置指纹；不会把不稳定实例或基础设施故障混入成功率。
-- [ ] 至少一次校准实验以多种配置变体对比自建 holdout 与 SWE-bench-Live 外部锚点，并明确判定自建评分的有效性边界。
-- [ ] 三类受控变更（prompt、压缩、工具）均可触发同一回归入口；被拒绝的候选会产生可审计的拦截记录。
-- [ ] 四类失败模式均有可执行归因格式；至少一条经验证失败可安全回流为新样本，且 split 防泄漏规则被测试。
+- [ ] 四个子任务分别产出可独立验证的实现和证据，并由父任务做一次端到端整合演练。
+- [ ] 自建 catalog 具有 30 条合格题和冻结的 18/12 split；所有题都能证明 base 失败与 gold 通过。
+- [ ] 外部锚点的 20 条实例、数据集版本、抽样 seed、gold 预检和实际有效分母均被记录；Docker 不可用时不会伪造结果。
+- [ ] 报告能同时展示 N、X、Y、成本、重复次数、置信区间、配置指纹、无效项和外部有效性结论。
+- [ ] prompt、压缩与工具变更可以经过同一 gate；reject 有可审计记录，且不会将运行基础设施错误误计为回退。
+- [ ] 四类 Agent 失败模式可复现、可归因、可回流，并有 split 防泄漏测试。
 
-## Scope Boundaries
+## Out of Scope
 
-In scope:
+- 为迎合基准修改 Lion 的业务行为，或将评测诊断写入用户 JSONL session。
+- V1 支持所有 SWE-bench-Live 语言、Windows 容器、分布式调度、自动训练或自动合并候选。
+- 将单轮小样本结果宣传为生产成功率或统计显著收益。
 
-- 以 Lion 作为受测 Agent，先覆盖 Python 仓库任务、Linux 容器/隔离工作区和现有 Agent/Core/Tool 运行时。
-- 新的评测代码、数据格式、报告和测试；必要时复用既有 benchmark 的预算、checkpoint、质量护栏和报告经验。
+## Risks and Deferred Items
 
-Out of scope:
-
-- 修改 Lion 生产 Agent 来迎合基准，或把诊断日志机制塞进产品 JSONL session。
-- 宣称 SWE-bench-Live 的分数等价于真实生产成功率，或用单次小样本构造统计显著结论。
-- 在 V1 同时支持全部语言、Windows 容器、分布式并发调度、自动训练或自动合并候选变更。
-
-## Open Decision
-
-首个评测基线卡需由项目所有者锁定：受测的 Agent/model/provider 配置与预算上限，并确认是否采用建议的 “30 条自建 + 20 条 SWE-bench-Live、目标为首测 X 后的 Y 大于等于 X 加 10 个百分点” 规模。这个决定直接决定外部容器成本、重复次数和门禁的统计精度。
+- Docker daemon 当前不可用；基础代码可用 mock/离线校验完成，但正式自建隔离运行与 SWE-bench-Live 校准必须在 Docker 可用的机器执行。
+- API 成本和模型波动通过显式 budget、checkpoint、有效分母和版本化 manifest 控制；没有运行凭证与预算时，在线命令必须拒绝启动。
+- 30 条高质量任务需要独立 curate，而不能从提交 diff 自动批量生成。自动抽题仅可辅助发现候选，不能替代 base/gold/泄漏审查。

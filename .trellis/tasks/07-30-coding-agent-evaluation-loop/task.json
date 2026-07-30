@@ -18,7 +18,12 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [],
+  "children": [
+    "07-30-evaluation-foundation",
+    "07-30-evaluation-task-corpus",
+    "07-30-evaluation-external-anchor",
+    "07-30-evaluation-regression-feedback"
+  ],
   "parent": null,
   "relatedFiles": [],
   "notes": "",
