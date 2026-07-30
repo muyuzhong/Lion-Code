@@ -662,3 +662,53 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 17: 建立 SWE-bench-Live 外部锚点评测
+
+**Date**: 2026-07-30
+**Task**: 接入 SWE-bench-Live 外部锚点
+**Branch**: `master`
+
+### Summary
+
+冻结 20 条 Python-only SWE-bench-Live `verified` 外部锚点，建立三次 gold patch 预检、
+官方 evaluator adapter、实际分母/区间报告、环境漂移拒绝与五 profile 校准。发现官方
+evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的本地 materialized JSONL，
+避免把可变 Hugging Face dataset 名称误作冻结输入。本机 Docker daemon 不可用，因此未生成
+或伪造任何外部通过率。
+
+### Main Changes
+
+- `external_anchor_assets/` 固定数据 revision、verified 文件 SHA、20 条 instance ID、分层
+  规则、evaluator revision 与完整 selected-row canonical SHA-256。
+- 官方 runner 对每题 gold 连跑三次；只有三次 `resolved=true` 的题目进入实际分母。
+- 统一输出 `TaskResult` / `ExternalAnchorReport`，记录摘要、镜像 digest、Wilson 95% 区间；
+  Docker、JSONL、镜像或官方结果异常一律 `blocked`/`invalid`，无成功率。
+- 比较前严格校验数据/evaluator/platform/选择/镜像环境指纹；校准要求 baseline、三候选和
+  故意退化 profile，阈值为 Spearman >= 0.70、方向一致率 >= 80%。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5a4b26f` | 建立 SWE-bench-Live 外部锚点评测 |
+| `829eebb` | chore(task): archive 07-30-evaluation-external-anchor |
+
+### Testing
+
+- [OK] 远端冻结 snapshot 的 500 行与确定性抽样交叉校验：仍得到相同 20 条锚点。
+- [OK] `tests/benchmarks`：36 passed；外部锚点专项：12 passed。
+- [OK] 新增路径 Ruff、compileall、`git diff --check` 与离线 manifest CLI 通过。
+- [OK] 全量 pytest：509 passed、6 skipped、6 subtests passed。
+- [INFO] 仍有既有 Windows GBK spinner 线程警告；与本任务无关。
+
+### Status
+
+[OK] **Completed — actual external score remains blocked until a controlled Linux Docker host and approved model budget are available**
+
+### Next Steps
+
+- 在受控 Linux Docker host materialize 并校验 20 行 JSONL，checkout 固定官方 evaluator，
+  再执行 gold 预检和五 profile 校准。
+- 继续父任务的回归门禁与失败回流子任务；任何 prompt、压缩或工具变更先走该外部锚点可比性检查。
