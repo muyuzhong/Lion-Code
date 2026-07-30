@@ -620,3 +620,24 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 15: 建立编码 Agent 评测基础设施
+
+**Date**: 2026-07-31
+**Task**: 建立编码 Agent 评测基础设施
+**Branch**: `master`
+
+### Summary
+
+新增离线评测契约、隔离生命周期、MCP 禁用 seam、受控轨迹与回归测试；真实 Docker 路径保持 blocked。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8bc7673` | (see git log) |
+
+### Status
+
+[OK] **Completed**
