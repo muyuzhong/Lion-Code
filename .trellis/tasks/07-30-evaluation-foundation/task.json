@@ -3,7 +3,7 @@
   "name": "evaluation-foundation",
   "title": "实现评测运行器与轨迹协议",
   "description": "实现隔离工作区、Agent 执行适配、patch 验收、实验清单和受控轨迹。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

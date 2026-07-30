@@ -224,6 +224,7 @@ class Agent:
         model_limits_resolver: ModelLimitsResolver | None = None,
         is_sub_agent: bool = False,
         terminal_output: bool = True,
+        mcp_enabled: bool = True,
     ):
         self.permission_mode = permission_mode
         self.thinking = thinking
@@ -231,6 +232,8 @@ class Agent:
         self.use_openai = bool(api_base)
         self.is_sub_agent = is_sub_agent
         self._terminal_output = terminal_output
+        # 评测根 Agent 必须阻止机器级 MCP 发现；默认值保留 CLI/TUI 语义。
+        self._mcp_enabled = mcp_enabled
         self._notice_fn: Callable[[str, Literal["info", "error"]], None] | None = None
         self._api_key = api_key or os.environ.get(
             "OPENAI_API_KEY" if self.use_openai else "ANTHROPIC_API_KEY",
@@ -433,6 +436,11 @@ class Agent:
     def core_runtime(self) -> LionAgentRuntime:
         """返回供应用会话层订阅事件与读取消息快照的 Core Runtime。"""
         return self._core_runtime
+
+    @property
+    def mcp_enabled(self) -> bool:
+        """返回当前根 Agent 是否允许首次对话时发现 MCP 工具。"""
+        return self._mcp_enabled
 
     def _build_core_memory_query_service(self):
         """构建绑定当前 Core Provider 的文本查询服务。"""
@@ -1092,7 +1100,8 @@ class Agent:
     async def chat(self, user_message: str) -> None:
         # 只允许根环境在首次对话时发现 MCP；子 Agent 直接复用父 Registry 中的适配器。
         if (
-            not self._mcp_initialized
+            self._mcp_enabled
+            and not self._mcp_initialized
             and not self.is_sub_agent
             and self.tool_environment.owns_mcp_manager
         ):

@@ -1,1 +1,3 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Agent/Core、会话持久化与前端观察器的既有边界；评测只能在这些边界外编排。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"受控 trace 必须订阅 typed event，不能建立 stdout 或 JSONL 日志旁路。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"评测底座需要 fake provider、聚焦测试和完整仓库验证。"}
