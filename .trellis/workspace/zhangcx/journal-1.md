@@ -712,3 +712,40 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 - 在受控 Linux Docker host materialize 并校验 20 行 JSONL，checkout 固定官方 evaluator，
   再执行 gold 预检和五 profile 校准。
 - 继续父任务的回归门禁与失败回流子任务；任何 prompt、压缩或工具变更先走该外部锚点可比性检查。
+
+## Session 18: 建立评测回归门禁与失败回流
+
+**Date**: 2026-07-30
+**Task**: 建立回归门禁与失败回流
+**Branch**: `master`
+
+### Summary
+
+完成 prompt、压缩和工具策略变更的正式回归门禁，建立未合入拒绝项的累计拦截账本；将受控轨迹的失败候选、人工复现/责任审查与下一版 regression 任务回流连成防泄漏闭环。
+
+### Main Changes
+
+- `evaluate_regression_gate()` 严格比较冻结 catalog、任务/repeat、资源、模型和运行环境；只有显式声明的 prompt、compression、tool-policy 版本差异可比较。
+- V1 使用 -10pp 非劣边界和 `3/3 -> 0/3` 灾难回退拒绝；`invalid` 不计算 delta，`waived` 必须提供原因，`reject && !merged` 才计入拦截账本。
+- 无覆盖 baseline/candidate 的有效外部校准时结论为 `self_only`；满足五 profile、相关性、方向一致性并覆盖两边 profile 后才标为 `external_calibrated`。
+- 基于脱敏 `TraceEvent` 分类 loop、context_decay、tool_misuse、premature_termination；blocked/invalid/offline 统一优先归为 infrastructure。
+- 只有已复现、Agent 责任且未去重的失败能进入下一版 regression；来源 holdout 必须 retire，不能继续留在 active holdout。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2ddbf66` | 建立评测回归门禁与失败回流 |
+| `95d1b73` | chore(task): archive 07-30-evaluation-regression-feedback |
+
+### Testing
+
+- [OK] 回归门禁专项：pass/reject/invalid/waived、故意 `3/3 -> 0/3` 劣化账本、self-only 与外部校准范围通过。
+- [OK] 四类失败、基础设施优先级、签名去重和 holdout retire 回流测试通过。
+- [OK] 新增路径 Ruff、compileall、`git diff --check` 及 Trellis task validate 通过。
+- [OK] 全量 pytest：512 passed、6 skipped、6 subtests passed。
+- [INFO] 仍有既有 Windows GBK spinner 线程警告；与本任务无关。
+
+### Status
+
+[OK] **Completed — 外部通过率仍保持 blocked，需受控 Linux Docker host 和批准预算后才可真实执行**
