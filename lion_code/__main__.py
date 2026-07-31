@@ -9,10 +9,23 @@ import signal
 import sys
 
 from .agent import Agent
+from .application.session import LionCodingSession
 from .config import load_api_config
-from .ui import print_welcome, print_user_prompt, print_error, print_info, print_plan_for_approval, print_plan_approval_options
 from .memory import list_memories
-from .skills import discover_skills, resolve_skill_prompt, get_skill_by_name, execute_skill
+from .skills import (
+    discover_skills,
+    execute_skill,
+    get_skill_by_name,
+    resolve_skill_prompt,
+)
+from .ui import (
+    print_error,
+    print_info,
+    print_plan_approval_options,
+    print_plan_for_approval,
+    print_user_prompt,
+    print_welcome,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -88,6 +101,7 @@ async def run_repl(agent: Agent) -> None:
                 print("  Invalid choice. Enter 1, 2, 3, or 4.")
 
     agent.set_plan_approval_fn(plan_approval_fn)
+    command_session = LionCodingSession(agent, terminal_output=True)
 
     sigint_count = 0
 
@@ -132,6 +146,20 @@ async def run_repl(agent: Agent) -> None:
             print("\nBye!\n")
             break
 
+        if inp.startswith("/"):
+            command_result = command_session.handle_command(inp)
+            command_name = inp[1:].split(" ", 1)[0].lower()
+            if command_name in {"task", "session-memory", "handoff", "dream"}:
+                try:
+                    message = await command_session.execute_session_memory_command(
+                        command_result
+                    )
+                    if message:
+                        print_info(message)
+                except Exception as error:  # noqa: BLE001 - REPL 需保留交互循环并显示命令失败。
+                    print_error(str(error))
+                continue
+
         # 内置 REPL 命令在普通对话前分发，避免被误送给模型。
         if inp == "/clear":
             await agent.clear_history()
@@ -147,12 +175,6 @@ async def run_repl(agent: Agent) -> None:
                 await agent.compact()
             except Exception as e:
                 print_error(str(e))
-            continue
-        if inp == "/dream":
-            try:
-                print_info(await agent.dream())
-            except Exception as e:
-                print_error(f"Dream failed: {e}")
             continue
         if inp == "/learn":
             try:
@@ -259,7 +281,12 @@ REPL commands:
   /plan               Toggle plan mode (read-only <-> normal)
   /cost               Show token usage and cost
   /compact            Manually compact conversation
-  /dream              Consolidate recent project sessions into durable Memory
+  /task               Show the active project task
+  /task switch <text> Switch the active project task
+  /task done          Finish the active project task
+  /session-memory     Show project Session Memory
+  /handoff            Save a project handoff summary
+  /dream              Consolidate restricted candidates into Auto Memory
   /learn              Distill this session into a reusable Skill when worthwhile
   /goal <condition>   Pursue a goal across turns until an evaluator judges it met
   /goal               Show the active goal's status

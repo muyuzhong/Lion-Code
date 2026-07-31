@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .memory import build_memory_prompt_section
+from .project_identity import ProjectIdentity, resolve_project_identity
 from .skills import build_skill_descriptions
 from .subagent import build_agent_descriptions
 
@@ -161,28 +162,59 @@ def _load_rules_dir(directory: Path) -> str:
         return ""
 
 
-def load_claude_md() -> str:
-    """从 cwd 向上收集 CLAUDE.md，并解析其中的 @include。"""
-    parts: list[str] = []
-    d = Path.cwd().resolve()
-    while True:
-        f = d / "CLAUDE.md"
-        if f.is_file():
+def load_project_context_files(
+    *,
+    cwd: Path | None = None,
+    identity: ProjectIdentity | None = None,
+) -> tuple[ProjectContextFile, ...]:
+    """按项目根到当前目录加载 CLAUDE.md 与 AGENTS.md。
+
+    同一目录中 AGENTS.md 位于 CLAUDE.md 之后，子目录也位于父目录之后，
+    因此后出现的更具体规则拥有更高优先级。
+    """
+
+    current_cwd = (cwd or Path.cwd()).resolve()
+    project = identity or resolve_project_identity(current_cwd)
+    try:
+        relative = current_cwd.relative_to(project.root)
+    except ValueError:
+        directories = (current_cwd,)
+    else:
+        chain = [project.root]
+        directory = project.root
+        for part in relative.parts:
+            directory = directory / part
+            chain.append(directory)
+        directories = tuple(chain)
+
+    files: list[ProjectContextFile] = []
+    for directory in directories:
+        for filename in ("CLAUDE.md", "AGENTS.md"):
+            path = directory / filename
+            if not path.is_file():
+                continue
             try:
-                content = f.read_text()
-                content = _resolve_includes(content, d)
-                parts.insert(0, content)
+                files.append(ProjectContextFile(
+                    path=str(path),
+                    content=_resolve_includes(path.read_text(), directory),
+                ))
             except Exception:
                 pass
-        parent = d.parent
-        if parent == d:
-            break
-        d = parent
+    return tuple(files)
+
+
+def load_claude_md() -> str:
+    """兼容入口：返回当前项目的 CLAUDE.md、AGENTS.md 与局部 rules。"""
+
+    parts = [
+        f"## {Path(item.path).name}\n{item.content}"
+        for item in load_project_context_files()
+    ]
     # rules 只读取当前项目，避免向上遍历时意外继承其他项目的局部规则。
     rules = _load_rules_dir(Path.cwd())
     claude_md = ""
     if parts:
-        claude_md = "\n\n# Project Instructions (CLAUDE.md)\n" + "\n\n---\n\n".join(parts)
+        claude_md = "\n\n# Project Instructions\n" + "\n\n---\n\n".join(parts)
     return claude_md + rules
 
 
@@ -205,8 +237,8 @@ def get_git_context() -> str:
 
 # ─── 前缀缓存的静态/动态边界 ─────────────────────────────────
 # 静态模板在用户和会话之间完全一致，适合作为 cache_control 前缀；环境、Git、Memory
-# 和 Skill 会随项目变化，因此放在动态尾部。CLAUDE.md 与日期再由
-# build_user_context_reminder 注入首条用户消息，避免项目内容破坏系统提示词缓存共享。
+# 和 Skill 会随项目变化，因此放在动态尾部。项目指令由 Agent 的临时 Provider
+# Overlay 注入，不进入系统提示或 canonical Session。
 
 
 def build_static_system_prompt() -> str:
@@ -247,26 +279,6 @@ def build_dynamic_system_context(
         f"Platform: {plat}\n"
         f"Shell: {shell}"
         f"{git_context}{memory_section}{skills_section}{agent_section}{deferred_section}"
-    )
-
-
-def build_user_context_reminder() -> str:
-    """把 CLAUDE.md 与日期包装为 `<system-reminder>`，供首条用户消息注入。
-
-    项目内容若进入静态系统块会切碎前缀缓存，因此必须留在缓存边界之外。
-    """
-    from datetime import date
-    today = date.today().isoformat()
-    claude_md = load_claude_md()
-    claude_md_section = f"\n{claude_md}\n" if claude_md else ""
-    return (
-        "<system-reminder>\n"
-        "As you answer the user's questions, you can use the following context:"
-        f"{claude_md_section}\n"
-        "# currentDate\n"
-        f"Today's date is {today}.\n\n"
-        "IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n"
-        "</system-reminder>"
     )
 
 

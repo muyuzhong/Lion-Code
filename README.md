@@ -500,7 +500,12 @@ lion-code --repl                                       # 纯文本 REPL
 | `/plan` | 切换 Plan 模式（只读分析） |
 | `/cost` | 查看 Token 使用量和费用 |
 | `/compact` | 手动压缩当前对话 |
-| `/dream` | 整合当前 Memory 与最近 5 个项目 Session |
+| `/task` | 查看当前项目的目标、活动任务与下一步 |
+| `/task switch <内容>` | 切换活动任务，并把旧任务保留为待继续事项 |
+| `/task done` | 结束活动任务，保留完成摘要并准备受限长期候选 |
+| `/session-memory` | 查看当前项目的跨会话短期工作状态 |
+| `/handoff` | 生成并保存下一 Session 可继续的交接摘要 |
+| `/dream` | 将受限候选与最近项目 Session 整理为 Auto Memory |
 | `/learn` | 判断并沉淀当前会话中的可复用经验 |
 | `/memory` | 查看已保存的 Memory |
 | `/skills` | 查看可用 Skill |
@@ -508,6 +513,11 @@ lion-code --repl                                       # 纯文本 REPL
 | `/loop <任务>` | 按间隔或模型自定时重复任务 |
 | `/<skill-name>` | 调用一个用户可执行 Skill |
 | `exit` / `quit` | 退出程序 |
+
+项目上下文按 `AGENTS.md`（兼容 `CLAUDE.md`）→ Session Memory → Auto Memory 的优先级
+临时投影给 Provider；不会写入 canonical 对话或 JSONL。`/clear` 只开启新对话，保留当前
+项目或 worktree 的 Session Memory；`/dream` 只接收稳定偏好、明确反馈、已验证决策及原因、
+可复用失败经验和外部引用等候选，不能自动改写 `AGENTS.md`。
 
 ### TUI（Textual）
 

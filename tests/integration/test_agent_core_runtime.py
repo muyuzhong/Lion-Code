@@ -14,16 +14,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from core.fakes import FakeProvider
+
 from lion_code.agent import Agent
 from lion_code.context import SUMMARY_SYSTEM_PROMPT
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
+from lion_code.project_identity import resolve_project_identity
 from lion_code.providers import RuntimeModelLimits
+from lion_code.session_memory import SessionMemoryRepository
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
-
-from core.fakes import FakeProvider
 
 
 class _LimitsFakeProvider(FakeProvider):
@@ -155,8 +157,19 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self._temp_dir = tempfile.TemporaryDirectory()
         self._session_repository = SessionRepository(Path(self._temp_dir.name))
+        self._session_memory_repository = SessionMemoryRepository(
+            resolve_project_identity(),
+            storage_dir=Path(self._temp_dir.name) / "session-memory",
+        )
+        self._session_memory_semantics = patch.object(
+            Agent,
+            "_extract_session_memory_semantics",
+            new=AsyncMock(return_value={}),
+        )
+        self._session_memory_semantics.start()
 
     def tearDown(self) -> None:
+        self._session_memory_semantics.stop()
         self._temp_dir.cleanup()
 
     def _make_agent(
@@ -173,6 +186,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 tool_registry=registry,
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                session_memory_repository=self._session_memory_repository,
                 terminal_output=False,
                 **agent_kwargs,
             )
@@ -191,6 +205,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 tool_registry=registry,
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                session_memory_repository=self._session_memory_repository,
                 terminal_output=False,
             )
         agent._mcp_initialized = True
@@ -225,6 +240,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 api_key="test-key",
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                session_memory_repository=self._session_memory_repository,
                 terminal_output=False,
             )
         agent._mcp_initialized = True
@@ -395,15 +411,17 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             [message.text for message in fake.received_messages[2][:-1]],
             ["first question", "first answer"],
         )
+        projected = [message.text for message in fake.received_messages[3]]
         self.assertEqual(
-            [message.text for message in fake.received_messages[3]],
+            projected[:3],
             [
                 "Previous conversation summary:\ncondensed context",
                 "second question",
                 "second answer",
-                "third question",
             ],
         )
+        self.assertTrue(projected[3].startswith("third question\n\n<relevant-memory>"))
+        self.assertIn("<session-memory>", projected[3])
 
         state = await self._session_repository.load(agent.session_id)
         self.assertEqual(len(state.compaction_entries), 1)
@@ -516,10 +534,10 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             [session_path],
         )
         self.assertEqual(list(self._session_repository.session_dir.glob("*.json")), [])
-        self.assertEqual(
-            [message.text for message in fake.received_messages[0]],
-            ["first question", "first answer", "second question"],
-        )
+        projected = [message.text for message in fake.received_messages[0]]
+        self.assertEqual(projected[:2], ["first question", "first answer"])
+        self.assertTrue(projected[2].startswith("second question\n\n<relevant-memory>"))
+        self.assertIn("<session-memory>", projected[2])
         state = await self._session_repository.load(session_id)
         self.assertEqual(
             [message.text for message in state.messages],
@@ -688,6 +706,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 api_key="test-key",
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                session_memory_repository=self._session_memory_repository,
                 terminal_output=False,
             )
         agent._mcp_initialized = True
@@ -839,6 +858,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 tool_registry=ToolRegistry(),
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                session_memory_repository=self._session_memory_repository,
                 terminal_output=False,
             )
         agent._mcp_initialized = True
@@ -909,6 +929,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 api_key="test-key",
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                session_memory_repository=self._session_memory_repository,
                 terminal_output=False,
             )
             agent._mcp_initialized = True

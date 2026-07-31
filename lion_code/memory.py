@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import re
 import time
@@ -15,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .frontmatter import parse_frontmatter
+from .project_identity import ProjectIdentity, project_storage_dir, resolve_project_identity
 
 # sideQuery 使用独立模型调用，签名为 async (system, user_message) -> str。
 from typing import Callable
@@ -41,18 +41,22 @@ class MemoryEntry:
 # ─── 存储路径 ───────────────────────────────────────────────
 
 
-def _project_hash() -> str:
-    return hashlib.sha256(str(Path.cwd()).encode()).hexdigest()[:16]
+def _project_hash(identity: ProjectIdentity | None = None) -> str:
+    """返回当前 Git worktree 或规范 cwd 的稳定项目键。"""
+
+    return (identity or resolve_project_identity()).key
 
 
-def get_memory_dir() -> Path:
-    d = Path.home() / ".lion-code" / "projects" / _project_hash() / "memory"
+def get_memory_dir(identity: ProjectIdentity | None = None) -> Path:
+    """返回当前项目的 Auto Memory 目录。"""
+
+    d = project_storage_dir(identity) / "memory"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def _get_index_path() -> Path:
-    return get_memory_dir() / "MEMORY.md"
+def _get_index_path(identity: ProjectIdentity | None = None) -> Path:
+    return get_memory_dir(identity) / "MEMORY.md"
 
 
 # ─── 增删改查 ───────────────────────────────────────────────
@@ -97,8 +101,8 @@ def _update_memory_index(memory_dir: Path | None = None) -> None:
     (d / "MEMORY.md").write_text("\n".join(lines), encoding="utf-8")
 
 
-def load_memory_index() -> str:
-    index_path = _get_index_path()
+def load_memory_index(identity: ProjectIdentity | None = None) -> str:
+    index_path = _get_index_path(identity)
     if not index_path.exists():
         return ""
     content = index_path.read_text(encoding="utf-8", errors="replace")
@@ -319,14 +323,14 @@ def build_memory_prompt_section() -> str:
     index = load_memory_index()
     memory_dir = str(get_memory_dir())
 
-    return f"""# Memory System
+    return f"""# Auto Memory
 
 You have a persistent, file-based memory system at `{memory_dir}`.
 
 ## Memory Types
 - **user**: User's role, preferences, knowledge level
 - **feedback**: Corrections and guidance from the user (include Why + How to apply)
-- **project**: Ongoing work, goals, deadlines, decisions
+- **project**: Long-lived, verified project decisions and their reasons
 - **reference**: Pointers to external resources (URLs, tools, dashboards)
 
 ## How to Save Memories
@@ -347,7 +351,8 @@ Filename format: `{{type}}_{{slugified_name}}.md`
 The MEMORY.md index is auto-updated when you write to the memory directory — do NOT update it manually.
 
 ## What NOT to Save
-- Code patterns or architecture (read the code instead)
+- Current work, goals, deadlines, pending tasks, or next steps
+- Unverified architecture claims or temporary test failures
 - Git history (use git log)
 - Anything already in CLAUDE.md
 - Ephemeral task details
