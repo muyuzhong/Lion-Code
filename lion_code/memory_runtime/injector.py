@@ -18,6 +18,8 @@ from lion_code.memory_runtime.types import (
     MemoryOverlay,
 )
 
+_SOURCE_PRIORITY = {"project": 0, "session": 1, "auto": 2}
+
 
 class MemoryContextInjector:
     """在不修改输入消息的前提下派生带 Memory 的临时投影。"""
@@ -44,15 +46,25 @@ class MemoryContextInjector:
         selected: list[MemoryOverlay] = []
         skipped: list[str] = []
         selected_bytes = 0
+        auto_bytes = 0
+        auto_count = 0
         seen_paths: set[str] = set()
-        for overlay in overlays:
+        ordered = sorted(
+            enumerate(overlays),
+            key=lambda pair: (_SOURCE_PRIORITY[pair[1].source], pair[0]),
+        )
+        for _, overlay in ordered:
             if overlay.path in seen_paths:
                 skipped.append(overlay.path)
                 continue
             seen_paths.add(overlay.path)
+            if overlay.required or overlay.source in {"project", "session"}:
+                selected.append(overlay)
+                selected_bytes += overlay.byte_size
+                continue
             if (
-                len(selected) >= self.policy.max_active_memories
-                or selected_bytes + overlay.byte_size
+                auto_count >= self.policy.max_active_memories
+                or auto_bytes + overlay.byte_size
                 > self.policy.max_injection_bytes
             ):
                 skipped.append(overlay.path)
@@ -66,6 +78,8 @@ class MemoryContextInjector:
                 continue
             selected.append(overlay)
             selected_bytes += overlay.byte_size
+            auto_bytes += overlay.byte_size
+            auto_count += 1
 
         return self._apply(projected, selected), MemoryInjectionReport(
             injected_paths=tuple(item.path for item in selected),
@@ -90,11 +104,17 @@ class MemoryContextInjector:
 
     @staticmethod
     def _format(overlays: Sequence[MemoryOverlay]) -> str:
-        rows = [
-            "<relevant-memory>",
-            *(f"## {item.path}\n{item.content}" for item in overlays),
-            "</relevant-memory>",
-        ]
+        rows = ["<relevant-memory>"]
+        for source in ("project", "session", "auto"):
+            items = [item for item in overlays if item.source == source]
+            if not items:
+                continue
+            rows.extend([
+                f"<{source}-memory>",
+                *(f"## {item.path}\n{item.content}" for item in items),
+                f"</{source}-memory>",
+            ])
+        rows.append("</relevant-memory>")
         return "\n\n".join(rows)
 
     @staticmethod

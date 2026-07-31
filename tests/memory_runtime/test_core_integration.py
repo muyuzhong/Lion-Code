@@ -13,6 +13,7 @@ from lion_code.core import AssistantMessage, TextContent, ToolCall
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantMessageEvent
 from lion_code.memory import MemoryPrefetch, RelevantMemory
 from lion_code.memory_runtime import MemoryCoordinator, MemoryOverlay
+from lion_code.prompt import ProjectContextFile
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
@@ -88,10 +89,15 @@ def _make_agent(
     tmp_path: Path,
     events: list[AssistantDoneEvent],
     registry: ToolRegistry | None = None,
+    project_context: tuple[ProjectContextFile, ...] = (),
 ) -> tuple[Agent, FakeProvider, SessionRepository]:
     fake = FakeProvider(events)
     repository = SessionRepository(tmp_path)
     monkeypatch.setattr("lion_code.agent.create_provider", lambda **_kwargs: fake)
+    monkeypatch.setattr(
+        "lion_code.agent.load_project_context_files",
+        lambda **_kwargs: project_context,
+    )
     agent = Agent(
         api_base="https://example.test/v1",
         api_key="test-key",
@@ -123,6 +129,31 @@ async def test_overlay_reaches_provider_but_not_harness_or_jsonl(
         encoding="utf-8"
     )
     assert agent._last_memory_injection.injected_paths == ("project.md",)
+    await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_project_overlay_reaches_provider_but_not_harness_or_jsonl(
+    monkeypatch, tmp_path
+) -> None:
+    context = (ProjectContextFile("C:/repo/AGENTS.md", "run focused tests"),)
+    agent, fake, repository = _make_agent(
+        monkeypatch,
+        tmp_path,
+        [_stop_event()],
+        project_context=context,
+    )
+
+    await agent.chat("question")
+
+    provider_text = fake.received_messages[0][-1].text
+    assert "<project-memory>" in provider_text
+    assert "run focused tests" in provider_text
+    assert all("<relevant-memory>" not in message.text for message in agent._core_runtime.messages)
+    state = await repository.load(agent.session_id)
+    assert state is not None
+    assert all("<relevant-memory>" not in message.text for message in state.messages)
+    assert agent._last_memory_injection.injected_paths == ("C:/repo/AGENTS.md",)
     await agent.close()
 
 

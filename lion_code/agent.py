@@ -43,6 +43,7 @@ from .memory_runtime import (
     MemoryContextInjector,
     MemoryCoordinator,
     MemoryInjectionReport,
+    MemoryOverlay,
     ProviderTextQueryService,
 )
 from .providers.oneshot import complete_text
@@ -83,9 +84,10 @@ from .session_runtime import (
 from .prompt import (
     build_dynamic_system_context,
     build_static_system_prompt,
-    build_user_context_reminder,
     load_claude_md,
+    load_project_context_files,
 )
+from .project_identity import resolve_project_identity
 from .skills import create_skill
 from .subagent import get_sub_agent_config
 from .hooks import load_pre_tool_use_hooks
@@ -330,6 +332,21 @@ class Agent:
             confirmed_paths=self._confirmed_paths,
             cancellation_fn=lambda: self._aborted,
         )
+        self._project_identity = resolve_project_identity(self.tool_context.cwd)
+        self._project_context_files = load_project_context_files(
+            cwd=self.tool_context.cwd,
+            identity=self._project_identity,
+        )
+        self._project_memory_overlays = tuple(
+            MemoryOverlay(
+                path=item.path,
+                content=item.content,
+                byte_size=len(item.content.encode("utf-8")),
+                source="project",
+                required=True,
+            )
+            for item in self._project_context_files
+        )
         self._permission_policy = PermissionPolicy(cwd=self.tool_context.cwd)
         self._result_store = ResultStore()
         self.tool_runtime = ToolRuntime(
@@ -358,10 +375,8 @@ class Agent:
         self._mcp_manager = self.tool_environment.mcp_manager
         self._mcp_initialized = False
 
-        # 系统提示词按前缀缓存拆成静态核心和动态尾部。自定义提示词整体视为静态；
-        # 默认路径则把环境、Git、Skill 放在动态尾部，并把 CLAUDE.md 与日期作为
-        # reminder 注入首条用户消息，尽量提高跨项目的缓存复用率。
-        self._user_context_reminder = ""
+        # 系统提示词按前缀缓存拆成静态核心和动态尾部。项目指令改由 Provider
+        # Overlay 注入，既不破坏缓存边界，也不污染 canonical Session history。
         if custom_system_prompt:
             self._static_system_prompt = custom_system_prompt
             self._dynamic_system_context = ""
@@ -370,7 +385,6 @@ class Agent:
             self._dynamic_system_context = build_dynamic_system_context(
                 self.tool_registry.deferred_tool_names()
             )
-            self._user_context_reminder = build_user_context_reminder()
         self._base_system_prompt = (
             self._static_system_prompt + "\n\n" + self._dynamic_system_context
             if self._dynamic_system_context else self._static_system_prompt
@@ -467,7 +481,10 @@ class Agent:
         )
         projected, memory_report = self._memory_injector.inject(
             prepared.messages,
-            self._memory_coordinator.active_overlays,
+            (
+                *self._project_memory_overlays,
+                *self._memory_coordinator.active_overlays,
+            ),
             max_tokens=state.effective_window_tokens,
         )
         self._last_context_actions = prepared.actions
