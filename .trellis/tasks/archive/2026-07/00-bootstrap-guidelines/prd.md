@@ -21,8 +21,8 @@ the rest conversationally.
 
 ## Status (update the checkboxes as you complete each item)
 
-- [ ] Fill backend guidelines
-- [ ] Add code examples
+- [x] Fill backend guidelines
+- [x] Add code examples
 
 ---
 
@@ -97,6 +97,9 @@ is a separate conversation, not a bootstrap concern.
 - The platform hook auto-injects those spec files + the task's `prd.md`
   into every sub-agent prompt, so the sub-agent codes/reviews per team
   conventions without anyone pasting them manually.
+- This bootstrap task is intentionally the exception: it has no context
+  manifests because its purpose is to create the specs that normal coding
+  tasks will load.
 - Source of truth: `.trellis/spec/`. That's why filling it well now pays
   off forever.
 

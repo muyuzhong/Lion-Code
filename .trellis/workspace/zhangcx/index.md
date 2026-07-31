@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
-- **Last Active**: 2026-07-30
+- **Total Sessions**: 18
+- **Last Active**: 2026-07-31
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~601 | Active |
+| `journal-1.md` | ~750 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,11 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-07-31 | 建立评测回归门禁与失败回流 | `2ddbf66` | `master` |
+| 17 | 2026-07-30 | 建立 SWE-bench-Live 外部锚点评测 | `5a4b26f` | `master` |
+| 16 | 2026-07-31 | 建立自建编码任务集与准入证据 | `67d0333` | `master` |
+| 15 | 2026-07-31 | 建立编码 Agent 评测基础设施 | `8bc7673` | `master` |
+| 14 | 2026-07-30 | 补齐 Lion 后端开发规范 | `81d1cfd` | `master` |
 | 13 | 2026-07-30 | 完成并归档阶段5迁移 | `cbc0195` | `master` |
 | 12 | 2026-07-28 | 阶段5暂停：完成 Core Provider 单路径 | `8e8071a`, `563121f`, `64e25b6` | `master` |
 | 11 | 2026-07-28 | 阶段4完成：TUI 真机验收与流式修复 | `f82959e`, `fa24b1d`, `b802bf1` | `master` |

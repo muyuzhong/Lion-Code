@@ -1,80 +1,87 @@
 # Error Handling
 
-> Executable error and recovery contracts used by Lion's backend runtime.
+> Lion represents expected runtime failures as typed Core/application events or
+> structured tool results.  Catch at the boundary that can make an informed
+> recovery decision; do not hide a programming or orchestration failure behind an
+> unrelated UI message.
 
-## Scenario: Core context overflow recovery
+## Current error channels
 
-### 1. Scope / Trigger
+| Boundary | Expected failure representation | Current example |
+|---|---|---|
+| Tool execution | `ToolResult(content=..., is_error=True)` | `lion_code/tooling/runtime.py::ToolRuntime.execute` returns this for unknown tools and caught tool/middleware exceptions. |
+| Permission / hook / freshness policy | Structured error `ToolResult`, not an exception to the model loop | `lion_code/tooling/middleware.py` returns denial, confirmation, hook and read-freshness results with `is_error=True`. |
+| Provider/model run | Canonical `AssistantMessage(stop_reason="error", error_message=...)` and related Core events | `lion_code/core/messages.py` defines the canonical error fields; `TerminalRenderer` renders the resulting event. |
+| Application stream | Forward the mapped event; unstructured run exceptions propagate after queue cleanup | `lion_code/application/session.py::LionCodingSession._drive`. |
+| CLI / REPL process edge | Catch, present with `ui.print_error`, and exit or continue as that interface requires | `lion_code/__main__.py` catches command/action exceptions at the REPL and `main()` boundary. |
 
-This contract applies when the Core provider ends a run with a canonical
-`AssistantMessage(stop_reason="error")` whose `error_message` identifies a
-context/input/token-length overflow. Provider transport retries and the legacy
-SDK loop are outside this contract.
+## Rules for new code
 
-### 2. Signatures
+- Return a structured `ToolResult(is_error=True)` for an expected tool failure,
+  permission refusal, cancellation, invalid hook outcome, or failed middleware
+  operation.  The Core loop can then report the result back to the model and the
+  frontend can render the same outcome.
+- Use the canonical assistant error fields/events for provider outcomes.  Do not
+  create a parallel provider-specific error history or print directly from a
+  provider implementation.
+- Catch narrow operational errors where behavior is deliberately different.  For
+  example, `SessionRepository.list_sessions()` skips one unreadable or invalid
+  session, while a direct session load is allowed to surface the error.
+- A broad catch is justified only at an existing containment boundary: the tool
+  runtime converts arbitrary tool failures to a structured result, and the CLI
+  top level converts an uncaught process failure to terminal output.  Do not copy
+  `except Exception` into ordinary business logic just to keep execution going.
+- Preserve cancellation semantics.  `asyncio.CancelledError` is handled
+  separately during overflow compaction; do not turn it into a successful retry.
 
-- `Agent.compact_core_context_for_overflow() -> Awaitable[bool]`
-- `LionCodingSession._drive(run) -> AsyncIterator[LionSessionEvent]`
-- `SessionAgentEndEvent.will_retry: bool`
-- `CompactionEndEvent(aborted, will_retry, error_message)`
-- `AutoRetryEndEvent(success, attempt, final_error)`
+## Context-overflow recovery (current application contract)
 
-### 3. Contracts
-
-The success path emits this order exactly:
+`LionCodingSession._drive()` recognizes only a canonical terminal assistant error
+whose message identifies a context/input/token-length overflow.  It may run one
+recovery attempt, in this order:
 
 ```text
 SessionAgentEnd(will_retry=True)
-→ CompactionStart(reason="overflow")
-→ CompactionEnd(aborted=False, will_retry=True)
-→ AutoRetryStart(attempt=1, max_attempts=1, delay_ms=0)
-→ retry Core events
-→ SessionAgentEnd(will_retry=False)
-→ AutoRetryEnd
-→ AgentSettled
+-> CompactionStart(reason="overflow")
+-> CompactionEnd(aborted=False, will_retry=True)
+-> AutoRetryStart(attempt=1, max_attempts=1, delay_ms=0)
+-> retry Core events
+-> SessionAgentEnd(will_retry=False)
+-> AutoRetryEnd
+-> AgentSettled
 ```
 
-Recovery reuses the current `LionAgentRuntime.continue_()` and append-only
-`SessionRecorder`. It preserves the latest successful user turn plus the failed
-prompt, while the original overflow Assistant error remains in durable history.
-At most one automatic retry is allowed.
+- A quota or generic service error does not enter this recovery path.
+- If compaction has no safe old context, raises, or is cancelled, emit a terminal
+  `CompactionEndEvent(..., will_retry=False)` and do not retry.
+- If the retry fails or aborts, emit one `AutoRetryEndEvent(success=False, ...)`;
+  never loop automatically.
+- If the underlying run itself raises unexpectedly, `_drive()` drains/cleans up
+  its queue and propagates the exception.  It does not pretend the run settled.
 
-### 4. Validation & Error Matrix
+## Presentation and persistence
 
-| Condition | Required result |
-|---|---|
-| Context/input/token-length marker | Start overflow recovery |
-| Generic quota or service error | Do not compact or retry |
-| No older context can be safely replaced | `CompactionEnd(aborted=True, will_retry=False)` |
-| Compactor raises | Same terminal event with `error_message` |
-| User cancels during compaction | Cancel summary task; do not retry |
-| Retry returns `error` or `aborted` | `AutoRetryEnd(success=False)`; do not loop |
-| Unstructured run exception | Preserve `_drive` behavior: propagate; do not emit Settled |
+- `lion_code/observers/terminal.py::TerminalRenderer.handle` renders assistant
+  errors and `ToolExecutionEndEvent(is_error=True)` through `ui.print_error`.
+  It renders; it does not decide policy or retry.
+- `SessionRecorder.handle` persists completed `MessageEndEvent` messages only.
+  Incremental render events are not durable history, so do not rely on them for
+  post-failure recovery.
 
-### 5. Good / Base / Bad Cases
+## Representative tests
 
-- Good: old history is summarized, recent context survives, one continuation
-  succeeds, and the session settles.
-- Base: a normal provider error produces the ordinary Agent end and Settled only.
-- Bad: broad matching such as `"exceeded the limit"` treats RPM quota failures as
-  context overflow; repeated recovery loops can burn requests indefinitely.
+- `tests/integration/test_core_tool_runtime.py` verifies a middleware denial
+  returns a structured error through the Core tool loop.
+- `tests/runtime/test_terminal_renderer.py` verifies tool and assistant errors
+  are presented as terminal errors.
+- `tests/application/test_coding_session.py` covers application event order,
+  overflow compaction, cancellation and the one-retry limit.
 
-### 6. Tests Required
+## Avoid
 
-`tests/application/test_coding_session.py` must assert:
-
-- the exact application-event order and `will_retry` values;
-- the retry provider context and durable `CompactionEntry`;
-- no compaction without replaceable old context;
-- compaction failure and cancellation terminal behavior;
-- one retry only, including retry failure;
-- generic service/quota errors do not enter overflow recovery.
-
-### 7. Wrong vs Correct
-
-Wrong: emit `AgentSettled` after the first Core `AgentEnd`, then start a separate
-retry loop or infer overflow from any message containing `"limit"`.
-
-Correct: keep `_drive` running, classify only canonical Assistant errors with
-context/input/token-length markers, reuse the same Core runtime and recorder,
-then emit one final `AgentSettled` after recovery reaches a terminal state.
+- Do not raise a normal policy refusal through the whole Agent stack when it can
+  be a `ToolResult(is_error=True)`.
+- Do not infer overflow from any generic word such as `limit`; quota and service
+  failures must remain ordinary terminal provider errors.
+- Do not emit `AgentSettled` before a deliberate retry reaches a terminal state,
+  or after an unstructured run exception.
