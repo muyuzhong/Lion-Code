@@ -97,27 +97,77 @@ def _make_agent(
 ) -> tuple[Agent, FakeProvider, SessionRepository]:
     fake = FakeProvider(events)
     repository = SessionRepository(tmp_path)
+    identity = project_identity or ProjectIdentity(
+        root=tmp_path.resolve(),
+        key=f"test-{tmp_path.name}",
+        is_git=False,
+    )
+    memory_repository = session_memory_repository or SessionMemoryRepository(
+        identity,
+        storage_dir=tmp_path / "session-memory",
+    )
     monkeypatch.setattr("lion_code.agent.create_provider", lambda **_kwargs: fake)
     monkeypatch.setattr(
         "lion_code.agent.load_project_context_files",
         lambda **_kwargs: project_context,
     )
-    if project_identity is not None:
-        monkeypatch.setattr(
-            "lion_code.agent.resolve_project_identity",
-            lambda _cwd: project_identity,
-        )
+    monkeypatch.setattr(
+        "lion_code.agent.resolve_project_identity",
+        lambda _cwd: identity,
+    )
     agent = Agent(
         api_base="https://example.test/v1",
         api_key="test-key",
         custom_system_prompt="test",
         tool_registry=registry or ToolRegistry(),
         session_repository=repository,
-        session_memory_repository=session_memory_repository,
+        session_memory_repository=memory_repository,
+        terminal_output=False,
     )
+
+    async def no_semantic_patch(*_args, **_kwargs) -> dict[str, object]:
+        return {}
+
+    monkeypatch.setattr(agent, "_extract_session_memory_semantics", no_semantic_patch)
     agent._mcp_initialized = True
     agent._memory_coordinator = MemoryCoordinator(query_service=None)
     return agent, fake, repository
+
+
+def _result_tool(name: str, content: str, *, is_error: bool = False) -> LionTool:
+    async def execute(_ctx, _id, _arguments, _on_update):
+        return ToolResult(content=content, is_error=is_error)
+
+    return LionTool(
+        name=name,
+        label=name,
+        description=name,
+        parameters={"type": "object"},
+        execute_fn=execute,
+        capabilities=ToolCapabilities(read_only=True),
+    )
+
+
+def _evidence_tool_event() -> AssistantDoneEvent:
+    return AssistantDoneEvent(
+        reason="toolUse",
+        message=AssistantMessage(
+            model="fake",
+            content=[
+                ToolCall(
+                    id="write",
+                    name="write_file",
+                    arguments={"file_path": "lion_code/session_memory.py"},
+                ),
+                ToolCall(
+                    id="test",
+                    name="run_shell",
+                    arguments={"command": "python -m pytest -q"},
+                ),
+            ],
+            stop_reason="toolUse",
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -138,7 +188,10 @@ async def test_overlay_reaches_provider_but_not_harness_or_jsonl(
     assert "<relevant-memory>" not in repository.storage_for(agent.session_id).path.read_text(
         encoding="utf-8"
     )
-    assert agent._last_memory_injection.injected_paths == ("project.md",)
+    assert agent._last_memory_injection.injected_paths == (
+        str(agent._session_memory_repository.path),
+        "project.md",
+    )
     await agent.close()
 
 
@@ -158,12 +211,16 @@ async def test_project_overlay_reaches_provider_but_not_harness_or_jsonl(
 
     provider_text = fake.received_messages[0][-1].text
     assert "<project-memory>" in provider_text
+    assert "<session-memory>" in provider_text
     assert "run focused tests" in provider_text
     assert all("<relevant-memory>" not in message.text for message in agent._core_runtime.messages)
     state = await repository.load(agent.session_id)
     assert state is not None
     assert all("<relevant-memory>" not in message.text for message in state.messages)
-    assert agent._last_memory_injection.injected_paths == ("C:/repo/AGENTS.md",)
+    assert agent._last_memory_injection.injected_paths == (
+        "C:/repo/AGENTS.md",
+        str(agent._session_memory_repository.path),
+    )
     await agent.close()
 
 
@@ -197,13 +254,14 @@ async def test_clear_and_restore_keep_current_project_session_memory(
 
     assert agent.session_memory == saved
     await agent.chat("first question")
+    saved_after_turn = agent.session_memory
     await agent.clear_history()
 
     assert agent.session_id != first_session_id
-    assert agent.session_memory == saved
-    assert memory_repository.load() == saved
+    assert agent.session_memory == saved_after_turn
+    assert memory_repository.load() == saved_after_turn
     assert await agent.restore_core_session(first_session_id)
-    assert agent.session_memory == saved
+    assert agent.session_memory == saved_after_turn
     await agent.close()
 
 
@@ -240,7 +298,82 @@ async def test_corrupt_session_memory_stays_visible_without_clear_overwrite(
 
 
 @pytest.mark.asyncio
-async def test_current_turn_prefetch_is_visible_on_second_model_call(
+async def test_turn_end_merges_tool_evidence_before_semantic_patch(
+    monkeypatch, tmp_path
+) -> None:
+    registry = ToolRegistry()
+    registry.register(_result_tool("write_file", "Successfully wrote file"))
+    registry.register(
+        _result_tool("run_shell", "Command failed (exit code 1)")
+    )
+    agent, _, _ = _make_agent(
+        monkeypatch,
+        tmp_path,
+        [_evidence_tool_event(), _stop_event()],
+        registry,
+    )
+
+    async def semantic_patch(*_args, **_kwargs) -> dict[str, object]:
+        return {
+            "currentGoal": "完成短期记忆",
+            "activeTask": "记录工具事实",
+            "pending": ["运行完整回归"],
+            "relevantFiles": ["model-invented.py"],
+            "verification": ["model-invented verification"],
+        }
+
+    monkeypatch.setattr(agent, "_extract_session_memory_semantics", semantic_patch)
+
+    await agent.chat("记录这轮进展")
+
+    assert agent.session_memory is not None
+    assert agent.session_memory.relevant_files == ("lion_code/session_memory.py",)
+    assert agent.session_memory.verification == ("python -m pytest -q: failed",)
+    assert any(
+        item.startswith("run_shell failed:")
+        for item in agent.session_memory.blockers
+    )
+    assert agent.session_memory.current_goal == "完成短期记忆"
+    assert agent.session_memory.active_task == "记录工具事实"
+    assert agent.session_memory.pending == ("运行完整回归",)
+    await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_semantic_patch_failure_still_saves_tool_evidence(
+    monkeypatch, tmp_path
+) -> None:
+    registry = ToolRegistry()
+    registry.register(_result_tool("write_file", "Successfully wrote file"))
+    registry.register(
+        _result_tool("run_shell", "Command failed (exit code 1)")
+    )
+    agent, _, _ = _make_agent(
+        monkeypatch,
+        tmp_path,
+        [_evidence_tool_event(), _stop_event()],
+        registry,
+    )
+
+    async def unavailable_semantic_patch(*_args, **_kwargs) -> dict[str, object]:
+        raise RuntimeError("semantic memory unavailable")
+
+    monkeypatch.setattr(
+        agent,
+        "_extract_session_memory_semantics",
+        unavailable_semantic_patch,
+    )
+
+    await agent.chat("记录这轮进展")
+
+    assert agent.session_memory is not None
+    assert agent.session_memory.relevant_files == ("lion_code/session_memory.py",)
+    assert agent.session_memory.verification == ("python -m pytest -q: failed",)
+    await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_current_turn_prefetch_waits_until_next_user_turn_and_snapshot_is_fixed(
     monkeypatch, tmp_path
 ) -> None:
     registry = ToolRegistry()
@@ -248,7 +381,7 @@ async def test_current_turn_prefetch_is_visible_on_second_model_call(
     agent, fake, _ = _make_agent(
         monkeypatch,
         tmp_path,
-        [_tool_event(), _stop_event()],
+        [_tool_event(), _stop_event(), _stop_event("next turn")],
         registry,
     )
     agent._memory_coordinator = MemoryCoordinator(query_service=_QueryService())
@@ -264,12 +397,17 @@ async def test_current_turn_prefetch_is_visible_on_second_model_call(
 
     await agent.chat("current question")
 
-    assert "<relevant-memory>" not in "".join(
-        message.text for message in fake.received_messages[0]
-    )
-    assert "<relevant-memory>" in "".join(
-        message.text for message in fake.received_messages[1]
-    )
+    first_overlay = fake.received_messages[0][-1].text
+    second_overlay = fake.received_messages[1][-1].text
+    first_overlay = first_overlay[first_overlay.index("<relevant-memory>"):]
+    second_overlay = second_overlay[second_overlay.index("<relevant-memory>"):]
+    assert first_overlay == second_overlay
+    assert "<auto-memory>" not in first_overlay
+
+    await agent.chat("next question")
+
+    assert "<auto-memory>" in fake.received_messages[2][-1].text
+    assert "current memory" in fake.received_messages[2][-1].text
     assert all("<relevant-memory>" not in message.text for message in agent._core_runtime.messages)
     await agent.close()
 

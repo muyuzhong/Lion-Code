@@ -6,11 +6,15 @@ from pathlib import Path
 import pytest
 
 from lion_code import session_memory as session_memory_module
+from lion_code.core.messages import AssistantMessage, ToolCall, ToolResultMessage
 from lion_code.project_identity import ProjectIdentity
 from lion_code.session_memory import (
     SessionMemory,
     SessionMemoryError,
     SessionMemoryRepository,
+    apply_semantic_patch,
+    apply_tool_evidence,
+    extract_tool_evidence,
 )
 
 
@@ -79,3 +83,87 @@ def test_corrupt_session_memory_is_reported_without_overwriting_file(tmp_path) -
         repository.load()
 
     assert repository.path.read_bytes() == original
+
+
+def test_tool_evidence_updates_files_verification_and_blockers_only_from_events(
+    tmp_path,
+) -> None:
+    identity = _identity(tmp_path / "repo", "project")
+    calls = AssistantMessage(
+        model="test",
+        stop_reason="toolUse",
+        content=[
+            ToolCall(
+                id="write",
+                name="write_file",
+                arguments={"file_path": "lion_code/session_memory.py"},
+            ),
+            ToolCall(
+                id="read",
+                name="read_file",
+                arguments={"file_path": "tests/test_session_memory.py"},
+            ),
+            ToolCall(
+                id="test",
+                name="run_shell",
+                arguments={"command": "python -m pytest -q"},
+            ),
+            ToolCall(
+                id="lint",
+                name="run_shell",
+                arguments={"command": "python -m ruff check lion_code"},
+            ),
+            ToolCall(
+                id="failed-edit",
+                name="edit_file",
+                arguments={"file_path": "broken.py"},
+            ),
+        ],
+    )
+    results = [
+        ToolResultMessage(tool_call_id="write", tool_name="write_file", content="ok"),
+        ToolResultMessage(tool_call_id="read", tool_name="read_file", content="ok"),
+        ToolResultMessage(
+            tool_call_id="test",
+            tool_name="run_shell",
+            content="Command failed (exit code 1)",
+        ),
+        ToolResultMessage(
+            tool_call_id="lint",
+            tool_name="run_shell",
+            content="All checks passed!",
+        ),
+        ToolResultMessage(
+            tool_call_id="failed-edit",
+            tool_name="edit_file",
+            content="Error editing file: no match",
+            is_error=True,
+        ),
+    ]
+
+    evidence = extract_tool_evidence([calls, *results])
+    updated = apply_tool_evidence(SessionMemory.empty(identity.root), evidence)
+    semantic = apply_semantic_patch(
+        updated,
+        {
+            "currentGoal": "完成短期记忆",
+            "activeTask": "固定快照",
+            "pending": ["运行回归"],
+            "relevantFiles": ["model-invented.py"],
+            "verification": ["model-invented verification"],
+        },
+    )
+
+    assert semantic.relevant_files == (
+        "lion_code/session_memory.py",
+        "tests/test_session_memory.py",
+    )
+    assert semantic.verification == (
+        "python -m pytest -q: failed",
+        "python -m ruff check lion_code: passed",
+    )
+    assert any(item.startswith("run_shell failed:") for item in semantic.blockers)
+    assert any(item.startswith("edit_file failed:") for item in semantic.blockers)
+    assert semantic.current_goal == "完成短期记忆"
+    assert semantic.active_task == "固定快照"
+    assert semantic.pending == ("运行回归",)

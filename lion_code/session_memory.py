@@ -5,11 +5,18 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from lion_code.core.messages import (
+    AgentMessage,
+    AssistantMessage,
+    ToolCall,
+    ToolResultMessage,
+)
 from lion_code.project_identity import (
     ProjectIdentity,
     project_storage_dir,
@@ -97,6 +104,22 @@ class SessionMemory:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class SessionMemoryEvidence:
+    """从 canonical 工具消息确定性提取的短期状态事实。"""
+
+    relevant_files: tuple[str, ...] = ()
+    verification: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, list[str]]:
+        return {
+            "relevantFiles": list(self.relevant_files),
+            "verification": list(self.verification),
+            "blockers": list(self.blockers),
+        }
+
+
 class SessionMemoryRepository:
     """以项目身份隔离的 Session Memory JSON 文件。"""
 
@@ -151,6 +174,113 @@ class SessionMemoryRepository:
         return saved
 
 
+def format_session_memory(memory: SessionMemory) -> str:
+    """把完整短期状态格式化为固定 Provider Overlay。"""
+
+    rows = ["# Project Session Memory", f"Project root: {memory.project_root}"]
+    _append_text(rows, "Current goal", memory.current_goal)
+    _append_text(rows, "Active task", memory.active_task)
+    _append_items(rows, "Completed", memory.completed)
+    _append_items(rows, "Pending", memory.pending)
+    _append_items(rows, "Decisions", memory.decisions)
+    _append_items(rows, "Blockers", memory.blockers)
+    _append_items(rows, "Relevant files", memory.relevant_files)
+    _append_items(rows, "Verification", memory.verification)
+    _append_text(rows, "Previous handoff", memory.previous_handoff)
+    _append_text(rows, "Next step", memory.next_step)
+    return "\n".join(rows)
+
+
+def extract_tool_evidence(
+    messages: Sequence[AgentMessage],
+) -> SessionMemoryEvidence:
+    """从该轮 canonical 工具调用/结果配对中提取不可由模型伪造的事实。"""
+
+    calls: dict[str, ToolCall] = {}
+    relevant_files: list[str] = []
+    verification: list[str] = []
+    blockers: list[str] = []
+    for message in messages:
+        if isinstance(message, AssistantMessage):
+            calls.update({call.id: call for call in message.tool_calls})
+            continue
+        if not isinstance(message, ToolResultMessage):
+            continue
+        call = calls.get(message.tool_call_id)
+        arguments = call.arguments if call is not None else {}
+        path = arguments.get("file_path")
+        failed = _tool_failed(message)
+        if (
+            not failed
+            and message.tool_name in {"read_file", "write_file", "edit_file"}
+            and isinstance(path, str)
+        ):
+            relevant_files.append(path)
+        command = arguments.get("command")
+        if (
+            message.tool_name == "run_shell"
+            and isinstance(command, str)
+            and _is_verification_command(command)
+        ):
+            status = "failed" if failed else "passed"
+            verification.append(f"{_brief(command, 180)}: {status}")
+        if failed:
+            blockers.append(
+                f"{message.tool_name} failed: {_brief(message.text, 240)}"
+            )
+    return SessionMemoryEvidence(
+        relevant_files=_merge_items((), relevant_files),
+        verification=_merge_items((), verification),
+        blockers=_merge_items((), blockers),
+    )
+
+
+def apply_tool_evidence(
+    memory: SessionMemory,
+    evidence: SessionMemoryEvidence,
+) -> SessionMemory:
+    """合并确定性工具事实；语义层无法删除这些字段。"""
+
+    return replace(
+        memory,
+        relevant_files=_merge_items(memory.relevant_files, evidence.relevant_files),
+        verification=_merge_items(memory.verification, evidence.verification),
+        blockers=_merge_items(memory.blockers, evidence.blockers),
+    )
+
+
+def apply_semantic_patch(
+    memory: SessionMemory,
+    patch: Mapping[str, object],
+) -> SessionMemory:
+    """仅接受任务语义字段，避免模型覆盖工具事实。"""
+
+    updates: dict[str, object] = {}
+    for source, target in {
+        "currentGoal": "current_goal",
+        "activeTask": "active_task",
+        "previousHandoff": "previous_handoff",
+        "nextStep": "next_step",
+    }.items():
+        value = patch.get(source)
+        if source in patch and (value is None or isinstance(value, str)):
+            updates[target] = value
+
+    for source, target in {
+        "completed": "completed",
+        "decisions": "decisions",
+        "blockers": "blockers",
+    }.items():
+        value = patch.get(source)
+        if _is_text_list(value):
+            updates[target] = _merge_items(getattr(memory, target), value)
+
+    pending = patch.get("pending")
+    if _is_text_list(pending):
+        updates["pending"] = _merge_items((), pending)
+    return replace(memory, **updates)
+
+
 def _required_text(data: dict[str, object], field: str) -> str:
     value = data.get(field)
     if not isinstance(value, str) or not value:
@@ -176,3 +306,77 @@ def _text_items(data: dict[str, object], field: str) -> tuple[str, ...]:
 
 def _timestamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _append_text(rows: list[str], label: str, value: str | None) -> None:
+    if value:
+        rows.extend((f"## {label}", value))
+
+
+def _append_items(rows: list[str], label: str, values: tuple[str, ...]) -> None:
+    if values:
+        rows.extend((f"## {label}", *(f"- {value}" for value in values)))
+
+
+def _merge_items(
+    existing: Sequence[str],
+    additions: Sequence[str],
+    *,
+    limit: int = 50,
+) -> tuple[str, ...]:
+    merged: list[str] = []
+    for value in (*existing, *additions):
+        value = value.strip()
+        if value and value not in merged:
+            merged.append(value)
+        if len(merged) == limit:
+            break
+    return tuple(merged)
+
+
+def _is_text_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _tool_failed(result: ToolResultMessage) -> bool:
+    text = result.text.lower()
+    return result.is_error or any(marker in text for marker in (
+        "command failed (exit code",
+        "command timed out",
+        "error:",
+        "error reading",
+        "error writing",
+        "error editing",
+    ))
+
+
+def _is_verification_command(command: str) -> bool:
+    normalized = command.lower()
+    markers = (
+        "pytest",
+        "unittest",
+        "ruff",
+        "mypy",
+        "pyright",
+        "compileall",
+        "typecheck",
+        "type-check",
+        "lint",
+        "tsc",
+        "go test",
+        "cargo test",
+        "mvn test",
+        "gradle test",
+        "npm test",
+        "pnpm test",
+        "yarn test",
+        "npm run build",
+        "pnpm run build",
+        "yarn build",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _brief(text: str, limit: int) -> str:
+    normalized = " ".join(text.split())
+    return normalized[:limit] + ("…" if len(normalized) > limit else "")

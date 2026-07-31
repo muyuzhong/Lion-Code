@@ -85,6 +85,10 @@ from .session_memory import (
     SessionMemory,
     SessionMemoryError,
     SessionMemoryRepository,
+    apply_semantic_patch,
+    apply_tool_evidence,
+    extract_tool_evidence,
+    format_session_memory,
 )
 from .prompt import (
     build_dynamic_system_context,
@@ -167,6 +171,41 @@ When a Skill should be created:
 {"create": true, "reason": "concise reason", "scope": "project", "name": "lowercase-kebab-case", "content": "complete SKILL.md text"}
 
 The `content` value must be a concise, executable `SKILL.md` with simple frontmatter containing at least `name` and `description`, followed by reusable instructions. Its frontmatter name must match `name`. Do not include session-specific secrets or claim unverified facts."""
+
+
+SESSION_MEMORY_EXTRACTION_SYSTEM = """You maintain a coding agent's short-lived project work state. Return exactly one JSON object, with no Markdown.
+
+You may use only these optional keys: currentGoal, activeTask, completed, pending, decisions, blockers, previousHandoff, nextStep.
+
+Use concise strings. completed, pending, decisions, and blockers must be arrays of strings. Do not include relevantFiles or verification: they are extracted deterministically. Do not invent test outcomes, file changes, or work that is not supported by the supplied evidence."""
+
+
+def _turn_assistant_text(messages: tuple[AgentMessage, ...]) -> str:
+    return next(
+        (
+            message.text
+            for message in reversed(messages)
+            if isinstance(message, AssistantMessage)
+        ),
+        "",
+    )
+
+
+def _trim_session_memory_text(text: str, limit: int = 4_000) -> str:
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def _parse_session_memory_patch(raw: str) -> dict[str, object]:
+    candidate = raw.strip()
+    if not candidate:
+        return {}
+    if candidate.startswith("```"):
+        candidate = candidate.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 # ─── 结构化运行结果 ───────────────────────────────────────
@@ -339,20 +378,9 @@ class Agent:
             cancellation_fn=lambda: self._aborted,
         )
         self._project_identity = resolve_project_identity(self.tool_context.cwd)
-        self._project_context_files = load_project_context_files(
-            cwd=self.tool_context.cwd,
-            identity=self._project_identity,
-        )
-        self._project_memory_overlays = tuple(
-            MemoryOverlay(
-                path=item.path,
-                content=item.content,
-                byte_size=len(item.content.encode("utf-8")),
-                source="project",
-                required=True,
-            )
-            for item in self._project_context_files
-        )
+        self._project_context_files = ()
+        self._project_memory_overlays = ()
+        self._reload_project_memory()
         self._session_memory_repository = (
             session_memory_repository
             or SessionMemoryRepository(self._project_identity)
@@ -361,6 +389,7 @@ class Agent:
             raise ValueError("Session Memory repository belongs to another project")
         self._session_memory: SessionMemory | None = None
         self._session_memory_error: str | None = None
+        self._reported_session_memory_error: str | None = None
         self._reload_session_memory()
         self._permission_policy = PermissionPolicy(cwd=self.tool_context.cwd)
         self._result_store = ResultStore()
@@ -413,6 +442,7 @@ class Agent:
         self._memory_coordinator = MemoryCoordinator(query_service=None)
         self._memory_injector = MemoryContextInjector()
         self._last_memory_injection = MemoryInjectionReport()
+        self._turn_memory_overlays = self._build_turn_memory_overlays()
 
         # Provider/Core 是唯一主路径，Harness messages 是唯一活跃历史。
         self._core_runtime: LionAgentRuntime
@@ -475,6 +505,50 @@ class Agent:
 
         return self._session_memory_error
 
+    def _reload_project_memory(self) -> None:
+        """重新读取当前项目指令，始终保持在人写文件的只读边界内。"""
+
+        self._project_context_files = load_project_context_files(
+            cwd=self.tool_context.cwd,
+            identity=self._project_identity,
+        )
+        self._project_memory_overlays = tuple(
+            MemoryOverlay(
+                path=item.path,
+                content=item.content,
+                byte_size=len(item.content.encode("utf-8")),
+                source="project",
+                required=True,
+            )
+            for item in self._project_context_files
+        )
+
+    def _build_turn_memory_overlays(self) -> tuple[MemoryOverlay, ...]:
+        """组合本轮不可变的项目、Session 与 Auto Memory。"""
+
+        overlays = list(self._project_memory_overlays)
+        if self._session_memory is not None:
+            content = format_session_memory(self._session_memory)
+            overlays.append(MemoryOverlay(
+                path=str(self._session_memory_repository.path),
+                content=content,
+                byte_size=len(content.encode("utf-8")),
+                source="session",
+                required=True,
+            ))
+        overlays.extend(self._memory_coordinator.active_overlays)
+        return tuple(overlays)
+
+    def _prepare_turn_memory_snapshot(self, user_message: str) -> None:
+        """压缩后固定三层 Overlay，当前预取结果只留给下一轮。"""
+
+        if not self.is_sub_agent:
+            self._reload_session_memory()
+            self._report_session_memory_error()
+            self._memory_coordinator.collect_ready()
+            self._memory_coordinator.begin_turn(user_message)
+        self._turn_memory_overlays = self._build_turn_memory_overlays()
+
     def _build_core_memory_query_service(self):
         """构建绑定当前 Core Provider 的文本查询服务。"""
 
@@ -499,7 +573,6 @@ class Agent:
     ) -> list[AgentMessage]:
         """只派生 Provider 投影，不改写 Harness、Session 或 UI。"""
 
-        self._memory_coordinator.collect_ready()
         self._sync_core_usage()
         state = self._context_runtime_state()
         prepared = self._context_manager.prepare(
@@ -508,10 +581,7 @@ class Agent:
         )
         projected, memory_report = self._memory_injector.inject(
             prepared.messages,
-            (
-                *self._project_memory_overlays,
-                *self._memory_coordinator.active_overlays,
-            ),
+            self._turn_memory_overlays,
             max_tokens=state.effective_window_tokens,
         )
         self._last_context_actions = prepared.actions
@@ -1166,18 +1236,28 @@ class Agent:
         await self._compact_core_context_if_needed()
         if self._aborted:
             return
-        if not self.is_sub_agent:
-            self._memory_coordinator.begin_turn(user_message)
-        await self._core_runtime.prompt(user_message)
-        while not self._aborted and await self._apply_pending_core_context_reset():
-            if self._aborted:
-                break
-            await self._core_runtime.continue_()
-        self._sync_core_usage()
-        self._sync_core_outcome()
-        self._core_compaction_required = self._context_manager.should_compact(
-            self._context_runtime_state()
-        )
+        turn_start_index = len(self._core_runtime.messages)
+        self._prepare_turn_memory_snapshot(user_message)
+        try:
+            await self._core_runtime.prompt(user_message)
+            while not self._aborted and await self._apply_pending_core_context_reset():
+                if self._aborted:
+                    break
+                await self._core_runtime.continue_()
+            self._sync_core_usage()
+            self._sync_core_outcome()
+            self._core_compaction_required = self._context_manager.should_compact(
+                self._context_runtime_state()
+            )
+        finally:
+            try:
+                if not self.is_sub_agent:
+                    await self._update_session_memory_after_turn(
+                        user_message,
+                        turn_start_index,
+                    )
+            finally:
+                self._turn_memory_overlays = self._build_turn_memory_overlays()
 
     # ─── 子 Agent 单次运行入口 ───────────────────────────────
 
@@ -1291,6 +1371,7 @@ class Agent:
         """结束当前会话并创建新 Session；旧 append-only 历史保持可恢复。"""
         await self._flush_background_operations()
         self._memory_coordinator.reset()
+        self._reload_project_memory()
         self._reload_session_memory()
         self._last_memory_injection = MemoryInjectionReport()
         self.session_id = uuid.uuid4().hex[:8]
@@ -1308,6 +1389,7 @@ class Agent:
         await self._ensure_core_session_ready()
         self.tool_context.plan_file_path = self._plan_file_path
         self._reset_session_counters()
+        self._turn_memory_overlays = self._build_turn_memory_overlays()
         self._emit_notice("Conversation cleared.")
 
     def show_cost(self) -> None:
@@ -1787,6 +1869,7 @@ class Agent:
             return False
 
         self._memory_coordinator.reset()
+        self._reload_project_memory()
         self._reload_session_memory()
         self._last_memory_injection = MemoryInjectionReport()
         self.session_id = session_id
@@ -1815,6 +1898,7 @@ class Agent:
         self._reset_core_observers()
         await self._ensure_core_session_ready()
         self._reset_session_counters()
+        self._turn_memory_overlays = self._build_turn_memory_overlays()
         self._emit_notice(f"Session restored ({len(state.messages)} messages).")
         return True
 
@@ -1824,8 +1908,67 @@ class Agent:
         try:
             self._session_memory = self._session_memory_repository.load()
             self._session_memory_error = None
+            self._reported_session_memory_error = None
         except SessionMemoryError as error:
             self._session_memory_error = str(error)
+
+    def _report_session_memory_error(self) -> None:
+        error = self._session_memory_error
+        if error is None or error == self._reported_session_memory_error:
+            return
+        self._reported_session_memory_error = error
+        self._emit_notice(f"Session Memory unavailable: {error}", role="error")
+
+    async def _update_session_memory_after_turn(
+        self,
+        user_message: str,
+        turn_start_index: int,
+    ) -> None:
+        """保存本轮确定性工具事实，再以受限模型 patch 补充任务语义。"""
+
+        if self._session_memory is None or self._session_memory_error is not None:
+            return
+        messages = self._core_runtime.messages[turn_start_index:]
+        if not messages:
+            return
+        memory = apply_tool_evidence(
+            self._session_memory,
+            extract_tool_evidence(messages),
+        )
+        if not self._aborted:
+            try:
+                patch = await self._extract_session_memory_semantics(
+                    memory,
+                    user_message,
+                    _turn_assistant_text(messages),
+                )
+            except Exception:
+                patch = {}
+            memory = apply_semantic_patch(memory, patch)
+        try:
+            self._session_memory = self._session_memory_repository.save(memory)
+        except SessionMemoryError as error:
+            self._session_memory_error = str(error)
+
+    async def _extract_session_memory_semantics(
+        self,
+        memory: SessionMemory,
+        user_message: str,
+        assistant_text: str,
+    ) -> dict[str, object]:
+        """让 side query 只提炼目标和交接语义，不接管工具事实。"""
+
+        payload = {
+            "currentState": memory.to_dict(),
+            "userInput": _trim_session_memory_text(user_message),
+            "finalAssistantReply": _trim_session_memory_text(assistant_text),
+        }
+        raw = await self._build_core_memory_query_service().complete(
+            system=SESSION_MEMORY_EXTRACTION_SYSTEM,
+            user=json.dumps(payload, ensure_ascii=False),
+            max_output_tokens=512,
+        )
+        return _parse_session_memory_patch(raw)
 
     async def restore_session_id(self, session_id: str) -> bool:
         """优先恢复 JSONL；Core 遇到旧 JSON 时原地迁移且保留源文件。"""
