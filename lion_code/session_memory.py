@@ -298,7 +298,10 @@ def _long_term_candidate(value: str) -> LongTermMemoryCandidate | None:
     if has_verified_decision:
         return LongTermMemoryCandidate("project", content)
     has_reusable_failure = (
-        any(marker in normalized for marker in ("失败经验", "[failure]", "failure lesson"))
+        any(
+            marker in normalized
+            for marker in ("失败经验", "[failure]", "failure lesson")
+        )
         and any(marker in normalized for marker in (
             "修复", "解决", "改为", "fixed", "corrected", "resolved",
         ))

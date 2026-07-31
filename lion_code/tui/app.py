@@ -1254,7 +1254,8 @@ class LionTuiApp(App):
 
         try:
             message = await self.session.execute_session_memory_command(result)
-        except Exception as error:
+        # 前端必须把异步命令失败显示为状态行，不能让 Worker 静默退出。
+        except Exception as error:  # noqa: BLE001
             self._notice(f"Error: {error}", role="error")
             return
         if message:

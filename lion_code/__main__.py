@@ -156,7 +156,7 @@ async def run_repl(agent: Agent) -> None:
                     )
                     if message:
                         print_info(message)
-                except Exception as error:
+                except Exception as error:  # noqa: BLE001 - REPL 需保留交互循环并显示命令失败。
                     print_error(str(error))
                 continue
 

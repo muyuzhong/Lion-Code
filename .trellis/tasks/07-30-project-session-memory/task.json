@@ -29,6 +29,6 @@
     "lion_code/dream.py",
     "lion_code/application/"
   ],
-  "notes": "本任务当前仅完成 Trellis 规划。不得执行 task.py start，不得修改产品代码；后续实施前需重新审阅并明确启动。",
+  "notes": "已按 PRD、设计和切片计划完成实现与规格收敛；Session JSONL 仍只承载 canonical 对话。全量 pytest 已通过，仓库既有 Ruff 基线问题单独记录，不作为本切片新增缺陷。",
   "meta": {}
 }
