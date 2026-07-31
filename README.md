@@ -7,7 +7,6 @@
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
 [![Tests: 518 passed](https://img.shields.io/badge/Tests-518%20passed-22c55e.svg)](tests/)
-[![Code: 43K lines Python](https://img.shields.io/badge/Code-43K%20lines%20Python-8B5CF6.svg)](lion_code/)
 [![Status: Active](https://img.shields.io/badge/Status-Active%20Development-f59e0b.svg)](#路线图)
 
 [快速开始](#快速开始) · [架构](#架构) · [安全模型](#1-fail-closed-工具执行边界) · [上下文管理](#2-多级上下文管理) · [评测](#可复现评测) · [路线图](#路线图)
@@ -26,8 +25,6 @@
 - **这些机制到底有没有用**——如何用数据说话，而不是凭感觉？
 
 Lion Code 就是我对这些问题的回答。它是一个**可读、可验证的 Agent 运行时**（~43K 行 Python，518 条测试），用较少的依赖实现了上述所有关键机制，并为每项重要结论保留了源码、测试或 Benchmark 证据。
-
-> **项目背景：** 本项目从 [Hugging Face Tau](https://github.com/huggingface/tau) 的通用运行时出发，以"源码吸收 + 本地演化"方式引入其核心循环（`tau_agent`），并在其上独立构建了安全模型、上下文管理管线、会话持久层和评测框架。Core 循环、规范消息类型和 Provider 抽象源自上游；工具执行运行时、Hook 系统、Memory 架构、TUI、上下文管理和 Benchmark 套件为原创工作。
 
 ---
 
@@ -576,14 +573,6 @@ python -m compileall -q lion_code tests
 # 离线 Benchmark 校验（无 API 费用）
 python benchmarks/context_management/formal_benchmark.py
 ```
-
----
-
-## 上游溯源
-
-Lion Code 的 Core Runtime（`lion_code/core/`）从 [Hugging Face Tau](https://github.com/huggingface/tau)（Release 0.3.3，commit `d597a8a`，MIT License）以"源码吸收 + 本地演化"方式引入。选择源码引入而非包依赖，避免了 `tau_agent.UserMessage` 与 `lion_code.core.UserMessage` 两套运行时类型并存的问题，同时允许对循环、Harness 和消息类型进行深度修改。
-
-详见 [`UPSTREAM.md`](UPSTREAM.md) 查看完整的文件级映射、修改日志与同步流程。
 
 ---
 
