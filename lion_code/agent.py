@@ -81,6 +81,11 @@ from .session_runtime import (
     list_legacy_sessions,
     load_legacy_session,
 )
+from .session_memory import (
+    SessionMemory,
+    SessionMemoryError,
+    SessionMemoryRepository,
+)
 from .prompt import (
     build_dynamic_system_context,
     build_static_system_prompt,
@@ -221,6 +226,7 @@ class Agent:
         tool_registry: ToolRegistry | None = None,
         tool_environment: ToolEnvironment | None = None,
         session_repository: SessionRepository | None = None,
+        session_memory_repository: SessionMemoryRepository | None = None,
         context_manager: ContextManager | None = None,
         context_compactor: ContextCompactor | None = None,
         model_limits_resolver: ModelLimitsResolver | None = None,
@@ -347,6 +353,15 @@ class Agent:
             )
             for item in self._project_context_files
         )
+        self._session_memory_repository = (
+            session_memory_repository
+            or SessionMemoryRepository(self._project_identity)
+        )
+        if self._session_memory_repository.identity != self._project_identity:
+            raise ValueError("Session Memory repository belongs to another project")
+        self._session_memory: SessionMemory | None = None
+        self._session_memory_error: str | None = None
+        self._reload_session_memory()
         self._permission_policy = PermissionPolicy(cwd=self.tool_context.cwd)
         self._result_store = ResultStore()
         self.tool_runtime = ToolRuntime(
@@ -447,6 +462,18 @@ class Agent:
     def core_runtime(self) -> LionAgentRuntime:
         """返回供应用会话层订阅事件与读取消息快照的 Core Runtime。"""
         return self._core_runtime
+
+    @property
+    def session_memory(self) -> SessionMemory | None:
+        """返回最近的有效短期状态；初次读取损坏文件时为 None。"""
+
+        return self._session_memory
+
+    @property
+    def session_memory_error(self) -> str | None:
+        """返回最近一次 Session Memory 加载错误，供前端显式提示。"""
+
+        return self._session_memory_error
 
     def _build_core_memory_query_service(self):
         """构建绑定当前 Core Provider 的文本查询服务。"""
@@ -1264,6 +1291,7 @@ class Agent:
         """结束当前会话并创建新 Session；旧 append-only 历史保持可恢复。"""
         await self._flush_background_operations()
         self._memory_coordinator.reset()
+        self._reload_session_memory()
         self._last_memory_injection = MemoryInjectionReport()
         self.session_id = uuid.uuid4().hex[:8]
         self.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -1759,6 +1787,7 @@ class Agent:
             return False
 
         self._memory_coordinator.reset()
+        self._reload_session_memory()
         self._last_memory_injection = MemoryInjectionReport()
         self.session_id = session_id
         self.tool_context.session_id = session_id
@@ -1788,6 +1817,15 @@ class Agent:
         self._reset_session_counters()
         self._emit_notice(f"Session restored ({len(state.messages)} messages).")
         return True
+
+    def _reload_session_memory(self) -> None:
+        """重载当前项目状态；损坏文件仅暴露错误，绝不回写空状态。"""
+
+        try:
+            self._session_memory = self._session_memory_repository.load()
+            self._session_memory_error = None
+        except SessionMemoryError as error:
+            self._session_memory_error = str(error)
 
     async def restore_session_id(self, session_id: str) -> bool:
         """优先恢复 JSONL；Core 遇到旧 JSON 时原地迁移且保留源文件。"""

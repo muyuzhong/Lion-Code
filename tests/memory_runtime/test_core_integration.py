@@ -13,7 +13,9 @@ from lion_code.core import AssistantMessage, TextContent, ToolCall
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantMessageEvent
 from lion_code.memory import MemoryPrefetch, RelevantMemory
 from lion_code.memory_runtime import MemoryCoordinator, MemoryOverlay
+from lion_code.project_identity import ProjectIdentity
 from lion_code.prompt import ProjectContextFile
+from lion_code.session_memory import SessionMemory, SessionMemoryRepository
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
@@ -90,6 +92,8 @@ def _make_agent(
     events: list[AssistantDoneEvent],
     registry: ToolRegistry | None = None,
     project_context: tuple[ProjectContextFile, ...] = (),
+    project_identity: ProjectIdentity | None = None,
+    session_memory_repository: SessionMemoryRepository | None = None,
 ) -> tuple[Agent, FakeProvider, SessionRepository]:
     fake = FakeProvider(events)
     repository = SessionRepository(tmp_path)
@@ -98,12 +102,18 @@ def _make_agent(
         "lion_code.agent.load_project_context_files",
         lambda **_kwargs: project_context,
     )
+    if project_identity is not None:
+        monkeypatch.setattr(
+            "lion_code.agent.resolve_project_identity",
+            lambda _cwd: project_identity,
+        )
     agent = Agent(
         api_base="https://example.test/v1",
         api_key="test-key",
         custom_system_prompt="test",
         tool_registry=registry or ToolRegistry(),
         session_repository=repository,
+        session_memory_repository=session_memory_repository,
     )
     agent._mcp_initialized = True
     agent._memory_coordinator = MemoryCoordinator(query_service=None)
@@ -154,6 +164,78 @@ async def test_project_overlay_reaches_provider_but_not_harness_or_jsonl(
     assert state is not None
     assert all("<relevant-memory>" not in message.text for message in state.messages)
     assert agent._last_memory_injection.injected_paths == ("C:/repo/AGENTS.md",)
+    await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_clear_and_restore_keep_current_project_session_memory(
+    monkeypatch, tmp_path
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    identity = ProjectIdentity(root=root.resolve(), key="project", is_git=True)
+    memory_repository = SessionMemoryRepository(
+        identity,
+        storage_dir=tmp_path / "project-state",
+    )
+    saved = memory_repository.save(
+        SessionMemory(
+            project_root=str(identity.root),
+            current_goal="实现短期记忆",
+            active_task="持久化状态",
+            next_step="验证 clear",
+        )
+    )
+    agent, _, _ = _make_agent(
+        monkeypatch,
+        tmp_path,
+        [_stop_event()],
+        project_identity=identity,
+        session_memory_repository=memory_repository,
+    )
+    first_session_id = agent.session_id
+
+    assert agent.session_memory == saved
+    await agent.chat("first question")
+    await agent.clear_history()
+
+    assert agent.session_id != first_session_id
+    assert agent.session_memory == saved
+    assert memory_repository.load() == saved
+    assert await agent.restore_core_session(first_session_id)
+    assert agent.session_memory == saved
+    await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_corrupt_session_memory_stays_visible_without_clear_overwrite(
+    monkeypatch, tmp_path
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    identity = ProjectIdentity(root=root.resolve(), key="project", is_git=True)
+    memory_repository = SessionMemoryRepository(
+        identity,
+        storage_dir=tmp_path / "project-state",
+    )
+    saved = memory_repository.save(
+        SessionMemory(project_root=str(identity.root), current_goal="valid state")
+    )
+    agent, _, _ = _make_agent(
+        monkeypatch,
+        tmp_path,
+        [],
+        project_identity=identity,
+        session_memory_repository=memory_repository,
+    )
+    memory_repository.path.write_text("{broken", encoding="utf-8")
+    original = memory_repository.path.read_bytes()
+
+    await agent.clear_history()
+
+    assert agent.session_memory == saved
+    assert agent.session_memory_error is not None
+    assert memory_repository.path.read_bytes() == original
     await agent.close()
 
 
