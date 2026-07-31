@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/agent-e2e-evaluation.md","reason":"Defines the versioned result, isolation, corpus and external-anchor boundaries that the regression gate must preserve."}
+{"file":".trellis/tasks/07-30-evaluation-regression-feedback/design.md","reason":"Defines the gate comparability set, failure-mode evidence rules, ledger counting and holdout-retirement boundary."}

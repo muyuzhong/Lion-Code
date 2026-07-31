@@ -599,3 +599,154 @@ B4 完成:AgentSettledEvent 触发 TerminalNotificationController.notify_turn_fi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 14: 补齐 Lion 后端开发规范
+
+**Date**: 2026-07-30
+**Task**: 补齐 Lion 后端开发规范
+**Branch**: `master`
+
+### Summary
+
+完成 Bootstrap Guidelines：以当前 Lion 代码为依据补齐后端规范、同步索引和任务验收，并通过任务、编译与差异检查。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `81d1cfd` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 15: 建立编码 Agent 评测基础设施
+
+**Date**: 2026-07-31
+**Task**: 建立编码 Agent 评测基础设施
+**Branch**: `master`
+
+### Summary
+
+新增离线评测契约、隔离生命周期、MCP 禁用 seam、受控轨迹与回归测试；真实 Docker 路径保持 blocked。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8bc7673` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 16: 建立自建编码任务集与准入证据
+
+**Date**: 2026-07-31
+**Task**: 建立自建编码任务集与准入证据
+**Branch**: `master`
+
+### Summary
+
+基于 Lion 真实历史提交建立 30 条任务卡、18/12 split、冻结 catalog/lock 与三次 Git provenance 准入；明确历史回放不是官方语义成绩。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `67d0333` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 17: 建立 SWE-bench-Live 外部锚点评测
+
+**Date**: 2026-07-30
+**Task**: 接入 SWE-bench-Live 外部锚点
+**Branch**: `master`
+
+### Summary
+
+冻结 20 条 Python-only SWE-bench-Live `verified` 外部锚点，建立三次 gold patch 预检、
+官方 evaluator adapter、实际分母/区间报告、环境漂移拒绝与五 profile 校准。发现官方
+evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的本地 materialized JSONL，
+避免把可变 Hugging Face dataset 名称误作冻结输入。本机 Docker daemon 不可用，因此未生成
+或伪造任何外部通过率。
+
+### Main Changes
+
+- `external_anchor_assets/` 固定数据 revision、verified 文件 SHA、20 条 instance ID、分层
+  规则、evaluator revision 与完整 selected-row canonical SHA-256。
+- 官方 runner 对每题 gold 连跑三次；只有三次 `resolved=true` 的题目进入实际分母。
+- 统一输出 `TaskResult` / `ExternalAnchorReport`，记录摘要、镜像 digest、Wilson 95% 区间；
+  Docker、JSONL、镜像或官方结果异常一律 `blocked`/`invalid`，无成功率。
+- 比较前严格校验数据/evaluator/platform/选择/镜像环境指纹；校准要求 baseline、三候选和
+  故意退化 profile，阈值为 Spearman >= 0.70、方向一致率 >= 80%。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5a4b26f` | 建立 SWE-bench-Live 外部锚点评测 |
+| `829eebb` | chore(task): archive 07-30-evaluation-external-anchor |
+
+### Testing
+
+- [OK] 远端冻结 snapshot 的 500 行与确定性抽样交叉校验：仍得到相同 20 条锚点。
+- [OK] `tests/benchmarks`：36 passed；外部锚点专项：12 passed。
+- [OK] 新增路径 Ruff、compileall、`git diff --check` 与离线 manifest CLI 通过。
+- [OK] 全量 pytest：509 passed、6 skipped、6 subtests passed。
+- [INFO] 仍有既有 Windows GBK spinner 线程警告；与本任务无关。
+
+### Status
+
+[OK] **Completed — actual external score remains blocked until a controlled Linux Docker host and approved model budget are available**
+
+### Next Steps
+
+- 在受控 Linux Docker host materialize 并校验 20 行 JSONL，checkout 固定官方 evaluator，
+  再执行 gold 预检和五 profile 校准。
+- 继续父任务的回归门禁与失败回流子任务；任何 prompt、压缩或工具变更先走该外部锚点可比性检查。
+
+## Session 18: 建立评测回归门禁与失败回流
+
+**Date**: 2026-07-31
+**Task**: 建立回归门禁与失败回流
+**Branch**: `master`
+
+### Summary
+
+完成 prompt、压缩和工具策略变更的正式回归门禁，建立未合入拒绝项的累计拦截账本；将受控轨迹的失败候选、人工复现/责任审查与下一版 regression 任务回流连成防泄漏闭环。
+
+### Main Changes
+
+- `evaluate_regression_gate()` 严格比较冻结 catalog、任务/repeat、资源、模型和运行环境；只有显式声明的 prompt、compression、tool-policy 版本差异可比较。
+- V1 使用 -10pp 非劣边界和 `3/3 -> 0/3` 灾难回退拒绝；`invalid` 不计算 delta，`waived` 必须提供原因，`reject && !merged` 才计入拦截账本。
+- 无覆盖 baseline/candidate 的有效外部校准时结论为 `self_only`；满足五 profile、相关性、方向一致性并覆盖两边 profile 后才标为 `external_calibrated`。
+- 基于脱敏 `TraceEvent` 分类 loop、context_decay、tool_misuse、premature_termination；blocked/invalid/offline 统一优先归为 infrastructure。
+- 只有已复现、Agent 责任且未去重的失败能进入下一版 regression；来源 holdout 必须 retire，不能继续留在 active holdout。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2ddbf66` | 建立评测回归门禁与失败回流 |
+| `95d1b73` | chore(task): archive 07-30-evaluation-regression-feedback |
+| `fe72cf7` | chore(task): archive 07-30-coding-agent-evaluation-loop |
+
+### Testing
+
+- [OK] 回归门禁专项：pass/reject/invalid/waived、故意 `3/3 -> 0/3` 劣化账本、self-only 与外部校准范围通过。
+- [OK] 四类失败、基础设施优先级、签名去重和 holdout retire 回流测试通过。
+- [OK] 新增路径 Ruff、compileall、`git diff --check` 及 Trellis task validate 通过。
+- [OK] 全量 pytest：512 passed、6 skipped、6 subtests passed。
+- [INFO] 仍有既有 Windows GBK spinner 线程警告；与本任务无关。
+
+### Status
+
+[OK] **Completed — 编码 Agent 评测闭环父任务已归档；外部通过率仍保持 blocked，需受控 Linux Docker host 和批准预算后才可真实执行**

@@ -1,0 +1,1050 @@
+{
+  "schema_version": "agent-e2e/v1",
+  "catalog_id": "lion-historical-replay",
+  "catalog_version": "v1",
+  "tasks": [
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-cross-file-refactor-01",
+      "family": "cross_file_refactor",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "3370351f2cfc4a30927e79a50f0ab9276880e6ef",
+      "public_prompt": "收敛 Core-only runtime 的依赖与文档边界，删除已经失效的旧路径引用，并保持测试和基准入口一致。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/test_context_formal_benchmark.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "55136a2acf17a2643dac9885fa7556e9902aa782568fc97fb61b7fc26c7a8e68",
+      "difficulty": 4,
+      "involved_files": [
+        "lion_code/agent_runtime.py",
+        "benchmarks/context_management/formal_benchmark.py",
+        "tests/test_context_formal_benchmark.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-cross-file-refactor-02",
+      "family": "cross_file_refactor",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "1f95fb02ac9afc546b3b3f44705d86ce1607a43b",
+      "public_prompt": "移除 legacy TUI 与全局输出桥，让默认 TUI 和 Agent 观察器保留单一输出所有权。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/application/test_coding_session.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "bc30736737c96b03c2c1669e8bfdee1f3dfa0651dd9223dbc61b91e8b8b51440",
+      "difficulty": 5,
+      "involved_files": [
+        "lion_code/agent.py",
+        "lion_code/application/session.py",
+        "lion_code/tui/app.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-cross-file-refactor-03",
+      "family": "cross_file_refactor",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "9e92d09f9619d3985a31bf54878c487e1a268d0c",
+      "public_prompt": "把会话持久化收敛到 JSONL 单一路径，并保持 Dream 和集成恢复行为一致。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/integration/test_agent_core_runtime.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "7ae4f1d8ebe99fa01bae11abc01406e65672482ad297ec0569e8eb288b71228c",
+      "difficulty": 3,
+      "involved_files": [
+        "lion_code/dream.py",
+        "lion_code/session.py",
+        "tests/integration/test_agent_core_runtime.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-cross-file-refactor-04",
+      "family": "cross_file_refactor",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "53571928af1a45670c34eaaab595028e2ae03d61",
+      "public_prompt": "删除 SDK 专属对话和旧压缩路径，使 Agent、记忆协调器和 Core 集成只依赖规范运行时。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/memory_runtime/test_core_integration.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "79cace39e8dbcb85035fcc4fc406c0e818868ea08620259a3d770ebae3541281",
+      "difficulty": 5,
+      "involved_files": [
+        "lion_code/agent.py",
+        "lion_code/memory_runtime/coordinator.py",
+        "tests/memory_runtime/test_core_integration.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-cross-file-refactor-05",
+      "family": "cross_file_refactor",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "563121ffcaa973106e513fa22bdfeefbcf7fc396",
+      "public_prompt": "收敛 Core Provider 单一路径，确保应用会话、Agent 和自动化路径不再保留平行 provider 状态。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/integration/test_agent_core_runtime.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "6278a9e2141189a701628a4f9af1bd71892b974d379f01acbaf6f46cdae692f4",
+      "difficulty": 5,
+      "involved_files": [
+        "lion_code/agent.py",
+        "lion_code/application/session.py",
+        "lion_code/autonomy.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-cross-file-refactor-06",
+      "family": "cross_file_refactor",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "e2bde092c0b422f9628fa93a320220e806063620",
+      "public_prompt": "将 side query 全面迁移到 Core Provider，统一 Dream、记忆查询和一次性 provider 的使用边界。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/providers/test_oneshot.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "3ce9150e45a15ecd358cc173ff0e0cf37626a828f780239f4b6cca5e8f951798",
+      "difficulty": 4,
+      "involved_files": [
+        "lion_code/agent.py",
+        "lion_code/dream.py",
+        "lion_code/providers/oneshot.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-cross-file-refactor-07",
+      "family": "cross_file_refactor",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "96d8cd18d0604d149ca260e9aaaf53bb25e92e9c",
+      "public_prompt": "重命名旧 TUI 模块，为新 TUI 腾出包名，同时保持命令行和遗留测试的兼容入口。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/test_legacy_tui.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "07a29085048b6ca3d2896a142693cef852f00a6c864d72b67d4ee350dd0fbfc6",
+      "difficulty": 3,
+      "involved_files": [
+        "lion_code/__main__.py",
+        "lion_code/legacy_tui.py",
+        "tests/test_legacy_tui.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-cross-file-refactor-08",
+      "family": "cross_file_refactor",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "886e78833aea32b92e2ffaf0ce126c6faab357af",
+      "public_prompt": "把上下文管理基准迁移到 ContextManager，统一正式基准、数据集和断言的入口。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/test_context_formal_benchmark.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "796ea0ff04e6d6b09ab85157a235469119ba745631291f535054c975386d6fb4",
+      "difficulty": 3,
+      "involved_files": [
+        "benchmarks/context_management/benchmark.py",
+        "benchmarks/context_management/formal_benchmark.py",
+        "tests/test_context_formal_benchmark.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-cross-file-refactor-09",
+      "family": "cross_file_refactor",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "f986aa74e7ab0a66583a8bc55913f6a3540a41b4",
+      "public_prompt": "引入供应商无关的上下文投影，使 Agent 和 ContextManager 共享模型限制、估算和策略类型。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/context/test_projector.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "58de6a669284b7f99df028c5d19d2041ec028a31fcbce7cd4c2e36455333e4ec",
+      "difficulty": 5,
+      "involved_files": [
+        "lion_code/agent.py",
+        "lion_code/context/projector.py",
+        "tests/context/test_projector.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-cross-file-refactor-10",
+      "family": "cross_file_refactor",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "f82b6710749fc1e530dc17c1c304ca42162ca386",
+      "public_prompt": "适配 Lion 工具运行时到 portable Core，同时保证 adapter 与集成工具循环的行为契约。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/adapters/test_tool_adapter.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "5f40b01799cef393f66030f9e03f64c3f246e437995838b41d956503f3ecbbab",
+      "difficulty": 4,
+      "involved_files": [
+        "lion_code/adapters/tool_adapter.py",
+        "tests/adapters/test_tool_adapter.py",
+        "tests/integration/test_core_tool_runtime.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-bugfix-01",
+      "family": "bugfix",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "70fe53710d6ad04fcca116842df8d9968f7f987b",
+      "public_prompt": "修复流式 TUI 输出在连续增量到达时的闪烁，同时保留现有渲染顺序。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/tui/test_tui_app.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "2f8e12c72b7038b3ae6dde07780a6bcc0b254fd1b53b930cf966a9d6b5ca97f6",
+      "difficulty": 3,
+      "involved_files": [
+        "lion_code/tui/app.py",
+        "lion_code/tui/widgets.py",
+        "tests/tui/test_tui_app.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-bugfix-02",
+      "family": "bugfix",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "82b28d7d02e72bdee38f8205d5969cd9b1697ad4",
+      "public_prompt": "按实际渲染行裁剪补全窗口，避免长候选在 TUI 中越界或遮挡。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/tui/test_tui_app.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "264f4a518788dcf52f899c051fd2fd4d226d0357b3482a51a0018e9622f2ca5b",
+      "difficulty": 2,
+      "involved_files": [
+        "lion_code/tui/app.py",
+        "tests/tui/test_tui_app.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-bugfix-03",
+      "family": "bugfix",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "d3ee6f6252d2ba97646d2c098f0208edc56d763f",
+      "public_prompt": "归一化 Windows 文件拖拽路径，使带引号、空格和反斜杠的路径能够可靠插入输入框。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/tui/test_tui_file_drop.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "0a8680a2530d8d275ea153eb7f8cff0ed1c55d8ed798abba0a9e16648ea4c365",
+      "difficulty": 2,
+      "involved_files": [
+        "lion_code/tui/file_drop.py",
+        "tests/tui/test_tui_file_drop.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-bugfix-04",
+      "family": "bugfix",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "502cfd4071ed0efb46f57197de2192cc69113688",
+      "public_prompt": "阻止取消信号已经生效后仍启动新的 Core 请求，保持取消语义和事件顺序。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/integration/test_agent_core_runtime.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "b4f06a3c39a6a6a05095156f9f2170a214b873b13796d841a4d85e3e57783e13",
+      "difficulty": 3,
+      "involved_files": [
+        "lion_code/agent.py",
+        "tests/integration/test_agent_core_runtime.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-bugfix-05",
+      "family": "bugfix",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "2db28bb51247f1c51d3cf78c8f052fe033222751",
+      "public_prompt": "在热切换 provider 或模型后保留先前累计用量，避免成本和 token 指标回退。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/integration/test_agent_core_runtime.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "aca638e3623725fa3651468a888a74844e93fd99caa8e41c9be7c8db26733e37",
+      "difficulty": 3,
+      "involved_files": [
+        "lion_code/agent.py",
+        "tests/integration/test_agent_core_runtime.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-bugfix-06",
+      "family": "bugfix",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "41e8617ecffd934eb37b6ab53f388c3782edb1d1",
+      "public_prompt": "释放已替换的 Core Provider 连接，避免配置切换后保留不再使用的资源。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/integration/test_agent_core_runtime.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "9a98d421217f5763f157b35f7399098139bcc6d3fccbab4383b952eb60dee920",
+      "difficulty": 3,
+      "involved_files": [
+        "lion_code/agent.py",
+        "lion_code/agent_runtime.py",
+        "tests/integration/test_agent_core_runtime.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-bugfix-07",
+      "family": "bugfix",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "74a91844ddde9fdf44a66a0620efc5395fe3ffe8",
+      "public_prompt": "保留 Provider 的用户取消语义，不把取消转换成普通模型错误或额外重试。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/providers/test_anthropic.py tests/providers/test_openai_compatible.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "92c724ab5c9beb15283540d11d92a90b3fbd69dc8025f7087befc9870f2ca2f0",
+      "difficulty": 4,
+      "involved_files": [
+        "lion_code/providers/anthropic.py",
+        "lion_code/providers/openai_compatible.py",
+        "lion_code/providers/stream.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-bugfix-08",
+      "family": "bugfix",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "74ea3bc0f9674a2caedea90d3c7ca9949ba2721a",
+      "public_prompt": "将 Core 终态同步回 Agent，确保结构化结果、停止原因和前端观察器读取同一状态。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/integration/test_agent_core_runtime.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "dd68dee9d9e7cafdadb9e2841d22bb157caf42fc64ff37ec532173c7ac973b68",
+      "difficulty": 3,
+      "involved_files": [
+        "lion_code/agent.py",
+        "tests/integration/test_agent_core_runtime.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-bugfix-09",
+      "family": "bugfix",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "c65bf81a6a7ef8e1a0784414ded8dcfdaea4008b",
+      "public_prompt": "当 TUI 正在处理模型请求时阻止新的命令分发，避免并发命令破坏会话状态。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/tui/test_tui_app.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "cb297625d6ad01ca5b3d45e960588a2cab893745d40c6a0a7424aa19cbcbc563",
+      "difficulty": 2,
+      "involved_files": [
+        "lion_code/tui/app.py",
+        "tests/tui/test_tui_app.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-bugfix-10",
+      "family": "bugfix",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "87407595a8f75ceb26b76e91d5954a4ec03868c5",
+      "public_prompt": "模型热配完成后重绑应用会话 Runtime，防止后续命令仍指向旧 provider 或旧状态。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/application/test_coding_session.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "b18cc7c2dbcb75d7b84b8fb56a8c67e6eb8e155485aa12179056b7fd303d7011",
+      "difficulty": 3,
+      "involved_files": [
+        "lion_code/application/session.py",
+        "tests/application/test_coding_session.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-feature-01",
+      "family": "feature",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "ff85b953f3894fcc195297514acd267d0be23cf4",
+      "public_prompt": "为上下文溢出加入受控压缩和一次自动重试链，并保持应用会话事件的可观察顺序。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/application/test_coding_session.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "f95945100c1054db8cd8ff32c6e502e01fbf61990ce779e8821a9a051073ffc2",
+      "difficulty": 5,
+      "involved_files": [
+        "lion_code/agent.py",
+        "lion_code/application/session.py",
+        "tests/application/test_coding_session.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-feature-02",
+      "family": "feature",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "223bbfb3257a2b4e1d4f5d8494b26d84a6c41ef8",
+      "public_prompt": "将 TUI 终端通知接入 AgentSettled，使完成态通知只显示一次且不抢占流式输出。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/tui/test_tui_app.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "e8f5313da327002fb5db9a85b41d8a914d1672a9f9ba5e7ac4f59d5b2ae6ee0d",
+      "difficulty": 2,
+      "involved_files": [
+        "lion_code/tui/app.py",
+        "tests/tui/test_tui_app.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-feature-03",
+      "family": "feature",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "ab36504cf53acbb1ccd3e53f49381d71c7284313",
+      "public_prompt": "把六档 thinking 配置接入 Core 路径，并让 Agent、应用命令、provider factory 和 TUI 使用同一配置。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/providers/test_thinking.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "de70f30a2c7b126b5cd76831d7f565c4efb06a8548485c96c4e34307ec5617e9",
+      "difficulty": 5,
+      "involved_files": [
+        "lion_code/agent.py",
+        "lion_code/application/session.py",
+        "lion_code/providers/thinking.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-feature-04",
+      "family": "feature",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "26968194652ef3c19d9edc96141efe74525d0a34",
+      "public_prompt": "让子 Agent 复用 Core Runtime 和父级工具边界，同时保持子任务结果能够汇总回根 Agent。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/integration/test_agent_core_runtime.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "e353789c0536e5ee2c30199acf02032a4e97cc6d32fcec32324d30b2ae18ee95",
+      "difficulty": 4,
+      "involved_files": [
+        "lion_code/agent.py",
+        "lion_code/tui/app.py",
+        "tests/integration/test_agent_core_runtime.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-feature-05",
+      "family": "feature",
+      "split": "regression",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "4c2ae4e700bcd5bc795af0e7ce6ea3df9ff69e9c",
+      "public_prompt": "将 Anthropic 后端接入 Core Runtime，使命令行、Agent 与 TUI 的模型运行路径一致。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/integration/test_agent_core_runtime.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "bdfd72509fe4d4e1e332488767e177d9dd080907f8a065132b5011fafc5d66fe",
+      "difficulty": 4,
+      "involved_files": [
+        "lion_code/__main__.py",
+        "lion_code/agent.py",
+        "lion_code/tui/app.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-feature-06",
+      "family": "feature",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "22a3840dbe92b532b4b55361813f9e2171d7f736",
+      "public_prompt": "增加 `/resume` 会话选择器，展示可恢复会话并将选择结果安全地交给应用会话。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/tui/test_tui_app.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "44172d6ba977a2f39449b66d5882457e5d84a4246ed272132e5503739ce18508",
+      "difficulty": 3,
+      "involved_files": [
+        "lion_code/application/commands.py",
+        "lion_code/tui/app.py",
+        "tests/tui/test_tui_app.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-feature-07",
+      "family": "feature",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "cc182a6c69b547ccb6f23901efe5ce32c1336e14",
+      "public_prompt": "增加 `/model` 选择器，统一 provider 设置、应用会话和 TUI 的模型切换体验。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/application/test_provider_settings.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "3e4a5a14d00017f81ea0cbded628aba7f22391f28ad4e53e5b21da82a0f7a283",
+      "difficulty": 4,
+      "involved_files": [
+        "lion_code/application/commands.py",
+        "lion_code/application/provider_settings.py",
+        "lion_code/tui/app.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-feature-08",
+      "family": "feature",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "73e758311f0d636cc3b40ae58c400272cbc1d845",
+      "public_prompt": "增加命令补全和主题选择列表，保证输入组件、应用会话和 TUI 焦点行为一致。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/tui/test_tui_autocomplete.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "20bcb00ddeea10f01fa01ebc120ea8bce4b326fd8051f8ce825a7536aa4df3b2",
+      "difficulty": 3,
+      "involved_files": [
+        "lion_code/application/session.py",
+        "lion_code/tui/app.py",
+        "lion_code/tui/prompt_input.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-feature-09",
+      "family": "feature",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "9a6eb03dfe8cbc58d9f918746ebf5299db44ad8f",
+      "public_prompt": "接入精简 TUI 主应用作为默认入口，并保持 CLI 和 TUI 入口的稳定启动契约。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/tui/test_tui_app.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "4590745df4239f4e2f692de1ddbf07b0871fcc9fd726d1cdbf8bda4dc6718b4e",
+      "difficulty": 4,
+      "involved_files": [
+        "lion_code/__main__.py",
+        "lion_code/tui/__init__.py",
+        "lion_code/tui/app.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "task_id": "lion-feature-10",
+      "family": "feature",
+      "split": "holdout",
+      "repository": "https://github.com/muyuzhong/Lion-Code",
+      "base_revision": "6a3471124181844b66a69c80861a8441a85748a0",
+      "public_prompt": "扩展 LionCodingSession 的属性面并落地默认命令注册表，使上层 TUI 能通过稳定接口驱动会话。",
+      "public_setup": [
+        "python -m pip install -e ."
+      ],
+      "public_validation_commands": [
+        "python -m pytest -q tests/application/test_coding_session.py"
+      ],
+      "verifier_identity": "lion-historical-patch-provenance/v1",
+      "gold_evidence_hash": "250275d131744b308a1c791f8e742c71bc24307b47ae8c6f8839378d7f91cea5",
+      "difficulty": 3,
+      "involved_files": [
+        "lion_code/application/commands.py",
+        "lion_code/application/session.py",
+        "tests/application/test_coding_session.py"
+      ],
+      "resources": {
+        "schema_version": "agent-e2e/v1",
+        "cpu_cores": 2.0,
+        "memory_mb": 4096,
+        "disk_mb": 4096,
+        "estimated_minutes": 20
+      },
+      "status": "active",
+      "extensions": {
+        "corpus_version": "v1",
+        "evidence_kind": "historical_patch_provenance"
+      }
+    }
+  ],
+  "extensions": {}
+}
