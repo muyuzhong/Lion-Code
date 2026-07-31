@@ -2,7 +2,7 @@
 
 ## 执行前门槛
 
-- 本文只定义未来执行顺序。当前 task.json.status 必须保持 planning，不能运行 task.py start。
+- 用户已批准并执行 task.py start，当前 task.json.status 为 in_progress。后续只能按本文的切片顺序推进。
 - 开始实现前重新阅读 prd.md、design.md、相关运行时规格和当前 git 状态；若当前实现已变化，先修正设计而不是套用本计划。
 - 每个切片结束后只暂存本切片写入的文件，运行对应验证、git diff --check，并以中文提交。不得使用 git add -A 或纳入无关工作区改动。
 - 在功能真正通过测试前，不得把 planned、设计或候选表述为 implemented。
