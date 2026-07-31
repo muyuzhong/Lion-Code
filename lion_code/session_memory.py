@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -120,6 +121,19 @@ class SessionMemoryEvidence:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class LongTermMemoryCandidate:
+    """从短期状态中筛出的、仍需 Dream 复核的长期候选。"""
+
+    memory_type: str
+    content: str
+
+    def to_dict(self) -> dict[str, str]:
+        """转换为传给隔离 Dream 的无特权证据。"""
+
+        return {"type": self.memory_type, "content": self.content}
+
+
 class SessionMemoryRepository:
     """以项目身份隔离的 Session Memory JSON 文件。"""
 
@@ -189,6 +203,127 @@ def format_session_memory(memory: SessionMemory) -> str:
     _append_text(rows, "Previous handoff", memory.previous_handoff)
     _append_text(rows, "Next step", memory.next_step)
     return "\n".join(rows)
+
+
+def format_active_task(memory: SessionMemory) -> str:
+    """生成供 `/task` 显示的最小项目工作状态。"""
+
+    return "\n".join((
+        "# Current Task",
+        f"Current goal: {memory.current_goal or '(none)'}",
+        f"Active task: {memory.active_task or '(none)'}",
+        f"Next step: {memory.next_step or '(none)'}",
+    ))
+
+
+def switch_active_task(memory: SessionMemory, task: str) -> SessionMemory:
+    """切换活动任务，并把未完成的旧任务显式保留为待办。"""
+
+    task = task.strip()
+    if not task:
+        raise ValueError("任务内容不能为空")
+    if len(task) > 500:
+        raise ValueError("任务内容不能超过 500 个字符")
+    pending = memory.pending
+    if memory.active_task and memory.active_task != task:
+        pending = _merge_items(pending, (f"待继续：{memory.active_task}",))
+    return replace(memory, active_task=task, pending=pending, next_step=None)
+
+
+def finish_active_task(memory: SessionMemory) -> SessionMemory:
+    """结束活动任务，清空指针并保留可审阅的完成摘要。"""
+
+    if not memory.active_task:
+        return memory
+    return replace(
+        memory,
+        active_task=None,
+        completed=_merge_items(memory.completed, (memory.active_task,)),
+        next_step=None,
+    )
+
+
+def build_handoff(memory: SessionMemory) -> str:
+    """从当前状态生成可继续的交接文本，不递归嵌入旧 handoff。"""
+
+    rows = [f"项目：{memory.project_root}"]
+    _append_text(rows, "当前目标", memory.current_goal)
+    _append_text(rows, "活动任务", memory.active_task)
+    _append_items(rows, "已完成", memory.completed)
+    _append_items(rows, "待完成", memory.pending)
+    _append_items(rows, "已做决策", memory.decisions)
+    _append_items(rows, "当前阻塞", memory.blockers)
+    _append_items(rows, "相关文件", memory.relevant_files)
+    _append_items(rows, "验证状态", memory.verification)
+    _append_text(rows, "下一步", memory.next_step)
+    return "\n".join(rows)
+
+
+def extract_long_term_candidates(
+    memory: SessionMemory,
+) -> tuple[LongTermMemoryCandidate, ...]:
+    """仅从明确的稳定证据生成候选，绝不把短期进度交给 Auto Memory。"""
+
+    candidates: list[LongTermMemoryCandidate] = []
+    for value in (*memory.decisions, *memory.blockers):
+        candidate = _long_term_candidate(value)
+        if candidate is None or candidate in candidates:
+            continue
+        candidates.append(candidate)
+        if len(candidates) == 12:
+            break
+    return tuple(candidates)
+
+
+def _long_term_candidate(value: str) -> LongTermMemoryCandidate | None:
+    content = value.strip()
+    normalized = content.casefold()
+    if not content or _contains_transient_state(normalized):
+        return None
+    if normalized.startswith(("用户偏好", "[user]", "user preference", "preference:")):
+        return LongTermMemoryCandidate("user", content)
+    if normalized.startswith(("明确反馈", "反馈", "[feedback]", "feedback:")):
+        return LongTermMemoryCandidate("feedback", content)
+    if re.search(r"https?://\S+", content) and normalized.startswith(
+        ("参考", "引用", "[reference]", "reference:")
+    ):
+        return LongTermMemoryCandidate("reference", content)
+    has_verified_decision = (
+        ("已验证" in normalized or "verified" in normalized)
+        and ("原因" in normalized or "because" in normalized)
+        and any(marker in normalized for marker in (
+            "架构", "architecture", "决策", "decision", "采用", "选择", "design",
+        ))
+    )
+    if has_verified_decision:
+        return LongTermMemoryCandidate("project", content)
+    has_reusable_failure = (
+        any(marker in normalized for marker in ("失败经验", "[failure]", "failure lesson"))
+        and any(marker in normalized for marker in (
+            "修复", "解决", "改为", "fixed", "corrected", "resolved",
+        ))
+    )
+    if has_reusable_failure:
+        return LongTermMemoryCandidate("project", content)
+    return None
+
+
+def _contains_transient_state(value: str) -> bool:
+    return any(marker in value for marker in (
+        "current goal",
+        "active task",
+        "next step",
+        "pending",
+        "todo",
+        "当前目标",
+        "当前任务",
+        "下一步",
+        "待办",
+        "相关文件",
+        "relevant files",
+        "verification",
+        "验证状态",
+    ))
 
 
 def extract_tool_evidence(

@@ -55,8 +55,8 @@ def get_memory_dir(identity: ProjectIdentity | None = None) -> Path:
     return d
 
 
-def _get_index_path() -> Path:
-    return get_memory_dir() / "MEMORY.md"
+def _get_index_path(identity: ProjectIdentity | None = None) -> Path:
+    return get_memory_dir(identity) / "MEMORY.md"
 
 
 # ─── 增删改查 ───────────────────────────────────────────────
@@ -101,8 +101,8 @@ def _update_memory_index(memory_dir: Path | None = None) -> None:
     (d / "MEMORY.md").write_text("\n".join(lines), encoding="utf-8")
 
 
-def load_memory_index() -> str:
-    index_path = _get_index_path()
+def load_memory_index(identity: ProjectIdentity | None = None) -> str:
+    index_path = _get_index_path(identity)
     if not index_path.exists():
         return ""
     content = index_path.read_text(encoding="utf-8", errors="replace")

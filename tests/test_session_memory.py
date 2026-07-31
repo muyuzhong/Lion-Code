@@ -14,7 +14,11 @@ from lion_code.session_memory import (
     SessionMemoryRepository,
     apply_semantic_patch,
     apply_tool_evidence,
+    build_handoff,
+    extract_long_term_candidates,
     extract_tool_evidence,
+    finish_active_task,
+    switch_active_task,
 )
 
 
@@ -167,3 +171,71 @@ def test_tool_evidence_updates_files_verification_and_blockers_only_from_events(
     assert semantic.current_goal == "完成短期记忆"
     assert semantic.active_task == "固定快照"
     assert semantic.pending == ("运行回归",)
+
+
+def test_task_switch_finish_and_handoff_preserve_project_state(tmp_path) -> None:
+    identity = _identity(tmp_path / "repo", "project")
+    memory = SessionMemory(
+        project_root=str(identity.root),
+        current_goal="完成项目级短期记忆",
+        active_task="接入命令",
+        completed=("完成存储",),
+        pending=("运行回归",),
+        decisions=("JSONL 保持完整会话记录",),
+        relevant_files=("lion_code/session_memory.py",),
+        next_step="实现 /task",
+    )
+
+    switched = switch_active_task(memory, "补齐 Dream 候选")
+    finished = finish_active_task(switched)
+    handoff = build_handoff(finished)
+
+    assert switched.active_task == "补齐 Dream 候选"
+    assert "待继续：接入命令" in switched.pending
+    assert switched.next_step is None
+    assert finished.active_task is None
+    assert finished.completed == ("完成存储", "补齐 Dream 候选")
+    assert "当前目标" in handoff
+    assert "已完成" in handoff
+    assert "待完成" in handoff
+    assert "相关文件" in handoff
+    assert "下一步" not in handoff
+
+
+def test_long_term_candidates_reject_short_lived_work_state(tmp_path) -> None:
+    identity = _identity(tmp_path / "repo", "project")
+    memory = SessionMemory(
+        project_root=str(identity.root),
+        current_goal="完成当前切片",
+        active_task="运行测试",
+        completed=("完成当前任务",),
+        pending=("继续修复",),
+        decisions=(
+            "用户偏好：提交信息使用中文",
+            "明确反馈：不要使用 git add -A",
+            "已验证的架构决策：保持 JSONL 与短期状态分离；原因：恢复完整记录需要独立审计边界",
+            "参考：https://example.test/runtime-boundary",
+            "当前任务：将 session_memory.py 加入相关文件",
+        ),
+        blockers=(
+            "失败经验：Windows 控制台乱码；修复：测试运行时关闭终端渲染",
+            "run_shell failed: python -m pytest -q",
+        ),
+        relevant_files=("lion_code/session_memory.py",),
+        verification=("python -m pytest -q: failed",),
+        previous_handoff="继续当前任务",
+        next_step="运行测试",
+    )
+
+    candidates = extract_long_term_candidates(memory)
+
+    assert [(candidate.memory_type, candidate.content) for candidate in candidates] == [
+        ("user", "用户偏好：提交信息使用中文"),
+        ("feedback", "明确反馈：不要使用 git add -A"),
+        (
+            "project",
+            "已验证的架构决策：保持 JSONL 与短期状态分离；原因：恢复完整记录需要独立审计边界",
+        ),
+        ("reference", "参考：https://example.test/runtime-boundary"),
+        ("project", "失败经验：Windows 控制台乱码；修复：测试运行时关闭终端渲染"),
+    ]

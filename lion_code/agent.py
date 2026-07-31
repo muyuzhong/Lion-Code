@@ -10,12 +10,31 @@ import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
-from .tools import ToolDef
 from .agent_runtime import LionAgentRuntime
+from .autonomy import (
+    DENIAL_LIMITS,
+    GOAL_EVALUATOR_SYSTEM,
+    GOAL_MAX_ITERATIONS,
+    GOAL_TRANSCRIPT_FRAMING,
+    LOOP_MAX_ITERATIONS,
+    OFFER_CLOUD_THRESHOLD_SECONDS,
+    build_classifier_system,
+    build_classifier_transcript,
+    clamp_wakeup_delay,
+    classifier_user_message,
+    dynamic_loop_directive,
+    goal_directive,
+    goal_judge_user_message,
+    is_daily_wording,
+    load_auto_mode_rules,
+    parse_block_verdict,
+    parse_goal_verdict,
+    parse_loop_input,
+)
 from .context import (
     ContextAction,
     ContextCompactor,
@@ -30,15 +49,7 @@ from .core.events import AgentEvent, MessageEndEvent, MessageUpdateEvent
 from .core.messages import AgentMessage, AssistantMessage, TextContent, UserMessage
 from .core.provider import ModelProvider
 from .core.provider_events import TextDeltaEvent
-from .observers import TerminalRenderer, UsageObserver
-from .providers.factory import create_provider
-from .providers.thinking import (
-    ThinkingLevel,
-    coerce_thinking_level,
-    next_thinking_level,
-    normalize_thinking_level,
-    provider_thinking_levels,
-)
+from .hooks import load_pre_tool_use_hooks
 from .memory_runtime import (
     MemoryContextInjector,
     MemoryCoordinator,
@@ -46,33 +57,36 @@ from .memory_runtime import (
     MemoryOverlay,
     ProviderTextQueryService,
 )
-from .providers.oneshot import complete_text
-from .autonomy import (
-    goal_directive,
-    GOAL_EVALUATOR_SYSTEM,
-    GOAL_TRANSCRIPT_FRAMING,
-    goal_judge_user_message,
-    parse_goal_verdict,
-    GOAL_MAX_ITERATIONS,
-    parse_loop_input,
-    is_daily_wording,
-    OFFER_CLOUD_THRESHOLD_SECONDS,
-    clamp_wakeup_delay,
-    dynamic_loop_directive,
-    LOOP_MAX_ITERATIONS,
-    load_auto_mode_rules,
-    build_classifier_system,
-    DENIAL_LIMITS,
-    build_classifier_transcript,
-    parse_block_verdict,
-    classifier_user_message,
+from .observers import TerminalRenderer, UsageObserver
+from .project_identity import resolve_project_identity
+from .prompt import (
+    build_dynamic_system_context,
+    build_static_system_prompt,
+    load_claude_md,
+    load_project_context_files,
 )
-from .ui import (
-    print_error,
-    print_confirmation,
-    print_info,
-    print_sub_agent_start,
-    print_sub_agent_end,
+from .providers.factory import create_provider
+from .providers.oneshot import complete_text
+from .providers.thinking import (
+    ThinkingLevel,
+    coerce_thinking_level,
+    next_thinking_level,
+    normalize_thinking_level,
+    provider_thinking_levels,
+)
+from .session_memory import (
+    SessionMemory,
+    SessionMemoryError,
+    SessionMemoryRepository,
+    apply_semantic_patch,
+    apply_tool_evidence,
+    build_handoff,
+    extract_long_term_candidates,
+    extract_tool_evidence,
+    finish_active_task,
+    format_active_task,
+    format_session_memory,
+    switch_active_task,
 )
 from .session_runtime import (
     SessionRecorder,
@@ -81,25 +95,8 @@ from .session_runtime import (
     list_legacy_sessions,
     load_legacy_session,
 )
-from .session_memory import (
-    SessionMemory,
-    SessionMemoryError,
-    SessionMemoryRepository,
-    apply_semantic_patch,
-    apply_tool_evidence,
-    extract_tool_evidence,
-    format_session_memory,
-)
-from .prompt import (
-    build_dynamic_system_context,
-    build_static_system_prompt,
-    load_claude_md,
-    load_project_context_files,
-)
-from .project_identity import resolve_project_identity
 from .skills import create_skill
 from .subagent import get_sub_agent_config
-from .hooks import load_pre_tool_use_hooks
 from .tooling import ToolEnvironment, ToolRegistry, ToolResult, ToolRuntime
 from .tooling.builtin import create_builtin_tools
 from .tooling.context import ToolContext
@@ -121,6 +118,14 @@ from .tooling.permission import PermissionPolicy
 from .tooling.result_store import ResultStore
 from .tooling.selection import ToolSelectionPolicy, select_tools
 from .tooling.types import JSONValue
+from .tools import ToolDef
+from .ui import (
+    print_confirmation,
+    print_error,
+    print_info,
+    print_sub_agent_end,
+    print_sub_agent_start,
+)
 
 # ─── Thinking 能力检测 ──────────────────────────────────────
 
@@ -504,6 +509,72 @@ class Agent:
         """返回最近一次 Session Memory 加载错误，供前端显式提示。"""
 
         return self._session_memory_error
+
+    def show_session_memory(self) -> str:
+        """读取并展示当前项目短期状态，不触碰 JSONL transcript。"""
+
+        return format_session_memory(self._editable_session_memory())
+
+    def show_active_task(self) -> str:
+        """读取活动任务的最小视图。"""
+
+        return format_active_task(self._editable_session_memory())
+
+    def switch_session_task(self, task: str) -> str:
+        """持久化新的活动任务，并把旧任务保留为待继续事项。"""
+
+        memory = switch_active_task(self._editable_session_memory(), task)
+        self._save_session_memory(memory)
+        return f"已切换活动任务：{memory.active_task}"
+
+    def finish_session_task(self) -> str:
+        """结束当前任务并计算受限的长期候选，候选不会直接写入 Auto Memory。"""
+
+        memory = self._editable_session_memory()
+        if not memory.active_task:
+            return "当前没有活动任务。"
+        finished = memory.active_task
+        memory = finish_active_task(memory)
+        self._save_session_memory(memory)
+        candidate_count = len(extract_long_term_candidates(memory))
+        if candidate_count:
+            return (
+                f"已结束任务：{finished}；已准备 {candidate_count} 条长期候选，"
+                "可用 /dream 复核整理。"
+            )
+        return f"已结束任务：{finished}；没有可安全沉淀的长期候选。"
+
+    def create_session_handoff(self) -> str:
+        """从当前短期状态生成并保存 handoff，供下一会话直接续接。"""
+
+        memory = self._editable_session_memory()
+        handoff = build_handoff(memory)
+        self._save_session_memory(
+            replace(memory, previous_handoff=handoff)
+        )
+        return handoff
+
+    def _editable_session_memory(self) -> SessionMemory:
+        """重载可安全写入的项目状态；损坏文件绝不被命令覆盖。"""
+
+        self._reload_session_memory()
+        if self._session_memory_error is not None:
+            raise RuntimeError(
+                f"Session Memory 不可用：{self._session_memory_error}"
+            )
+        if self._session_memory is None:
+            raise RuntimeError("Session Memory 尚未初始化。")
+        return self._session_memory
+
+    def _save_session_memory(self, memory: SessionMemory) -> None:
+        """保存命令产生的短期状态，不改动当前轮已固定的 Overlay。"""
+
+        try:
+            self._session_memory = self._session_memory_repository.save(memory)
+            self._session_memory_error = None
+        except SessionMemoryError as error:
+            self._session_memory_error = str(error)
+            raise RuntimeError(f"Session Memory 保存失败：{error}") from error
 
     def _reload_project_memory(self) -> None:
         """重新读取当前项目指令，始终保持在人写文件的只读边界内。"""
@@ -1435,6 +1506,8 @@ class Agent:
 
         from .dream import DreamCoordinator
 
+        self._reload_session_memory()
+        self._report_session_memory_error()
         self._emit_subagent_status(
             "dream", "consolidate project memory", started=True
         )

@@ -110,6 +110,11 @@ class CommandResult:
     # Lion 增补:Plan 模式切换与费用显示是 Lion 特有交互,Tau 无对应。
     plan_toggle_requested: bool = False
     cost_requested: bool = False
+    task_action: str | None = None
+    task_text: str | None = None
+    session_memory_requested: bool = False
+    handoff_requested: bool = False
+    dream_requested: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +211,27 @@ def _thinking_command(ctx: CommandContext) -> CommandResult:
     return CommandResult(handled=True, thinking_level=level, message=f"Thinking: {level}")
 
 
+def _task_command(ctx: CommandContext) -> CommandResult:
+    """仅解析活动任务操作，实际读写由应用会话层执行。"""
+
+    if not ctx.args:
+        return CommandResult(handled=True, task_action="show")
+    action, _, task = ctx.args.partition(" ")
+    action = action.lower()
+    if action == "switch" and task.strip():
+        return CommandResult(
+            handled=True,
+            task_action="switch",
+            task_text=task.strip(),
+        )
+    if action == "done" and not task.strip():
+        return CommandResult(handled=True, task_action="done")
+    return CommandResult(
+        handled=True,
+        message="Usage: /task | /task switch <text> | /task done",
+    )
+
+
 def create_default_command_registry() -> CommandRegistry:
     """注册 Lion 内置 TUI 命令;全部以 CommandResult 意图返回,由前端执行。"""
     registry = CommandRegistry()
@@ -241,6 +267,33 @@ def create_default_command_registry() -> CommandRegistry:
             description="压缩当前上下文",
             usage="/compact",
             handler=lambda ctx: CommandResult(handled=True, compact_summary=ctx.args),
+        ),
+        SlashCommand(
+            name="task",
+            description="查看、切换或结束当前项目任务",
+            usage="/task [switch <text>|done]",
+            handler=_task_command,
+        ),
+        SlashCommand(
+            name="session-memory",
+            description="查看当前项目的 Session Memory",
+            usage="/session-memory",
+            handler=lambda _ctx: CommandResult(
+                handled=True,
+                session_memory_requested=True,
+            ),
+        ),
+        SlashCommand(
+            name="handoff",
+            description="保存当前项目的交接摘要",
+            usage="/handoff",
+            handler=lambda _ctx: CommandResult(handled=True, handoff_requested=True),
+        ),
+        SlashCommand(
+            name="dream",
+            description="整理受限的 Auto Memory 候选",
+            usage="/dream",
+            handler=lambda _ctx: CommandResult(handled=True, dream_requested=True),
         ),
         SlashCommand(
             name="model",
