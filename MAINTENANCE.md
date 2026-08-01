@@ -14,9 +14,16 @@
 | ----- | ------- | ------ | ------ | ------ | --------- |
 | m-001 | abc1234 | 3      | −29    | 142    | 通过      |
 | m-008 | 2d092d3 | 4      | −115   | 238    | 18/18     |
-| 二阶段 | （本提交） | 17     | −197   | 533    | 通过      |
+| 二阶段 | 5238ae6 | 17     | −197   | 533    | 通过      |
+| 三阶段-1 | （本提交） | 3      | agent.py −245 | 543    | 通过      |
 
 ## 完成
+### 三阶段-1 · 2026-08-01 · 拆解 agent.py:autonomy_runtime 提取
+- 范围:把 /goal、/loop、Auto Mode 的状态与协调循环从 `agent.py` 迁入新模块 `autonomy_runtime.py`(纯提示词已在 `autonomy.py`)。
+- 做了:`AutonomyRuntime` + `AutonomyHost` 窄协议(经 host 回调 Agent 的 chat/emit/budget/side-query,非 Service Locator);迁入 6 个状态字段 + 16 个方法;Agent 保留薄委托(公共 API 不变)+ 6 个状态属性委托;side-query 工具(`_run_evaluator_query`/`_run_classifier_query`/`_canonical_side_messages`)暂留 agent.py(learning 后续也用)。先补 /goal、/loop 特征测试(10 例,`tests/test_autonomy_goal_loop.py`)再迁移。
+- 验证:全量 543 passed(+10 新测试)、6 skipped;compileall 通过;ruff 218 / format 146 / mypy 105 均持平基线。agent.py 2397->2152(−245)。
+- 路线图:后续 session_memory_coordinator -> subagent_factory -> learning_runtime -> agent_lifecycle -> agent_runtime Core 协调,目标 agent.py ~1200 行。
+
 ### 二阶段 · 2026-08-01 · 清掉已知的架构债务（m-012 / m-007 / m-013 / m-010 + 第二套路径扫描）
 - **m-012**：删除 `/skill:` 半成品入口。`application/skills.py` 移除 tau `<skill>` 块机器（expand_skill_command / format_skill_invocation / parse_skill_invocation / SkillInvocation，保留 `Skill`）；TUI autocomplete 的 `/skill:` 处理、`app.py` 与 `commands.py` 的 `/skill:` 特判、`state.py` 展示分支、相关测试一并移除。接线（让 TUI `/skill:` 走 `lion_code.skills.resolve_skill_prompt`）转预留任务 `08-01-tui-skill-wiring`。
 - **m-007**：`mcp_client.py` 两条未测容错分支（连接失败隔离、读循环 EOF）补测试 `tests/test_mcp_client.py`（5 例）。确认无实际「重连」逻辑——只有失败隔离与 EOF 退出，属容错路径非死代码。

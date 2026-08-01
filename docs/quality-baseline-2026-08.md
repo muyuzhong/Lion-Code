@@ -135,7 +135,7 @@
 
 ## 9. 测试与稳定性
 
-- **全量：533 passed, 6 skipped, 6 subtests passed，耗时约 138s**（2026-08-01 本机 Python 3.13；二阶段清理后:删 4 个 `/skill:` 专项测试、新增 5 个 MCP 容错测试,净 +1）
+- **全量：543 passed, 6 skipped, 6 subtests passed，耗时约 73s**（2026-08-01 本机 Python 3.13；三阶段-1 后:含 10 个 /goal//loop 特征测试）
 - **不稳定候选**：`PytestUnhandledThreadExceptionWarning` —— `UnicodeEncodeError: 'gbk' codec can't encode character '⠴'`（测试/应用内线程在 GBK 环境打印 Unicode 字符导致）。建议后续在 `PYTHONIOENCODING=utf-8` 下复测确认。
 
 ## 10. 静态工具基线（配置后）
