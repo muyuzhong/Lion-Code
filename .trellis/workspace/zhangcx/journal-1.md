@@ -750,3 +750,42 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed — 编码 Agent 评测闭环父任务已归档；外部通过率仍保持 blocked，需受控 Linux Docker host 和批准预算后才可真实执行**
+
+
+## Session 19: 二阶段:清掉已知的架构债务
+
+**Date**: 2026-08-01
+**Task**: 二阶段:清掉已知的架构债务
+**Branch**: `feat/phase2-arch-debt`
+
+### Summary
+
+按序处理 m-012/m-007/m-013/m-010 + 第二套路径扫描,保证每种核心行为只有一个权威实现
+
+### Main Changes
+
+- m-012: 删除 /skill: 半成品入口(tau <skill> 机器+TUI autocomplete/app.py/commands.py 特判+state.py 展示分支);接线转预留任务 08-01-tui-skill-wiring
+- m-007: mcp_client 连接失败隔离/读循环 EOF 两条容错分支补测试 tests/test_mcp_client.py(5 例);确认无重连逻辑
+- m-013: 合并两套 MEMORY 索引重建,memory.rebuild_memory_index_if_needed 唯一入口,删 tools._auto_update_memory_index
+- m-010: 清理 TUI 零引用符号(terminal_title 薄化、state.py format_terminal_command_result_block)
+- Task5: 扫描 Provider/Session/Tool/Memory,确认无第二套权威路径,均为分层;唯一重复(MEMORY 索引)已由 m-013 处理
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5238ae6` | (see git log) |
+
+### Testing
+
+- [OK] 全量 533 passed(532-4 /skill: 专项+5 MCP 容错)、6 skipped、compileall 通过
+- [OK] ruff 218 / format 146(由 147 改善) / mypy 105 / vulture 5 均未超基线;CI format 阈值同步 147->146
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 预留任务 08-01-tui-skill-wiring: 把 TUI /skill: 接到 lion_code.skills.resolve_skill_prompt(待 /skill 删除稳定后实施)
+- 可选 defer: providers/provider.py 重导出 shim 收敛、core/session/memory.py 命名澄清
