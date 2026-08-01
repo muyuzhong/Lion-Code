@@ -22,14 +22,13 @@ from lion_code.core.messages import (
 from lion_code.core.tools import AgentToolResult, ToolCall
 from lion_code.core.types import JSONValue
 from .markup import CustomMessageMarkup, ToolCallMarkup, ToolResultMarkup
-from lion_code.application.skills import Skill, parse_skill_invocation
+from lion_code.application.skills import Skill
 from .themes import TranscriptRole
 
 ChatItemRole = TranscriptRole
 TOOL_RESULT_PREVIEW_LINES = 8
 TOOL_PATCH_PREVIEW_LINES = 32
 TOOL_RESULT_PREVIEW_CHARS = 2_000
-TERMINAL_COMMAND_OUTPUT_PREVIEW_LINES = 120
 # Show live elapsed time on an executing tool row once it stops being instant;
 # quick reads/edits never flash a "(0s)".
 TOOL_TIMER_MIN_SECONDS = 1.0
@@ -206,13 +205,7 @@ class TuiState:
             )
             return
 
-        skill_invocation = parse_skill_invocation(content)
-        if skill_invocation is None:
-            self.add_item("user", content)
-            return
-        self.add_item("skill", f"Using skill: {skill_invocation.name}")
-        if skill_invocation.additional_instructions:
-            self.add_item("user", skill_invocation.additional_instructions)
+        self.add_item("user", content)
 
     def add_thinking_delta(self, delta: str) -> None:
         """Append a thinking/reasoning fragment to the current thinking block."""
@@ -499,21 +492,6 @@ def format_tool_result_block(
     patch = _result_patch(name=name, ok=ok, data=data)
     if patch:
         lines.extend(["", "Patch:", _preview_text(patch, max_lines=TOOL_PATCH_PREVIEW_LINES)])
-    return "\n".join(lines)
-
-
-def format_terminal_command_result_block(
-    *,
-    ok: bool,
-    added_to_context: bool,
-    output: str,
-) -> str:
-    """Format an input-bar terminal command result for visible TUI display."""
-    status = "✓" if ok else "✗"
-    suffix = " · added to context" if added_to_context else " · not added to context"
-    lines = [f"{status} bash{suffix}"]
-    if output:
-        lines.append(_preview_text(output, max_lines=TERMINAL_COMMAND_OUTPUT_PREVIEW_LINES))
     return "\n".join(lines)
 
 

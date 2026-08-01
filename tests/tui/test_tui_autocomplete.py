@@ -9,7 +9,6 @@ from lion_code.application.commands import (
     create_default_command_registry,
 )
 from lion_code.application.prompt_templates import PromptTemplate
-from lion_code.application.skills import Skill
 from lion_code.tui.autocomplete import CompletionOption, build_completion_state
 from lion_code.tui.widgets import render_completion_suggestions
 
@@ -47,13 +46,11 @@ def test_command_completion_for_slash_lists_every_registered_command() -> None:
     state = build_completion_state(
         "/",
         command_registry=registry,
-        skills=(),
         prompt_templates=(),
     )
 
     assert [item.display for item in state.items] == [
-        f"/{command.name}" if command.name != "skill" else "/skill:"
-        for command in registry.list_commands()
+        f"/{command.name}" for command in registry.list_commands()
     ]
 
 
@@ -61,7 +58,6 @@ def test_slash_completion_groups_commands_and_custom_prompts() -> None:
     state = build_completion_state(
         "/",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(
             PromptTemplate(
                 name="example",
@@ -84,35 +80,10 @@ def test_slash_completion_groups_commands_and_custom_prompts() -> None:
     assert rendered.index("Custom prompts") < rendered.index("/example")
 
 
-def test_completion_rendering_aligns_wrapped_descriptions() -> None:
-    state = build_completion_state(
-        "/skill:r",
-        command_registry=create_default_command_registry(),
-        skills=(
-            Skill(
-                name="review",
-                path=Path("review.md"),
-                content="Review code",
-                description="Review code with a long description that wraps onto another line.",
-            ),
-        ),
-        prompt_templates=(),
-    )
-
-    console = Console(width=48, record=True)
-    console.print(render_completion_suggestions(state))
-    rendered = console.export_text()
-
-    assert "› /skill:review" in rendered
-    assert "                 another line." in rendered
-    assert not any(line.startswith("another line.") for line in rendered.splitlines())
-
-
 def test_command_completion_suggests_registered_commands() -> None:
     state = build_completion_state(
         "/sess",
         command_registry=_mechanism_registry(),
-        skills=(),
         prompt_templates=(),
     )
 
@@ -125,7 +96,6 @@ def test_command_completion_matches_search_terms_with_canonical_replacement() ->
     clear_state = build_completion_state(
         "/cl",
         command_registry=_mechanism_registry(),
-        skills=(),
         prompt_templates=(),
     )
 
@@ -138,7 +108,6 @@ def test_command_completion_prioritizes_direct_matches_over_search_terms() -> No
     state = build_completion_state(
         "/res",
         command_registry=_mechanism_registry(),
-        skills=(),
         prompt_templates=(),
     )
 
@@ -147,76 +116,10 @@ def test_command_completion_prioritizes_direct_matches_over_search_terms() -> No
     assert state.selected.apply("/res") == "/resume"
 
 
-def test_skill_command_is_available_for_command_completion() -> None:
-    state = build_completion_state(
-        "/ski",
-        command_registry=_mechanism_registry(),
-        skills=(),
-        prompt_templates=(),
-    )
-
-    assert [item.display for item in state.items] == ["/skill:", "/skills"]
-    assert state.selected is not None
-    assert state.selected.apply("/ski") == "/skill:"
-
-
-def test_skill_name_completion_preserves_request_text_for_incomplete_name() -> None:
-    state = build_completion_state(
-        "/skill:r fix tests",
-        command_registry=create_default_command_registry(),
-        skills=(
-            Skill(
-                name="review",
-                path=Path("review.md"),
-                content="Review code",
-                description="Review code",
-            ),
-        ),
-        prompt_templates=(),
-    )
-
-    assert [item.display for item in state.items] == ["/skill:review"]
-    assert state.selected is not None
-    assert state.selected.apply("/skill:r fix tests") == "/skill:review fix tests"
-
-
-def test_skill_name_completion_hides_after_completed_skill_command_space() -> None:
-    trailing_space_state = build_completion_state(
-        "/skill:review ",
-        command_registry=create_default_command_registry(),
-        skills=(
-            Skill(
-                name="review",
-                path=Path("review.md"),
-                content="Review code",
-                description="Review code",
-            ),
-        ),
-        prompt_templates=(),
-    )
-    request_state = build_completion_state(
-        "/skill:review fix tests",
-        command_registry=create_default_command_registry(),
-        skills=(
-            Skill(
-                name="review",
-                path=Path("review.md"),
-                content="Review code",
-                description="Review code",
-            ),
-        ),
-        prompt_templates=(),
-    )
-
-    assert trailing_space_state.items == ()
-    assert request_state.items == ()
-
-
 def test_custom_prompt_completion_hides_after_completed_prompt_command_space() -> None:
     trailing_space_state = build_completion_state(
         "/example ",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(
             PromptTemplate(
                 name="example",
@@ -229,7 +132,6 @@ def test_custom_prompt_completion_hides_after_completed_prompt_command_space() -
     request_state = build_completion_state(
         "/example fix tests",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(
             PromptTemplate(
                 name="example",
@@ -248,13 +150,11 @@ def test_builtin_command_completion_hides_after_completed_command_space() -> Non
     trailing_space_state = build_completion_state(
         "/compact ",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
     )
     request_state = build_completion_state(
         "/compact summarize old context",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
     )
 
@@ -266,7 +166,6 @@ def test_builtin_command_argument_completion_wins_over_completed_command_hide() 
     state = build_completion_state(
         "/model fak",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         model_names=("fake-model",),
     )
@@ -278,7 +177,6 @@ def test_builtin_command_argument_completion_wins_over_custom_prompt_name() -> N
     state = build_completion_state(
         "/model fak",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(
             PromptTemplate(
                 name="model",
@@ -296,7 +194,6 @@ def test_custom_prompt_completion_reappears_when_deleting_back_to_command_token(
     state = build_completion_state(
         "/exa",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(
             PromptTemplate(
                 name="example",
@@ -314,7 +211,6 @@ def test_completion_selection_wraps() -> None:
     state = build_completion_state(
         "/s",
         command_registry=_mechanism_registry(),
-        skills=(),
         prompt_templates=(),
     )
 
@@ -327,7 +223,6 @@ def test_model_argument_completion_preserves_existing_text() -> None:
     state = build_completion_state(
         "/model fak continue",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         model_names=("fake-model", "other-model"),
     )
@@ -341,7 +236,6 @@ def test_provider_argument_completion_is_not_available() -> None:
     state = build_completion_state(
         "/provider lo",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         provider_names=("openai", "local"),
     )
@@ -353,7 +247,6 @@ def test_login_argument_completion_uses_available_providers() -> None:
     state = build_completion_state(
         "/login op",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         provider_names=("openai", "openrouter", "anthropic"),
     )
@@ -365,7 +258,6 @@ def test_login_argument_completion_includes_anthropic_auth_aliases() -> None:
     state = build_completion_state(
         "/login anthropic-",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         provider_names=("anthropic", "anthropic-api", "anthropic-subscription"),
     )
@@ -380,7 +272,6 @@ def test_logout_argument_completion_uses_available_providers() -> None:
     state = build_completion_state(
         "/logout op",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         provider_names=("openai", "openrouter", "anthropic"),
     )
@@ -392,7 +283,6 @@ def test_thinking_argument_completion_uses_available_modes() -> None:
     state = build_completion_state(
         "/thinking h",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         thinking_levels=("off", "minimal", "low", "medium", "high", "xhigh"),
     )
@@ -404,7 +294,6 @@ def test_theme_argument_completion_uses_theme_names() -> None:
     state = build_completion_state(
         "/theme tau-",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         theme_names=("tau-dark", "tau-light", "high-contrast"),
     )
@@ -418,7 +307,6 @@ def test_resume_argument_completion_uses_session_ids() -> None:
     state = build_completion_state(
         "/resume sess",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         session_ids=("session-1", "other"),
     )
@@ -432,7 +320,6 @@ def test_resume_argument_completion_uses_session_options_with_descriptions() -> 
     state = build_completion_state(
         "/resume sess",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         session_options=(
             CompletionOption(value="session-2", description="Newer - qwen - /repo"),
@@ -458,7 +345,6 @@ def test_file_reference_completion_matches_workspace_files(tmp_path: Path) -> No
     state = build_completion_state(
         "please read @app",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         cwd=tmp_path,
     )
@@ -474,7 +360,6 @@ def test_file_reference_completion_stays_off_for_slash_commands(tmp_path: Path) 
     state = build_completion_state(
         "/help @read",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         cwd=tmp_path,
     )
@@ -488,7 +373,6 @@ def test_shell_path_completion_preserves_bang_prefix(tmp_path: Path) -> None:
     state = build_completion_state(
         "!cat READ",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         cwd=tmp_path,
     )
@@ -504,7 +388,6 @@ def test_shell_path_completion_preserves_double_bang_prefix(tmp_path: Path) -> N
     state = build_completion_state(
         "!!cat READ",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         cwd=tmp_path,
     )
@@ -521,7 +404,6 @@ def test_shell_path_completion_matches_relative_paths(tmp_path: Path) -> None:
     state = build_completion_state(
         "!cat src/ma",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         cwd=tmp_path,
     )
@@ -538,14 +420,12 @@ def test_shell_path_completion_adds_trailing_slash_for_directories(tmp_path: Pat
     directory_state = build_completion_state(
         "!cat sr",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         cwd=tmp_path,
     )
     child_state = build_completion_state(
         "!cat src/",
         command_registry=create_default_command_registry(),
-        skills=(),
         prompt_templates=(),
         cwd=tmp_path,
     )

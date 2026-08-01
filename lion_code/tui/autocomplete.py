@@ -8,7 +8,6 @@ from pathlib import Path
 
 from lion_code.application.commands import CommandRegistry, SlashCommand
 from lion_code.application.prompt_templates import PromptTemplate
-from lion_code.application.skills import Skill
 
 IGNORED_FILE_COMPLETION_DIRS = frozenset(
     {
@@ -90,7 +89,6 @@ def build_completion_state(
     text: str,
     *,
     command_registry: CommandRegistry,
-    skills: Sequence[Skill],
     prompt_templates: Sequence[PromptTemplate],
     model_names: Sequence[str] = (),
     provider_names: Sequence[str] = (),
@@ -112,11 +110,6 @@ def build_completion_state(
     token_end = _first_token_end(text)
     token = text[:token_end]
     has_argument_text = token_end < len(text)
-    if token.startswith("/skill:"):
-        if has_argument_text and _matches_skill_command(token, skills):
-            return CompletionState()
-        return CompletionState(_skill_completions(token=token, token_end=token_end, skills=skills))
-
     if ":" in token:
         return CompletionState()
 
@@ -313,11 +306,6 @@ def _parse_shell_path_token(token: str) -> tuple[str, str, str] | None:
     return parent_text, name_prefix, replacement_prefix
 
 
-def _matches_skill_command(token: str, skills: Sequence[Skill]) -> bool:
-    command_name = token.removeprefix("/skill:").lower()
-    return any(skill.name.lower() == command_name for skill in skills)
-
-
 def _matches_prompt_template_command(
     token: str, prompt_templates: Sequence[PromptTemplate]
 ) -> bool:
@@ -383,9 +371,6 @@ def _command_alias_completions(
         replacement_name = name if name in (command.name, *command.aliases) else command.name
         display = f"/{replacement_name}"
         replacement = f"/{replacement_name}"
-        if command.name == "skill" and replacement_name == command.name:
-            display = "/skill:"
-            replacement = "/skill:"
         if display in seen:
             continue
         seen.add(display)
@@ -400,24 +385,6 @@ def _command_alias_completions(
             )
         )
     return suggestions
-
-
-def _skill_completions(
-    *, token: str, token_end: int, skills: Sequence[Skill]
-) -> tuple[CompletionItem, ...]:
-    prefix = token.removeprefix("/skill:").lower()
-    suggestions = [
-        CompletionItem(
-            display=f"/skill:{skill.name}",
-            replacement=f"/skill:{skill.name}",
-            start=0,
-            end=token_end,
-            description=skill.description,
-        )
-        for skill in sorted(skills, key=lambda item: item.name)
-        if skill.name.lower().startswith(prefix)
-    ]
-    return tuple(suggestions)
 
 
 def _command_argument_completions(

@@ -832,7 +832,6 @@ class LionTuiApp(App):
         return build_completion_state(
             text,
             command_registry=self.session.command_registry,
-            skills=self.session.skills,
             prompt_templates=self.session.prompt_templates,
             model_names=model_names,
             theme_names=available_tui_theme_names(),
@@ -985,13 +984,13 @@ class LionTuiApp(App):
         if not text:
             return
         if self.session.is_running:
-            if text.startswith("/") and not text.startswith("/skill:"):
+            if text.startswith("/"):
                 self._notice("会话运行中，取消当前任务后再执行命令")
                 return
             # 运行中 Enter = steer 入队。
             self.run_worker(self._queue_message(text, "steer"), group="queue")
             return
-        if text.startswith("/") and not text.startswith("/skill:"):
+        if text.startswith("/"):
             self._dispatch(self.session.handle_command(text))
             return
         self.run_worker(self._run_prompt(text), exclusive=True, group="chat")

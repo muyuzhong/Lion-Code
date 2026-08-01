@@ -18,7 +18,7 @@ from lion_code.core import (
 )
 from lion_code.core.provider_events import TextDeltaEvent, ThinkingDeltaEvent
 from lion_code.application.events import AutoRetryStartEvent, QueueUpdateEvent
-from lion_code.application.skills import Skill, format_skill_invocation
+from lion_code.application.skills import Skill
 from lion_code.tui import TuiEventAdapter, TuiState
 from lion_code.tui.state import format_tool_call_block, format_tool_result_block
 
@@ -54,26 +54,13 @@ def test_tui_adapter_builds_assistant_item_from_nested_stream_events() -> None:
     assert [(item.role, item.text) for item in state.items] == [("assistant", "Hello")]
 
 
-def test_tui_adapter_builds_user_and_compact_skill_items() -> None:
-    skill = Skill(
-        name="review",
-        path=Path("/workspace/.tau/skills/review.md"),
-        content="# Review\nFull instructions.",
-        description="Review code",
-    )
+def test_tui_adapter_builds_user_item() -> None:
     state = TuiState()
     adapter = TuiEventAdapter(state)
 
     adapter.apply(MessageEndEvent(message=UserMessage(content="Hello Tau")))
-    adapter.apply(
-        MessageEndEvent(message=UserMessage(content=format_skill_invocation(skill, "check auth")))
-    )
 
-    assert [(item.role, item.text) for item in state.items] == [
-        ("user", "Hello Tau"),
-        ("skill", "Using skill: review"),
-        ("user", "check auth"),
-    ]
+    assert [(item.role, item.text) for item in state.items] == [("user", "Hello Tau")]
 
 
 def test_tui_adapter_groups_nested_thinking_deltas() -> None:

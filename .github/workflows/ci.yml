@@ -59,7 +59,7 @@ jobs:
           WOULD=$(echo "$OUTPUT" | grep -oE '[0-9]+ files would be reformatted' | grep -oE '^[0-9]+' || echo 0)
           ALREADY=$(echo "$OUTPUT" | grep -oE '[0-9]+ files already formatted' | grep -oE '^[0-9]+' || echo 0)
           echo "待重排: $WOULD / 已合规: $ALREADY"
-          BASELINE=147
+          BASELINE=146
           echo "基线: $BASELINE"
           if [ "${WOULD:-0}" -gt "$BASELINE" ]; then
             echo "::error::ruff format 待重排文件 ($WOULD) 超过基线 ($BASELINE) — 不得继续恶化"

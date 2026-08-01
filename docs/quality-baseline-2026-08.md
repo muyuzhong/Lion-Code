@@ -135,7 +135,7 @@
 
 ## 9. 测试与稳定性
 
-- **全量：532 passed, 6 skipped, 6 subtests passed，耗时 80.31s**（2026-08-01 本机 Python 3.13）
+- **全量：533 passed, 6 skipped, 6 subtests passed，耗时约 138s**（2026-08-01 本机 Python 3.13；二阶段清理后:删 4 个 `/skill:` 专项测试、新增 5 个 MCP 容错测试,净 +1）
 - **不稳定候选**：`PytestUnhandledThreadExceptionWarning` —— `UnicodeEncodeError: 'gbk' codec can't encode character '⠴'`（测试/应用内线程在 GBK 环境打印 Unicode 字符导致）。建议后续在 `PYTHONIOENCODING=utf-8` 下复测确认。
 
 ## 10. 静态工具基线（配置后）
@@ -143,7 +143,7 @@
 | 工具 | 当前状态 | 基线值 |
 |---|---|---|
 | `ruff check .` | 218 错，162 可自动修复 | 218 |
-| `ruff format --check .` | 147 文件待重排 / 201 已合规 | 147 |
+| `ruff format --check .` | 146 文件待重排 / 205 已合规 | 146 |
 | `mypy lion_code` | 105 错 / 14 文件 | 105 |
 | `vulture` (min-conf 70) | 5 个高置信候选 | 5 |
 | `import-linter` | 3 契约 KEPT | 0 broken |
@@ -167,7 +167,7 @@
 | 指标 | 基线 | 阈值含义 |
 |---|---|---|
 | ruff check 错误数 | 218 | 新增代码不得引入更多违规 |
-| ruff format 待重排文件 | 147 | 新增文件必须格式合规 |
+| ruff format 待重排文件 | 146 | 新增文件必须格式合规 |
 | mypy 错误数 | 105 | 新增代码不得引入更多类型错误 |
 | import-linter | 0 broken | 不得打破架构边界 |
 | pytest | 全部通过 | 不得回归 |

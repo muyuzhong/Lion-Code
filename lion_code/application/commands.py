@@ -178,9 +178,6 @@ class CommandRegistry:
         if not stripped.startswith("/"):
             return CommandResult(handled=False)
 
-        if stripped.startswith("/skill:"):
-            return CommandResult(handled=False)
-
         name, args = _parse_command(stripped)
         if not name:
             return CommandResult(handled=False)

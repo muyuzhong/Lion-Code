@@ -101,6 +101,27 @@ def _update_memory_index(memory_dir: Path | None = None) -> None:
     (d / "MEMORY.md").write_text("\n".join(lines), encoding="utf-8")
 
 
+def rebuild_memory_index_if_needed(file_path: str) -> None:
+    """写入文件后,若它落在 Auto Memory 目录内则重建 MEMORY.md 索引。
+
+    MEMORY.md 索引的唯一写入入口:write_file 工具经此触发,dream 经
+    ``_update_memory_index`` 触发,二者共用同一重建逻辑。索引重建为尽力而为,
+    失败不得影响写入操作本身。
+    """
+    try:
+        memory_dir = get_memory_dir()
+        memory_dir_str = str(memory_dir)
+        if (
+            file_path.startswith(memory_dir_str)
+            and file_path.endswith(".md")
+            and not file_path.endswith("MEMORY.md")
+        ):
+            _update_memory_index(memory_dir)
+    except Exception:
+        # 索引重建失败不得影响 write_file 的主路径。
+        pass
+
+
 def load_memory_index(identity: ProjectIdentity | None = None) -> str:
     index_path = _get_index_path(identity)
     if not index_path.exists():
