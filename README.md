@@ -372,7 +372,7 @@ Lion-Code/
 │   ├── __main__.py             # CLI、TUI 与 REPL 入口
 │   ├── agent.py                # Agent 组装、工具路由与宿主能力 (~94 KB)
 │   ├── agent_runtime.py        # Agent ↔ Core Runtime 桥接
-│   ├── core/                   # 可移植 Agent 循环（从 Hugging Face Tau 吸收并演化）
+│   ├── core/                   # 可移植 Agent 循环
 │   │   ├── loop.py             # 异步生成器：整个工具使用周期
 │   │   ├── harness.py          # 配置、事件总线、消息队列
 │   │   ├── messages.py         # 规范消息类型（AgentMessage、ToolResult...）
@@ -442,9 +442,8 @@ Lion-Code/
 │   └── ...
 ├── docs/
 │   ├── tui.md                  # TUI 使用说明、快捷键与配置
-│   └── tui-migration-audit.md  # Tau → Lion 迁移审计
+│    
 ├── pyproject.toml              # 构建、依赖、CLI 入口
-├── UPSTREAM.md                 # 上游（Tau）文件映射与同步日志
 ├── MAINTENANCE.md              # 维护台账与瘦身日志
 └── README.md
 ```
@@ -595,10 +594,3 @@ python benchmarks/context_management/formal_benchmark.py
 - [ ] **CI 管线**——跨平台（Windows、Linux）、多 Python 版本 CI，展示测试状态徽章
 - [ ] **评测扩展**——更多任务多样性和对抗性测试用例
 
----
-
-## 许可证
-
-[MIT](LICENSE)
-
-Lion Code 包含来自 [Hugging Face Tau](https://github.com/huggingface/tau) 的代码（MIT）。详见 [`licenses/TAU_LICENSE`](licenses/TAU_LICENSE)。
