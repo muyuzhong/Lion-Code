@@ -9,5 +9,9 @@ dist/
 /tags
 .lion-code/
 .agents
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 /benchmarks/context_management/README_CN.md
 /benchmarks/context_management/REPORT_CN.md

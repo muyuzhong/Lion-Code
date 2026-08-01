@@ -1,0 +1,110 @@
+# Lion 质量基线 CI（2026-08-01 建立）
+#
+# 原则：先记录基线、执行「不得继续恶化」，不追求立即全绿。
+# 基线数值见 docs/quality-baseline-2026-08.md。
+#
+# 设计：
+# - ruff check / format / mypy 使用「错误数超基线 → fail」的比对，拦截恶化。
+# - import-linter 契约必须通过（架构边界）。
+# - coverage 只报告，不设 fail_under（基线模式）。
+# - 用户指定的 5 条命令全部包含。
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  quality-gates:
+    name: 质量门禁（基线模式）
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      # ---------- 用户指定的 5 条命令 ----------
+
+      - name: ruff check .（含基线比对）
+        run: |
+          BEFORE=$(ruff check . 2>&1 | tail -1 | grep -oE 'Found [0-9]+ errors' | grep -oE '[0-9]+' || echo 0)
+          echo "当前 ruff 错误数: $BEFORE"
+          BASELINE=218
+          echo "基线: $BASELINE"
+          if [ "$BEFORE" -gt "$BASELINE" ]; then
+            echo "::error::ruff 错误数 ($BEFORE) 超过基线 ($BASELINE) — 不得继续恶化"
+            exit 1
+          fi
+          # 打印违规摘要供人工跟踪
+          ruff check . --output-format=concise | grep -oE ' [A-Z]+[0-9]+ ' | sort | uniq -c | sort -rn | head -10
+
+      - name: ruff format --check .（含基线比对）
+        run: |
+          OUTPUT=$(ruff format --check . 2>&1)
+          WOULD=$(echo "$OUTPUT" | grep -oE '[0-9]+ files would be reformatted' | grep -oE '^[0-9]+' || echo 0)
+          ALREADY=$(echo "$OUTPUT" | grep -oE '[0-9]+ files already formatted' | grep -oE '^[0-9]+' || echo 0)
+          echo "待重排: $WOULD / 已合规: $ALREADY"
+          BASELINE=147
+          echo "基线: $BASELINE"
+          if [ "${WOULD:-0}" -gt "$BASELINE" ]; then
+            echo "::error::ruff format 待重排文件 ($WOULD) 超过基线 ($BASELINE) — 不得继续恶化"
+            exit 1
+          fi
+          if [ -z "$WOULD" ] && [ -z "$ALREADY" ]; then
+            echo "$OUTPUT" | tail -3
+            exit 1
+          fi
+
+      - name: python -m compileall -q lion_code tests
+        run: python -m compileall -q lion_code tests
+
+      - name: python -m pytest -q（全量测试）
+        run: python -m pytest -q
+
+      - name: git diff --check
+        run: git diff --check
+
+      # ---------- 附加质量门禁 ----------
+
+      - name: mypy 类型检查（含基线比对）
+        run: |
+          OUTPUT=$(python -m mypy lion_code 2>&1)
+          echo "$OUTPUT" | tail -3
+          FOUND=$(echo "$OUTPUT" | grep -oE 'Found [0-9]+ errors' | grep -oE '[0-9]+' || echo 0)
+          echo "当前 mypy 错误数: $FOUND"
+          BASELINE=105
+          echo "基线: $BASELINE"
+          if [ "$FOUND" -gt "$BASELINE" ]; then
+            echo "::error::mypy 错误数 ($FOUND) 超过基线 ($BASELINE) — 不得继续恶化"
+            exit 1
+          fi
+
+      - name: import-linter 架构契约
+        run: |
+          lint-imports --no-cache || exit 1
+
+      - name: vulture 死代码候选（报告，不设硬阈值）
+        run: |
+          echo "当前 vulture 候选（基线 5）:"
+          vulture lion_code tests --min-confidence 70 2>&1 || true
+
+      - name: 分支覆盖率报告（基线 70%，仅报告不阻塞）
+        run: |
+          python -m coverage run --branch -m pytest -q -p no:cacheprovider
+          python -m coverage report --include="lion_code/*"
+          echo "基线: lion_code 分支覆盖率 70%"

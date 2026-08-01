@@ -19,9 +19,119 @@ dependencies = [
 
 [project.optional-dependencies]
 benchmark = ["openai>=1.50.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "coverage>=7.6",
+    "radon>=6.0",
+    "vulture>=2.10",
+    "import-linter>=2.0",
+]
 
 [project.scripts]
 lion-code = "lion_code.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["lion_code*"]
+
+# ===========================================================================
+# 质量基线工具配置（2026-08-01 建立，基线模式）
+# 原则：记录基线、执行「不得继续恶化」，不追求立即全绿。
+# 每项 ignore 均注明原因；后续精简阶段逐条收紧。
+# ===========================================================================
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+extend-exclude = [
+    "benchmarks/**/results",
+    "*.pyc",
+]
+
+[tool.ruff.lint]
+# 基线模式规则集：E/F 为硬错误，I/RUF/UP 为可自动修复项。
+# 说明：BLE001(宽泛 except) 有 99 处，属现有风格，列入 ignore 留待后续阶段；
+#       E501(行宽) 大量存在，基线阶段忽略。
+select = ["E", "F", "I", "RUF", "UP"]
+ignore = [
+    "E501",   # 行宽：基线阶段忽略（大量既有违规），后续精简阶段处理
+    "E402",   # 模块级 import 非顶部：21 处，多为条件导入，现有风格
+    "RUF001", # 混淆字符检测：本项目含大量中文/全角标点，误报重灾区（326 处）
+    "RUF002", # 同 RUF001，docstring 混淆字符（393 处）
+    "RUF003", # 同 RUF001，注释混淆字符（231 处）
+    "RUF100", # 未使用的 noqa：自动修复会改动现有代码，暂留
+    "UP042",  # 使用类构造代替 @classmethod：19 处，现有风格
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+warn_redundant_casts = true
+check_untyped_defs = true
+ignore_missing_imports = true
+# 基线模式：103 处错误集中在 14 个文件（多为 TUI 层），本阶段不要求全绿。
+# CI 用「错误数不超基线」的比对步骤拦截恶化。
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+branch = true
+source = ["lion_code"]
+# 覆盖率 7.x：branch 在 run 时启用，report 不再需要 --branch
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+# 基线模式：不设 fail_under，仅报告分支覆盖率（当前 lion_code 70%）
+
+[tool.radon.cc]
+min = "C"
+exclude = "tests,benchmarks"
+
+[tool.vulture]
+paths = ["lion_code", "tests"]
+min_confidence = 70
+
+# ===========================================================================
+# import-linter 架构契约
+# 原则：契约反映现状，不追求理想架构。CI 拦截「打破现有边界」的回归。
+# 用法：lint-imports（自动读 pyproject.toml 的 [tool.importlinter]）
+# ===========================================================================
+[tool.importlinter]
+root_package = "lion_code"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "TUI 不直接依赖 memory_runtime 与 session_runtime"
+type = "forbidden"
+source_modules = ["lion_code.tui"]
+forbidden_modules = ["lion_code.memory_runtime", "lion_code.session_runtime"]
+ignore_imports = []
+# 现状：tui 经 application.session -> agent -> memory_runtime/session_runtime 间接依赖。
+# 基线阶段只拦截「新增直接 import」；间接路径留待后续精简阶段（agent 拆分）处理。
+allow_indirect_imports = "True"
+
+[[tool.importlinter.contracts]]
+name = "Application 不依赖 TUI"
+type = "forbidden"
+source_modules = ["lion_code.application"]
+forbidden_modules = ["lion_code.tui"]
+ignore_imports = []
+allow_indirect_imports = "False"
+
+[[tool.importlinter.contracts]]
+name = "生产代码不导入测试与基准"
+type = "forbidden"
+source_modules = ["lion_code"]
+forbidden_modules = ["tests", "benchmarks"]
+ignore_imports = []
+allow_indirect_imports = "False"
