@@ -789,3 +789,40 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 
 - 预留任务 08-01-tui-skill-wiring: 把 TUI /skill: 接到 lion_code.skills.resolve_skill_prompt(待 /skill 删除稳定后实施)
 - 可选 defer: providers/provider.py 重导出 shim 收敛、core/session/memory.py 命名澄清
+
+
+## Session 20: 三阶段-1:提取 autonomy_runtime,拆解 agent.py
+
+**Date**: 2026-08-01
+**Task**: 三阶段-1:提取 autonomy_runtime,拆解 agent.py
+**Branch**: `feat/phase3-agent-decompose`
+
+### Summary
+
+把 /goal//loop/AutoMode 协调从 agent.py 迁入 autonomy_runtime.py(AutonomyHost 窄协议),agent.py 2397->2152
+
+### Main Changes
+
+- 新建 autonomy_runtime.py:AutonomyRuntime+AutonomyHost,迁入 6 状态字段+16 方法
+- Agent 改薄委托+6 状态属性委托,公共 API 不变;side-query 工具暂留
+- 先补 /goal//loop 特征测试 10 例(test_autonomy_goal_loop.py)再迁移
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3e3a188` | (see git log) |
+
+### Testing
+
+- [OK] 全量 543 passed(+10)、6 skipped、compileall 通过
+- [OK] ruff 218 / format 146 / mypy 105 持平基线
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 三阶段-2:session_memory_coordinator 提取(SessionMemory+dream+handoff+memory overlays)
+- 预留 tui-skill-wiring 接线仍待办

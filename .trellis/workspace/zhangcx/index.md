@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 19
+- **Total Sessions**: 20
 - **Last Active**: 2026-08-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~791 | Active |
+| `journal-1.md` | ~828 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 20 | 2026-08-01 | 三阶段-1:提取 autonomy_runtime,拆解 agent.py | `3e3a188` | `feat/phase3-agent-decompose` |
 | 19 | 2026-08-01 | 二阶段:清掉已知的架构债务 | `5238ae6` | `feat/phase2-arch-debt` |
 | 18 | 2026-07-31 | 建立评测回归门禁与失败回流 | `2ddbf66` | `master` |
 | 17 | 2026-07-30 | 建立 SWE-bench-Live 外部锚点评测 | `5a4b26f` | `master` |
