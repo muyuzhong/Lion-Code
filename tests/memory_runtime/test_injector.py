@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from lion_code.context import estimate_messages_tokens
 from lion_code.core.messages import (
     AssistantMessage,
@@ -16,8 +18,20 @@ from lion_code.memory_runtime import (
 )
 
 
-def _overlay(path: str = "project.md", content: str = "remember this") -> MemoryOverlay:
-    return MemoryOverlay(path, content, len(content.encode("utf-8")))
+def _overlay(
+    path: str = "project.md",
+    content: str = "remember this",
+    *,
+    source: Literal["project", "session", "auto"] = "auto",
+    required: bool = False,
+) -> MemoryOverlay:
+    return MemoryOverlay(
+        path,
+        content,
+        len(content.encode("utf-8")),
+        source=source,
+        required=required,
+    )
 
 
 def test_overlay_is_ephemeral_and_each_projection_contains_one_block() -> None:
@@ -104,3 +118,25 @@ def test_duplicate_overlay_path_is_injected_once() -> None:
     assert projected[-1].text.count("## project.md") == 1
     assert report.injected_paths == ("project.md",)
     assert report.skipped_paths == ("project.md",)
+
+
+def test_project_and_session_layers_precede_and_outlive_auto_budget() -> None:
+    injector = MemoryContextInjector(
+        MemoryContextPolicy(max_active_memories=0, max_injection_bytes=0)
+    )
+
+    projected, report = injector.inject(
+        [UserMessage(content="question")],
+        [
+            _overlay("auto.md", "auto"),
+            _overlay("session.md", "session", source="session"),
+            _overlay("AGENTS.md", "project", source="project"),
+        ],
+        max_tokens=0,
+    )
+
+    text = projected[-1].text
+    assert report.injected_paths == ("AGENTS.md", "session.md")
+    assert report.skipped_paths == ("auto.md",)
+    assert text.index("<project-memory>") < text.index("<session-memory>")
+    assert "<auto-memory>" not in text

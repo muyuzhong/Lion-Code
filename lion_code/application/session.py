@@ -27,9 +27,6 @@ from lion_code.core.events import AgentEndEvent, AgentEvent, MessageEndEvent
 from lion_code.core.messages import AgentMessage, AssistantMessage
 
 from .commands import CommandRegistry, CommandResult, create_default_command_registry
-from .prompt_templates import PromptTemplate
-from .provider_settings import ModelChoice, load_model_choices, remember_model
-from .skills import Skill
 from .events import (
     AgentSettledEvent,
     AutoRetryEndEvent,
@@ -40,6 +37,9 @@ from .events import (
     QueueUpdateEvent,
     SessionAgentEndEvent,
 )
+from .prompt_templates import PromptTemplate
+from .provider_settings import ModelChoice, load_model_choices, remember_model
+from .skills import Skill
 
 if TYPE_CHECKING:
     from lion_code.agent import Agent
@@ -292,6 +292,30 @@ class LionCodingSession:
 
     def handle_command(self, text: str) -> CommandResult:
         return self._command_registry.execute(self, text)
+
+    async def execute_session_memory_command(
+        self,
+        result: CommandResult,
+    ) -> str | None:
+        """执行项目短期记忆命令；解析意图由 CommandRegistry 统一提供。"""
+
+        if self._running:
+            raise RuntimeError("会话运行中，取消当前任务后再执行命令")
+        if result.task_action == "show":
+            return self._agent.show_active_task()
+        if result.task_action == "switch":
+            if result.task_text is None:
+                raise ValueError("缺少要切换的任务")
+            return self._agent.switch_session_task(result.task_text)
+        if result.task_action == "done":
+            return self._agent.finish_session_task()
+        if result.session_memory_requested:
+            return self._agent.show_session_memory()
+        if result.handoff_requested:
+            return self._agent.create_session_handoff()
+        if result.dream_requested:
+            return await self._agent.dream()
+        return None
 
     # ─── Lion 特有交互(权限确认 / Plan 审批)─────────────────
 

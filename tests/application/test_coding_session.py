@@ -11,7 +11,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from lion_code.agent import Agent
 from lion_code.application import (
@@ -32,6 +32,8 @@ from lion_code.core.events import (
     ToolExecutionStartEvent,
 )
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
+from lion_code.project_identity import resolve_project_identity
+from lion_code.session_memory import SessionMemory, SessionMemoryRepository
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
@@ -94,10 +96,20 @@ def _error_event(message: str) -> AssistantErrorEvent:
     )
 
 
+async def _no_session_memory_semantics(*_args, **_kwargs) -> dict[str, object]:
+    """应用会话测试只验证主 Provider 事件，不消费额外的状态提炼脚本。"""
+
+    return {}
+
+
 class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self._temp_dir = tempfile.TemporaryDirectory()
         self._session_repository = SessionRepository(Path(self._temp_dir.name))
+        self._session_memory_repository = SessionMemoryRepository(
+            resolve_project_identity(),
+            storage_dir=Path(self._temp_dir.name) / "session-memory",
+        )
 
     def tearDown(self) -> None:
         self._temp_dir.cleanup()
@@ -113,8 +125,10 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 tool_registry=registry or ToolRegistry(),
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                session_memory_repository=self._session_memory_repository,
             )
         agent._mcp_initialized = True
+        agent._extract_session_memory_semantics = _no_session_memory_semantics
         return LionCodingSession(agent), agent, fake
 
     # ─── 构造约束 ────────────────────────────────────────────
@@ -139,6 +153,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 session_repository=self._session_repository,
             )
             agent._mcp_initialized = True
+            agent._extract_session_memory_semantics = _no_session_memory_semantics
             await agent.chat("first")
 
             recorder = agent._session_recorder
@@ -224,6 +239,48 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(session.messages[2].text, "echo:hi")
         self.assertIsInstance(events[-1], AgentSettledEvent)
+
+    async def test_session_memory_commands_share_task_handoff_and_dream_intents(self) -> None:
+        session, agent, _fake = self._make_session([])
+        agent._session_memory = self._session_memory_repository.save(
+            SessionMemory(
+                project_root=str(agent._project_identity.root),
+                current_goal="完成短期记忆",
+                active_task="接入命令",
+                next_step="添加测试",
+            )
+        )
+
+        task = await session.execute_session_memory_command(
+            session.handle_command("/task")
+        )
+        switched = await session.execute_session_memory_command(
+            session.handle_command("/task switch 完成 handoff")
+        )
+        finished = await session.execute_session_memory_command(
+            session.handle_command("/task done")
+        )
+        handoff = await session.execute_session_memory_command(
+            session.handle_command("/handoff")
+        )
+        snapshot = await session.execute_session_memory_command(
+            session.handle_command("/session-memory")
+        )
+        agent.dream = AsyncMock(return_value="Dream 完成")
+        dream = await session.execute_session_memory_command(
+            session.handle_command("/dream")
+        )
+
+        self.assertIn("接入命令", task or "")
+        self.assertIn("完成 handoff", switched or "")
+        self.assertIn("已结束任务", finished or "")
+        self.assertIn("项目：", handoff or "")
+        self.assertIn("Previous handoff", snapshot or "")
+        self.assertEqual(dream, "Dream 完成")
+        agent.dream.assert_awaited_once()
+        self.assertIsNone(agent.session_memory.active_task if agent.session_memory else None)
+        self.assertIn("完成 handoff", agent.session_memory.completed if agent.session_memory else ())
+        self.assertEqual(session.messages, ())
 
     # ─── 运行中入队 ──────────────────────────────────────────
 
@@ -349,15 +406,17 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(recovery_events[2].will_retry)
         self.assertTrue(recovery_events[5].success)
         self.assertEqual(fake.call_count, 5)
+        projected = [message.text for message in fake.received_messages[4]]
         self.assertEqual(
-            [message.text for message in fake.received_messages[4]],
+            projected[:3],
             [
                 "Previous conversation summary:\nrecovery summary",
                 "keep recent turn",
                 "recent answer",
-                "trigger overflow",
             ],
         )
+        self.assertTrue(projected[3].startswith("trigger overflow\n\n<relevant-memory>"))
+        self.assertIn("<session-memory>", projected[3])
 
         entries = await self._session_repository.storage_for(
             agent.session_id

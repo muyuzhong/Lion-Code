@@ -1,9 +1,10 @@
-# Runtime, Provider, Session, and Frontend Boundaries
+# Runtime, Provider, Session, Memory, and Frontend Boundaries
 
 ## 1. Scope / Trigger
 
 Use this contract when changing Agent construction, Provider configuration, child
-agents, session persistence or migration, or a frontend that consumes Agent output.
+agents, project identity, memory boundaries, session persistence or migration, or a
+frontend that consumes Agent output.
 These layers share one canonical Core history; adding a second message store, writer,
 or process-global output bridge is an architecture regression.
 
@@ -40,6 +41,12 @@ class SessionRecorder:
         summary: str,
         replaces_entry_ids: list[str] | None = None,
     ) -> CompactionEntry: ...
+
+class SessionMemoryRepository:
+    def load(self) -> SessionMemory: ...
+    def save(self, memory: SessionMemory) -> SessionMemory: ...
+
+def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
 ```
 
 ## 3. Contracts
@@ -62,6 +69,37 @@ class SessionRecorder:
   import must remain lazy so product startup and offline benchmark validation work
   without it.
 
+### Project Identity and Memory
+
+- `resolve_project_identity()` uses the current Git worktree root when available;
+  otherwise it uses the normalized current working directory. The resulting key
+  isolates Auto Memory and Session Memory per project or worktree, so a repository
+  subdirectory cannot create a second project state.
+- Project instructions are read-only human-authored files. Load `CLAUDE.md` then
+  `AGENTS.md` at every directory from project root to current cwd; deeper files win
+  and `AGENTS.md` wins within one directory. The project-memory, Session Memory, and
+  Dream lifecycles never write either file.
+- Auto Memory is the durable, selectively recalled layer and only supports `user`,
+  `feedback`, `project`, and `reference`. A `project` item records a long-lived,
+  verified decision and its reason, never current work, goals, deadlines, or next
+  steps.
+- `SessionMemoryRepository` stores the lightweight project work state separately
+  from JSONL: active goal/task, completed and pending work, decisions, blockers,
+  relevant files, verification, handoff, and next step. Corrupt state is surfaced
+  and never replaced by an empty automatic write.
+- All three memory layers are temporary Provider projection only, in this priority:
+  project instructions, fixed Session Memory, then selectively recalled Auto Memory.
+  Project and Session layers are required overlays; canonical Core messages and JSONL
+  never contain their XML wrapper or injected text.
+- A root chat compresses canonical context first, reloads and fixes the Session Memory
+  snapshot, collects any completed Auto Memory recall, starts recall for the next
+  turn, and then calls the Provider. Tool-loop Provider calls reuse exactly that
+  snapshot. At turn end deterministic tool evidence is saved before the bounded
+  semantic patch; a failed patch cannot erase file or verification facts.
+- `/clear` starts a new JSONL conversation but retains the current project's Session
+  Memory. Restoring JSONL reloads the current project state rather than treating an
+  old transcript as the work-state authority.
+
 ### Session
 
 - `SessionRecorder` is the only runtime writer. It appends completed Core messages,
@@ -77,6 +115,14 @@ class SessionRecorder:
   listed as a second session.
 - Sub-agents do not create durable session rows; their captured text returns to the
   parent tool call.
+- Completing a project task clears only the active task pointer and keeps its summary
+  in Session Memory. `/handoff` persists a resumable state summary without changing
+  the JSONL transcript.
+- `/dream` receives only filtered Session Memory candidate evidence. It can propose
+  durable user preferences, explicit feedback, verified decisions with reasons,
+  reusable failure-and-fix lessons, and external references; it rejects progress,
+  pending work, temporary test failures, file lists, verification logs, handoffs,
+  and next steps. Dream still writes only validated Auto Memory files.
 
 ### Frontends
 
@@ -88,6 +134,9 @@ class SessionRecorder:
   callback is cleared before the TUI closes its session on unmount; confirmation and
   Plan callbacks are reclaimed with that session. Toggling terminal output must not
   rebuild or replace `UsageObserver` or `SessionRecorder`.
+- `CommandRegistry` parses `/task`, `/session-memory`, `/handoff`, and `/dream` into
+  synchronous intents. `LionCodingSession` performs the state operation; both the
+  REPL and TUI dispatch those same intents and do not add command text to JSONL.
 
 ## 4. Validation & Error Matrix
 
@@ -105,6 +154,12 @@ class SessionRecorder:
 | Structured frontend | No terminal renderer; events/notices remain visible exactly once |
 | Direct Agent or REPL | Terminal renderer/stdout remains available |
 | Terminal-output toggle during a run | Raise `RuntimeError` |
+| Git project root or its subdirectory | Resolve to one project key and state file |
+| Non-Git cwd | Use its normalized cwd as the project identity |
+| Corrupt Session Memory | Report it; keep the source file and skip automatic writes |
+| `/clear` or JSONL restore | Keep/reload current project Session Memory; do not merge it into transcript |
+| Tool loop after Auto Memory recall settles | Reuse the turn-start overlay snapshot until the next user turn |
+| `/dream` candidate input | Include only filtered durable evidence; never grant writes outside Auto Memory |
 
 ## 5. Good / Base / Bad Cases
 
@@ -122,6 +177,10 @@ class SessionRecorder:
 - Good: Textual receives deltas, tool events, and one queued notice while stdout stays
   quiet.
 - Bad: a module-global sink lets one frontend steal another Agent instance's output.
+- Good: a task handoff changes `session-memory.json` while the JSONL chain remains a
+  record of only user, assistant, and tool messages.
+- Bad: appending a Session Memory overlay into harness messages makes compaction and
+  resume treat injected project state as user conversation.
 
 ## 6. Tests Required
 
@@ -134,7 +193,15 @@ class SessionRecorder:
   `tests/application/test_coding_session.py`: observer identity, usage continuity,
   structured-frontend terminal suppression, and notice callbacks.
 - `tests/tui/test_tui_app.py`: two streaming turns, tool-row identity, one notice per
-  action, and no normal-delta full redraw.
+  action, no normal-delta full redraw, and shared Session Memory command dispatch.
+- `tests/test_project_identity.py`, `tests/test_prompt.py`, and
+  `tests/memory_runtime/test_core_integration.py`: project/worktree identity,
+  root-to-cwd instruction precedence, non-destructive three-layer projection,
+  `/clear`/restore lifecycle, and fixed per-turn overlays.
+- `tests/test_session_memory.py`, `tests/test_dream.py`,
+  `tests/application/test_coding_session.py`, and `tests/test_cli.py`: deterministic
+  tool evidence, task/handoff persistence, filtered Dream candidates, and matching
+  REPL/TUI command intents.
 - `tests/test_context_formal_benchmark.py`: offline benchmark imports without the
   optional SDK and every dataset source snapshot exists.
 - Before completion run the full test suite, `compileall`, changed-scope lint/type

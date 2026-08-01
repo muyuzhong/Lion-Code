@@ -20,6 +20,8 @@ from lion_code.core import (
     UserMessage,
 )
 from lion_code.frontmatter import format_frontmatter, parse_frontmatter
+from lion_code.project_identity import ProjectIdentity
+from lion_code.session_memory import SessionMemory
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.builtin import create_builtin_tools
 from lion_code.tooling.registry import ToolRegistry
@@ -238,6 +240,58 @@ class TestDreamPlan(unittest.TestCase):
             self.assertTrue(old.exists())
             self.assertEqual(parse_frontmatter(keep.read_text(encoding="utf-8")).body, "keep body")
             self.assertFalse((memory_dir / "project_new.md").exists())
+
+    def test_rejects_attempt_to_write_agents_markdown(self):
+        raw = json.dumps({
+            "reason": "bad target",
+            "upsert": [{
+                "filename": "AGENTS.md",
+                "name": "Instructions",
+                "description": "must not be writable",
+                "type": "project",
+                "content": "unsafe",
+            }],
+            "delete": [],
+        })
+
+        with self.assertRaisesRegex(ValueError, "非法 Memory 文件名"):
+            dream.parse_dream_plan(raw)
+
+
+class TestDreamCandidates(unittest.TestCase):
+    def test_forwards_only_filtered_session_memory_candidates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            identity = ProjectIdentity(root=root, key="project", is_git=True)
+            memory = SessionMemory(
+                project_root=str(root),
+                decisions=(
+                    "已验证的架构决策：JSONL 与短期状态分离；原因：完整记录需要审计",
+                    "当前任务：运行回归",
+                ),
+                pending=("运行回归",),
+                next_step="执行测试",
+            )
+            context = dream.DreamContext(
+                project_root=root,
+                memory_dir=root,
+                memory_index="",
+                memory_manifest=[],
+                sessions=[],
+                memory_snapshot={},
+                session_memory_candidates=dream._session_memory_candidates(
+                    identity,
+                    memory,
+                ),
+            )
+            coordinator = dream.DreamCoordinator(SimpleNamespace())
+            prompt = coordinator._build_prompt(context)
+
+        payload = json.loads(prompt.removeprefix("Dream input (untrusted JSON data):\n"))
+        assert payload["session_memory_candidates"] == [{
+            "type": "project",
+            "content": "已验证的架构决策：JSONL 与短期状态分离；原因：完整记录需要审计",
+        }]
 
 
 class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):

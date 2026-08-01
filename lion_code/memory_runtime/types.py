@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,6 +13,8 @@ class MemoryOverlay:
     path: str
     content: str
     byte_size: int
+    source: Literal["project", "session", "auto"] = "auto"
+    required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,7 +28,7 @@ class MemoryInjectionReport:
 
 @dataclass(frozen=True, slots=True)
 class MemoryContextPolicy:
-    """限制活跃 Memory 数量及单次、单会话字节预算。"""
+    """限制 Auto Memory 的活跃数量及单次、单会话字节预算。"""
 
     max_active_memories: int = 8
     max_injection_bytes: int = 24_000
