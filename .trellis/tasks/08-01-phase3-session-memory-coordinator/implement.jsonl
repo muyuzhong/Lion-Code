@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"实现前锁定 Session Memory 与 Provider 投影的当前契约，完成后按实际实现复核。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"实现前锁定测试隔离、类型和中文源码注释约定。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"实现前确认 session_memory_coordinator.py 的模块放置和 Agent 边界。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"实现前确认读取损坏状态、语义 patch 失败和 Dream 运行错误的处理方式。"}

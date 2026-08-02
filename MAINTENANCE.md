@@ -16,6 +16,7 @@
 | m-008 | 2d092d3 | 4      | −115   | 238    | 18/18     |
 | 二阶段 | 5238ae6 | 17     | −197   | 533    | 通过      |
 | 三阶段-1 | （本提交） | 3      | agent.py −245 | 543    | 通过      |
+| 三阶段-2 | （本提交） | 3      | agent.py −89，新增协调器 347 行 | 547    | 通过      |
 
 ## 完成
 ### 三阶段-1 · 2026-08-01 · 拆解 agent.py:autonomy_runtime 提取
@@ -23,6 +24,21 @@
 - 做了:`AutonomyRuntime` + `AutonomyHost` 窄协议(经 host 回调 Agent 的 chat/emit/budget/side-query,非 Service Locator);迁入 6 个状态字段 + 16 个方法;Agent 保留薄委托(公共 API 不变)+ 6 个状态属性委托;side-query 工具(`_run_evaluator_query`/`_run_classifier_query`/`_canonical_side_messages`)暂留 agent.py(learning 后续也用)。先补 /goal、/loop 特征测试(10 例,`tests/test_autonomy_goal_loop.py`)再迁移。
 - 验证:全量 543 passed(+10 新测试)、6 skipped;compileall 通过;ruff 218 / format 146 / mypy 105 均持平基线。agent.py 2397->2152(−245)。
 - 路线图:后续 session_memory_coordinator -> subagent_factory -> learning_runtime -> agent_lifecycle -> agent_runtime Core 协调,目标 agent.py ~1200 行。
+
+### 三阶段-2 · 2026-08-03 · 提取 agent.py:session_memory_coordinator
+- 范围:把项目级 Session Memory、项目指令 Overlay、Auto Memory 召回协调、Dream
+  入口和每轮短期状态更新迁入 `session_memory_coordinator.py`；Core canonical
+  history、JSONL schema、Provider 协议和 TUI 命令解析不变。
+- 做了:`SessionMemoryCoordinator` + `SessionMemoryHost` 窄协议持有项目身份、
+  Session Memory、三层 Overlay、MemoryCoordinator、Dream 和轮后更新；Agent
+  保留公共入口、Core 消费所需的兼容属性和 Provider/clear/restore/abort/close
+  路径，既有测试替身继续有效。
+- 验证:全量 547 passed、6 skipped、6 subtests；compileall 通过；import-linter
+  3 契约 KEPT；ruff 218 / format 146 / mypy 102 / vulture 5，未引入新的静态
+  错误。新协调器测试覆盖状态所有权、query service 绑定、兼容 setter 和公共
+  委托。已知 GBK spinner `UnicodeEncodeError` 警告仍存在。
+- 结果:`agent.py` 1,890 -> 1,801 行（−89）；新增 `session_memory_coordinator.py`
+  347 行和 4 个特征测试。下一步按路线进入 `subagent_factory`。
 
 ### 二阶段 · 2026-08-01 · 清掉已知的架构债务（m-012 / m-007 / m-013 / m-010 + 第二套路径扫描）
 - **m-012**：删除 `/skill:` 半成品入口。`application/skills.py` 移除 tau `<skill>` 块机器（expand_skill_command / format_skill_invocation / parse_skill_invocation / SkillInvocation，保留 `Skill`）；TUI autocomplete 的 `/skill:` 处理、`app.py` 与 `commands.py` 的 `/skill:` 特判、`state.py` 展示分支、相关测试一并移除。接线（让 TUI `/skill:` 走 `lion_code.skills.resolve_skill_prompt`）转预留任务 `08-01-tui-skill-wiring`。

@@ -1,1 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"定义 Session Memory、三层 Overlay、Core 历史、Dream 和 Provider 切换边界。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"定义 Python 类型、测试、错误处理和提交前验证要求。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"确认新协调模块位于 lion_code 根运行时层，避免创建重复 Service 层。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"确认损坏 Session Memory、side-query 失败和取消路径的错误语义。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"本子任务跨 Agent、Core、Memory、Dream 和应用命令边界，需要按数据流检查。"}

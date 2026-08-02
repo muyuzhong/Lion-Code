@@ -91,6 +91,11 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
   project instructions, fixed Session Memory, then selectively recalled Auto Memory.
   Project and Session layers are required overlays; canonical Core messages and JSONL
   never contain their XML wrapper or injected text.
+- `SessionMemoryCoordinator` owns project identity, Session Memory persistence,
+  project/turn overlays, Auto Memory recall coordination, Dream, and post-turn
+  Session Memory updates. `Agent` remains the host for Core/Provider/TUI capabilities
+  and exposes compatibility delegates; the coordinator must use its narrow
+  `SessionMemoryHost` boundary rather than a global service locator.
 - A root chat compresses canonical context first, reloads and fixes the Session Memory
   snapshot, collects any completed Auto Memory recall, starts recall for the next
   turn, and then calls the Provider. Tool-loop Provider calls reuse exactly that

@@ -1,7 +1,9 @@
-# Lion 质量基线（2026-08-01）
+# Lion 质量基线（2026-08-01；三阶段-2 于 2026-08-03 复测）
 
-> 代码精简第一阶段产出。本文件记录**当前代码库的真实质量基线**，所有数字可从文末命令重新测得。
+> 代码精简阶段产出。本文件记录**当前代码库的真实质量基线**，所有数字可从文末命令重新测得。
 > 原则：先记录基线 → 执行「不得继续恶化」→ 后续阶段按模块逐步提高标准。
+> 三阶段-2 于 2026-08-03 复测：Session Memory 协调职责已迁出 `agent.py`，
+> 新增 4 个特征测试；静态门槛仍沿用既有基线。
 
 ## 1. 规模
 
@@ -16,7 +18,7 @@
 
 | 行数 | 文件 |
 |---|---|
-| 2,397 | `lion_code/agent.py` |
+| 1,801 | `lion_code/agent.py` |
 | 2,260 | `lion_code/tui/widgets.py` |
 | 1,417 | `benchmarks/agent_e2e/external_anchor.py` |
 | 1,399 | `lion_code/tui/app.py` |
@@ -99,7 +101,7 @@
 ## 6. 循环依赖
 
 - **ast Tarjan 粗测**：模块级 0 个循环。
-- **import-linter 复核**：分析 145 文件 / 709 依赖，**3 条架构契约全部 KEPT**。
+- **import-linter 复核**：分析 147 文件 / 719 依赖，**3 条架构契约全部 KEPT**。
 - 契约清单（`pyproject.toml [tool.importlinter]`）：
   1. TUI 不直接依赖 memory_runtime/session_runtime（间接经 application→agent 的路径为现状，允许）
   2. Application 不依赖 TUI
@@ -117,7 +119,8 @@
 | 61 | 7 | `lion_code/tools.py` |
 | 50 | 10 | `lion_code/application/session.py` |
 
-> ⚠️ `agent.py` 同时是最大文件（2,397 行）、高复杂度（272）、最高提交频率（48），是后续精简的第一优先目标。
+> ⚠️ `agent.py` 仍是高复杂度和高提交频率热点；本轮已从 1,890 行降至 1,801 行，
+> 后续继续按路线拆分职责。
 
 ## 8. 分支覆盖率（coverage.py --branch）
 
@@ -135,7 +138,7 @@
 
 ## 9. 测试与稳定性
 
-- **全量：543 passed, 6 skipped, 6 subtests passed，耗时约 73s**（2026-08-01 本机 Python 3.13；三阶段-1 后:含 10 个 /goal//loop 特征测试）
+- **全量：547 passed, 6 skipped, 6 subtests passed，耗时约 100s**（2026-08-03 本机 Python 3.13；三阶段-2 后，新增 4 个 Session Memory 协调器特征测试）
 - **不稳定候选**：`PytestUnhandledThreadExceptionWarning` —— `UnicodeEncodeError: 'gbk' codec can't encode character '⠴'`（测试/应用内线程在 GBK 环境打印 Unicode 字符导致）。建议后续在 `PYTHONIOENCODING=utf-8` 下复测确认。
 
 ## 10. 静态工具基线（配置后）
@@ -143,8 +146,8 @@
 | 工具 | 当前状态 | 基线值 |
 |---|---|---|
 | `ruff check .` | 218 错，162 可自动修复 | 218 |
-| `ruff format --check .` | 146 文件待重排 / 205 已合规 | 146 |
-| `mypy lion_code` | 105 错 / 14 文件 | 105 |
+| `ruff format --check .` | 146 文件待重排 / 212 已合规 | 146 |
+| `mypy lion_code` | 102 错 / 14 文件 | 105 |
 | `vulture` (min-conf 70) | 5 个高置信候选 | 5 |
 | `import-linter` | 3 契约 KEPT | 0 broken |
 | `coverage` | lion_code 70% 分支 | 70% |
@@ -206,4 +209,5 @@ python -m coverage report --include="lion_code/*"
 python -m compileall -q lion_code tests
 ```
 
-> 本文件数字均在 **2026-08-01**、Python 3.13.12、上述 `pyproject.toml` 配置下测得。
+> 本文件数字均在 **2026-08-03**、Python 3.13、上述 `pyproject.toml` 配置下测得；
+> ruff 218 / format 146 / mypy 105 仍是 CI 的“不继续恶化”门槛。
