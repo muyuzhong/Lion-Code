@@ -826,3 +826,38 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 
 - 三阶段-2:session_memory_coordinator 提取(SessionMemory+dream+handoff+memory overlays)
 - 预留 tui-skill-wiring 接线仍待办
+
+
+## Session 21: 完成三阶段-2 Session Memory 协调器提取
+
+**Date**: 2026-08-03
+**Task**: 完成三阶段-2 Session Memory 协调器提取
+**Branch**: `feat/phase3-session-memory-coordinator`
+
+### Summary
+
+完成父任务 07-30-project-session-memory 之后的三阶段-2 子任务：将 Session Memory、三层 Overlay、Dream 和轮后更新迁入 SessionMemoryCoordinator，保留 Agent 公共 API 与兼容边界。
+
+### Main Changes
+
+- 新增 SessionMemoryCoordinator 与 SessionMemoryHost 窄协议，Agent 改为薄委托。
+- 补充协调器特征测试并同步 runtime boundary、维护台账和质量基线。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `952da7c` | (see git log) |
+
+### Testing
+
+- [OK] 547 passed, 6 skipped, 6 subtests passed；compileall 通过。
+- [OK] ruff 218、format 146、mypy 102、vulture 5；import-linter 3 契约 KEPT。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 按路线继续评估 subagent_factory 提取。
