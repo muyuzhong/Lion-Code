@@ -861,3 +861,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Next Steps
 
 - 按路线继续评估 subagent_factory 提取。
+
+
+## Session 22: 三阶段-3：提取子 Agent 工厂
+
+**Date**: 2026-08-03
+**Task**: 三阶段-3：提取子 Agent 工厂
+**Branch**: `muyuzhong/phase3-subagent-factory`
+
+### Summary
+
+将子 Agent 与 Skill fork 的构造和工具策略迁入 SubagentFactory，保持懒导入、权限、共享环境和资源关闭边界；全量测试 551 passed、6 skipped。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `19709152b082183f2e2893aa79021a0387930c04` | (see git log) |
+
+### Status
+
+[OK] **Completed**

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 21
+- **Total Sessions**: 22
 - **Last Active**: 2026-08-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~863 | Active |
+| `journal-1.md` | ~884 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 22 | 2026-08-03 | 三阶段-3：提取子 Agent 工厂 | `19709152b082183f2e2893aa79021a0387930c04` | `muyuzhong/phase3-subagent-factory` |
 | 21 | 2026-08-03 | 完成三阶段-2 Session Memory 协调器提取 | `952da7c` | `feat/phase3-session-memory-coordinator` |
 | 20 | 2026-08-01 | 三阶段-1:提取 autonomy_runtime,拆解 agent.py | `3e3a188` | `feat/phase3-agent-decompose` |
 | 19 | 2026-08-01 | 二阶段:清掉已知的架构债务 | `5238ae6` | `feat/phase2-arch-debt` |
