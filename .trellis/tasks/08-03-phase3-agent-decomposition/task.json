@@ -20,7 +20,8 @@
   "subtasks": [],
   "children": [
     "08-03-phase3-subagent-factory",
-    "08-03-phase3-learning-runtime"
+    "08-03-phase3-learning-runtime",
+    "08-03-phase3-agent-lifecycle"
   ],
   "parent": null,
   "relatedFiles": [],
