@@ -924,3 +924,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 25: 收敛 Agent Runtime 协调
+
+**Date**: 2026-08-04
+**Task**: 收敛 Agent Runtime 协调
+**Branch**: `muyuzhong/phase3-subagent-factory`
+
+### Summary
+
+提取 AgentRuntimeCoordinator，保持 Core 单一路径与兼容锚点，完成全量回归和边界规格更新。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `37385e3` | (see git log) |
+
+### Status
+
+[OK] **Completed**
