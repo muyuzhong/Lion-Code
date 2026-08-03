@@ -66,24 +66,36 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
 
 ### Runtime and Provider
 
-- Every `Agent` owns one `LionAgentRuntime`; both OpenAI-compatible and Anthropic
-  requests go through `ModelProvider` implementations in `lion_code/providers/`.
+- Every `Agent` composes one `AgentRuntimeCoordinator`, which owns exactly one
+  `LionAgentRuntime`; both OpenAI-compatible and Anthropic requests go through
+  `ModelProvider` implementations in `lion_code/providers/`.
 - `LionAgentRuntime.messages` is the only active conversation state. Goal, loop,
   plan, learning, Dream, side queries, and child agents must not create
   protocol-private histories or SDK clients.
+- `AgentRuntimeCoordinator` owns Core assembly, observer subscription order,
+  `SessionRecorder`, context projection/compaction, background cleanup, output
+  capture, and chat/run/clear/restore/close orchestration through
+  `AgentRuntimeHost`. `Agent` remains the composition root for MCP discovery,
+  tools, Memory/Plan/Autonomy/Learning and UI callbacks, and exposes compatibility
+  delegates such as `_core_runtime`, `_ensure_core_session_ready`, `chat()` and
+  `close()`. The coordinator must not import `Agent` or create a second history,
+  Provider, or JSONL writer.
 - `Agent.configure_api()` is an idle-only transaction. Build the replacement Provider
   first, replace it without clearing canonical history, update stored credentials and
   model, refresh the compactor, query service, and model-limit cache, then schedule
   the old Provider for closing.
 - `AgentLifecycle` owns that configuration transaction and both Thinking-change
-  paths through `AgentLifecycleHost`; `Agent` owns the fields, `LionAgentRuntime`,
-  `MemoryCoordinator`, recorder, and background-operation queue, and exposes the
-  existing public methods as compatibility delegates. The lifecycle module must not
-  import `Agent` or create another Provider, message history, or session writer.
+  paths through `AgentLifecycleHost`; `Agent` exposes coordinator-backed Core,
+  compactor, recorder and background-operation compatibility views while retaining
+  configuration fields and Memory composition. The lifecycle module must not import
+  `Agent` or create another Provider, message history, or session writer.
 - `Agent._create_provider(**kwargs)` is the required host factory boundary. It reads
   `lion_code.agent.create_provider` at call time, so existing patches of that name
   affect initial construction, Provider swaps, and Thinking rebuilds. Do not import
   the factory directly into `agent_lifecycle.py`.
+- `Agent._create_terminal_renderer()` is the corresponding renderer factory boundary:
+  it resolves `lion_code.agent.TerminalRenderer` at call time, so terminal renderer
+  patches remain effective while the coordinator rebuilds observers.
 - Child and Dream agents inherit the parent's stored Provider configuration and
   `terminal_output` setting. They must not infer credentials from a transport client.
 - `SubagentFactory` owns child tool selection and construction through a narrow
@@ -236,6 +248,9 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
 - `tests/runtime/test_terminal_renderer.py` and
   `tests/application/test_coding_session.py`: observer identity, usage continuity,
   structured-frontend terminal suppression, and notice callbacks.
+- `tests/runtime/test_agent_runtime.py`: `agent_runtime` imports without importing
+  `lion_code.agent`, and a constructed `Agent` exposes the coordinator's one Core
+  runtime rather than a duplicate history.
 - `tests/tui/test_tui_app.py`: two streaming turns, tool-row identity, one notice per
   action, no normal-delta full redraw, and shared Session Memory command dispatch.
 - `tests/test_project_identity.py`, `tests/test_prompt.py`, and

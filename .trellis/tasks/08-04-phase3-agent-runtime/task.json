@@ -3,7 +3,7 @@
   "name": "phase3-agent-runtime",
   "title": "三阶段-6：收敛 Agent Runtime 协调",
   "description": "收敛 Agent 的 Core Runtime、上下文、观察器与会话生命周期协调，保持外部行为不变。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

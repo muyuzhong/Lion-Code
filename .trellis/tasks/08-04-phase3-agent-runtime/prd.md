@@ -41,18 +41,18 @@ Memory、Plan、Autonomy 与公开 API 的薄组合根。
 
 ## Acceptance Criteria
 
-- [ ] AC1：Core 组装、observer/session-ready、context projection/compaction、运行结果
+- [x] AC1：Core 组装、observer/session-ready、context projection/compaction、运行结果
   捕获、单次运行和 Core 会话生命周期均由 `AgentRuntimeCoordinator` 独立拥有；
   `Agent` 只保留组合根和薄委托。
-- [ ] AC2：`chat()` 的 MCP 初始化、Memory overlay 时序、Core prompt/continue、usage/
+- [x] AC2：`chat()` 的 MCP 初始化、Memory overlay 时序、Core prompt/continue、usage/
   budget/outcome 更新和 Session Memory 轮后更新不变，且不会创建第二份消息历史。
-- [ ] AC3：`run()` 的 timeout/aborted/model-error 结构化结果、`run_once()` 的文本/token
+- [x] AC3：`run()` 的 timeout/aborted/model-error 结构化结果、`run_once()` 的文本/token
   捕获、context compaction 和 Plan pending reset 行为保持不变。
-- [ ] AC4：clear/restore 保留 JSONL、Model/Thinking、计划模式、observer 顺序和 Session
+- [x] AC4：clear/restore 保留 JSONL、Model/Thinking、计划模式、observer 顺序和 Session
   Memory 生命周期；`close()` 仍即使前序关闭失败也尝试关闭其余资源。
-- [ ] AC5：`lion_code.agent.TerminalRenderer` patch 与 `_core_runtime` /
+- [x] AC5：`lion_code.agent.TerminalRenderer` patch 与 `_core_runtime` /
   `_ensure_core_session_ready` 兼容入口继续可用；新模块不在模块级导入 `Agent`。
-- [ ] AC6：相关 runtime/integration/application/memory/tooling 回归、完整测试、
+- [x] AC6：相关 runtime/integration/application/memory/tooling 回归、完整测试、
   compileall、导入边界、改动范围静态检查、差异检查与 Trellis validation 通过；台账记录
   实际物理行数和已知基线差异。
 
@@ -66,6 +66,7 @@ Memory、Plan、Autonomy 与公开 API 的薄组合根。
 
 ## Planning Status
 
-阻塞问题为空。该任务是三阶段最终且最高耦合的切片，采用“扩展现有
-`agent_runtime.py`、单一 Core history、兼容委托”的设计；已完成复杂任务所需设计与
-实施计划，等待用户明确批准后才启动并改代码。
+已完成实现与验证：`AgentRuntimeCoordinator` 已在现有 `agent_runtime.py` 收敛 Core
+生命周期，`Agent` 保留 MCP/Memory/Plan/工具/UI 组合边界及兼容委托。实际物理行数为
+`agent.py` 1,858 -> 1,461（−397），全量验证为 557 passed、6 skipped、11 subtests；
+仅保留既有 Windows GBK spinner warning 与项目静态基线差异。
