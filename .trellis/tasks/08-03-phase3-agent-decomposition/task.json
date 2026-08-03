@@ -21,7 +21,8 @@
   "children": [
     "08-03-phase3-subagent-factory",
     "08-03-phase3-learning-runtime",
-    "08-03-phase3-agent-lifecycle"
+    "08-03-phase3-agent-lifecycle",
+    "08-04-phase3-agent-runtime"
   ],
   "parent": null,
   "relatedFiles": [],
