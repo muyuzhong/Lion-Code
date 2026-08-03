@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from .agent_lifecycle import AgentLifecycle
 from .agent_runtime import LionAgentRuntime
 from .autonomy_runtime import AutonomyRuntime
 from .context import (
@@ -39,7 +40,6 @@ from .memory_runtime import (
     MemoryCoordinator,
     MemoryInjectionReport,
     MemoryOverlay,
-    ProviderTextQueryService,
 )
 from .observers import TerminalRenderer, UsageObserver
 from .project_identity import ProjectIdentity, resolve_project_identity
@@ -53,9 +53,6 @@ from .providers.oneshot import complete_text
 from .providers.thinking import (
     ThinkingLevel,
     coerce_thinking_level,
-    next_thinking_level,
-    normalize_thinking_level,
-    provider_thinking_levels,
 )
 from .session_memory import (
     SessionMemory,
@@ -357,7 +354,8 @@ class Agent:
         self._terminal_renderer_unsubscribe: Callable[[], None] | None = None
         self._usage_observer: UsageObserver | None = None
         self._observer_unsubscribers: list[Callable[[], None]] = []
-        provider = self._build_core_provider(self._thinking_level)
+        self._lifecycle = AgentLifecycle(self)
+        provider = self._lifecycle.build_core_provider(self._thinking_level)
         self._core_runtime = LionAgentRuntime(
             provider=provider,
             model=self.model,
@@ -956,19 +954,11 @@ class Agent:
 
     @property
     def api_configured(self) -> bool:
-        return bool(self._api_key and (not self.use_openai or self._api_base))
+        return self._lifecycle.api_configured
 
     def get_api_config(self) -> dict:
         """返回 Agent 自己持有的当前 Provider 配置。"""
-        return {
-            "use_openai": self.use_openai,
-            "model": self.model,
-            "api_key": self._api_key,
-            "base_url": (
-                self._api_base if self.use_openai else self._anthropic_base_url
-            )
-            or "",
-        }
+        return self._lifecycle.get_api_config()
 
     def configure_api(
         self,
@@ -980,148 +970,29 @@ class Agent:
         use_openai: bool | None = None,
     ) -> None:
         """在空闲态原子切换模型/凭证，并保留 canonical history。"""
-        if self.is_processing:
-            raise RuntimeError("Agent 运行中，无法切换 Provider 或模型")
-
-        previous_model = self.model
-        previous_thinking_level = self._thinking_level
-        target_model = model or self.model
-        target_use_openai = self.use_openai if use_openai is None else use_openai
-        same_protocol = target_use_openai == self.use_openai
-        target_api_key = (
-            api_key
-            if api_key is not None
-            else (
-                self._api_key
-                if same_protocol
-                else os.environ.get(
-                    "OPENAI_API_KEY" if target_use_openai else "ANTHROPIC_API_KEY",
-                    "",
-                )
-            )
+        self._lifecycle.configure_api(
+            model=model,
+            api_key=api_key,
+            api_base=api_base,
+            anthropic_base_url=anthropic_base_url,
+            use_openai=use_openai,
         )
-        target_api_base = (
-            api_base
-            if api_base is not None
-            else (
-                self._api_base
-                if same_protocol and target_use_openai
-                else os.environ.get("OPENAI_BASE_URL")
-            )
-        )
-        if target_use_openai and not target_api_base:
-            target_api_base = "https://api.openai.com/v1"
-        target_anthropic_base_url = (
-            anthropic_base_url
-            if anthropic_base_url is not None
-            else (
-                self._anthropic_base_url
-                if same_protocol and not target_use_openai
-                else os.environ.get("ANTHROPIC_BASE_URL")
-            )
-        )
-
-        provider_changed = (
-            target_use_openai != self.use_openai
-            or target_api_key != self._api_key
-            or (
-                target_api_base != self._api_base
-                if target_use_openai
-                else target_anthropic_base_url != self._anthropic_base_url
-            )
-        )
-        provider: ModelProvider | None = None
-        compactor: ProviderContextCompactor | None = None
-        query_service: ProviderTextQueryService | None = None
-        if provider_changed:
-            if target_use_openai:
-                provider = create_provider(
-                    api_key=target_api_key,
-                    api_base=target_api_base,
-                    thinking_level=self._thinking_level,
-                )
-            else:
-                provider = create_provider(
-                    api_key=target_api_key,
-                    anthropic_base_url=target_anthropic_base_url,
-                    thinking_level=self._thinking_level,
-                )
-            compactor = ProviderContextCompactor(
-                provider=provider,
-                get_model=lambda: self.model,
-            )
-            query_service = ProviderTextQueryService(
-                provider=provider,
-                model=lambda: self.model,
-            )
-
-        previous_provider: ModelProvider | None = None
-        if provider is not None:
-            previous_provider = self._core_runtime.replace_provider(provider)
-        self.use_openai = target_use_openai
-        self._api_key = target_api_key
-        self._api_base = target_api_base if target_use_openai else None
-        self._anthropic_base_url = (
-            target_anthropic_base_url if not target_use_openai else None
-        )
-        self.model = target_model
-        self._core_runtime.set_model(target_model)
-        if target_model != previous_model or provider_changed:
-            self.effective_window = effective_window_tokens(
-                fallback_model_limits(target_model)
-            )
-            self._resolved_model_limits_for = None
-            self._core_compaction_required = False
-        if compactor is not None and query_service is not None:
-            self._context_compactor = compactor
-            self._memory_coordinator.set_query_service(query_service)
-        if previous_provider is not None:
-            close = getattr(previous_provider, "aclose", None)
-            if close is not None:
-                self._schedule_background_operation(close)
-
-        recorder = self._session_recorder
-        if recorder is not None and (
-            self.model != previous_model
-            or self._thinking_level != previous_thinking_level
-        ):
-            model_value = self.model
-            thinking_value = self._thinking_level
-
-            async def persist_configuration() -> object:
-                if model_value != previous_model:
-                    await recorder.record_model_change(model_value)
-                if thinking_value != previous_thinking_level:
-                    await recorder.record_thinking_level_change(thinking_value)
-                return None
-
-            self._schedule_background_operation(persist_configuration)
 
     def set_thinking(self, enabled: bool) -> str:
         """切换 Thinking，并把实际生效级别写入当前 Core Session。"""
-        previous = self._thinking_mode
-        self.thinking = enabled
-        self._thinking_mode = self._resolve_thinking_mode()
-        recorder = self._session_recorder
-        if recorder is not None and self._thinking_mode != previous:
-            thinking_value = self._thinking_mode
-            self._schedule_background_operation(
-                lambda: recorder.record_thinking_level_change(thinking_value)
-            )
-        return self._thinking_mode
+        return self._lifecycle.set_thinking(enabled)
 
     # ─── Core 路径 Thinking 档位(Tau 6 档)─────────────────────
 
     @property
     def thinking_level(self) -> str:
         """Core 路径当前 thinking 档位(off..xhigh)。"""
-        return self._thinking_level
+        return self._lifecycle.thinking_level
 
     @property
     def available_thinking_levels(self) -> tuple[str, ...]:
         """当前后端支持的 thinking 档位(v1 两后端均返回全 6 档)。"""
-        kind = "openai-compatible" if self.use_openai else "anthropic"
-        return provider_thinking_levels(kind, model=self.model)
+        return self._lifecycle.available_thinking_levels
 
     def set_thinking_level(self, level: ThinkingLevel | str) -> ThinkingLevel:
         """设定 thinking 档位并热重建 Core Provider,持久化档位变更。
@@ -1129,37 +1000,19 @@ class Agent:
         与布尔 ``set_thinking(bool)`` 接口互不影响:本方法采用
         Tau 6 档词汇;档位经归一化,未变则直接返回,不重建不落盘。
         """
-        normalized = normalize_thinking_level(level)
-        if normalized == self._thinking_level:
-            return normalized
-        self._apply_core_thinking_level(normalized)
-        recorder = self._session_recorder
-        if recorder is not None:
-            thinking_value = normalized
-            self._schedule_background_operation(
-                lambda: recorder.record_thinking_level_change(thinking_value)
-            )
-        return normalized
+        return self._lifecycle.set_thinking_level(level)
 
     def cycle_thinking_level(self) -> ThinkingLevel:
         """循环到下一档并持久化(供 TUI shift+tab 与 /thinking 无参调用)。"""
-        return self.set_thinking_level(
-            next_thinking_level(self._thinking_level, self.available_thinking_levels)
-        )
+        return self._lifecycle.cycle_thinking_level()
 
     def _build_core_provider(self, thinking_level: ThinkingLevel) -> ModelProvider:
         """用当前凭证与指定档位构建一个新 Core Provider。"""
-        if self.use_openai:
-            return create_provider(
-                api_key=self._api_key,
-                api_base=self._api_base,
-                thinking_level=thinking_level,
-            )
-        return create_provider(
-            api_key=self._api_key,
-            anthropic_base_url=self._anthropic_base_url,
-            thinking_level=thinking_level,
-        )
+        return self._lifecycle.build_core_provider(thinking_level)
+
+    def _create_provider(self, **kwargs: Any) -> ModelProvider:
+        """在调用时读取本模块 factory，保留测试替身的动态 patch 锚点。"""
+        return create_provider(**kwargs)
 
     def _apply_core_thinking_level(self, level: ThinkingLevel) -> None:
         """设定 ``self._thinking_level`` 并热重建 Core Provider 使档位生效。
@@ -1167,25 +1020,7 @@ class Agent:
         不落盘档位变更(由调用方按需记录):恢复会话时复用本方法仅重建 Provider,
         避免对已有 entry 重复写。``context_compactor`` 与模型限制缓存一并刷新。
         """
-        if self.is_processing:
-            raise RuntimeError("Agent 运行中，无法切换 thinking 档位")
-        provider = self._build_core_provider(level)
-        compactor = ProviderContextCompactor(
-            provider=provider,
-            get_model=lambda: self.model,
-        )
-        query_service = ProviderTextQueryService(
-            provider=provider,
-            model=lambda: self.model,
-        )
-        previous = self._core_runtime.replace_provider(provider)
-        self._thinking_level = level
-        self._context_compactor = compactor
-        self._memory_coordinator.set_query_service(query_service)
-        self._resolved_model_limits_for = None
-        close = getattr(previous, "aclose", None)
-        if close is not None:
-            self._schedule_background_operation(close)
+        self._lifecycle.apply_core_thinking_level(level)
 
     # ─── 主对话入口 ──────────────────────────────────────────
 

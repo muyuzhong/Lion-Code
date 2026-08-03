@@ -36,17 +36,17 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1：`AgentLifecycle` 独立拥有上述 Provider/Thinking 配置流程，`agent.py` 只保留
+- [x] AC1：`AgentLifecycle` 独立拥有上述 Provider/Thinking 配置流程，`agent.py` 只保留
   组装、Host factory 和公共兼容委托。
-- [ ] AC2：`configure_api()` 在忙碌时或 replacement 构建失败时保持原 Provider、配置和
+- [x] AC2：`configure_api()` 在忙碌时或 replacement 构建失败时保持原 Provider、配置和
   canonical history；成功切换后原 Runtime 身份和消息不变。
-- [ ] AC3：model-only 切换不重建 Provider；协议/凭证/base 切换和 Thinking 档位切换均
+- [x] AC3：model-only 切换不重建 Provider；协议/凭证/base 切换和 Thinking 档位切换均
   刷新 compactor 与 Memory query service，并异步关闭旧 Provider。
-- [ ] AC4：既有 `lion_code.agent.create_provider` patch 继续覆盖初始构造、API 切换与
+- [x] AC4：既有 `lion_code.agent.create_provider` patch 继续覆盖初始构造、API 切换与
   Thinking 重建；新模块不在模块级导入 `Agent`。
-- [ ] AC5：Session recorder 继续记录 model/Thinking 变更；`_child_api_kwargs()` 继续在
+- [x] AC5：Session recorder 继续记录 model/Thinking 变更；`_child_api_kwargs()` 继续在
   fork 时读取当前 API 配置。
-- [ ] AC6：相关 integration/application/tooling 回归、完整测试、compileall、导入边界、
+- [x] AC6：相关 integration/application/tooling 回归、完整测试、compileall、导入边界、
   改动范围静态检查、差异检查与 Trellis validation 均通过，并如实记录基线差异。
 
 ## Out of Scope

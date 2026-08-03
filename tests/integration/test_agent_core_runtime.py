@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 from core.fakes import FakeProvider
 
 from lion_code.agent import Agent
+from lion_code.agent_lifecycle import AgentLifecycle
 from lion_code.context import SUMMARY_SYSTEM_PROMPT
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
@@ -282,7 +283,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent._core_runtime.messages, ())
 
     async def test_core_run_reports_provider_error(self) -> None:
-        agent, _fake = self._make_agent([_error_event("upstream failed")], ToolRegistry())
+        agent, _fake = self._make_agent(
+            [_error_event("upstream failed")], ToolRegistry()
+        )
 
         result = await agent.run("hello")
 
@@ -294,7 +297,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_tool_loop_through_runtime(self) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
-        agent, fake = self._make_agent([_tooluse_event(), _stop_event("done")], registry)
+        agent, fake = self._make_agent(
+            [_tooluse_event(), _stop_event("done")], registry
+        )
 
         await agent.chat("hello")
 
@@ -351,7 +356,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(agent._core_runtime.messages[-1].is_error)
         self.assertIn("Cost limit reached", agent._core_runtime.messages[-1].text)
 
-    async def test_provider_gets_projection_while_harness_and_session_stay_full(self) -> None:
+    async def test_provider_gets_projection_while_harness_and_session_stay_full(
+        self,
+    ) -> None:
         registry = ToolRegistry()
         registry.register(_snippable_lion_tool())
         agent, fake = self._make_agent(
@@ -378,7 +385,12 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             for message in agent._core_runtime.messages
             if message.role == "toolResult"
         ]
-        self.assertTrue(all(message.text.startswith("durable-result-") for message in durable_results))
+        self.assertTrue(
+            all(
+                message.text.startswith("durable-result-")
+                for message in durable_results
+            )
+        )
 
         state = await self._session_repository.load(agent.session_id)
         session_results = [
@@ -389,12 +401,16 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             [message.text for message in durable_results],
         )
 
-    async def test_automatic_compaction_persists_summary_and_keeps_recent_turn(self) -> None:
+    async def test_automatic_compaction_persists_summary_and_keeps_recent_turn(
+        self,
+    ) -> None:
         registry = ToolRegistry()
         agent, fake = self._make_agent(
             [
                 _stop_event("first answer", Usage(total_tokens=100)),
-                _stop_event("second answer", Usage(input=160_000, total_tokens=160_000)),
+                _stop_event(
+                    "second answer", Usage(input=160_000, total_tokens=160_000)
+                ),
                 _stop_event("condensed context"),
                 _stop_event("third answer"),
             ],
@@ -437,9 +453,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             ],
         )
         raw_message_texts = [
-            entry.message.text
-            for entry in state.entries
-            if entry.type == "message"
+            entry.message.text for entry in state.entries if entry.type == "message"
         ]
         self.assertIn("first question", raw_message_texts)
         self.assertIn("first answer", raw_message_texts)
@@ -458,7 +472,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         # 模拟 Plan 模式切换：运行中改 _system_prompt，下一轮请求必须看到新值。
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
-        agent, fake = self._make_agent([_tooluse_event(), _stop_event("done")], registry)
+        agent, fake = self._make_agent(
+            [_tooluse_event(), _stop_event("done")], registry
+        )
         agent._system_prompt = "initial"
 
         mutated = {"done": False}
@@ -476,7 +492,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_dynamic_tools_refetched_per_turn(self) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
-        agent, fake = self._make_agent([_tooluse_event(), _stop_event("done")], registry)
+        agent, fake = self._make_agent(
+            [_tooluse_event(), _stop_event("done")], registry
+        )
 
         added = {"done": False}
 
@@ -494,7 +512,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_cancel_then_continue_without_incomplete_tool_call(self) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
-        agent, fake = self._make_agent([_tooluse_event(), _stop_event("done")], registry)
+        agent, fake = self._make_agent(
+            [_tooluse_event(), _stop_event("done")], registry
+        )
 
         cancelled = {"done": False}
 
@@ -557,7 +577,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotEqual(agent.session_id, previous_session_id)
         self.assertTrue(previous_path.exists())
-        self.assertTrue(self._session_repository.storage_for(agent.session_id).path.exists())
+        self.assertTrue(
+            self._session_repository.storage_for(agent.session_id).path.exists()
+        )
         self.assertEqual(agent._core_runtime.messages, ())
         self.assertEqual(agent._core_runtime.harness.pending_message_count, 0)
         self.assertEqual(agent.current_turns, 0)
@@ -639,14 +661,22 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await agent.restore_latest_session())
         jsonl_path = self._session_repository.storage_for(session_id).path
         self.assertEqual(
-            (legacy_path.name, legacy_path.read_bytes(), legacy_path.stat().st_mtime_ns),
+            (
+                legacy_path.name,
+                legacy_path.read_bytes(),
+                legacy_path.stat().st_mtime_ns,
+            ),
             legacy_file_state,
         )
         self.assertTrue(jsonl_path.exists())
         await agent.chat("continue")
 
         self.assertEqual(
-            (legacy_path.name, legacy_path.read_bytes(), legacy_path.stat().st_mtime_ns),
+            (
+                legacy_path.name,
+                legacy_path.read_bytes(),
+                legacy_path.stat().st_mtime_ns,
+            ),
             legacy_file_state,
         )
         self.assertEqual(
@@ -679,7 +709,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sessions), 1)
         self.assertEqual(sessions[0]["format"], "jsonl")
 
-    async def test_plan_clear_and_execute_compacts_without_deleting_history(self) -> None:
+    async def test_plan_clear_and_execute_compacts_without_deleting_history(
+        self,
+    ) -> None:
         fake = FakeProvider(
             [
                 AssistantDoneEvent(
@@ -741,10 +773,10 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(state.compaction_entries[0].replaces_entry_ids), 3)
         self.assertGreater(len(state.entries), len(state.messages))
 
-
     async def test_configure_api_replaces_provider_in_existing_runtime(self) -> None:
         """换 key/base 原位替换 Provider，并保留 Harness 与 canonical history。"""
         agent, old_fake = self._make_agent([_stop_event("done")], ToolRegistry())
+        self.assertIsInstance(agent._lifecycle, AgentLifecycle)
         await agent.chat("hello")
         old_runtime = agent._core_runtime
         old_compactor = agent._context_compactor
@@ -835,9 +867,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         )
         await agent.chat("first")
 
-        new_fake = FakeProvider(
-            [_tooluse_event("c2", usage=Usage(input=1_000))]
-        )
+        new_fake = FakeProvider([_tooluse_event("c2", usage=Usage(input=1_000))])
         with patch("lion_code.agent.create_provider", return_value=new_fake):
             agent.configure_api(api_key="new-key")
 

@@ -3,7 +3,7 @@
   "name": "phase3-agent-lifecycle",
   "title": "三阶段-5：提取 Agent 生命周期",
   "description": "将 Agent 的 Provider 配置与 Thinking 档位生命周期协调提取为独立协作模块，保持外部行为不变。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

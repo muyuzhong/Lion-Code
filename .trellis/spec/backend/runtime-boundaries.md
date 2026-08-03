@@ -20,6 +20,19 @@ def Agent.configure_api(
     use_openai: bool | None = None,
 ) -> None: ...
 
+class AgentLifecycle:
+    def configure_api(
+        self,
+        *,
+        model: str | None = None,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        anthropic_base_url: str | None = None,
+        use_openai: bool | None = None,
+    ) -> None: ...
+    def set_thinking_level(self, level: ThinkingLevel | str) -> ThinkingLevel: ...
+    def apply_core_thinking_level(self, level: ThinkingLevel) -> None: ...
+
 def Agent.set_terminal_output(enabled: bool) -> None: ...
 
 class LionCodingSession:
@@ -62,6 +75,15 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
   first, replace it without clearing canonical history, update stored credentials and
   model, refresh the compactor, query service, and model-limit cache, then schedule
   the old Provider for closing.
+- `AgentLifecycle` owns that configuration transaction and both Thinking-change
+  paths through `AgentLifecycleHost`; `Agent` owns the fields, `LionAgentRuntime`,
+  `MemoryCoordinator`, recorder, and background-operation queue, and exposes the
+  existing public methods as compatibility delegates. The lifecycle module must not
+  import `Agent` or create another Provider, message history, or session writer.
+- `Agent._create_provider(**kwargs)` is the required host factory boundary. It reads
+  `lion_code.agent.create_provider` at call time, so existing patches of that name
+  affect initial construction, Provider swaps, and Thinking rebuilds. Do not import
+  the factory directly into `agent_lifecycle.py`.
 - Child and Dream agents inherit the parent's stored Provider configuration and
   `terminal_output` setting. They must not infer credentials from a transport client.
 - `SubagentFactory` owns child tool selection and construction through a narrow
@@ -159,6 +181,7 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
 | Provider/model switch while idle | Preserve canonical messages and refresh all Provider-derived services |
 | Provider/model switch while processing | Raise `RuntimeError`; leave the active Provider and configuration unchanged |
 | Replacement Provider construction fails | Keep the current Provider and canonical history unchanged |
+| Lifecycle factory uses a patched `lion_code.agent.create_provider` | Use the patched factory for construction, API swap, and Thinking rebuild |
 | Old Provider after a successful swap | Close only after replacement; never close an active stream |
 | New top-level session | Create and append one JSONL chain |
 | Existing valid JSONL | Replay it and continue appending to the same file |
@@ -182,6 +205,11 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
   services use the replacement.
 - Base: changing only the model updates the live Core model and records one model
   change without rebuilding the Provider.
+- Good: `AgentLifecycle` receives the current `Agent` as a narrow host, builds a
+  replacement through `host._create_provider()`, and only writes host fields after
+  that construction succeeds.
+- Bad: importing `create_provider` inside the lifecycle module bypasses the
+  established test and compatibility patch point.
 - Bad: keeping `_openai_messages` and `_anthropic_messages` beside Core history makes
   resume, compaction, and child inheritance protocol-dependent.
 - Good: restoring `abc.json` creates `abc.jsonl`, continues there, and leaves
@@ -200,7 +228,9 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
 
 - `tests/integration/test_agent_core_runtime.py`: both Provider protocols, idle and
   active hot-switch behavior, derived-service refresh, child inheritance, JSONL
-  restore, and immutable legacy migration.
+  restore, immutable legacy migration, and that `Agent` composes
+  `AgentLifecycle` while preserving the `lion_code.agent.create_provider` patch
+  anchor for all Provider creation paths.
 - `tests/session_runtime/`: append/replay ordering, compaction projection, incomplete
   tails, invalid legacy data, and same-ID precedence.
 - `tests/runtime/test_terminal_renderer.py` and
@@ -230,6 +260,7 @@ self._openai_messages = []
 self._anthropic_messages = []
 ui.set_sink(tui_sink)
 legacy_path.replace(jsonl_path)
+# agent_lifecycle.py: from .providers.factory import create_provider
 ```
 
 ### Correct
@@ -239,5 +270,6 @@ history = agent.core_runtime.messages
 session = LionCodingSession(agent, terminal_output=False)
 session.set_notice_fn(app_notice)
 storage = repository.storage_for(session_id)
+# AgentLifecycle calls host._create_provider(**provider_kwargs).
 # Legacy input is read-only; SessionRecorder appends canonical entries to storage.
 ```

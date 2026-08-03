@@ -19,6 +19,7 @@
 | 三阶段-2 | （本提交） | 3      | agent.py −89，新增协调器 347 行 | 547    | 通过      |
 | 三阶段-3 | （本提交） | 3      | agent.py −26，新增工厂 77 行 | 551    | 不适用      |
 | 三阶段-4 | （本提交） | 3      | agent.py −21，新增运行时 88 行 | 555    | 不适用      |
+| 三阶段-5 | （本提交） | 3      | agent.py −160，新增生命周期 284 行 | 555    | 通过      |
 
 ## 完成
 ### 三阶段-1 · 2026-08-01 · 拆解 agent.py:autonomy_runtime 提取
@@ -70,6 +71,23 @@
   通过，新模块独立 mypy 无问题；全库 Ruff 83 / format 105 / mypy 102 均为既有基线。
 - 结果:`agent.py` 2,044 -> 2,023 行（−21）；新增 88 行运行时和三类无效响应、导入
   边界、兼容重导出回归测试。下一步按路线进入 `agent_lifecycle`。
+
+### 三阶段-5 · 2026-08-03 · 提取 agent.py:agent_lifecycle
+
+- 范围:把 Provider 配置解析、空闲态原子替换、Thinking 模式/档位切换、Provider
+  派生服务刷新和会话配置记录从 `agent.py` 迁入 `agent_lifecycle.py`；终端观察器、
+  background-operation 队列、`close()` 和会话恢复流程的整体协调保持在 `Agent`。
+- 做了:`AgentLifecycle` + `AgentLifecycleHost` 窄协议只操作宿主既有的 Core、Memory、
+  配置字段和 recorder；`Agent` 保留所有公共 API 及 `_build_core_provider()`、
+  `_apply_core_thinking_level()` 的兼容委托，并以 `_create_provider()` 在调用时读取
+  `lion_code.agent.create_provider`，保留构造、Provider 热切换和 Thinking 重建的
+  FakeProvider patch 锚点。没有新增 history、Provider 或 session writer。
+- 验证:聚焦 integration/application/tooling 回归 58 passed；全量 555 passed、6 skipped、
+  11 subtests（已知 Windows GBK spinner warning 仍存在）；compileall、改动范围 Ruff、
+  import-linter 3 契约、`git diff --check` 和 Trellis validation 均通过。改动范围 mypy
+  因依赖闭包中的 12 个文件报告 82 项错误而非零，`agent_lifecycle.py` 无诊断。
+- 结果:`agent.py` 1,766 -> 1,606 行（−160）；新增 284 行生命周期协调器和既有
+  Provider 原子替换回归中的实例装配断言。
 
 ### 二阶段 · 2026-08-01 · 清掉已知的架构债务（m-012 / m-007 / m-013 / m-010 + 第二套路径扫描）
 - **m-012**：删除 `/skill:` 半成品入口。`application/skills.py` 移除 tau `<skill>` 块机器（expand_skill_command / format_skill_invocation / parse_skill_invocation / SkillInvocation，保留 `Skill`）；TUI autocomplete 的 `/skill:` 处理、`app.py` 与 `commands.py` 的 `/skill:` 特判、`state.py` 展示分支、相关测试一并移除。接线（让 TUI `/skill:` 走 `lion_code.skills.resolve_skill_prompt`）转预留任务 `08-01-tui-skill-wiring`。
