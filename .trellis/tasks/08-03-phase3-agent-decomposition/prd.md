@@ -18,7 +18,7 @@
 | S3 | `subagent_factory` | 已归档 | 子 Agent 与 Skill fork 的构造、工具筛选与懒导入边界独立 |
 | S4 | `learning_runtime` | 已归档 | 已有特征测试覆盖的 `/learn` 运行时职责独立 |
 | S5 | `agent_lifecycle` | 已归档 | `configure_api` 等 Provider/Thinking 生命周期配置集中且兼容 |
-| S6 | `agent_runtime` | 规划中 | Core 协调收敛，且不重新耦合前述职责 |
+| S6 | `agent_runtime` | 已归档 | Core 协调收敛，且不重新耦合前述职责 |
 
 ## Requirements
 
@@ -30,11 +30,11 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1：S3 至 S6 均已完成、验证、提交并归档为独立子任务。
-- [ ] AC2：每个切片均保持既有对外行为和兼容测试通过；没有以删测或放宽权限来换取收敛。
-- [ ] AC3：最终 `agent.py` 的职责边界可由模块和窄协议解释，且行数朝约 1200 行目标显著收敛。
-- [ ] AC4：最终全量测试、编译、导入边界、差异检查和 Trellis 校验均有记录；基线差异被如实报告。
-- [ ] AC5：所有提交仅包含本路线任务文件、实现和必要测试/维护记录，不包含已知并行变更。
+- [x] AC1：S3 至 S6 均已完成、验证、提交并归档为独立子任务。
+- [x] AC2：每个切片均保持既有对外行为和兼容测试通过；没有以删测或放宽权限来换取收敛。
+- [x] AC3：最终 `agent.py` 的职责边界可由模块和窄协议解释，且行数朝约 1200 行目标显著收敛。
+- [x] AC4：最终全量测试、编译、导入边界、差异检查和 Trellis 校验均有记录；基线差异被如实报告。
+- [x] AC5：所有提交仅包含本路线任务文件、实现和必要测试/维护记录，不包含已知并行变更。
 
 ## Out of Scope
 
@@ -43,4 +43,6 @@
 
 ## Planning Status
 
-父任务只管理路线、子任务映射和最终集成验收；S3-S5 均已完成并归档，S6 已依据最新代码完成规划，等待单独的实现批准。S6 完成后再执行父任务的最终验收和归档。
+父任务只管理路线、子任务映射和最终集成验收。S3（`1970915`）、S4（`b17c9d6`）、S5（`9874f28`）与 S6（`37385e3`）均已作为独立子任务提交并归档。
+
+最终验收（2026-08-04）：`agent.py` 从路线起点约 2,070 行收敛到 1,461 物理行；四个职责均已有独立模块和窄主机协议。最终代码路径保持唯一 Core history、Provider 与 JSONL writer，且未将 MCP、Memory、Plan、Autonomy、Learning 或 UI 边界重新耦合回 `agent.py`。S6 完整验证记录为 557 passed、6 skipped、11 subtests，并保留 1 个已知 Windows GBK spinner `UnicodeEncodeError` warning；compileall、改动范围 Ruff lint、import-linter、差异检查和 Trellis 校验均通过。`agent.py` 的 format 与 mypy 历史基线已如实记录，未被作为本路线回归。`.trellis/spec/backend/runtime-boundaries.md` 已在 S6 同步更新；本次父任务验收未发现新的运行时契约，因此无需额外 code-spec 变更。
