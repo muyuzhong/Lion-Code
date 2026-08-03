@@ -945,3 +945,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 26: 完成 Agent 运行时拆分路线验收
+
+**Date**: 2026-08-04
+**Task**: 完成 Agent 运行时拆分路线验收
+**Branch**: `muyuzhong/phase3-subagent-factory`
+
+### Summary
+
+核对 S3-S6 的归档与提交证据，复跑全量测试并完成父任务验收、归档。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `921f5b7` | (see git log) |
+
+### Status
+
+[OK] **Completed**
