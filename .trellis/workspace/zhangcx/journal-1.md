@@ -882,3 +882,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 23: 三阶段-4：提取 Learning Runtime
+
+**Date**: 2026-08-03
+**Task**: 三阶段-4：提取 Learning Runtime
+**Branch**: `muyuzhong/phase3-subagent-factory`
+
+### Summary
+
+将显式 /learn 的提示词、Core 转录、evaluator 决策解析和 Skill 创建迁入 LearningRuntime，保持 Agent 公共委托、导入兼容和错误语义；全量测试 555 passed。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b17c9d6b30536fab988d1c3b45d938628d8e6987` | (see git log) |
+
+### Status
+
+[OK] **Completed**
