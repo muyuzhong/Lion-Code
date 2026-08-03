@@ -3,7 +3,7 @@
   "name": "phase3-subagent-factory",
   "title": "三阶段-3：提取 subagent_factory",
   "description": "将 Agent 中子 Agent 与 Skill fork 的构造职责提取为独立工厂，保持现有行为与权限边界。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

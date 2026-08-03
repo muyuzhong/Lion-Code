@@ -22,11 +22,11 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1：`subagent_factory.py` 存在且其顶层导入不含 `lion_code.agent`；实际构造路径使用局部懒导入。
-- [ ] AC2：`_execute_agent_tool()` 和 Skill fork 分支均经同一工厂创建子 Agent，且不再在 `agent.py` 重复工具选择或 `Agent(...)` 构造。
-- [ ] AC3：既有共享 Registry、共享 MCP manager、非拥有环境、受限权限、令牌累计、成功/异常文本和关闭语义保持不变，并有测试证明。
-- [ ] AC4：聚焦测试、全量测试、编译、导入边界检查、差异检查和本子任务 Trellis 校验通过；静态检查相对基线没有恶化。
-- [ ] AC5：本切片不修改并行质量基线文件或 `docs/tui-migration-audit.md` 删除。
+- [x] AC1：`subagent_factory.py` 存在且其顶层导入不含 `lion_code.agent`；实际构造路径使用局部懒导入。
+- [x] AC2：`_execute_agent_tool()` 和 Skill fork 分支均经同一工厂创建子 Agent，且不再在 `agent.py` 重复工具选择或 `Agent(...)` 构造。
+- [x] AC3：既有共享 Registry、共享 MCP manager、非拥有环境、受限权限、令牌累计、成功/异常文本和关闭语义保持不变，并有测试证明。
+- [x] AC4：聚焦测试、全量测试、编译、导入边界检查、差异检查和本子任务 Trellis 校验通过；静态检查相对基线没有恶化。
+- [x] AC5：本切片不修改并行质量基线文件或 `docs/tui-migration-audit.md` 删除。
 
 ## Out of Scope
 

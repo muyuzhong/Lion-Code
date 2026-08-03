@@ -64,6 +64,10 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
   the old Provider for closing.
 - Child and Dream agents inherit the parent's stored Provider configuration and
   `terminal_output` setting. They must not infer credentials from a transport client.
+- `SubagentFactory` owns child tool selection and construction through a narrow
+  parent-host contract. It imports `Agent` only while constructing a child to avoid
+  a module-level cycle; `Agent` retains child execution, status presentation, usage
+  accounting, error text, and resource closure.
 - Base product dependencies and imports do not include the OpenAI or Anthropic Python
   SDKs. The online context benchmark may use the `benchmark` optional extra, but the
   import must remain lazy so product startup and offline benchmark validation work

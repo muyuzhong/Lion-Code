@@ -17,6 +17,7 @@
 | 二阶段 | 5238ae6 | 17     | −197   | 533    | 通过      |
 | 三阶段-1 | （本提交） | 3      | agent.py −245 | 543    | 通过      |
 | 三阶段-2 | （本提交） | 3      | agent.py −89，新增协调器 347 行 | 547    | 通过      |
+| 三阶段-3 | （本提交） | 3      | agent.py −26，新增工厂 77 行 | 551    | 不适用      |
 
 ## 完成
 ### 三阶段-1 · 2026-08-01 · 拆解 agent.py:autonomy_runtime 提取
@@ -39,6 +40,20 @@
   委托。已知 GBK spinner `UnicodeEncodeError` 警告仍存在。
 - 结果:`agent.py` 1,890 -> 1,801 行（−89）；新增 `session_memory_coordinator.py`
   347 行和 4 个特征测试。下一步按路线进入 `subagent_factory`。
+
+### 三阶段-3 · 2026-08-03 · 提取 agent.py:subagent_factory
+- 范围:把 Agent tool 与 Skill fork 的工具策略选择和子 Agent 构造迁入
+  `subagent_factory.py`；运行、状态通知、令牌累计、错误文本和关闭仍由 `Agent`
+  协调。
+- 做了:`SubagentFactory` + `SubagentFactoryHost` 窄协议只读取父级 Registry、
+  `ToolEnvironment`、当前 API 参数和权限模式；工厂在实际构造时才局部导入
+  `Agent`，避免模块级循环依赖。两条 fork 路径统一使用工厂，保留共享 MCP manager
+  的非拥有 child view 和禁止默认递归派生的工具策略。
+- 验证:聚焦 40 passed；全量 551 passed、6 skipped、6 subtests，已知 GBK spinner
+  `UnicodeEncodeError` 警告仍存在；compileall 与 import-linter 3 契约 KEPT。
+  改动范围 Ruff 通过，新工厂独立 mypy 无问题；全库 format/mypy 仍只报告既有基线。
+- 结果:`agent.py` 2,070 -> 2,044 行（−26）；新增 77 行工厂和四条构造契约测试。
+  下一步按路线进入 `learning_runtime`。
 
 ### 二阶段 · 2026-08-01 · 清掉已知的架构债务（m-012 / m-007 / m-013 / m-010 + 第二套路径扫描）
 - **m-012**：删除 `/skill:` 半成品入口。`application/skills.py` 移除 tau `<skill>` 块机器（expand_skill_command / format_skill_invocation / parse_skill_invocation / SkillInvocation，保留 `Skill`）；TUI autocomplete 的 `/skill:` 处理、`app.py` 与 `commands.py` 的 `/skill:` 特判、`state.py` 展示分支、相关测试一并移除。接线（让 TUI `/skill:` 走 `lion_code.skills.resolve_skill_prompt`）转预留任务 `08-01-tui-skill-wiring`。

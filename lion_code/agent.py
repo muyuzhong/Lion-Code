@@ -67,7 +67,7 @@ from .session_runtime import (
     load_legacy_session,
 )
 from .skills import create_skill
-from .subagent import get_sub_agent_config
+from .subagent_factory import SubagentFactory
 from .tooling import ToolEnvironment, ToolRegistry, ToolResult, ToolRuntime
 from .tooling.builtin import create_builtin_tools
 from .tooling.context import ToolContext
@@ -83,7 +83,6 @@ from .tooling.middleware import (
 )
 from .tooling.permission import PermissionPolicy
 from .tooling.result_store import ResultStore
-from .tooling.selection import ToolSelectionPolicy, select_tools
 from .tooling.types import JSONValue
 from .tools import ToolDef
 from .ui import (
@@ -341,6 +340,7 @@ class Agent:
         )
         self._mcp_manager = self.tool_environment.mcp_manager
         self._mcp_initialized = False
+        self._subagent_factory = SubagentFactory(self)
 
         # 系统提示词按前缀缓存拆成静态核心和动态尾部。项目指令改由 Provider
         # Overlay 注入，既不破坏缓存边界，也不污染 canonical Session history。
@@ -1854,26 +1854,12 @@ class Agent:
             return f"Unknown skill: {inp.get('skill_name', '')}"
 
         if result["context"] == "fork":
-            if result.get("allowed_tools"):
-                policy = ToolSelectionPolicy(
-                    allowed_names=frozenset(result["allowed_tools"]),
-                    exclude_names=frozenset({"schedule_wakeup"}),
-                )
-            else:
-                policy = ToolSelectionPolicy(
-                    exclude_names=frozenset({"agent", "schedule_wakeup"}),
-                )
-            child_registry = select_tools(self.tool_registry, policy)
             self._emit_subagent_status(
                 "skill-fork", inp.get("skill_name", ""), started=True
             )
-            sub_agent = Agent(
-                **self._child_api_kwargs(),
-                custom_system_prompt=result["prompt"],
-                tool_registry=child_registry,
-                tool_environment=self.tool_environment.child_view(),
-                is_sub_agent=True,
-                permission_mode=self._child_permission_mode(),
+            sub_agent = self._subagent_factory.create_for_skill(
+                system_prompt=result["prompt"],
+                allowed_tools=result.get("allowed_tools"),
             )
             try:
                 sub_result = await sub_agent.run_once(inp.get("args") or "Execute this skill task.")
@@ -2010,19 +1996,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
 
         self._emit_subagent_status(agent_type, description, started=True)
 
-        config = get_sub_agent_config(agent_type)
-        child_registry = select_tools(
-            self.tool_registry,
-            config.tool_policy,
-        )
-        sub_agent = Agent(
-            **self._child_api_kwargs(),
-            custom_system_prompt=config.system_prompt,
-            tool_registry=child_registry,
-            tool_environment=self.tool_environment.child_view(),
-            is_sub_agent=True,
-            permission_mode=self._child_permission_mode(),
-        )
+        sub_agent = self._subagent_factory.create_for_agent_type(agent_type)
 
         try:
             result = await sub_agent.run_once(prompt)
