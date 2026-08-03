@@ -18,6 +18,7 @@
 | 三阶段-1 | （本提交） | 3      | agent.py −245 | 543    | 通过      |
 | 三阶段-2 | （本提交） | 3      | agent.py −89，新增协调器 347 行 | 547    | 通过      |
 | 三阶段-3 | （本提交） | 3      | agent.py −26，新增工厂 77 行 | 551    | 不适用      |
+| 三阶段-4 | （本提交） | 3      | agent.py −21，新增运行时 88 行 | 555    | 不适用      |
 
 ## 完成
 ### 三阶段-1 · 2026-08-01 · 拆解 agent.py:autonomy_runtime 提取
@@ -54,6 +55,21 @@
   改动范围 Ruff 通过，新工厂独立 mypy 无问题；全库 format/mypy 仍只报告既有基线。
 - 结果:`agent.py` 2,070 -> 2,044 行（−26）；新增 77 行工厂和四条构造契约测试。
   下一步按路线进入 `learning_runtime`。
+
+### 三阶段-4 · 2026-08-03 · 提取 agent.py:learning_runtime
+- 范围:把显式 `/learn` 的 Meta-Skill 提示词、Core 会话转录、evaluator side-query、
+  JSON 决策解析和 Skill 创建迁入 `learning_runtime.py`；不新增学习队列、知识图谱、
+  后台任务或命令行为。
+- 做了:`LearningRuntime` + `LearningRuntimeHost` 窄协议只读取 canonical Core 消息并
+  调用既有 evaluator side-query；`Agent` 初始化时组装运行时，并保留
+  `learn_from_current_session()` 薄委托与 `LEARN_META_SKILL_PROMPT` 的直接导入兼容。
+  新模块不反向导入 `Agent`，不会创建第二份会话历史或 Provider。
+- 验证:聚焦 `tests/test_learning.py` 为 7 passed、5 subtests；相关 Agent 回归为
+  41 passed、5 subtests；全量 555 passed、6 skipped、11 subtests，已知 GBK spinner
+  `UnicodeEncodeError` 警告仍存在。compileall、import-linter 3 契约和改动范围 Ruff
+  通过，新模块独立 mypy 无问题；全库 Ruff 83 / format 105 / mypy 102 均为既有基线。
+- 结果:`agent.py` 2,044 -> 2,023 行（−21）；新增 88 行运行时和三类无效响应、导入
+  边界、兼容重导出回归测试。下一步按路线进入 `agent_lifecycle`。
 
 ### 二阶段 · 2026-08-01 · 清掉已知的架构债务（m-012 / m-007 / m-013 / m-010 + 第二套路径扫描）
 - **m-012**：删除 `/skill:` 半成品入口。`application/skills.py` 移除 tau `<skill>` 块机器（expand_skill_command / format_skill_invocation / parse_skill_invocation / SkillInvocation，保留 `Skill`）；TUI autocomplete 的 `/skill:` 处理、`app.py` 与 `commands.py` 的 `/skill:` 特判、`state.py` 展示分支、相关测试一并移除。接线（让 TUI `/skill:` 走 `lion_code.skills.resolve_skill_prompt`）转预留任务 `08-01-tui-skill-wiring`。

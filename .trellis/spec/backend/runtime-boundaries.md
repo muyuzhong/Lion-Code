@@ -68,6 +68,11 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
   parent-host contract. It imports `Agent` only while constructing a child to avoid
   a module-level cycle; `Agent` retains child execution, status presentation, usage
   accounting, error text, and resource closure.
+- `LearningRuntime` owns explicit `/learn` transcript projection, evaluator decision
+  parsing, and Skill creation through a narrow host contract. It reads the existing
+  canonical Core history and uses the existing side-query path; `Agent` retains the
+  public delegation and composition boundary, and no second history or Provider is
+  created.
 - Base product dependencies and imports do not include the OpenAI or Anthropic Python
   SDKs. The online context benchmark may use the `benchmark` optional extra, but the
   import must remain lazy so product startup and offline benchmark validation work

@@ -32,14 +32,14 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1：`LearningRuntime` 独立拥有 `/learn` 决策流程，`agent.py` 只保留组装和薄委托。
-- [ ] AC2：`/learn` 仍使用一次 evaluator 调用、`max_tokens=4096`、当前工作目录与
+- [x] AC1：`LearningRuntime` 独立拥有 `/learn` 决策流程，`agent.py` 只保留组装和薄委托。
+- [x] AC2：`/learn` 仍使用一次 evaluator 调用、`max_tokens=4096`、当前工作目录与
   Core JSON 转录；接受和拒绝时的可观察返回文本保持不变。
-- [ ] AC3：无 JSON、无闭合 JSON 或接受决策缺少 `name`、`content`、`scope` 时，仍抛出
+- [x] AC3：无 JSON、无闭合 JSON 或接受决策缺少 `name`、`content`、`scope` 时，仍抛出
   `ValueError("Invalid Meta-Skill response")`，且不写入 Skill。
-- [ ] AC4：`LEARN_META_SKILL_PROMPT` 可继续从 `lion_code.agent` 导入；新模块不在模块级
+- [x] AC4：`LEARN_META_SKILL_PROMPT` 可继续从 `lion_code.agent` 导入；新模块不在模块级
   导入 `Agent`。
-- [ ] AC5：`tests/test_learning.py` 及相关回归测试、`compileall`、导入边界和差异检查通过；
+- [x] AC5：`tests/test_learning.py` 及相关回归测试、`compileall`、导入边界和差异检查通过；
   已知全仓静态质量基线只记录差异，不在本切片顺带清理。
 
 ## Out of Scope
@@ -64,5 +64,4 @@
 
 ## Planning Status
 
-阻塞问题为空。该计划只提取现有 `/learn` 流程，未扩展产品能力；等待用户对本摘要的
-明确实现批准后才启动任务并修改运行时代码。
+实现与验证已完成。该切片只提取现有 `/learn` 流程，未扩展产品能力；等待提交与归档。
