@@ -2,6 +2,8 @@
 
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,8 +11,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from lion_code import skills
-from lion_code.agent import Agent, LEARN_META_SKILL_PROMPT
+from lion_code.agent import LEARN_META_SKILL_PROMPT, Agent
 from lion_code.core.messages import AssistantMessage, TextContent, UserMessage
+from lion_code.learning_runtime import (
+    LEARN_META_SKILL_PROMPT as RUNTIME_LEARN_META_SKILL_PROMPT,
+)
+from lion_code.learning_runtime import (
+    LearningRuntime,
+)
 
 
 class TestCreateSkill(unittest.TestCase):
@@ -24,7 +32,9 @@ class TestCreateSkill(unittest.TestCase):
 
                 result = skills.create_skill("learned-flow", content)
 
-                skill_path = Path(tmp) / ".claude" / "skills" / "learned-flow" / "SKILL.md"
+                skill_path = (
+                    Path(tmp) / ".claude" / "skills" / "learned-flow" / "SKILL.md"
+                )
                 self.assertEqual(result, f"Skill created: {skill_path}")
                 self.assertEqual(skill_path.read_text(encoding="utf-8"), content)
                 self.assertIsNone(skills._cached_skills)
@@ -46,15 +56,37 @@ class TestCreateSkill(unittest.TestCase):
 
 
 class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
-    async def test_create_decision_uses_one_meta_skill_call(self):
+    @staticmethod
+    def _agent(messages) -> Agent:
         agent = Agent.__new__(Agent)
-        agent._core_runtime = SimpleNamespace(messages=(
-            UserMessage(content="fix the build"),
-            AssistantMessage(
-                model="test",
-                content=[TextContent(text="fixed and verified")],
-            ),
-        ))
+        agent._core_runtime = SimpleNamespace(messages=messages)
+        agent._learning = LearningRuntime(agent)
+        return agent
+
+    def test_agent_reexports_meta_skill_prompt(self):
+        self.assertIs(LEARN_META_SKILL_PROMPT, RUNTIME_LEARN_META_SKILL_PROMPT)
+
+    def test_learning_runtime_import_does_not_import_agent(self):
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; import lion_code.learning_runtime; "
+                "assert 'lion_code.agent' not in sys.modules",
+            ],
+            check=True,
+        )
+
+    async def test_create_decision_uses_one_meta_skill_call(self):
+        agent = self._agent(
+            (
+                UserMessage(content="fix the build"),
+                AssistantMessage(
+                    model="test",
+                    content=[TextContent(text="fixed and verified")],
+                ),
+            )
+        )
         decision = {
             "create": True,
             "reason": "reusable",
@@ -66,7 +98,9 @@ class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
             return_value=f"```json\n{json.dumps(decision)}\n```"
         )
 
-        with patch("lion_code.agent.create_skill", return_value="Skill created") as create:
+        with patch(
+            "lion_code.learning_runtime.create_skill", return_value="Skill created"
+        ) as create:
             result = await agent.learn_from_current_session()
 
         self.assertEqual(result, "Skill created")
@@ -75,7 +109,9 @@ class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(system, LEARN_META_SKILL_PROMPT)
         self.assertNotIn("ordinary prompt", messages[0]["content"])
         self.assertIn("fix the build", messages[0]["content"])
-        self.assertEqual(agent._run_evaluator_query.await_args.kwargs["max_tokens"], 4096)
+        self.assertEqual(
+            agent._run_evaluator_query.await_args.kwargs["max_tokens"], 4096
+        )
         create.assert_called_once_with(
             name="fix-build",
             content=decision["content"],
@@ -83,19 +119,53 @@ class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_rejected_decision_does_not_write(self):
-        agent = Agent.__new__(Agent)
-        agent._core_runtime = SimpleNamespace(
-            messages=(UserMessage(content="hello"),)
-        )
+        agent = self._agent((UserMessage(content="hello"),))
         agent._run_evaluator_query = AsyncMock(
             return_value='{"create": false, "reason": "only small talk"}'
         )
 
-        with patch("lion_code.agent.create_skill") as create:
+        with patch("lion_code.learning_runtime.create_skill") as create:
             result = await agent.learn_from_current_session()
 
         self.assertEqual(result, "不建议沉淀：only small talk")
         create.assert_not_called()
+
+    async def test_invalid_response_does_not_write_skill(self):
+        for raw in ("not a JSON decision", '{"create": false'):
+            with self.subTest(raw=raw):
+                agent = self._agent((UserMessage(content="hello"),))
+                agent._run_evaluator_query = AsyncMock(return_value=raw)
+
+                with patch("lion_code.learning_runtime.create_skill") as create:
+                    with self.assertRaisesRegex(
+                        ValueError, "^Invalid Meta-Skill response$"
+                    ):
+                        await agent.learn_from_current_session()
+
+                create.assert_not_called()
+
+    async def test_create_decision_missing_required_field_does_not_write(self):
+        for missing in ("name", "content", "scope"):
+            with self.subTest(missing=missing):
+                decision = {
+                    "create": True,
+                    "name": "fix-build",
+                    "content": "---\\nname: fix-build\\n---",
+                    "scope": "project",
+                }
+                del decision[missing]
+                agent = self._agent((UserMessage(content="hello"),))
+                agent._run_evaluator_query = AsyncMock(
+                    return_value=json.dumps(decision)
+                )
+
+                with patch("lion_code.learning_runtime.create_skill") as create:
+                    with self.assertRaisesRegex(
+                        ValueError, "^Invalid Meta-Skill response$"
+                    ):
+                        await agent.learn_from_current_session()
+
+                create.assert_not_called()
 
 
 if __name__ == "__main__":

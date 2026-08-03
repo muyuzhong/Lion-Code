@@ -17,6 +17,10 @@
 | 二阶段 | 5238ae6 | 17     | −197   | 533    | 通过      |
 | 三阶段-1 | （本提交） | 3      | agent.py −245 | 543    | 通过      |
 | 三阶段-2 | （本提交） | 3      | agent.py −89，新增协调器 347 行 | 547    | 通过      |
+| 三阶段-3 | （本提交） | 3      | agent.py −26，新增工厂 77 行 | 551    | 不适用      |
+| 三阶段-4 | （本提交） | 3      | agent.py −21，新增运行时 88 行 | 555    | 不适用      |
+| 三阶段-5 | （本提交） | 3      | agent.py −160，新增生命周期 284 行 | 555    | 通过      |
+| 三阶段-6 | （本提交） | 4      | agent.py physical −397，Core 协调收敛 | 557    | lint 通过；format 基线 |
 
 ## 完成
 ### 三阶段-1 · 2026-08-01 · 拆解 agent.py:autonomy_runtime 提取
@@ -39,6 +43,75 @@
   委托。已知 GBK spinner `UnicodeEncodeError` 警告仍存在。
 - 结果:`agent.py` 1,890 -> 1,801 行（−89）；新增 `session_memory_coordinator.py`
   347 行和 4 个特征测试。下一步按路线进入 `subagent_factory`。
+
+### 三阶段-3 · 2026-08-03 · 提取 agent.py:subagent_factory
+- 范围:把 Agent tool 与 Skill fork 的工具策略选择和子 Agent 构造迁入
+  `subagent_factory.py`；运行、状态通知、令牌累计、错误文本和关闭仍由 `Agent`
+  协调。
+- 做了:`SubagentFactory` + `SubagentFactoryHost` 窄协议只读取父级 Registry、
+  `ToolEnvironment`、当前 API 参数和权限模式；工厂在实际构造时才局部导入
+  `Agent`，避免模块级循环依赖。两条 fork 路径统一使用工厂，保留共享 MCP manager
+  的非拥有 child view 和禁止默认递归派生的工具策略。
+- 验证:聚焦 40 passed；全量 551 passed、6 skipped、6 subtests，已知 GBK spinner
+  `UnicodeEncodeError` 警告仍存在；compileall 与 import-linter 3 契约 KEPT。
+  改动范围 Ruff 通过，新工厂独立 mypy 无问题；全库 format/mypy 仍只报告既有基线。
+- 结果:`agent.py` 2,070 -> 2,044 行（−26）；新增 77 行工厂和四条构造契约测试。
+  下一步按路线进入 `learning_runtime`。
+
+### 三阶段-4 · 2026-08-03 · 提取 agent.py:learning_runtime
+- 范围:把显式 `/learn` 的 Meta-Skill 提示词、Core 会话转录、evaluator side-query、
+  JSON 决策解析和 Skill 创建迁入 `learning_runtime.py`；不新增学习队列、知识图谱、
+  后台任务或命令行为。
+- 做了:`LearningRuntime` + `LearningRuntimeHost` 窄协议只读取 canonical Core 消息并
+  调用既有 evaluator side-query；`Agent` 初始化时组装运行时，并保留
+  `learn_from_current_session()` 薄委托与 `LEARN_META_SKILL_PROMPT` 的直接导入兼容。
+  新模块不反向导入 `Agent`，不会创建第二份会话历史或 Provider。
+- 验证:聚焦 `tests/test_learning.py` 为 7 passed、5 subtests；相关 Agent 回归为
+  41 passed、5 subtests；全量 555 passed、6 skipped、11 subtests，已知 GBK spinner
+  `UnicodeEncodeError` 警告仍存在。compileall、import-linter 3 契约和改动范围 Ruff
+  通过，新模块独立 mypy 无问题；全库 Ruff 83 / format 105 / mypy 102 均为既有基线。
+- 结果:`agent.py` 2,044 -> 2,023 行（−21）；新增 88 行运行时和三类无效响应、导入
+  边界、兼容重导出回归测试。下一步按路线进入 `agent_lifecycle`。
+
+### 三阶段-5 · 2026-08-03 · 提取 agent.py:agent_lifecycle
+
+- 范围:把 Provider 配置解析、空闲态原子替换、Thinking 模式/档位切换、Provider
+  派生服务刷新和会话配置记录从 `agent.py` 迁入 `agent_lifecycle.py`；终端观察器、
+  background-operation 队列、`close()` 和会话恢复流程的整体协调保持在 `Agent`。
+- 做了:`AgentLifecycle` + `AgentLifecycleHost` 窄协议只操作宿主既有的 Core、Memory、
+  配置字段和 recorder；`Agent` 保留所有公共 API 及 `_build_core_provider()`、
+  `_apply_core_thinking_level()` 的兼容委托，并以 `_create_provider()` 在调用时读取
+  `lion_code.agent.create_provider`，保留构造、Provider 热切换和 Thinking 重建的
+  FakeProvider patch 锚点。没有新增 history、Provider 或 session writer。
+- 验证:聚焦 integration/application/tooling 回归 58 passed；全量 555 passed、6 skipped、
+  11 subtests（已知 Windows GBK spinner warning 仍存在）；compileall、改动范围 Ruff、
+  import-linter 3 契约、`git diff --check` 和 Trellis validation 均通过。改动范围 mypy
+  因依赖闭包中的 12 个文件报告 82 项错误而非零，`agent_lifecycle.py` 无诊断。
+- 结果:`agent.py` 1,766 -> 1,606 行（−160）；新增 284 行生命周期协调器和既有
+  Provider 原子替换回归中的实例装配断言。
+
+### 三阶段-6 · 2026-08-04 · 收敛 agent.py:Agent Runtime 协调
+
+- 范围:把 Core 组装、observer/recorder、上下文 projection/compaction、后台清理、
+  输出捕获、单次 run、clear/restore/close 编排从 `agent.py` 收敛到既有
+  `agent_runtime.py` 的 `AgentRuntimeCoordinator`；不改 Provider、ToolRuntime、
+  JSONL schema、Memory 语义或 MCP 工具路由。
+- 做了:`AgentRuntimeCoordinator` + `AgentRuntimeHost` 持有唯一
+  `LionAgentRuntime`、observer 顺序、`SessionRecorder`、context manager/compactor、
+  model-limit cache、background queue、capture 与 Core 会话生命周期。`Agent` 保留
+  MCP 首次发现、Memory/Plan/Autonomy/Learning、工具/UI 边界和 public/private 薄委托；
+  `_core_runtime`、`_ensure_core_session_ready`、`TerminalRenderer` patch 锚点和
+  `AgentLifecycle` 所需的兼容属性均继续有效。新增无反向导入与一实例一协调器测试。
+- 验证:聚焦 runtime/run/integration/application/memory/tooling 81 passed；全量 557
+  passed、6 skipped、11 subtests（已知 Windows GBK spinner `UnicodeEncodeError` warning
+  仍存在）；compileall、Ruff lint、`agent_runtime.py` 与新增测试的 format、import-linter
+  3 契约、`git diff --check` 和 Trellis validation 通过。`agent.py` 延续既有 format
+  基线，未在本切片作全文件格式化；`mypy lion_code` 当前 99 项历史错误，改动的
+  `agent.py` / `agent_runtime.py` 无新诊断。全库当前 Ruff 82、format 103，均未作为
+  本切片的历史清理目标。
+- 结果:实际物理行（`Get-Content`）`agent.py` 1,858 -> 1,461（−397），非空行
+  1,606 -> 1,226（−380）；`agent_runtime.py` 962 物理行。三阶段所有子切片均已完成，
+  后续只需父任务最终验收与归档。
 
 ### 二阶段 · 2026-08-01 · 清掉已知的架构债务（m-012 / m-007 / m-013 / m-010 + 第二套路径扫描）
 - **m-012**：删除 `/skill:` 半成品入口。`application/skills.py` 移除 tau `<skill>` 块机器（expand_skill_command / format_skill_invocation / parse_skill_invocation / SkillInvocation，保留 `Skill`）；TUI autocomplete 的 `/skill:` 处理、`app.py` 与 `commands.py` 的 `/skill:` 特判、`state.py` 展示分支、相关测试一并移除。接线（让 TUI `/skill:` 走 `lion_code.skills.resolve_skill_prompt`）转预留任务 `08-01-tui-skill-wiring`。

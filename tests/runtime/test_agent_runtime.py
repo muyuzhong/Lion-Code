@@ -7,11 +7,15 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from lion_code.agent_runtime import LionAgentRuntime
+from core.fakes import FakeProvider
+
+from lion_code.agent_runtime import AgentRuntimeCoordinator, LionAgentRuntime
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
 from lion_code.core.provider_events import AssistantDoneEvent
 from lion_code.observers import TerminalRenderer, UsageObserver
@@ -19,8 +23,6 @@ from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
-
-from core.fakes import FakeProvider
 
 
 class _Controller:
@@ -103,6 +105,33 @@ def _runtime_with_echo() -> tuple[ToolRegistry, ToolRuntime]:
 
 
 class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
+    def test_runtime_coordinator_module_does_not_import_agent(self) -> None:
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; import lion_code.agent_runtime; "
+                "assert 'lion_code.agent' not in sys.modules",
+            ],
+            check=True,
+        )
+
+    async def test_agent_composes_one_runtime_coordinator(self) -> None:
+        from lion_code.agent import Agent
+
+        provider = FakeProvider([])
+        with patch("lion_code.agent.create_provider", return_value=provider):
+            agent = Agent(
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                custom_system_prompt="test",
+                terminal_output=False,
+                mcp_enabled=False,
+            )
+        self.assertIsInstance(agent._runtime_coordinator, AgentRuntimeCoordinator)
+        self.assertIs(agent.core_runtime, agent._runtime_coordinator.core_runtime)
+        await agent.close()
+
     async def test_closed_loop_through_tool_runtime(self) -> None:
         provider = FakeProvider([_tooluse_event(), _stop_event()])
         _registry, tool_runtime = _runtime_with_echo()
@@ -201,7 +230,10 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
     async def test_observers_wired_to_runtime(self) -> None:
         # 真正组装：LionAgentRuntime + TerminalRenderer + UsageObserver 同时工作。
         provider = FakeProvider(
-            [_tooluse_event(), _stop_event(usage=Usage(input=10, output=5, total_tokens=15))]
+            [
+                _tooluse_event(),
+                _stop_event(usage=Usage(input=10, output=5, total_tokens=15)),
+            ]
         )
         _registry, tool_runtime = _runtime_with_echo()
         runtime = LionAgentRuntime(

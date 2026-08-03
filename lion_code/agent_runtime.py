@@ -1,4 +1,4 @@
-"""LionAgentRuntime：把 Provider、Core Agent 与 ToolRuntime 组装成应用运行时。
+"""Core Agent Runtime 的组装与单会话协调。
 
 组装关系：
 
@@ -15,19 +15,86 @@ ToolRuntime 的中间件负责，运行时不再额外注入 ``before_tool_call`
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import asyncio
+import time
+import uuid
+from collections.abc import Callable, Coroutine, Sequence
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
 from lion_code.adapters import adapt_active_tools
+from lion_code.context import (
+    ContextCompactor,
+    ContextManager,
+    ContextRuntimeState,
+    ModelLimitsResolver,
+    ProviderContextCompactor,
+    effective_window_tokens,
+    fallback_model_limits,
+)
 from lion_code.core import (
     AgentHarness,
     AgentHarnessConfig,
     AgentMessage,
     EventListener,
 )
+from lion_code.core.events import AgentEvent, MessageEndEvent, MessageUpdateEvent
 from lion_code.core.loop import BeforeToolCalls, PrepareContext
-from lion_code.core.messages import UserMessage
+from lion_code.core.messages import AssistantMessage, UserMessage
 from lion_code.core.provider import ModelProvider
+from lion_code.core.provider_events import TextDeltaEvent
+from lion_code.memory_runtime import (
+    MemoryContextInjector,
+    MemoryInjectionReport,
+    MemoryOverlay,
+)
+from lion_code.observers import TerminalRenderer, UsageObserver
+from lion_code.providers.thinking import ThinkingLevel, coerce_thinking_level
+from lion_code.session_runtime import SessionRecorder, SessionRepository
 from lion_code.tooling import ToolRuntime
+
+StopReason = Literal[
+    "completed",
+    "max_turns",
+    "max_cost",
+    "timeout",
+    "model_error",
+    "tool_error",
+    "aborted",
+]
+
+
+@dataclass(slots=True)
+class AgentRunResult:
+    """一次 Agent 运行的结构化结果，供非终端消费者读取。"""
+
+    session_id: str
+    final_text: str
+    stop_reason: str
+    turns: int
+    wall_time_seconds: float
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cost_usd: float
+    error: str | None = None
+
+
+def _recent_context_boundary(
+    messages: tuple[AgentMessage, ...],
+    *,
+    keep_user_boundaries: int = 1,
+) -> int:
+    """按用户消息边界保留最近轮次，避免拆开 ToolCall 与 ToolResult。"""
+
+    found = 0
+    for index in range(len(messages) - 1, -1, -1):
+        if not isinstance(messages[index], UserMessage):
+            continue
+        found += 1
+        if found == keep_user_boundaries:
+            return index
+    return len(messages)
 
 
 class LionAgentRuntime:
@@ -125,3 +192,771 @@ class LionAgentRuntime:
     def messages(self) -> tuple[AgentMessage, ...]:
         """返回当前对话的消息快照。"""
         return self.harness.messages
+
+
+class AgentRuntimeHost(Protocol):
+    """Core 协调器向 Agent 组合根索取的最小能力边界。"""
+
+    model: str
+    is_sub_agent: bool
+    _thinking_level: ThinkingLevel
+    _terminal_output: bool
+    _system_prompt: str
+    _base_system_prompt: str
+    _aborted: bool
+    _last_stop_reason: str | None
+    session_id: str
+    session_start_time: str
+    effective_window: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cache_read_tokens: int
+    total_cache_creation_tokens: int
+    last_input_token_count: int
+    current_turns: int
+    last_api_call_time: float
+    _pending_core_context_reset: str | None
+    permission_mode: str
+    _plan_file_path: str | None
+    tool_context: Any
+    tool_environment: Any
+    _session_repository: SessionRepository
+    _memory_coordinator: Any
+    _turn_memory_overlays: tuple[MemoryOverlay, ...]
+    _last_memory_injection: MemoryInjectionReport
+
+    @property
+    def api_configured(self) -> bool: ...
+
+    @property
+    def _memory_injector(self) -> MemoryContextInjector: ...
+
+    def _create_terminal_renderer(self) -> TerminalRenderer: ...
+
+    def _emit_notice(
+        self,
+        message: str,
+        *,
+        role: Literal["info", "error"] = "info",
+    ) -> None: ...
+
+    def _check_budget(self) -> dict[str, Any]: ...
+
+    async def _ensure_mcp_tools(self) -> None: ...
+
+    async def _ensure_core_session_ready(self) -> None: ...
+
+    def _prepare_turn_memory_snapshot(self, user_message: str) -> None: ...
+
+    def _build_turn_memory_overlays(self) -> tuple[MemoryOverlay, ...]: ...
+
+    async def _update_session_memory_after_turn(
+        self,
+        user_message: str,
+        turn_start_index: int,
+    ) -> None: ...
+
+    def _reload_project_memory(self) -> None: ...
+
+    def _reload_session_memory(self) -> None: ...
+
+    def _generate_plan_file_path(self) -> str: ...
+
+    def _build_plan_mode_prompt(self) -> str: ...
+
+    def _apply_core_thinking_level(self, level: ThinkingLevel) -> None: ...
+
+    def _get_current_cost_usd(self) -> float: ...
+
+
+def sync_usage_from_observer(
+    host: Any,
+    observer: UsageObserver | None,
+    *,
+    last_synced_response_count: int,
+) -> int:
+    """把 UsageObserver 的累计统计投影到宿主，并返回最新响应序号。"""
+
+    if observer is None:
+        return last_synced_response_count
+    totals = observer.totals
+    host.total_input_tokens = totals.input_tokens
+    host.total_output_tokens = totals.output_tokens
+    host.total_cache_read_tokens = totals.cache_read_tokens
+    host.total_cache_creation_tokens = totals.cache_write_tokens
+    last = observer.last_usage
+    response_count = observer.response_count
+    if response_count == last_synced_response_count:
+        return last_synced_response_count
+    if last is None:
+        host.last_input_token_count = 0
+    elif last.total_tokens:
+        host.last_input_token_count = last.total_tokens
+    else:
+        host.last_input_token_count = (
+            last.input + last.cache_read + last.cache_write + last.output
+        )
+    if observer.last_response_at is not None:
+        host.last_api_call_time = observer.last_response_at
+    return response_count
+
+
+class AgentRuntimeCoordinator:
+    """拥有一个 Agent 的 Core 生命周期，但不反向依赖 Agent 实现。"""
+
+    def __init__(
+        self,
+        host: AgentRuntimeHost,
+        *,
+        provider: ModelProvider,
+        model: str,
+        tool_runtime: ToolRuntime,
+        context_manager: ContextManager,
+        context_compactor: ContextCompactor | None,
+        model_limits_resolver: ModelLimitsResolver,
+    ) -> None:
+        self._host = host
+        self._context_manager = context_manager
+        self._context_compactor = context_compactor
+        self._model_limits_resolver = model_limits_resolver
+        self._resolved_model_limits_for: tuple[int, str] | None = None
+        self._core_compaction_required = False
+        self._last_context_actions: tuple[Any, ...] = ()
+        self._core_compaction_task: asyncio.Task[str] | None = None
+        self._background_tasks: set[asyncio.Task[object]] = set()
+        self._background_errors: list[BaseException] = []
+        self._output_buffer: list[str] | None = None
+        self._captured_assistant_text: str | None = None
+        self._last_synced_core_response_count = 0
+        self._terminal_renderer: TerminalRenderer | None = None
+        self._terminal_renderer_unsubscribe: Callable[[], None] | None = None
+        self._usage_observer: UsageObserver | None = None
+        self._session_recorder: SessionRecorder | None = None
+        self._observer_unsubscribers: list[Callable[[], None]] = []
+        self._runtime = LionAgentRuntime(
+            provider=provider,
+            model=model,
+            get_system=lambda: self._host._system_prompt,
+            tool_runtime=tool_runtime,
+            prepare_context=self.prepare_core_context,
+            before_tool_calls=self.before_core_tool_calls,
+        )
+        if self._context_compactor is None:
+            self._context_compactor = ProviderContextCompactor(
+                provider=provider,
+                get_model=lambda: self._host.model,
+            )
+        self.reset_core_observers()
+
+    @property
+    def core_runtime(self) -> LionAgentRuntime:
+        """返回唯一持有活跃 Provider 与 canonical messages 的 Core Runtime。"""
+
+        return self._runtime
+
+    @core_runtime.setter
+    def core_runtime(self, value: LionAgentRuntime) -> None:
+        self._runtime = value
+
+    @property
+    def session_recorder(self) -> SessionRecorder | None:
+        return self._session_recorder
+
+    @session_recorder.setter
+    def session_recorder(self, value: SessionRecorder | None) -> None:
+        self._session_recorder = value
+
+    @property
+    def context_compactor(self) -> ContextCompactor | None:
+        return self._context_compactor
+
+    @context_compactor.setter
+    def context_compactor(self, value: ContextCompactor | None) -> None:
+        self._context_compactor = value
+
+    @property
+    def context_manager(self) -> ContextManager:
+        return self._context_manager
+
+    @property
+    def resolved_model_limits_for(self) -> tuple[int, str] | None:
+        return self._resolved_model_limits_for
+
+    @resolved_model_limits_for.setter
+    def resolved_model_limits_for(self, value: tuple[int, str] | None) -> None:
+        self._resolved_model_limits_for = value
+
+    @property
+    def core_compaction_required(self) -> bool:
+        return self._core_compaction_required
+
+    @core_compaction_required.setter
+    def core_compaction_required(self, value: bool) -> None:
+        self._core_compaction_required = value
+
+    @property
+    def usage_observer(self) -> UsageObserver | None:
+        return self._usage_observer
+
+    @usage_observer.setter
+    def usage_observer(self, value: UsageObserver | None) -> None:
+        self._usage_observer = value
+
+    @property
+    def terminal_renderer(self) -> TerminalRenderer | None:
+        return self._terminal_renderer
+
+    async def prepare_core_context(
+        self, messages: list[AgentMessage]
+    ) -> list[AgentMessage]:
+        """只生成 Provider 投影，不改写 canonical history 或 JSONL。"""
+
+        self.sync_core_usage()
+        state = self.context_runtime_state()
+        prepared = self._context_manager.prepare(messages, state)
+        projected, memory_report = self._host._memory_injector.inject(
+            prepared.messages,
+            self._host._turn_memory_overlays,
+            max_tokens=state.effective_window_tokens,
+        )
+        self._last_context_actions = prepared.actions
+        self._host._last_memory_injection = memory_report
+        self._core_compaction_required = prepared.compaction_required
+        return projected
+
+    async def capture_core_text(self, event: AgentEvent) -> None:
+        """为 run_once/run 捕获本次助手文本，不参与终端或 TUI 渲染。"""
+
+        if self._output_buffer is None:
+            return
+        if isinstance(event, MessageUpdateEvent) and isinstance(
+            event.assistant_message_event, TextDeltaEvent
+        ):
+            self._output_buffer.append(event.assistant_message_event.delta)
+        elif isinstance(event, MessageEndEvent) and isinstance(
+            event.message, AssistantMessage
+        ):
+            self._captured_assistant_text = event.message.text
+
+    def sync_core_usage(self) -> None:
+        self._last_synced_core_response_count = sync_usage_from_observer(
+            self._host,
+            self._usage_observer,
+            last_synced_response_count=self._last_synced_core_response_count,
+        )
+
+    def last_core_assistant(self) -> AssistantMessage | None:
+        return next(
+            (
+                message
+                for message in reversed(self._runtime.messages)
+                if isinstance(message, AssistantMessage)
+            ),
+            None,
+        )
+
+    def sync_core_outcome(self) -> None:
+        """把 Core 的 canonical 终态映射回 Agent 对外状态。"""
+
+        assistant = self.last_core_assistant()
+        if assistant is None:
+            return
+        if self._host._aborted or assistant.stop_reason == "aborted":
+            self._host._aborted = True
+            self._host._last_stop_reason = "aborted"
+        elif assistant.stop_reason == "error":
+            self._host._last_stop_reason = "model_error"
+        elif self._host._last_stop_reason is None:
+            self._host._last_stop_reason = "completed"
+
+    def before_core_tool_calls(self, _assistant: AssistantMessage) -> str | None:
+        """在工具调用前同步用量、递增轮次并检查既有预算。"""
+
+        self.sync_core_usage()
+        self._host.current_turns += 1
+        budget = self._host._check_budget()
+        if not budget["exceeded"]:
+            return None
+        self._host._last_stop_reason = budget["kind"]
+        try:
+            self._host._emit_notice(f"Budget exceeded: {budget['reason']}")
+        except UnicodeError:
+            pass
+        return budget["reason"]
+
+    def reset_session_counters(self) -> None:
+        host = self._host
+        host.total_input_tokens = 0
+        host.total_output_tokens = 0
+        host.total_cache_read_tokens = 0
+        host.total_cache_creation_tokens = 0
+        host.last_input_token_count = 0
+        host.current_turns = 0
+        host.last_api_call_time = 0.0
+        self._last_synced_core_response_count = (
+            self._usage_observer.response_count
+            if self._usage_observer is not None
+            else 0
+        )
+        host._last_stop_reason = None
+
+    def reset_core_observers(self) -> None:
+        """按 Usage → Session → Renderer → capture 的稳定顺序重建观察器。"""
+
+        for unsubscribe in self._observer_unsubscribers:
+            unsubscribe()
+        self._observer_unsubscribers.clear()
+        self._terminal_renderer_unsubscribe = None
+        self._terminal_renderer = (
+            self._host._create_terminal_renderer()
+            if self._host._terminal_output
+            else None
+        )
+        self._usage_observer = UsageObserver()
+        self._last_synced_core_response_count = 0
+        if self._host.is_sub_agent:
+            self._session_recorder = None
+        else:
+            self._session_recorder = SessionRecorder(
+                session_id=self._host.session_id,
+                model=self._host.model,
+                thinking_level=self._host._thinking_level,
+                cwd=self._host.tool_context.cwd,
+                storage=self._host._session_repository.storage_for(
+                    self._host.session_id
+                ),
+            )
+        self._observer_unsubscribers.append(
+            self._runtime.subscribe(self._usage_observer.handle)
+        )
+        if self._session_recorder is not None:
+            self._observer_unsubscribers.append(
+                self._runtime.subscribe(self._session_recorder.handle)
+            )
+        if self._terminal_renderer is not None:
+            self._terminal_renderer_unsubscribe = self._runtime.subscribe(
+                self._terminal_renderer.handle
+            )
+            self._observer_unsubscribers.append(self._terminal_renderer_unsubscribe)
+        self._observer_unsubscribers.append(
+            self._runtime.subscribe(self.capture_core_text)
+        )
+
+    async def ensure_core_session_ready(self) -> None:
+        await self.flush_background_operations()
+        await self.resolve_core_model_limits()
+        if self._session_recorder is not None:
+            await self._session_recorder.initialize()
+
+    async def resolve_core_model_limits(self) -> None:
+        key = (id(self._runtime.provider), self._host.model)
+        if self._resolved_model_limits_for == key:
+            return
+        limits = await self._model_limits_resolver.resolve(
+            self._runtime.provider,
+            self._host.model,
+        )
+        self._host.effective_window = effective_window_tokens(limits)
+        self._resolved_model_limits_for = key
+
+    def context_runtime_state(self) -> ContextRuntimeState:
+        return ContextRuntimeState(
+            effective_window_tokens=self._host.effective_window,
+            last_prompt_tokens=self._host.last_input_token_count,
+            last_model_call_at=self._host.last_api_call_time or None,
+            now=time.time(),
+        )
+
+    async def compact_core_context_if_needed(
+        self,
+        *,
+        force: bool = False,
+        keep_user_boundaries: int = 1,
+    ) -> bool:
+        """在新用户轮次前写入 CompactionEntry 并回放唯一活跃上下文。"""
+
+        if self._session_recorder is None or self._context_compactor is None:
+            return False
+        self.sync_core_usage()
+        if not force and not self._context_manager.should_compact(
+            self.context_runtime_state()
+        ):
+            return False
+
+        messages = self._runtime.messages
+        entry_ids = await self._session_recorder.context_entry_ids()
+        if len(entry_ids) != len(messages):
+            raise RuntimeError("Session context does not match active Harness messages")
+
+        boundary = _recent_context_boundary(
+            messages,
+            keep_user_boundaries=keep_user_boundaries,
+        )
+        replaced_ids = list(entry_ids[:boundary])
+        summary_messages = tuple(messages[:boundary])
+        if not replaced_ids:
+            if force:
+                return False
+            replaced_ids = list(entry_ids)
+            summary_messages = messages
+        if not replaced_ids:
+            return False
+
+        if self._host._aborted:
+            raise asyncio.CancelledError
+        task = asyncio.create_task(self._context_compactor.summarize(summary_messages))
+        self._core_compaction_task = task
+        try:
+            summary = await task
+        finally:
+            if self._core_compaction_task is task:
+                self._core_compaction_task = None
+        if self._host._aborted:
+            raise asyncio.CancelledError
+        await self._session_recorder.record_compaction(
+            summary=summary,
+            replaces_entry_ids=replaced_ids,
+        )
+        state = await self._host._session_repository.load(self._host.session_id)
+        if state is None:
+            raise RuntimeError("Session disappeared after compaction")
+        await self._runtime.replace_active_context(state.messages)
+        self._host.last_input_token_count = 0
+        self._last_context_actions = ()
+        self._core_compaction_required = False
+        return True
+
+    async def compact_core_context_for_overflow(self) -> bool:
+        """强制压缩旧上下文，保留最近成功轮次和当前失败 prompt。"""
+
+        return await self.compact_core_context_if_needed(
+            force=True,
+            keep_user_boundaries=2,
+        )
+
+    async def apply_pending_core_context_reset(self) -> bool:
+        """把 Plan 批准摘要持久化后作为唯一活跃上下文继续运行。"""
+
+        summary = self._host._pending_core_context_reset
+        if summary is None or self._session_recorder is None:
+            return False
+        replaced_ids = list(await self._session_recorder.context_entry_ids())
+        await self._session_recorder.record_compaction(
+            summary=summary,
+            replaces_entry_ids=replaced_ids,
+        )
+        state = await self._host._session_repository.load(self._host.session_id)
+        if state is None or len(state.messages) != 1:
+            raise RuntimeError(
+                "Compaction replay did not produce one active context message"
+            )
+        active_message = state.messages[0]
+        if not isinstance(active_message, UserMessage):
+            raise RuntimeError(
+                "Compaction replay did not produce one active context message"
+            )
+        await self._runtime.reset_active_context(active_message.text)
+        self.sync_core_usage()
+        self._host.last_input_token_count = 0
+        self._last_context_actions = ()
+        self._core_compaction_required = False
+        self._host._pending_core_context_reset = None
+        return True
+
+    def schedule_background_operation(
+        self,
+        operation: Callable[[], Coroutine[Any, Any, object]],
+    ) -> None:
+        """从同步生命周期入口提交异步清理，下个状态边界会收敛异常。"""
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(operation())
+            return
+        task: asyncio.Task[object] = loop.create_task(operation())
+        self._background_tasks.add(task)
+
+        def collect_result(done: asyncio.Task[object]) -> None:
+            self._background_tasks.discard(done)
+            try:
+                done.result()
+            except BaseException as error:
+                self._background_errors.append(error)
+
+        task.add_done_callback(collect_result)
+
+    async def flush_background_operations(self) -> None:
+        pending = tuple(self._background_tasks)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        if self._background_errors:
+            raise self._background_errors.pop(0)
+
+    def set_terminal_output(self, enabled: bool) -> None:
+        """切换终端观察器，绝不重建 UsageObserver 或 SessionRecorder。"""
+
+        if enabled == self._host._terminal_output:
+            return
+        if self._runtime.harness.is_running:
+            raise RuntimeError("Agent 运行中，无法切换终端输出")
+        if enabled:
+            self._host._terminal_output = True
+            self._terminal_renderer = self._host._create_terminal_renderer()
+            self._terminal_renderer_unsubscribe = self._runtime.subscribe(
+                self._terminal_renderer.handle
+            )
+            self._observer_unsubscribers.append(self._terminal_renderer_unsubscribe)
+            return
+        unsubscribe = self._terminal_renderer_unsubscribe
+        if unsubscribe is not None:
+            unsubscribe()
+            self._observer_unsubscribers.remove(unsubscribe)
+        self._terminal_renderer_unsubscribe = None
+        self._terminal_renderer = None
+        self._host._terminal_output = False
+
+    def abort(self) -> None:
+        """同时取消 Memory 预取、Core 流和可能在运行的压缩任务。"""
+
+        self._host._aborted = True
+        self._host._last_stop_reason = "aborted"
+        self._host._memory_coordinator.cancel_pending()
+        self._runtime.cancel()
+        if self._core_compaction_task is not None:
+            self._core_compaction_task.cancel()
+
+    async def chat(self, user_message: str) -> None:
+        """执行一次完整用户轮，保持 MCP/Memory/Core/JSONL 的既有时序。"""
+
+        await self._host._ensure_mcp_tools()
+        self._host._aborted = False
+        self._host._last_stop_reason = None
+        if not self._host.api_configured:
+            self._host._emit_notice(
+                "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
+                "或在 TUI 中用 /model 配置。",
+                role="error",
+            )
+            return
+        # 经过 Host 调用保留 Agent._ensure_core_session_ready 的替换入口。
+        await self._host._ensure_core_session_ready()
+        if self._host._aborted:
+            return
+        await self.compact_core_context_if_needed()
+        if self._host._aborted:
+            return
+        turn_start_index = len(self._runtime.messages)
+        self._host._prepare_turn_memory_snapshot(user_message)
+        try:
+            await self._runtime.prompt(user_message)
+            while (
+                not self._host._aborted
+                and await self.apply_pending_core_context_reset()
+            ):
+                if self._host._aborted:
+                    break
+                await self._runtime.continue_()
+            self.sync_core_usage()
+            self.sync_core_outcome()
+            self._core_compaction_required = self._context_manager.should_compact(
+                self.context_runtime_state()
+            )
+        finally:
+            try:
+                if not self._host.is_sub_agent:
+                    await self._host._update_session_memory_after_turn(
+                        user_message,
+                        turn_start_index,
+                    )
+            finally:
+                self._host._turn_memory_overlays = (
+                    self._host._build_turn_memory_overlays()
+                )
+
+    async def run_once(self, prompt: str) -> dict[str, Any]:
+        """运行一次并返回捕获的文本与本次 token 差值。"""
+
+        self._output_buffer = []
+        self._captured_assistant_text = None
+        previous_input = self._host.total_input_tokens
+        previous_output = self._host.total_output_tokens
+        try:
+            await self.chat(prompt)
+            text = "".join(self._output_buffer)
+            if not text:
+                text = self._captured_assistant_text or ""
+        finally:
+            self._output_buffer = None
+            self._captured_assistant_text = None
+        return {
+            "text": text,
+            "tokens": {
+                "input": self._host.total_input_tokens - previous_input,
+                "output": self._host.total_output_tokens - previous_output,
+            },
+        }
+
+    async def run(
+        self,
+        prompt: str,
+        *,
+        timeout: float | None = None,
+    ) -> AgentRunResult:
+        """执行一次并把取消、超时和 Provider 异常投影为结构化结果。"""
+
+        host = self._host
+        pre_input = host.total_input_tokens
+        pre_output = host.total_output_tokens
+        pre_cache = host.total_cache_read_tokens
+        pre_turns = host.current_turns
+        pre_cost = host._get_current_cost_usd()
+        start = time.monotonic()
+        self._output_buffer = []
+        self._captured_assistant_text = None
+        timed_out = False
+        timeout_handle = None
+        run_task = asyncio.current_task()
+        if timeout is not None:
+            loop = asyncio.get_running_loop()
+
+            def on_timeout() -> None:
+                nonlocal timed_out
+                timed_out = True
+                host._aborted = True
+                if run_task is not None and not run_task.done():
+                    run_task.cancel()
+
+            timeout_handle = loop.call_later(timeout, on_timeout)
+
+        stop_reason = "completed"
+        error: str | None = None
+        try:
+            await self.chat(prompt)
+            stop_reason = host._last_stop_reason or "completed"
+            if stop_reason == "model_error":
+                assistant = self.last_core_assistant()
+                error = (
+                    assistant.error_message
+                    if assistant is not None and assistant.error_message
+                    else "Provider error"
+                )
+        except asyncio.CancelledError:
+            stop_reason = "aborted"
+        except Exception as exc:
+            stop_reason = "model_error"
+            error = str(exc) or exc.__class__.__name__
+        finally:
+            if timeout_handle is not None:
+                timeout_handle.cancel()
+            final_text = "".join(self._output_buffer or [])
+            if not final_text:
+                final_text = self._captured_assistant_text or ""
+            self._output_buffer = None
+            self._captured_assistant_text = None
+
+        if timed_out:
+            stop_reason = "timeout"
+            error = error or f"timeout after {timeout}s"
+        return AgentRunResult(
+            session_id=host.session_id,
+            final_text=final_text,
+            stop_reason=stop_reason,
+            turns=host.current_turns - pre_turns,
+            wall_time_seconds=time.monotonic() - start,
+            input_tokens=host.total_input_tokens - pre_input,
+            output_tokens=host.total_output_tokens - pre_output,
+            cache_read_tokens=host.total_cache_read_tokens - pre_cache,
+            cost_usd=host._get_current_cost_usd() - pre_cost,
+            error=error,
+        )
+
+    async def clear_history(self) -> None:
+        """创建新的 JSONL 会话，同时保留项目级 Session Memory。"""
+
+        host = self._host
+        await self.flush_background_operations()
+        host._memory_coordinator.reset()
+        host._reload_project_memory()
+        host._reload_session_memory()
+        host._last_memory_injection = MemoryInjectionReport()
+        host.session_id = uuid.uuid4().hex[:8]
+        host.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        host.tool_context.session_id = host.session_id
+        host._pending_core_context_reset = None
+        self._core_compaction_required = False
+        self._last_context_actions = ()
+        if host.permission_mode == "plan":
+            host._plan_file_path = host._generate_plan_file_path()
+            host._system_prompt = (
+                host._base_system_prompt + host._build_plan_mode_prompt()
+            )
+        self._runtime.harness.clear_queues()
+        self._runtime.harness.replace_messages([])
+        self.reset_core_observers()
+        await host._ensure_core_session_ready()
+        host.tool_context.plan_file_path = host._plan_file_path
+        self.reset_session_counters()
+        host._turn_memory_overlays = host._build_turn_memory_overlays()
+        host._emit_notice("Conversation cleared.")
+
+    async def restore_core_session(self, session_id: str) -> bool:
+        """从 JSONL 回放唯一 Core history，并继续追加到同一会话。"""
+
+        host = self._host
+        await self.flush_background_operations()
+        state = await host._session_repository.load(session_id)
+        if state is None:
+            return False
+        host._memory_coordinator.reset()
+        host._reload_project_memory()
+        host._reload_session_memory()
+        host._last_memory_injection = MemoryInjectionReport()
+        host.session_id = session_id
+        host.tool_context.session_id = session_id
+        host._pending_core_context_reset = None
+        self._core_compaction_required = False
+        self._last_context_actions = ()
+        self._runtime.harness.clear_queues()
+        self._runtime.harness.replace_messages(state.messages)
+        if state.model is not None:
+            host.model = state.model
+            host.effective_window = effective_window_tokens(
+                fallback_model_limits(host.model)
+            )
+            self._resolved_model_limits_for = None
+            self._runtime.set_model(host.model)
+        if state.thinking_level is not None:
+            restored_level = coerce_thinking_level(state.thinking_level)
+            if restored_level != host._thinking_level:
+                host._apply_core_thinking_level(restored_level)
+        if state.session_info is not None:
+            host.session_start_time = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ",
+                time.gmtime(state.session_info.created_at),
+            )
+        self.reset_core_observers()
+        await host._ensure_core_session_ready()
+        self.reset_session_counters()
+        host._turn_memory_overlays = host._build_turn_memory_overlays()
+        host._emit_notice(f"Session restored ({len(state.messages)} messages).")
+        return True
+
+    async def compact(self) -> None:
+        await self._host._ensure_core_session_ready()
+        if await self.compact_core_context_if_needed(force=True):
+            self._host._emit_notice("Conversation compacted.")
+
+    async def close(self) -> None:
+        """按既有 finally 链回收后台、Memory、Provider 与 MCP 环境。"""
+
+        try:
+            await self.flush_background_operations()
+        finally:
+            try:
+                await self._host._memory_coordinator.close()
+            finally:
+                try:
+                    await self._runtime.aclose()
+                finally:
+                    await self._host.tool_environment.close()

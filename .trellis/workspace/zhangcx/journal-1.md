@@ -861,3 +861,108 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Next Steps
 
 - 按路线继续评估 subagent_factory 提取。
+
+
+## Session 22: 三阶段-3：提取子 Agent 工厂
+
+**Date**: 2026-08-03
+**Task**: 三阶段-3：提取子 Agent 工厂
+**Branch**: `muyuzhong/phase3-subagent-factory`
+
+### Summary
+
+将子 Agent 与 Skill fork 的构造和工具策略迁入 SubagentFactory，保持懒导入、权限、共享环境和资源关闭边界；全量测试 551 passed、6 skipped。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `19709152b082183f2e2893aa79021a0387930c04` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 23: 三阶段-4：提取 Learning Runtime
+
+**Date**: 2026-08-03
+**Task**: 三阶段-4：提取 Learning Runtime
+**Branch**: `muyuzhong/phase3-subagent-factory`
+
+### Summary
+
+将显式 /learn 的提示词、Core 转录、evaluator 决策解析和 Skill 创建迁入 LearningRuntime，保持 Agent 公共委托、导入兼容和错误语义；全量测试 555 passed。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b17c9d6b30536fab988d1c3b45d938628d8e6987` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 24: 完成 S5 Agent 生命周期提取
+
+**Date**: 2026-08-04
+**Task**: 完成 S5 Agent 生命周期提取
+**Branch**: `muyuzhong/phase3-subagent-factory`
+
+### Summary
+
+提取 AgentLifecycle，保持 Provider 原子热替换、Thinking 档位与 create_provider patch 锚点兼容；完成独立复核、规格同步和全量验证。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9874f28` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 25: 收敛 Agent Runtime 协调
+
+**Date**: 2026-08-04
+**Task**: 收敛 Agent Runtime 协调
+**Branch**: `muyuzhong/phase3-subagent-factory`
+
+### Summary
+
+提取 AgentRuntimeCoordinator，保持 Core 单一路径与兼容锚点，完成全量回归和边界规格更新。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `37385e3` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 26: 完成 Agent 运行时拆分路线验收
+
+**Date**: 2026-08-04
+**Task**: 完成 Agent 运行时拆分路线验收
+**Branch**: `muyuzhong/phase3-subagent-factory`
+
+### Summary
+
+核对 S3-S6 的归档与提交证据，复跑全量测试并完成父任务验收、归档。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `921f5b7` | (see git log) |
+
+### Status
+
+[OK] **Completed**

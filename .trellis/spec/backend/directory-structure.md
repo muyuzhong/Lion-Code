@@ -11,6 +11,7 @@
 lion_code/
 ├── __main__.py          # CLI / REPL entry point and process-level error boundary
 ├── agent.py             # Agent composition and high-level runtime ownership
+├── agent_lifecycle.py   # Provider configuration and Thinking lifecycle coordinator
 ├── application/         # LionCodingSession, application events and slash commands
 ├── core/                # Canonical messages, events, harness, loops and session protocol
 ├── providers/           # Built-in Anthropic and OpenAI-compatible HTTP providers
