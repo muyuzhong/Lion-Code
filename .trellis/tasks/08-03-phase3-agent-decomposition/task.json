@@ -19,7 +19,8 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "08-03-phase3-subagent-factory"
+    "08-03-phase3-subagent-factory",
+    "08-03-phase3-learning-runtime"
   ],
   "parent": null,
   "relatedFiles": [],
