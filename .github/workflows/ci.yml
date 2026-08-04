@@ -1,13 +1,7 @@
-# Lion 质量基线 CI（2026-08-01 建立）
+# Lion 质量基线 CI（2026-08-04 收紧）
 #
-# 原则：先记录基线、执行「不得继续恶化」，不追求立即全绿。
-# 基线数值见 docs/quality-baseline-2026-08.md。
-#
-# 设计：
-# - ruff check / format / mypy 使用「错误数超基线 → fail」的比对，拦截恶化。
-# - import-linter 契约必须通过（架构边界）。
-# - coverage 只报告，不设 fail_under（基线模式）。
-# - 用户指定的 5 条命令全部包含。
+# 质量门禁使用已提交的机器基线，不解析 Ruff/mypy 的人类可读摘要。
+# 分支保护仍需在 GitHub 仓库设置中把本 workflow 设为 required check。
 
 name: CI
 
@@ -15,6 +9,10 @@ on:
   push:
     branches: [master]
   pull_request:
+
+env:
+  QUALITY_BASELINE: docs/quality-baseline-2026-08.json
+  QUALITY_PATHS: lion_code tests scripts
 
 jobs:
   quality-gates:
@@ -26,6 +24,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 设置 Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -40,38 +40,32 @@ jobs:
 
       # ---------- 用户指定的 5 条命令 ----------
 
-      - name: ruff check .（含基线比对）
+      - name: ruff check（JSON 基线比对）
         run: |
-          BEFORE=$(ruff check . 2>&1 | tail -1 | grep -oE 'Found [0-9]+ errors' | grep -oE '[0-9]+' || echo 0)
-          echo "当前 ruff 错误数: $BEFORE"
-          BASELINE=218
-          echo "基线: $BASELINE"
-          if [ "$BEFORE" -gt "$BASELINE" ]; then
-            echo "::error::ruff 错误数 ($BEFORE) 超过基线 ($BASELINE) — 不得继续恶化"
-            exit 1
+          set +e
+          python -m ruff check $QUALITY_PATHS --output-format=json > ruff.json
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 1 ]; then
+            cat ruff.json
+            exit "$STATUS"
           fi
-          # 打印违规摘要供人工跟踪
-          ruff check . --output-format=concise | grep -oE ' [A-Z]+[0-9]+ ' | sort | uniq -c | sort -rn | head -10
+          python scripts/check_quality_baseline.py ruff-check ruff.json --status "$STATUS" --baseline "$QUALITY_BASELINE"
 
-      - name: ruff format --check .（含基线比对）
+      - name: ruff format --check（基线比对）
         run: |
-          OUTPUT=$(ruff format --check . 2>&1)
-          WOULD=$(echo "$OUTPUT" | grep -oE '[0-9]+ files would be reformatted' | grep -oE '^[0-9]+' || echo 0)
-          ALREADY=$(echo "$OUTPUT" | grep -oE '[0-9]+ files already formatted' | grep -oE '^[0-9]+' || echo 0)
-          echo "待重排: $WOULD / 已合规: $ALREADY"
-          BASELINE=146
-          echo "基线: $BASELINE"
-          if [ "${WOULD:-0}" -gt "$BASELINE" ]; then
-            echo "::error::ruff format 待重排文件 ($WOULD) 超过基线 ($BASELINE) — 不得继续恶化"
-            exit 1
+          set +e
+          python -m ruff format --check $QUALITY_PATHS > ruff-format.txt 2>&1
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 1 ]; then
+            cat ruff-format.txt
+            exit "$STATUS"
           fi
-          if [ -z "$WOULD" ] && [ -z "$ALREADY" ]; then
-            echo "$OUTPUT" | tail -3
-            exit 1
-          fi
+          python scripts/check_quality_baseline.py ruff-format ruff-format.txt --status "$STATUS" --baseline "$QUALITY_BASELINE"
 
-      - name: python -m compileall -q lion_code tests
-        run: python -m compileall -q lion_code tests
+      - name: python -m compileall -q lion_code tests scripts
+        run: python -m compileall -q lion_code tests scripts
 
       - name: python -m pytest -q（全量测试）
         run: python -m pytest -q
@@ -81,30 +75,48 @@ jobs:
 
       # ---------- 附加质量门禁 ----------
 
-      - name: mypy 类型检查（含基线比对）
+      - name: mypy 类型检查（JSON 基线比对）
         run: |
-          OUTPUT=$(python -m mypy lion_code 2>&1)
-          echo "$OUTPUT" | tail -3
-          FOUND=$(echo "$OUTPUT" | grep -oE 'Found [0-9]+ errors' | grep -oE '[0-9]+' || echo 0)
-          echo "当前 mypy 错误数: $FOUND"
-          BASELINE=105
-          echo "基线: $BASELINE"
-          if [ "$FOUND" -gt "$BASELINE" ]; then
-            echo "::error::mypy 错误数 ($FOUND) 超过基线 ($BASELINE) — 不得继续恶化"
-            exit 1
+          set +e
+          python -m mypy lion_code --platform linux -O json > mypy.jsonl 2>&1
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 1 ]; then
+            cat mypy.jsonl
+            exit "$STATUS"
           fi
+          python scripts/check_quality_baseline.py mypy mypy.jsonl --status "$STATUS" --baseline "$QUALITY_BASELINE"
 
       - name: import-linter 架构契约
-        run: |
-          lint-imports --no-cache || exit 1
+        run: lint-imports --no-cache
 
-      - name: vulture 死代码候选（报告，不设硬阈值）
+      - name: radon D/E/F 复杂度门禁
         run: |
-          echo "当前 vulture 候选（基线 5）:"
-          vulture lion_code tests --min-confidence 70 2>&1 || true
+          python -m radon cc lion_code -j > radon-cc.json
+          python scripts/check_quality_baseline.py radon-complexity radon-cc.json --baseline "$QUALITY_BASELINE"
 
-      - name: 分支覆盖率报告（基线 70%，仅报告不阻塞）
+      - name: vulture 高置信候选门禁
+        run: |
+          set +e
+          python -m vulture lion_code tests --min-confidence 70 > vulture.txt 2>&1
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 3 ]; then
+            cat vulture.txt
+            exit "$STATUS"
+          fi
+          python scripts/check_quality_baseline.py vulture vulture.txt --status "$STATUS" --baseline "$QUALITY_BASELINE"
+
+      - name: 准备 changed-lines diff
+        env:
+          BASE_REF: ${{ github.base_ref || 'master' }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_REF" || true
+          git diff --unified=0 "origin/$BASE_REF...HEAD" -- lion_code > changed-lines.diff || true
+
+      - name: 分支覆盖率与 changed-lines 覆盖率门禁
         run: |
           python -m coverage run --branch -m pytest -q -p no:cacheprovider
+          python -m coverage json -o coverage.json
+          python scripts/check_quality_baseline.py coverage coverage.json --diff-file changed-lines.diff --baseline "$QUALITY_BASELINE"
           python -m coverage report --include="lion_code/*"
-          echo "基线: lion_code 分支覆盖率 70%"
