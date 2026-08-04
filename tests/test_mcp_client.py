@@ -1,6 +1,7 @@
 """McpConnection / McpManager 容错分支的单测。
 
-覆盖 mcp_client.py 里此前无测试覆盖的两条失败容错路径(m-007):
+覆盖 mcp_client.py 里此前无测试覆盖的两条失败容错路径
+（m-007：MCP 失败隔离与 EOF 容错）:
 
 1. ``McpManager.load_and_connect`` 的 ``except`` 分支--单个 Server 子进程启动失败时,
    跳过该 Server 而不中断其他 Server(连接失败隔离)。

@@ -19,6 +19,19 @@ SESSION_RECORDER_SITES = {
     "agent_runtime.py": frozenset({"AgentRuntimeCoordinator.reset_core_observers"}),
 }
 JSONL_WRITER_SYMBOLS = frozenset({"JsonlSessionStorage", "entry_to_json_line"})
+MEMORY_INDEX_REBUILD_SYMBOLS = frozenset(
+    {"_update_memory_index", "rebuild_memory_index_if_needed"}
+)
+REMOVED_SKILL_COMMAND_SYMBOLS = frozenset(
+    {
+        "SkillInvocation",
+        "expand_skill_command",
+        "format_skill_invocation",
+        "parse_skill_invocation",
+    }
+)
+MCP_LIFECYCLE_CLASS_NAMES = frozenset({"McpConnection", "McpManager"})
+PROVIDER_SHIM_EXPORTS = ("CancellationToken", "ModelProvider")
 
 
 def _source_files(*parts: str) -> tuple[Path, ...]:
@@ -211,6 +224,158 @@ def _legacy_symbol_locations(
         for symbol in _legacy_symbols(_tree(path)):
             locations[symbol].add(_source_key(path))
     return {symbol: frozenset(found) for symbol, found in locations.items()}
+
+
+def _defined_symbols(tree: ast.Module, names: frozenset[str]) -> frozenset[str]:
+    symbols: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef)):
+            if node.name in names:
+                symbols.add(node.name)
+    return frozenset(symbols)
+
+
+def _contains_string(tree: ast.AST, value: str) -> bool:
+    return any(
+        isinstance(node, ast.Constant) and node.value == value
+        for node in ast.walk(tree)
+    )
+
+
+def _contains_attr_call(tree: ast.AST, attr: str) -> bool:
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == attr
+        for node in ast.walk(tree)
+    )
+
+
+def _memory_index_write_sites(tree: ast.Module) -> frozenset[str]:
+    sites: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            continue
+        if _contains_string(node, "MEMORY.md") and _contains_attr_call(
+            node, "write_text"
+        ):
+            sites.add(node.name)
+    return frozenset(sites)
+
+
+def _removed_skill_command_symbols(tree: ast.Module) -> frozenset[str]:
+    symbols: set[str] = set()
+    for node in ast.walk(tree):
+        name: str | None = None
+        if isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef)):
+            name = node.name
+        elif isinstance(node, ast.Name):
+            name = node.id
+        elif isinstance(node, ast.Attribute):
+            name = node.attr
+        elif isinstance(node, ast.alias):
+            name = node.name
+        elif isinstance(node, ast.Constant) and node.value == "/skill:":
+            symbols.add("/skill:")
+        if name in REMOVED_SKILL_COMMAND_SYMBOLS:
+            symbols.add(name)
+    return frozenset(symbols)
+
+
+def _mcp_lifecycle_classes(tree: ast.Module) -> frozenset[str]:
+    classes: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        name = node.name
+        lowered = name.casefold()
+        if name in MCP_LIFECYCLE_CLASS_NAMES or (
+            "mcp" in lowered
+            and any(
+                marker in lowered
+                for marker in ("client", "connection", "lifecycle", "manager")
+            )
+        ):
+            classes.add(name)
+    return frozenset(classes)
+
+
+class _AttributeCallSites(ast.NodeVisitor):
+    def __init__(self, attr: str) -> None:
+        self._attr = attr
+        self._class_names: list[str] = []
+        self._function_names = ["<module>"]
+        self.sites: set[str] = set()
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._class_names.append(node.name)
+        self.generic_visit(node)
+        self._class_names.pop()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute) and node.func.attr == self._attr:
+            self.sites.add(self._current_site())
+        self.generic_visit(node)
+
+    def _visit_function(
+        self,
+        node: ast.AsyncFunctionDef | ast.FunctionDef,
+    ) -> None:
+        self._function_names.append(node.name)
+        self.generic_visit(node)
+        self._function_names.pop()
+
+    def _current_site(self) -> str:
+        parts = [*self._class_names, self._function_names[-1]]
+        return ".".join(part for part in parts if part != "<module>")
+
+
+def _attribute_call_sites(tree: ast.Module, attr: str) -> frozenset[str]:
+    visitor = _AttributeCallSites(attr)
+    visitor.visit(tree)
+    return frozenset(visitor.sites)
+
+
+def _provider_shim_exports(tree: ast.Module) -> tuple[str, ...]:
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id == "__all__"
+            for target in node.targets
+        ):
+            continue
+        if isinstance(node.value, (ast.List, ast.Tuple)):
+            return tuple(
+                item.value
+                for item in node.value.elts
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            )
+    return ()
+
+
+def _provider_shim_unexpected_statements(tree: ast.Module) -> tuple[str, ...]:
+    unexpected: list[str] = []
+    for node in tree.body:
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            continue
+        if isinstance(node, ast.ImportFrom):
+            if node.module == "lion_code.core.provider":
+                continue
+        if isinstance(node, ast.Assign):
+            if any(
+                isinstance(target, ast.Name) and target.id == "__all__"
+                for target in node.targets
+            ):
+                continue
+        unexpected.append(type(node).__name__)
+    return tuple(unexpected)
 
 
 class _SessionRecorderCalls(ast.NodeVisitor):
@@ -428,6 +593,64 @@ def test_memory_overlay_code_cannot_mutate_harness_messages() -> None:
     )
 
 
+def test_memory_index_has_one_authoritative_definition() -> None:
+    definitions = {
+        _source_key(path): sorted(
+            _defined_symbols(_tree(path), MEMORY_INDEX_REBUILD_SYMBOLS)
+        )
+        for path in _source_files()
+        if _defined_symbols(_tree(path), MEMORY_INDEX_REBUILD_SYMBOLS)
+    }
+    write_sites = {
+        _source_key(path): sorted(_memory_index_write_sites(_tree(path)))
+        for path in _source_files()
+        if _memory_index_write_sites(_tree(path))
+    }
+
+    assert definitions == {
+        "memory.py": ["_update_memory_index", "rebuild_memory_index_if_needed"]
+    }
+    assert write_sites == {"memory.py": ["_update_memory_index"]}, (
+        f"MEMORY.md index writes must stay inside memory.py: {write_sites}"
+    )
+
+
+def test_removed_skill_command_symbols_do_not_return() -> None:
+    violations = {
+        _source_key(path): sorted(_removed_skill_command_symbols(_tree(path)))
+        for path in _source_files()
+        if _removed_skill_command_symbols(_tree(path))
+    }
+
+    assert not violations, f"旧 /skill: 半成品入口不得重新进入产品代码: {violations}"
+
+
+def test_mcp_lifecycle_management_has_single_owner() -> None:
+    lifecycle_classes = {
+        _source_key(path): sorted(_mcp_lifecycle_classes(_tree(path)))
+        for path in _source_files()
+        if _mcp_lifecycle_classes(_tree(path))
+    }
+    disconnect_calls = {
+        _source_key(path): sorted(_attribute_call_sites(_tree(path), "disconnect_all"))
+        for path in _source_files()
+        if _attribute_call_sites(_tree(path), "disconnect_all")
+    }
+
+    assert lifecycle_classes == {"mcp_client.py": ["McpConnection", "McpManager"]}
+    assert disconnect_calls == {"tooling/environment.py": ["ToolEnvironment.close"]}, (
+        "MCP disconnect lifecycle must remain owned by ToolEnvironment: "
+        f"{disconnect_calls}"
+    )
+
+
+def test_provider_shim_remains_reexport_only() -> None:
+    tree = _tree(SOURCE_ROOT / "providers" / "provider.py")
+
+    assert _provider_shim_exports(tree) == PROVIDER_SHIM_EXPORTS
+    assert _provider_shim_unexpected_statements(tree) == ()
+
+
 def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     provider = ast.parse(
         "class Provider:\n"
@@ -450,6 +673,12 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     jsonl_writer = ast.parse("from lion_code.core.session import JsonlSessionStorage\n")
     memory = ast.parse("def inject(runtime):\n    runtime.replace_messages([])\n")
     memory_owner = ast.parse("from lion_code.core import AgentHarness\n")
+    memory_index_writer = ast.parse(
+        "def rebuild(root):\n    (root / 'MEMORY.md').write_text('')\n"
+    )
+    old_skill = ast.parse("def parse_skill_invocation():\n    return '/skill:'\n")
+    mcp_lifecycle = ast.parse("class McpClient:\n    pass\n")
+    mcp_disconnect = ast.parse("def close(manager):\n    manager.disconnect_all()\n")
 
     assert _private_history_fields(provider) == frozenset({"_history", "_messages"})
     assert _sink_symbols(sink) == frozenset({"set_sink"})
@@ -464,3 +693,11 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     )
     assert _harness_mutation_calls(memory) == frozenset({"replace_messages"})
     assert _agent_harness_references(memory_owner) == frozenset({"AgentHarness"})
+    assert _memory_index_write_sites(memory_index_writer) == frozenset({"rebuild"})
+    assert _removed_skill_command_symbols(old_skill) == frozenset(
+        {"/skill:", "parse_skill_invocation"}
+    )
+    assert _mcp_lifecycle_classes(mcp_lifecycle) == frozenset({"McpClient"})
+    assert _attribute_call_sites(mcp_disconnect, "disconnect_all") == frozenset(
+        {"close"}
+    )
