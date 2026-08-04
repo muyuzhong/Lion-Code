@@ -1,13 +1,23 @@
 # 维护台账
 
 ## 状态说明
-- 候选：已识别但未处理
+- 候选：已识别但未处理，后续应主动消减
+- 已接受债务：确认存在但当前收益不足以立即修复，需继续显式记录
+- 兼容性保留：为既有导入或行为契约保留，必须保持薄委托/重导出形态
+- 功能路线图：不属于清债范围，需通过独立任务落地
+- 环境缺陷：与本机/平台环境相关，不能误记为产品路径已修复
 - 完成：已改动，附 commit
 - 无需改动：已检查，判断不该动（不再重复检查）
 - 待人工：需要我拍板，agent 不得自行决定
 
 ## 候选范围
-（暂无；m-010 已完成，见「完成」。）
+| 分类 | 条目 | 当前处理 |
+| --- | --- | --- |
+| 候选 | 5 个 vulture 高置信候选 | 纳入 `docs/quality-baseline-2026-08.*`，CI 不允许新增指纹；后续按模块消减。 |
+| 环境缺陷 | Windows GBK spinner `UnicodeEncodeError` | 已记录为本机/编码环境警告；未在 Linux/UTF-8 CI 复现，后续若继续复现应单独修输出编码。 |
+| 兼容性保留 | `providers/provider.py` 重导出 shim | 保留旧 provider 实现的相对导入兼容；不得重新承载实现。 |
+| 已接受债务 | `core/session/memory.py` 命名歧义 | 第二套路径扫描确认它是 JSONL session replay state，与项目级 Session Memory 异概念；暂不改名。 |
+| 功能路线图 | `/skill:` TUI 接线预留任务 | 旧半成品入口已删除；新接线必须走 `lion_code.skills.resolve_skill_prompt`，见 `08-01-tui-skill-wiring`。 |
 
 ## 瘦身账
 | 轮次  | commit  | 文件数 | 净行数 | 测试数 | benchmark |
@@ -113,9 +123,9 @@
   1,606 -> 1,226（−380）；`agent_runtime.py` 962 物理行。三阶段所有子切片均已完成，
   后续只需父任务最终验收与归档。
 
-### 二阶段 · 2026-08-01 · 清掉已知的架构债务（m-012 / m-007 / m-013 / m-010 + 第二套路径扫描）
+### 二阶段 · 2026-08-01 · 清掉已知的架构债务（m-012 / m-007 MCP 失败隔离与 EOF 容错 / m-013 / m-010 + 第二套路径扫描）
 - **m-012**：删除 `/skill:` 半成品入口。`application/skills.py` 移除 tau `<skill>` 块机器（expand_skill_command / format_skill_invocation / parse_skill_invocation / SkillInvocation，保留 `Skill`）；TUI autocomplete 的 `/skill:` 处理、`app.py` 与 `commands.py` 的 `/skill:` 特判、`state.py` 展示分支、相关测试一并移除。接线（让 TUI `/skill:` 走 `lion_code.skills.resolve_skill_prompt`）转预留任务 `08-01-tui-skill-wiring`。
-- **m-007**：`mcp_client.py` 两条未测容错分支（连接失败隔离、读循环 EOF）补测试 `tests/test_mcp_client.py`（5 例）。确认无实际「重连」逻辑——只有失败隔离与 EOF 退出，属容错路径非死代码。
+- **m-007 · MCP 失败隔离与 EOF 容错**：`mcp_client.py` 两条未测容错分支（连接失败隔离、读循环 EOF）补测试 `tests/test_mcp_client.py`（5 例）。确认无实际「重连」逻辑——只有失败隔离与 EOF 退出，属容错路径非死代码；后续如要实现断线重连，必须另立任务。
 - **m-013**：合并两套 MEMORY 索引重建。`memory.py` 新增 `rebuild_memory_index_if_needed` 作为唯一写入入口，`tools.py:_write_file` 改调它，删除 `_auto_update_memory_index`（脆弱正则版）。
 - **m-010**：清理 TUI 零引用符号。`terminal_title.py` 薄化为仅 `sanitize_terminal_title`（删 `TerminalTitleController` / `build_terminal_title` / `osc_terminal_title_sequence` / `terminal_title_supported` 及专用常量）；删 `state.py` 的 `format_terminal_command_result_block` 与 `TERMINAL_COMMAND_OUTPUT_PREVIEW_LINES`。
 - **第二套路径扫描（Task 5）**：扫描 Provider/Session/Tool/Memory。结论：**无第二套权威路径**——core 运行时迁移（PR#7-12）成立，现存均为分层（接口/实现、存储/运行时、格式/回放）。Provider：`core/provider.py`（Protocol）+ `providers/`（factory+impls）+ `providers/provider.py`（重导出 shim）；Session：`core/session/`（格式+回放）+ `session_runtime/`（record/repository，活）+ `session_memory.py`（项目状态，异概念）；Tool：`core/tools.py`（类型）+ `tooling/`（框架）+ `tools.py`（handler 后端，被 builtin.py 包装，活）；Memory：`memory.py`（存储）+ `memory_runtime/`（运行时）+ `session_memory.py` / `core/session/memory.py`（异概念）。唯一真正行为重复（MEMORY 索引）已由 m-013 处理。可选小清理（`providers/provider.py` shim 收敛、`core/session/memory.py` 命名澄清）defer。
