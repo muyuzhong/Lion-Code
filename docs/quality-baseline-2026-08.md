@@ -1,9 +1,12 @@
-# Lion 质量基线（2026-08-01；三阶段-2 于 2026-08-03 复测）
+# Lion 质量基线（2026-08-01 建立；2026-08-04 CI 门禁收紧）
 
-> 代码精简阶段产出。本文件记录**当前代码库的真实质量基线**，所有数字可从文末命令重新测得。
+> 代码精简阶段产出。本文件记录质量基线的人类可读说明；CI 的权威机器基线为
+> `docs/quality-baseline-2026-08.json`。
 > 原则：先记录基线 → 执行「不得继续恶化」→ 后续阶段按模块逐步提高标准。
 > 三阶段-2 于 2026-08-03 复测：Session Memory 协调职责已迁出 `agent.py`，
-> 新增 4 个特征测试；静态门槛仍沿用既有基线。
+> 新增 4 个特征测试。
+> 2026-08-04 复测：CI 门槛切到 Python 3.12.13 + Linux 平台 + 精确固定 dev 工具；
+> Ruff/mypy 不再解析人类可读文本，而是用机器输出和违规指纹比对。
 
 ## 1. 规模
 
@@ -101,11 +104,13 @@
 ## 6. 循环依赖
 
 - **ast Tarjan 粗测**：模块级 0 个循环。
-- **import-linter 复核**：分析 147 文件 / 719 依赖，**3 条架构契约全部 KEPT**。
+- **import-linter 复核**：分析 150 文件 / 750 依赖，**5 条架构契约全部 KEPT**。
 - 契约清单（`pyproject.toml [tool.importlinter]`）：
-  1. TUI 不直接依赖 memory_runtime/session_runtime（间接经 application→agent 的路径为现状，允许）
-  2. Application 不依赖 TUI
-  3. 生产代码不导入 tests/benchmarks
+  1. Core 不依赖 providers、tooling、application、tui。
+  2. Providers 只依赖 Core 抽象。
+  3. Application 不依赖 TUI。
+  4. TUI 只经 Application/Core 接触运行时。
+  5. 生产代码不导入 tests 与 benchmarks。
 
 ## 7. 复杂度 × 提交频率（churn 热点）
 
@@ -122,37 +127,46 @@
 > ⚠️ `agent.py` 仍是高复杂度和高提交频率热点；本轮已从 1,890 行降至 1,801 行，
 > 后续继续按路线拆分职责。
 
-## 8. 分支覆盖率（coverage.py --branch）
+## 8. 覆盖率（coverage.py --branch）
 
-- **lion_code：70%**（11,262 语句 / 3,572 分支，634 分支未覆盖）
-- 全项目含 tests：76%
+CI 权威口径为 Python 3.12.13、`coverage==7.15.2`、`source = ["lion_code"]`。
+
+- coverage report 总覆盖率：**72%**（11,714 语句 / 2,759 未覆盖 / 3,566 分支 / 658 部分分支）。
+- coverage JSON 真实分支覆盖率：**58.33%**（2,080 / 3,566），这是 CI 的全局分支覆盖率下限。
+- changed-lines 覆盖率：新增或修改的可执行 `lion_code/*.py` 行必须 **≥80%**；没有变更的可执行生产代码行时跳过。
 
 **最差模块**（≤50%）：
 
 | 覆盖率 | 模块 |
 |---|---|
-| 24% | `lion_code/tui/terminal_title.py` |
+| 14% | `lion_code/core/session/tree.py` |
+| 14% | `lion_code/tools.py` |
+| 22% | `lion_code/providers/http.py` |
+| 26% | `lion_code/tui/terminal_title.py` |
 | 40% | `lion_code/ui.py` |
 | 46% | `lion_code/tui/widgets.py` |
-| 53% | `lion_code/tui/terminal_notification.py` |
+| 47% | `lion_code/memory.py` |
 
 ## 9. 测试与稳定性
 
-- **全量：547 passed, 6 skipped, 6 subtests passed，耗时约 100s**（2026-08-03 本机 Python 3.13；三阶段-2 后，新增 4 个 Session Memory 协调器特征测试）
-- **不稳定候选**：`PytestUnhandledThreadExceptionWarning` —— `UnicodeEncodeError: 'gbk' codec can't encode character '⠴'`（测试/应用内线程在 GBK 环境打印 Unicode 字符导致）。建议后续在 `PYTHONIOENCODING=utf-8` 下复测确认。
+- **CI Linux 全量：572 passed, 7 skipped, 11 subtests passed，耗时约 23s**（2026-08-04 GitHub Actions Python 3.12.13；dev 工具版本由 pyproject 精确固定）。
+- **本机 Windows 警告候选**：`PytestUnhandledThreadExceptionWarning` —— `UnicodeEncodeError: 'gbk' codec can't encode character '⠴'`（测试/应用内线程在 GBK 环境打印 Unicode spinner 导致）。该警告未在 Linux/UTF-8 CI 日志中复现；如后续复现，应单独修复输出编码。
 
 ## 10. 静态工具基线（配置后）
 
 | 工具 | 当前状态 | 基线值 |
 |---|---|---|
-| `ruff check .` | 218 错，162 可自动修复 | 218 |
-| `ruff format --check .` | 146 文件待重排 / 212 已合规 | 146 |
-| `mypy lion_code` | 102 错 / 14 文件 | 105 |
-| `vulture` (min-conf 70) | 5 个高置信候选 | 5 |
-| `import-linter` | 3 契约 KEPT | 0 broken |
-| `coverage` | lion_code 70% 分支 | 70% |
+| `ruff check lion_code tests scripts --output-format=json` | 82 个违规指纹，59 个可自动修复 | 82 且不得出现新指纹 |
+| `ruff format --check lion_code tests scripts` | 103 文件待重排 | 103 且不得出现新文件指纹 |
+| `mypy lion_code --platform linux -O json` | 68 个错误指纹 | 68 且不得出现新指纹 |
+| `radon cc lion_code -j` | 11 个 D/E/F 级复杂度块 | 11 且不得出现新 D/E/F 指纹 |
+| `vulture lion_code tests --min-confidence 70` | 5 个高置信候选 | 5 且不得出现新指纹 |
+| `import-linter --no-cache` | 5 契约 KEPT | 0 broken |
+| `coverage json` | 分支覆盖率 58.33% | ≥58.33%，changed-lines ≥80% |
 
-**ruff 违规分布**：I001 (import 排序) 78、F401 (未用 import) 34、UP037 (类型别名) 20、其余散落（UP024/UP017/UP009/RUF012 等）。**忽略项及原因见 `pyproject.toml [tool.ruff.lint]`**（含 RUF001/002/003 中文项目误报、E501 行宽、E402 条件导入等）。
+**ruff 违规分布**：I001 (import 排序) 33、RUF012 (可变 class default) 9、UP037 (字符串类型注解) 7、E741/RUF022/RUF043 各 5，其余散落（RUF021/RUF023/UP017/RUF036/UP035/UP040/E731/UP012）。**忽略项及原因见 `pyproject.toml [tool.ruff.lint]`**（含 RUF001/002/003 中文项目误报、E501 行宽、E402 条件导入等）。
+
+> 本机 Windows 默认 `mypy lion_code` 当前仍为 99 个错误；CI 以 Linux 平台为权威，因此显式传入 `--platform linux` 并把基线收紧为 68。
 
 **vulture 候选**：
 
@@ -165,29 +179,34 @@
 
 ## 11. CI 门槛（不得继续恶化）
 
-`.github/workflows/ci.yml` 的 fail 阈值（超出即 CI 失败）：
+`.github/workflows/ci.yml` 的 fail 条件：
 
 | 指标 | 基线 | 阈值含义 |
 |---|---|---|
-| ruff check 错误数 | 218 | 新增代码不得引入更多违规 |
-| ruff format 待重排文件 | 146 | 新增文件必须格式合规 |
-| mypy 错误数 | 105 | 新增代码不得引入更多类型错误 |
+| ruff check | 82 个 JSON 指纹 | 状态码只允许 0/1；数量不得超过基线；不得出现新指纹 |
+| ruff format | 103 个文件指纹 | 状态码只允许 0/1；数量不得超过基线；不得出现新文件指纹 |
+| mypy | 68 个 Linux JSONL 指纹 | 状态码只允许 0/1；数量不得超过基线；不得出现新指纹 |
+| radon | 11 个 D/E/F 指纹 | 不允许新增 D/E/F 级复杂度块 |
+| vulture | 5 个高置信指纹 | 状态码只允许 0/3；不允许新增高置信候选 |
 | import-linter | 0 broken | 不得打破架构边界 |
 | pytest | 全部通过 | 不得回归 |
-| 覆盖率 | 70% | 不设 fail_under（基线模式） |
+| compileall | 0 error | `lion_code tests scripts` 必须可编译 |
+| git diff --check | 0 error | 不允许尾随空白等 diff 问题 |
+| coverage branch | 58.33% | 全局分支覆盖率不得低于当前真实值 |
+| changed-lines coverage | 80% | 新增或修改的可执行生产代码行覆盖率不得低于 80% |
 
-> 阈值随代码演进人工更新：`git log` 变更被接受时，同步上调/下调基线文档与 CI 数值。
+> 违规基线保存在 `docs/quality-baseline-2026-08.json`。后续主分支质量改善后，应同步下调 JSON 和本文档，避免旧预算长期宽松。
+> workflow 只能定义 check；是否真正阻止失败 CI 合并，需要在 GitHub 分支保护里把 `Quality gates (baseline) (3.12.13)` 设为 required check，并限制管理员绕过。
 
 ## 12. 运行时边界门禁更新（2026-08-04）
 
-上文的 3 条 import-linter 合同是 2026-08-03 的基线测量快照。当前
-pyproject.toml 已收紧为 5 条阻塞合同：
+当前 pyproject.toml 已将 5 条运行时边界合同纳入 CI 阻塞门禁：
 
 1. Core 不依赖 providers、tooling、application、tui。
 2. Providers 只依赖 Core 抽象。
 3. Application 不依赖 TUI。
 4. TUI 只经 Application/Core 接触运行时。
-5. 产品代码不导入 tests 与 benchmarks。
+5. 生产代码不导入 tests 与 benchmarks。
 
 补充的 tests/architecture/test_runtime_boundaries.py 以 AST 检查 Provider 私有消息
 历史、旧消息路径、全局 UI Sink、SessionRecorder 构造点、JSONL writer 旁路和
@@ -197,11 +216,17 @@ lint-imports --no-cache，因此这两类检查均会阻止架构回归。
 ## 13. 复现命令
 
 ```bash
+# 依赖：CI 权威环境为 Python 3.12.13 + Linux；dev 工具使用 pyproject 精确固定版本
+python -m pip install --upgrade pip
+python -m pip install ".[dev]"
+
 # 规模
 find lion_code tests benchmarks -name "*.py" -not -path "*__pycache__*" -exec wc -l {} + | sort -rn
 
 # 复杂度
 radon cc lion_code -s -a
+python -m radon cc lion_code -j > radon-cc.json
+python scripts/check_quality_baseline.py radon-complexity radon-cc.json
 radon mi lion_code -n B
 
 # 循环依赖
@@ -211,19 +236,25 @@ lint-imports --no-cache
 git log --name-only --pretty=format: | grep -v '^$' | sort | uniq -c | sort -rn
 
 # 静态检查
-ruff check .
-ruff format --check .
-python -m mypy lion_code
-vulture lion_code tests --min-confidence 70
+python -m ruff check lion_code tests scripts --output-format=json > ruff.json
+python scripts/check_quality_baseline.py ruff-check ruff.json --status 1
+python -m ruff format --check lion_code tests scripts > ruff-format.txt 2>&1
+python scripts/check_quality_baseline.py ruff-format ruff-format.txt --status 1
+python -m mypy lion_code --platform linux -O json > mypy.jsonl 2>&1
+python scripts/check_quality_baseline.py mypy mypy.jsonl --status 1
+python -m vulture lion_code tests --min-confidence 70 > vulture.txt 2>&1
+python scripts/check_quality_baseline.py vulture vulture.txt --status 3
 
 # 测试 + 覆盖率
 python -m pytest -q
 python -m coverage run --branch -m pytest -q
+python -m coverage json -o coverage.json
+python scripts/check_quality_baseline.py coverage coverage.json
 python -m coverage report --include="lion_code/*"
 
 # 编译检查
-python -m compileall -q lion_code tests
+python -m compileall -q lion_code tests scripts
 ```
 
-> 本文件数字均在 **2026-08-03**、Python 3.13、上述 `pyproject.toml` 配置下测得；
-> ruff 218 / format 146 / mypy 105 仍是 CI 的“不继续恶化”门槛。
+> CI 门禁数字均在 **2026-08-04**、Python 3.12.13、Linux 平台语义、上述精确固定
+> dev 工具版本下测得；`docs/quality-baseline-2026-08.json` 是 workflow 的权威输入。

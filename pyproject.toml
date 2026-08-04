@@ -20,14 +20,14 @@ dependencies = [
 [project.optional-dependencies]
 benchmark = ["openai>=1.50.0"]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "ruff>=0.6",
-    "mypy>=1.10",
-    "coverage>=7.6",
-    "radon>=6.0",
-    "vulture>=2.10",
-    "import-linter>=2.0",
+    "pytest==9.0.3",
+    "pytest-asyncio==1.4.0",
+    "ruff==0.16.0",
+    "mypy==2.3.0",
+    "coverage==7.15.2",
+    "radon==6.0.1",
+    "vulture==2.16",
+    "import-linter==2.11",
 ]
 
 [project.scripts]
@@ -71,11 +71,12 @@ indent-style = "space"
 
 [tool.mypy]
 python_version = "3.12"
+platform = "linux"
 warn_unused_configs = true
 warn_redundant_casts = true
 check_untyped_defs = true
 ignore_missing_imports = true
-# 基线模式：103 处错误集中在 14 个文件（多为 TUI 层），本阶段不要求全绿。
+# 基线模式：CI 以 Python 3.12 + linux 平台为准，本阶段不要求全绿。
 # CI 用「错误数不超基线」的比对步骤拦截恶化。
 
 [tool.pytest.ini_options]
@@ -91,7 +92,7 @@ source = ["lion_code"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-# 基线模式：不设 fail_under，仅报告分支覆盖率（当前 lion_code 70%）
+# 基线模式：CI 读取 coverage JSON 做分支覆盖率与 changed-lines 覆盖率门禁。
 
 [tool.radon.cc]
 min = "C"
