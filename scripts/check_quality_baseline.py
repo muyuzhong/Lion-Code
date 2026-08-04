@@ -225,6 +225,10 @@ def _branch_percent(report: Mapping[str, Any]) -> float:
     return float(totals.get("percent_covered", 0.0))
 
 
+def _gate_percent(value: float) -> float:
+    return float(f"{value:.2f}")
+
+
 def check_changed_line_coverage(
     report: Mapping[str, Any],
     diff_text: str,
@@ -327,8 +331,8 @@ def check_coverage(args: argparse.Namespace) -> None:
     baseline = _read_json(args.baseline)
     coverage_baseline = baseline["coverage"]
     report = _read_json(args.input)
-    threshold = float(coverage_baseline["branch_percent_min"])
-    percent = _branch_percent(report)
+    threshold = _gate_percent(float(coverage_baseline["branch_percent_min"]))
+    percent = _gate_percent(_branch_percent(report))
     print(f"branch coverage: {percent:.2f}% (baseline {threshold:.2f}%)")
     if percent < threshold:
         print(

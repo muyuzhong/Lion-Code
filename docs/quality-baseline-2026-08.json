@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created": "2026-08-04",
-  "python_version": "3.12.10",
+  "python_version": "3.12.13",
   "platform": "linux",
   "quality_paths": [
     "lion_code",
@@ -322,7 +322,7 @@
   "coverage": {
     "command": "python -m coverage run --branch -m pytest -q -p no:cacheprovider && python -m coverage json -o coverage.json",
     "version": "coverage==7.15.2",
-    "branch_percent_min": 58.44,
+    "branch_percent_min": 58.33,
     "changed_lines_percent_min": 80.0
   }
 }

@@ -5,7 +5,7 @@
 > 原则：先记录基线 → 执行「不得继续恶化」→ 后续阶段按模块逐步提高标准。
 > 三阶段-2 于 2026-08-03 复测：Session Memory 协调职责已迁出 `agent.py`，
 > 新增 4 个特征测试。
-> 2026-08-04 复测：CI 门槛切到 Python 3.12.10 + Linux 平台 + 精确固定 dev 工具；
+> 2026-08-04 复测：CI 门槛切到 Python 3.12.13 + Linux 平台 + 精确固定 dev 工具；
 > Ruff/mypy 不再解析人类可读文本，而是用机器输出和违规指纹比对。
 
 ## 1. 规模
@@ -129,10 +129,10 @@
 
 ## 8. 覆盖率（coverage.py --branch）
 
-CI 权威口径为 Python 3.12.10、`coverage==7.15.2`、`source = ["lion_code"]`。
+CI 权威口径为 Python 3.12.13、`coverage==7.15.2`、`source = ["lion_code"]`。
 
 - coverage report 总覆盖率：**72%**（11,714 语句 / 2,759 未覆盖 / 3,566 分支 / 658 部分分支）。
-- coverage JSON 真实分支覆盖率：**58.44%**（2,084 / 3,566），这是 CI 的全局分支覆盖率下限。
+- coverage JSON 真实分支覆盖率：**58.33%**（2,080 / 3,566），这是 CI 的全局分支覆盖率下限。
 - changed-lines 覆盖率：新增或修改的可执行 `lion_code/*.py` 行必须 **≥80%**；没有变更的可执行生产代码行时跳过。
 
 **最差模块**（≤50%）：
@@ -149,8 +149,8 @@ CI 权威口径为 Python 3.12.10、`coverage==7.15.2`、`source = ["lion_code"]
 
 ## 9. 测试与稳定性
 
-- **全量：572 passed, 6 skipped, 11 subtests passed，耗时 115.52s**（2026-08-04 本机临时 Python 3.12.10 venv；dev 工具版本与 CI 固定版本一致）。
-- **本机 Windows 警告候选**：`PytestUnhandledThreadExceptionWarning` —— `UnicodeEncodeError: 'gbk' codec can't encode character '⠴'`（测试/应用内线程在 GBK 环境打印 Unicode spinner 导致）。CI 在 Linux/UTF-8 环境下不应复现该编码警告；如复现，应单独修复输出编码。
+- **CI Linux 全量：572 passed, 7 skipped, 11 subtests passed，耗时约 23s**（2026-08-04 GitHub Actions Python 3.12.13；dev 工具版本由 pyproject 精确固定）。
+- **本机 Windows 警告候选**：`PytestUnhandledThreadExceptionWarning` —— `UnicodeEncodeError: 'gbk' codec can't encode character '⠴'`（测试/应用内线程在 GBK 环境打印 Unicode spinner 导致）。该警告未在 Linux/UTF-8 CI 日志中复现；如后续复现，应单独修复输出编码。
 
 ## 10. 静态工具基线（配置后）
 
@@ -162,7 +162,7 @@ CI 权威口径为 Python 3.12.10、`coverage==7.15.2`、`source = ["lion_code"]
 | `radon cc lion_code -j` | 11 个 D/E/F 级复杂度块 | 11 且不得出现新 D/E/F 指纹 |
 | `vulture lion_code tests --min-confidence 70` | 5 个高置信候选 | 5 且不得出现新指纹 |
 | `import-linter --no-cache` | 5 契约 KEPT | 0 broken |
-| `coverage json` | 分支覆盖率 58.44% | ≥58.44%，changed-lines ≥80% |
+| `coverage json` | 分支覆盖率 58.33% | ≥58.33%，changed-lines ≥80% |
 
 **ruff 违规分布**：I001 (import 排序) 33、RUF012 (可变 class default) 9、UP037 (字符串类型注解) 7、E741/RUF022/RUF043 各 5，其余散落（RUF021/RUF023/UP017/RUF036/UP035/UP040/E731/UP012）。**忽略项及原因见 `pyproject.toml [tool.ruff.lint]`**（含 RUF001/002/003 中文项目误报、E501 行宽、E402 条件导入等）。
 
@@ -192,11 +192,11 @@ CI 权威口径为 Python 3.12.10、`coverage==7.15.2`、`source = ["lion_code"]
 | pytest | 全部通过 | 不得回归 |
 | compileall | 0 error | `lion_code tests scripts` 必须可编译 |
 | git diff --check | 0 error | 不允许尾随空白等 diff 问题 |
-| coverage branch | 58.44% | 全局分支覆盖率不得低于当前真实值 |
+| coverage branch | 58.33% | 全局分支覆盖率不得低于当前真实值 |
 | changed-lines coverage | 80% | 新增或修改的可执行生产代码行覆盖率不得低于 80% |
 
 > 违规基线保存在 `docs/quality-baseline-2026-08.json`。后续主分支质量改善后，应同步下调 JSON 和本文档，避免旧预算长期宽松。
-> workflow 只能定义 check；是否真正阻止失败 CI 合并，需要在 GitHub 分支保护里把 `Quality gates (baseline) (3.12)` 设为 required check，并限制管理员绕过。
+> workflow 只能定义 check；是否真正阻止失败 CI 合并，需要在 GitHub 分支保护里把 `Quality gates (baseline) (3.12.13)` 设为 required check，并限制管理员绕过。
 
 ## 12. 运行时边界门禁更新（2026-08-04）
 
@@ -216,7 +216,7 @@ lint-imports --no-cache，因此这两类检查均会阻止架构回归。
 ## 13. 复现命令
 
 ```bash
-# 依赖：CI 权威环境为 Python 3.12 + Linux；dev 工具使用 pyproject 精确固定版本
+# 依赖：CI 权威环境为 Python 3.12.13 + Linux；dev 工具使用 pyproject 精确固定版本
 python -m pip install --upgrade pip
 python -m pip install ".[dev]"
 
@@ -256,5 +256,5 @@ python -m coverage report --include="lion_code/*"
 python -m compileall -q lion_code tests scripts
 ```
 
-> CI 门禁数字均在 **2026-08-04**、Python 3.12.10、Linux 平台语义、上述精确固定
+> CI 门禁数字均在 **2026-08-04**、Python 3.12.13、Linux 平台语义、上述精确固定
 > dev 工具版本下测得；`docs/quality-baseline-2026-08.json` 是 workflow 的权威输入。

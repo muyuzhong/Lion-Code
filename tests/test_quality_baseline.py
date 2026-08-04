@@ -81,3 +81,7 @@ diff --git a/lion_code/foo.py b/lion_code/foo.py
 
     with pytest.raises(SystemExit):
         quality.check_changed_line_coverage(report, diff, threshold=80.0)
+
+
+def test_gate_percent_uses_two_decimal_display_precision() -> None:
+    assert quality._gate_percent(58.329) == 58.33
