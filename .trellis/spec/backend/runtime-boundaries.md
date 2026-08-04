@@ -236,7 +236,53 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
 - Bad: appending a Session Memory overlay into harness messages makes compaction and
   resume treat injected project state as user conversation.
 
-## 6. Tests Required
+## 6. Executable Enforcement
+
+The boundary rules above are enforced by both import contracts and AST
+architecture tests. They are regression gates, not advisory documentation:
+
+~~~powershell
+lint-imports --no-cache
+python -m pytest -q tests/architecture/test_runtime_boundaries.py
+~~~
+
+pyproject.toml contains these five import-linter contracts:
+
+- core cannot depend on providers, tooling, application, or tui, including
+  indirect paths.
+- providers cannot depend on any Lion runtime layer other than core; direct
+  import validation also requires provider source to use only core or its own
+  package.
+- application cannot depend on tui.
+- tui cannot directly import a runtime engine layer. It consumes
+  application / core events; config, prompt, and version remain narrow
+  presentation/configuration exceptions.
+- Product code cannot import tests or benchmarks.
+
+tests/architecture/test_runtime_boundaries.py parses production source and
+also rejects patterns an import graph cannot express:
+
+- Provider classes storing message-history fields named messages or history.
+- The old _openai_messages or _anthropic_messages paths outside
+  session_runtime/legacy.py. That module is a read-only legacy JSON converter,
+  not a live Provider history.
+- A defined or invoked process-global set_sink.
+- Any new SessionRecorder construction. The only allowed construction sites
+  are AgentRuntimeCoordinator.reset_core_observers() for the active runtime
+  writer and Agent._migrate_legacy_core_session() for one-time legacy
+  conversion. The latter must not become a second active session path.
+- JsonlSessionStorage or entry_to_json_line escaping core/ or
+  session_runtime/.
+- Memory runtime code calling Harness mutation APIs or owning an
+  AgentHarness. Overlay code may read a canonical snapshot and return a
+  temporary projection only.
+
+When a legitimate architecture move requires a new exception, change the
+runtime code, this contract, the AST allowlist, and the focused test in one
+reviewed change. Do not disable a contract, add a broad indirect-import
+exception, or silently broaden an allowlist to make a regression pass.
+
+## 7. Tests Required
 
 - `tests/integration/test_agent_core_runtime.py`: both Provider protocols, idle and
   active hot-switch behavior, derived-service refresh, child inheritance, JSONL
@@ -253,6 +299,9 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
   runtime rather than a duplicate history.
 - `tests/tui/test_tui_app.py`: two streaming turns, tool-row identity, one notice per
   action, no normal-delta full redraw, and shared Session Memory command dispatch.
+- tests/architecture/test_runtime_boundaries.py: import ownership, Provider private
+  history, legacy path confinement, global-sink absence, SessionRecorder ownership,
+  JSONL writer confinement, and Memory Overlay non-mutation rules.
 - `tests/test_project_identity.py`, `tests/test_prompt.py`, and
   `tests/memory_runtime/test_core_integration.py`: project/worktree identity,
   root-to-cwd instruction precedence, non-destructive three-layer projection,
@@ -266,7 +315,7 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
 - Before completion run the full test suite, `compileall`, changed-scope lint/type
   checks, dependency/import residual scans, and `git diff --check`.
 
-## 7. Wrong vs Correct
+## 8. Wrong vs Correct
 
 ### Wrong
 

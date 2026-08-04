@@ -178,7 +178,23 @@
 
 > 阈值随代码演进人工更新：`git log` 变更被接受时，同步上调/下调基线文档与 CI 数值。
 
-## 12. 复现命令
+## 12. 运行时边界门禁更新（2026-08-04）
+
+上文的 3 条 import-linter 合同是 2026-08-03 的基线测量快照。当前
+pyproject.toml 已收紧为 5 条阻塞合同：
+
+1. Core 不依赖 providers、tooling、application、tui。
+2. Providers 只依赖 Core 抽象。
+3. Application 不依赖 TUI。
+4. TUI 只经 Application/Core 接触运行时。
+5. 产品代码不导入 tests 与 benchmarks。
+
+补充的 tests/architecture/test_runtime_boundaries.py 以 AST 检查 Provider 私有消息
+历史、旧消息路径、全局 UI Sink、SessionRecorder 构造点、JSONL writer 旁路和
+Memory Overlay 对 Core Harness 的写操作。CI 已同时运行 pytest 与
+lint-imports --no-cache，因此这两类检查均会阻止架构回归。
+
+## 13. 复现命令
 
 ```bash
 # 规模

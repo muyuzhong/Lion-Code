@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "运行时不变量与允许例外"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "测试与验证标准"}
+{"file": ".trellis/tasks/08-04-executable-runtime-boundaries/research/current-boundary-audit.md", "reason": "当前依赖、构造点和残留符号审计"}

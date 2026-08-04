@@ -111,14 +111,56 @@ root_package = "lion_code"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "TUI 不直接依赖 memory_runtime 与 session_runtime"
+name = "Core 不依赖上层运行时包"
 type = "forbidden"
-source_modules = ["lion_code.tui"]
-forbidden_modules = ["lion_code.memory_runtime", "lion_code.session_runtime"]
+source_modules = ["lion_code.core"]
+forbidden_modules = [
+    "lion_code.providers",
+    "lion_code.tooling",
+    "lion_code.application",
+    "lion_code.tui",
+]
 ignore_imports = []
-# 现状：tui 经 application.session -> agent -> memory_runtime/session_runtime 间接依赖。
-# 基线阶段只拦截「新增直接 import」；间接路径留待后续精简阶段（agent 拆分）处理。
-allow_indirect_imports = "True"
+allow_indirect_imports = "False"
+
+[[tool.importlinter.contracts]]
+name = "Providers 只依赖 Core 抽象"
+type = "forbidden"
+source_modules = ["lion_code.providers"]
+forbidden_modules = [
+    "lion_code.adapters",
+    "lion_code.agent",
+    "lion_code.agent_lifecycle",
+    "lion_code.agent_runtime",
+    "lion_code.application",
+    "lion_code.autonomy",
+    "lion_code.autonomy_runtime",
+    "lion_code.config",
+    "lion_code.context",
+    "lion_code.dream",
+    "lion_code.frontmatter",
+    "lion_code.hooks",
+    "lion_code.learning_runtime",
+    "lion_code.mcp_client",
+    "lion_code.memory",
+    "lion_code.memory_runtime",
+    "lion_code.observers",
+    "lion_code.project_identity",
+    "lion_code.prompt",
+    "lion_code.session_memory",
+    "lion_code.session_memory_coordinator",
+    "lion_code.session_runtime",
+    "lion_code.skills",
+    "lion_code.subagent",
+    "lion_code.subagent_factory",
+    "lion_code.tooling",
+    "lion_code.tools",
+    "lion_code.tui",
+    "lion_code.ui",
+    "lion_code.version",
+]
+ignore_imports = []
+allow_indirect_imports = "False"
 
 [[tool.importlinter.contracts]]
 name = "Application 不依赖 TUI"
@@ -127,6 +169,30 @@ source_modules = ["lion_code.application"]
 forbidden_modules = ["lion_code.tui"]
 ignore_imports = []
 allow_indirect_imports = "False"
+
+[[tool.importlinter.contracts]]
+name = "TUI 只经 Application/Core 接触运行时"
+type = "forbidden"
+source_modules = ["lion_code.tui"]
+forbidden_modules = [
+    "lion_code.adapters",
+    "lion_code.agent",
+    "lion_code.agent_lifecycle",
+    "lion_code.agent_runtime",
+    "lion_code.context",
+    "lion_code.memory_runtime",
+    "lion_code.observers",
+    "lion_code.providers",
+    "lion_code.session_memory",
+    "lion_code.session_memory_coordinator",
+    "lion_code.session_runtime",
+    "lion_code.subagent",
+    "lion_code.subagent_factory",
+    "lion_code.tooling",
+]
+ignore_imports = []
+# TUI 通过 application.session 间接使用 Agent；只阻止新增的直接引擎 import。
+allow_indirect_imports = "True"
 
 [[tool.importlinter.contracts]]
 name = "生产代码不导入测试与基准"
