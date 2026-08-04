@@ -196,7 +196,7 @@ CI 权威口径为 Python 3.12.10、`coverage==7.15.2`、`source = ["lion_code"]
 | changed-lines coverage | 80% | 新增或修改的可执行生产代码行覆盖率不得低于 80% |
 
 > 违规基线保存在 `docs/quality-baseline-2026-08.json`。后续主分支质量改善后，应同步下调 JSON 和本文档，避免旧预算长期宽松。
-> workflow 只能定义 check；是否真正阻止失败 CI 合并，需要在 GitHub 分支保护里把本 workflow 设为 required check，并限制管理员绕过。
+> workflow 只能定义 check；是否真正阻止失败 CI 合并，需要在 GitHub 分支保护里把 `Quality gates (baseline) (3.12)` 设为 required check，并限制管理员绕过。
 
 ## 12. 运行时边界门禁更新（2026-08-04）
 

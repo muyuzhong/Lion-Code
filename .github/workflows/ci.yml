@@ -16,7 +16,7 @@ env:
 
 jobs:
   quality-gates:
-    name: 质量门禁（基线模式）
+    name: Quality gates (baseline)
     runs-on: ubuntu-latest
     strategy:
       matrix:
