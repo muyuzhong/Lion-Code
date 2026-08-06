@@ -1,0 +1,28 @@
+{
+  "id": "cleanup-agent-coordinator-compat",
+  "name": "cleanup-agent-coordinator-compat",
+  "title": "清理 Agent 与 Coordinator 兼容层",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-06",
+  "completedAt": "2026-08-06",
+  "branch": "cleanup-agent-coordinator-compat",
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "pr_url": "https://github.com/muyuzhong/Lion-Code/pull/17"
+  }
+}
