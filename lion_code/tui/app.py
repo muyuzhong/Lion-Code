@@ -1090,10 +1090,8 @@ class LionTuiApp(App):
                     block
                     for block in event.message.content
                     if (
-                        isinstance(block, TextContent)
-                        and bool(block.text)
-                        or isinstance(block, ThinkingContent)
-                        and bool(block.thinking)
+                        (isinstance(block, TextContent) and bool(block.text))
+                        or (isinstance(block, ThinkingContent) and bool(block.thinking))
                     )
                 ]
                 canonical_items = (
