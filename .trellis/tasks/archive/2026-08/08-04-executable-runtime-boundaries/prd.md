@@ -41,12 +41,17 @@
 
 ## Acceptance Criteria
 
-- [ ] lint-imports --no-cache 通过，且包含 R1.1-R1.5 的 5 条明确合同。
-- [ ] 新 architecture 测试能在受控的临时源码片段或 AST fixture 上证明每一类禁止模式会失败，并在当前源码上通过。
-- [ ] Provider、TUI、Memory Overlay、Session Writer 与旧消息路径的当前合法例外都被精确记录；测试不以宽泛 grep 误伤合法迁移或测试 double。
-- [ ] 现有 MemoryContextInjector 的输入不可变行为继续通过，canonical Core history 与 JSONL 中不包含 overlay 标记。
-- [ ] 修改范围限于 import 合同、架构测试及相关规范/质量文档；不重构 Agent、Provider、TUI 或 Session 实现。
-- [ ] 受影响测试、完整 pytest、compileall、lint-imports、git diff --check 与 Trellis 任务校验通过。
+- [x] lint-imports --no-cache 通过，且包含 R1.1-R1.5 的 5 条明确合同。
+- [x] 新 architecture 测试能在受控的临时源码片段或 AST fixture 上证明每一类禁止模式会失败，并在当前源码上通过。
+  （`test_scanners_reintroduced_boundary_patterns` 用 13 个 AST fixture 覆盖全部禁止模式）
+- [x] Provider、TUI、Memory Overlay、Session Writer 与旧消息路径的当前合法例外都被精确记录；测试不以宽泛 grep 误伤合法迁移或测试 double。
+  （`SESSION_RECORDER_SITES` 精确到 `Agent._migrate_legacy_core_session` 和 `AgentRuntimeCoordinator.reset_core_observers`；
+  `LEGACY_MESSAGE_SYMBOLS` 限定 `session_runtime/legacy.py`；TUI 合同允许 config/prompt/version 窄例外）
+- [x] 现有 MemoryContextInjector 的输入不可变行为继续通过，canonical Core history 与 JSONL 中不包含 overlay 标记。
+  （`test_injector.py` 验证输入不被修改；`test_memory_overlay_code_cannot_mutate_harness_messages` 禁止 Harness mutation）
+- [x] 修改范围限于 import 合同、架构测试及相关规范/质量文档；不重构 Agent、Provider、TUI 或 Session 实现。
+- [x] 受影响测试、完整 pytest、compileall、lint-imports、git diff --check 与 Trellis 任务校验通过。
+  （577 passed / 6 skipped；compileall OK；5 contracts KEPT；14 architecture tests passed）
 
 ## Out of Scope
 

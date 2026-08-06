@@ -31,6 +31,7 @@
 | 三阶段-4 | （本提交） | 3      | agent.py −21，新增运行时 88 行 | 555    | 不适用      |
 | 三阶段-5 | （本提交） | 3      | agent.py −160，新增生命周期 284 行 | 555    | 通过      |
 | 三阶段-6 | （本提交） | 4      | agent.py physical −397，Core 协调收敛 | 557    | lint 通过；format 基线 |
+| 四阶段   | （本提交） | 2      | 运行时边界可执行约束 | 577    | 通过      |
 
 ## 完成
 ### 三阶段-1 · 2026-08-01 · 拆解 agent.py:autonomy_runtime 提取
@@ -122,6 +123,20 @@
 - 结果:实际物理行（`Get-Content`）`agent.py` 1,858 -> 1,461（−397），非空行
   1,606 -> 1,226（−380）；`agent_runtime.py` 962 物理行。三阶段所有子切片均已完成，
   后续只需父任务最终验收与归档。
+
+### 四阶段 · 2026-08-06 · 运行时边界可执行约束
+
+- 范围:把 Runtime Boundary 规范中的运行时不变量变成可重复执行的 CI 回归门禁。
+- 做了:pyproject.toml 已有 5 条 import-linter 合同（R1.1-R1.5: Core/Providers/
+  Application/TUI/生产代码）；`tests/architecture/test_runtime_boundaries.py` 已有
+  14 个 AST 架构测试覆盖 R2.1-R2.6（Provider 私有历史、legacy 路径、set_sink、
+  SessionRecorder 构造点、JSONL writer 逃逸、Memory Overlay 不可变），
+  其中 `test_scanners_reject_reintroduced_boundary_patterns` 用受控 AST fixture
+  证明每一类禁止模式会失败。更新 `runtime-boundaries.md` 反映 4 个窄端口替代
+  `AgentRuntimeHost` 及 `SessionLifecycle` 独立模块。MAINTENANCE.md 瘦身账补
+  四阶段行。import-linter 合同数在三阶段-6 后由 3 扩展到 5。
+- 验证:全量 577 passed、6 skipped；compileall 通过；lint-imports 5 合同 KEPT；
+  架构测试 14 passed；ruff/mypy/format 无新增基线回归。
 
 ### 二阶段 · 2026-08-01 · 清掉已知的架构债务（m-012 / m-007 MCP 失败隔离与 EOF 容错 / m-013 / m-010 + 第二套路径扫描）
 - **m-012**：删除 `/skill:` 半成品入口。`application/skills.py` 移除 tau `<skill>` 块机器（expand_skill_command / format_skill_invocation / parse_skill_invocation / SkillInvocation，保留 `Skill`）；TUI autocomplete 的 `/skill:` 处理、`app.py` 与 `commands.py` 的 `/skill:` 特判、`state.py` 展示分支、相关测试一并移除。接线（让 TUI `/skill:` 走 `lion_code.skills.resolve_skill_prompt`）转预留任务 `08-01-tui-skill-wiring`。
