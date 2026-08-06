@@ -39,8 +39,6 @@ def _mechanism_registry() -> CommandRegistry:
     return registry
 
 
-
-
 def test_command_completion_for_slash_lists_every_registered_command() -> None:
     registry = create_default_command_registry()
     state = build_completion_state(
@@ -52,6 +50,34 @@ def test_command_completion_for_slash_lists_every_registered_command() -> None:
     assert [item.display for item in state.items] == [
         f"/{command.name}" for command in registry.list_commands()
     ]
+
+
+def test_skill_names_appear_in_slash_completion() -> None:
+    state = build_completion_state(
+        "/",
+        command_registry=create_default_command_registry(),
+        prompt_templates=(),
+        skill_names=("code-review", "test-gen"),
+    )
+
+    displays = [item.display for item in state.items]
+    assert "/code-review" in displays
+    assert "/test-gen" in displays
+    skill_items = [item for item in state.items if item.category == "Skills"]
+    assert len(skill_items) == 2
+
+
+def test_skill_completion_filters_by_prefix() -> None:
+    state = build_completion_state(
+        "/code",
+        command_registry=create_default_command_registry(),
+        prompt_templates=(),
+        skill_names=("code-review", "test-gen"),
+    )
+
+    displays = [item.display for item in state.items]
+    assert "/code-review" in displays
+    assert "/test-gen" not in displays
 
 
 def test_slash_completion_groups_commands_and_custom_prompts() -> None:
@@ -190,7 +216,9 @@ def test_builtin_command_argument_completion_wins_over_custom_prompt_name() -> N
     assert [item.display for item in state.items] == ["fake-model"]
 
 
-def test_custom_prompt_completion_reappears_when_deleting_back_to_command_token() -> None:
+def test_custom_prompt_completion_reappears_when_deleting_back_to_command_token() -> (
+    None
+):
     state = build_completion_state(
         "/exa",
         command_registry=create_default_command_registry(),
@@ -413,7 +441,9 @@ def test_shell_path_completion_matches_relative_paths(tmp_path: Path) -> None:
     assert state.selected.apply("!cat src/ma") == "!cat src/main.py"
 
 
-def test_shell_path_completion_adds_trailing_slash_for_directories(tmp_path: Path) -> None:
+def test_shell_path_completion_adds_trailing_slash_for_directories(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.py").write_text("print('hi')\n", encoding="utf-8")
 
