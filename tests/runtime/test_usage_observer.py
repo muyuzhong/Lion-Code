@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
+from lion_code.agent_runtime import sync_usage_from_observer
 from lion_code.core import (
     AgentStartEvent,
     AssistantMessage,
@@ -13,7 +15,6 @@ from lion_code.core import (
     UserMessage,
 )
 from lion_code.observers import UsageObserver
-from lion_code.agent import Agent
 
 
 class TestUsageObserver(unittest.IsolatedAsyncioTestCase):
@@ -88,7 +89,7 @@ class TestUsageObserver(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(observer.last_response_at)
         self.assertEqual(observer.response_count, 2)
 
-    async def test_agent_uses_latest_response_instead_of_session_totals(self) -> None:
+    async def test_sync_projects_latest_response_not_session_totals(self) -> None:
         observer = UsageObserver()
         await observer.handle(
             MessageEndEvent(
@@ -102,18 +103,28 @@ class TestUsageObserver(unittest.IsolatedAsyncioTestCase):
                 )
             )
         )
-        agent = Agent.__new__(Agent)
-        agent._usage_observer = observer
+        host = SimpleNamespace(
+            total_input_tokens=0,
+            total_output_tokens=0,
+            total_cache_read_tokens=0,
+            total_cache_creation_tokens=0,
+            last_input_token_count=0,
+            last_api_call_time=0.0,
+        )
 
-        agent._sync_core_usage()
+        synced = sync_usage_from_observer(
+            host, observer, last_synced_response_count=0
+        )
 
-        self.assertEqual(agent.total_input_tokens, 107)
-        self.assertEqual(agent.total_output_tokens, 23)
-        self.assertEqual(agent.last_input_token_count, 17)
+        self.assertEqual(host.total_input_tokens, 107)
+        self.assertEqual(host.total_output_tokens, 23)
+        self.assertEqual(host.last_input_token_count, 17)
 
-        agent.last_input_token_count = 0
-        agent._sync_core_usage()
-        self.assertEqual(agent.last_input_token_count, 0)
+        host.last_input_token_count = 0
+        sync_usage_from_observer(
+            host, observer, last_synced_response_count=synced
+        )
+        self.assertEqual(host.last_input_token_count, 0)
 
 
 if __name__ == "__main__":

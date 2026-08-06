@@ -6,7 +6,6 @@ from unittest.mock import Mock
 import pytest
 
 import lion_code.memory_runtime.coordinator as coordinator_module
-from lion_code.agent import Agent
 from lion_code.memory import MemoryPrefetch, RelevantMemory
 from lion_code.memory_runtime import MemoryCoordinator, MemoryOverlay
 
@@ -103,12 +102,21 @@ def test_invalidate_removes_changed_overlay_and_reopens_path() -> None:
 
 
 def test_core_abort_cancels_memory_and_harness_together() -> None:
-    agent = Agent.__new__(Agent)
-    agent._core_runtime = Mock()
-    agent._memory_coordinator = Mock()
-    agent.use_openai = True
+    from lion_code.agent_runtime import AgentRuntimeCoordinator
 
-    agent.abort()
+    host = Mock()
+    host._memory_coordinator = Mock()
+    host._terminal_output = False
+    runtime = Mock()
+    coordinator = AgentRuntimeCoordinator.__new__(AgentRuntimeCoordinator)
+    coordinator._host = host
+    coordinator._runtime = runtime
+    coordinator._core_compaction_task = None
+    coordinator._terminal_renderer = None
+    coordinator._terminal_renderer_unsubscribe = None
+    coordinator._observer_unsubscribers = []
 
-    agent._memory_coordinator.cancel_pending.assert_called_once_with()
-    agent._core_runtime.cancel.assert_called_once_with()
+    coordinator.abort()
+
+    host._memory_coordinator.cancel_pending.assert_called_once_with()
+    runtime.cancel.assert_called_once_with()

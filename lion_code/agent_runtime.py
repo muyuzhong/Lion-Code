@@ -244,8 +244,6 @@ class AgentRuntimeHost(Protocol):
 
     async def _ensure_mcp_tools(self) -> None: ...
 
-    async def _ensure_core_session_ready(self) -> None: ...
-
     def _prepare_turn_memory_snapshot(self, user_message: str) -> None: ...
 
     def _build_turn_memory_overlays(self) -> tuple[MemoryOverlay, ...]: ...
@@ -739,8 +737,7 @@ class AgentRuntimeCoordinator:
                 role="error",
             )
             return
-        # 经过 Host 调用保留 Agent._ensure_core_session_ready 的替换入口。
-        await self._host._ensure_core_session_ready()
+        await self.ensure_core_session_ready()
         if self._host._aborted:
             return
         await self.compact_core_context_if_needed()
@@ -894,7 +891,7 @@ class AgentRuntimeCoordinator:
         self._runtime.harness.clear_queues()
         self._runtime.harness.replace_messages([])
         self.reset_core_observers()
-        await host._ensure_core_session_ready()
+        await self.ensure_core_session_ready()
         host.tool_context.plan_file_path = host._plan_file_path
         self.reset_session_counters()
         host._turn_memory_overlays = host._build_turn_memory_overlays()
@@ -936,14 +933,14 @@ class AgentRuntimeCoordinator:
                 time.gmtime(state.session_info.created_at),
             )
         self.reset_core_observers()
-        await host._ensure_core_session_ready()
+        await self.ensure_core_session_ready()
         self.reset_session_counters()
         host._turn_memory_overlays = host._build_turn_memory_overlays()
         host._emit_notice(f"Session restored ({len(state.messages)} messages).")
         return True
 
     async def compact(self) -> None:
-        await self._host._ensure_core_session_ready()
+        await self.ensure_core_session_ready()
         if await self.compact_core_context_if_needed(force=True):
             self._host._emit_notice("Conversation compacted.")
 
