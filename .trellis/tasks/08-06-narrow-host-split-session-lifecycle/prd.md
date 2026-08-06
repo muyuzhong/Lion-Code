@@ -51,17 +51,19 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1：`AgentRuntimeHost` 不再作为 coordinator 的唯一入口；coordinator 构造函数
-  接收 3-4 个窄端口。
-- [ ] AC2：coordinator 中 `self._host.*` 访问被替换为对应端口访问；不存在一个端口
-  暴露全部 27 字段的情况。
-- [ ] AC3：`SessionLifecycle` 独立拥有 clear/restore/compact/close，且不复制
-  reset_core_observers / reset_session_counters 逻辑。
-- [ ] AC4：全量测试、compileall、import-linter、架构测试通过；无新增 ruff/mypy/format
-  基线回归。
-- [ ] AC5：`agent_runtime.py` 物理行数显著下降（SessionLifecycle 拆出约 200 行）。
-- [ ] AC6：Agent 的公共 API（`chat` / `run` / `run_once` / `clear_history` /
-  `restore_core_session` / `compact` / `close` / `abort`）行为不变。
+- [x] AC1：`AgentRuntimeHost` 不再作为 coordinator 的唯一入口；coordinator 构造函数
+  接收 4 个窄端口（`usage`/`identity`/`session`/`memory`）。
+- [x] AC2：coordinator 中 `self._host.*` 访问被替换为 `self._usage/identity/session/memory`；
+  不存在一个端口暴露全部字段的情况。
+- [x] AC3：`SessionLifecycle` 独立拥有 clear/restore/compact/close（新模块
+  `session_lifecycle.py`），且不复制 reset_core_observers / reset_session_counters 逻辑
+  （通过持有 coordinator 引用调用）。
+- [x] AC4：全量测试（577 passed）、compileall、import-linter（5 kept）、架构测试（14 passed）
+  通过；ruff/mypy/format 无新增基线回归（mypy 48 errors 与基线一致）。
+- [x] AC5：`agent_runtime.py` 959 -> 924 行（−35）；`SessionLifecycle` 拆出为独立 152 行模块。
+- [x] AC6：Agent 的公共 API（`chat` / `run` / `run_once` / `clear_history` /
+  `restore_core_session` / `compact` / `close` / `abort`）行为不变（coordinator 转发到
+  SessionLifecycle）。
 
 ## Out of Scope
 

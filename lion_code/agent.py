@@ -283,7 +283,10 @@ class Agent:
         self._lifecycle = AgentLifecycle(self)
         provider = self._lifecycle.build_core_provider(self._thinking_level)
         self._runtime_coordinator = AgentRuntimeCoordinator(
-            self,
+            usage=self,
+            identity=self,
+            session=self,
+            memory=self,
             provider=provider,
             model=self.model,
             tool_runtime=self.tool_runtime,
@@ -700,7 +703,9 @@ class Agent:
         try:
             definitions = await self._mcp_manager.discover_tools()
             for definition in definitions:
-                self.tool_registry.register(create_mcp_tool(self._mcp_manager, definition))
+                self.tool_registry.register(
+                    create_mcp_tool(self._mcp_manager, definition)
+                )
         except Exception as error:
             self._emit_notice(f"[mcp] Init failed: {error}")
 

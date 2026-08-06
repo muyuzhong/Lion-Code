@@ -3,7 +3,7 @@
   "name": "narrow-host-split-session-lifecycle",
   "title": "收窄 Host 协议并拆分 SessionLifecycle",
   "description": "将 AgentRuntimeHost 19字段+16方法拆成3-4个窄端口,从 AgentRuntimeCoordinator 拆出 SessionLifecycle(clear/restore/compact/close+recorder)",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
