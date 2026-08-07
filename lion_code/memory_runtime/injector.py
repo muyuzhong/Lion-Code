@@ -29,7 +29,7 @@ class MemoryContextInjector:
 
     def inject(
         self,
-        messages: Sequence[AgentMessage],
+        messages: tuple[AgentMessage, ...],
         overlays: Sequence[MemoryOverlay],
         *,
         max_tokens: int | None = None,
@@ -64,16 +64,17 @@ class MemoryContextInjector:
                 continue
             if (
                 auto_count >= self.policy.max_active_memories
-                or auto_bytes + overlay.byte_size
-                > self.policy.max_injection_bytes
+                or auto_bytes + overlay.byte_size > self.policy.max_injection_bytes
             ):
                 skipped.append(overlay.path)
                 continue
 
             candidate = [*selected, overlay]
-            if max_tokens is not None and estimate_messages_tokens(
-                self._apply(projected, candidate)
-            ) > max_tokens:
+            if (
+                max_tokens is not None
+                and estimate_messages_tokens(self._apply(projected, candidate))
+                > max_tokens
+            ):
                 skipped.append(overlay.path)
                 continue
             selected.append(overlay)
@@ -109,11 +110,13 @@ class MemoryContextInjector:
             items = [item for item in overlays if item.source == source]
             if not items:
                 continue
-            rows.extend([
-                f"<{source}-memory>",
-                *(f"## {item.path}\n{item.content}" for item in items),
-                f"</{source}-memory>",
-            ])
+            rows.extend(
+                [
+                    f"<{source}-memory>",
+                    *(f"## {item.path}\n{item.content}" for item in items),
+                    f"</{source}-memory>",
+                ]
+            )
         rows.append("</relevant-memory>")
         return "\n\n".join(rows)
 

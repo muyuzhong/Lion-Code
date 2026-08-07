@@ -776,6 +776,37 @@ def test_memory_overlay_code_cannot_mutate_harness_messages() -> None:
     )
 
 
+def _type_annotation_mentions(tree: ast.Module, name: str) -> bool:
+    """Check whether *name* appears in any type annotation in *tree*."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == name:
+            return True
+        if isinstance(node, ast.Attribute) and node.attr == name:
+            return True
+    return False
+
+
+def test_memory_layer_does_not_reference_agent_harness_in_types() -> None:
+    """Memory layer type annotations must not mention ``AgentHarness``.
+
+    The ``ReadOnlyMessageSource`` Protocol replaces direct Harness access;
+    type-level references to ``AgentHarness`` would bypass that boundary.
+    """
+    paths = (
+        *_source_files("memory_runtime"),
+        SOURCE_ROOT / "session_memory_coordinator.py",
+    )
+    violations = {
+        _source_key(path): ["AgentHarness"]
+        for path in paths
+        if _type_annotation_mentions(_tree(path), "AgentHarness")
+    }
+    assert not violations, (
+        f"Memory layer must not reference AgentHarness in type annotations: "
+        f"{violations}"
+    )
+
+
 def test_memory_index_has_one_authoritative_definition() -> None:
     definitions = {
         _source_key(path): sorted(
