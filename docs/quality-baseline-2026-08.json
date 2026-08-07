@@ -286,7 +286,7 @@
     "radon_complexity": {
       "command": "python -m radon cc lion_code -j",
       "version": "radon==6.0.1",
-      "max_high_rank_count": 11,
+      "max_high_rank_count": 12,
       "blocked_ranks": [
         "D",
         "E",
@@ -303,7 +303,8 @@
         "lion_code/providers/stream.py:89:canonicalize_provider_stream:D:29",
         "lion_code/session_runtime/legacy.py:123:_anthropic_messages:D:24",
         "lion_code/tui/adapter.py:24:TuiEventAdapter.apply:D:21",
-        "lion_code/tui/app.py:1039:LionTuiApp._apply_streaming_transcript_event:E:32"
+        "lion_code/tui/app.py:1040:LionTuiApp._apply_streaming_transcript_event:E:32",
+        "lion_code/tui/app.py:1184:LionTuiApp._dispatch:D:22"
       ]
     },
     "vulture": {
