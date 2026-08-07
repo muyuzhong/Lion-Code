@@ -836,6 +836,7 @@ class LionTuiApp(App):
             model_names=model_names,
             theme_names=available_tui_theme_names(),
             cwd=self.session.cwd,
+            skill_names=tuple(s.name for s in self.session.skills),
         )
 
     def _refresh_completions(self) -> None:
@@ -1089,10 +1090,8 @@ class LionTuiApp(App):
                     block
                     for block in event.message.content
                     if (
-                        isinstance(block, TextContent)
-                        and bool(block.text)
-                        or isinstance(block, ThinkingContent)
-                        and bool(block.thinking)
+                        (isinstance(block, TextContent) and bool(block.text))
+                        or (isinstance(block, ThinkingContent) and bool(block.thinking))
                     )
                 ]
                 canonical_items = (
@@ -1186,7 +1185,7 @@ class LionTuiApp(App):
         if not result.handled:
             self._notice(
                 "未知命令 — 可用: /task /session-memory /handoff /dream "
-                "/model /clear /plan /cost /compact /theme /thinking /quit"
+                "/model /clear /plan /cost /compact /theme /thinking /quit /skills"
             )
             return
         if result.exit_requested:
@@ -1203,6 +1202,12 @@ class LionTuiApp(App):
             )
         elif result.compact_summary is not None:
             self.run_worker(self._compact(), exclusive=True, group="chat")
+        elif result.skill_prompt is not None:
+            self.run_worker(
+                self._run_prompt(result.skill_prompt), exclusive=True, group="chat"
+            )
+        elif result.skills_list_requested:
+            self._show_skills_list()
         elif (
             result.task_action is not None
             or result.session_memory_requested
@@ -1247,6 +1252,20 @@ class LionTuiApp(App):
             await self.session.compact()
         except Exception as error:
             self._notice(f"Error: {error}", role="error")
+
+    def _show_skills_list(self) -> None:
+        """显示可用 Skill 列表。"""
+
+        skills = self.session.skills
+        if not skills:
+            self._notice("No skills found. Add skills to .claude/skills/<name>/SKILL.md")
+            return
+        lines = [f"{len(skills)} skills:"]
+        for skill in skills:
+            tag = f"/{skill.name}"
+            desc = skill.description or ""
+            lines.append(f"  {tag} - {desc}")
+        self._notice("\n".join(lines))
 
     async def _execute_session_memory_command(self, result: CommandResult) -> None:
         """在应用会话层执行共享的短期记忆命令意图。"""

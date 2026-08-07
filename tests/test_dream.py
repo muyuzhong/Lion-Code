@@ -403,24 +403,32 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
 
 class TestAgentDreamRefresh(unittest.TestCase):
     def test_refreshes_index_and_invalidates_core_memory_context(self):
-        agent = Agent.__new__(Agent)
-        agent._memory_coordinator = Mock()
-        agent._dynamic_system_context = "old dynamic"
-        agent._static_system_prompt = "static"
-        agent._base_system_prompt = "old base"
-        agent._system_prompt = "old system"
+        from lion_code.session_memory_coordinator import SessionMemoryCoordinator
+
+        memory_coordinator = Mock()
+        host = SimpleNamespace(
+            _memory_coordinator=memory_coordinator,
+            _dynamic_system_context="old dynamic",
+            _static_system_prompt="static",
+            _base_system_prompt="old base",
+            _system_prompt="old system",
+        )
+        host._refresh_dynamic_system_context = Agent._refresh_dynamic_system_context.__get__(host)
+        coord = SessionMemoryCoordinator.__new__(SessionMemoryCoordinator)
+        coord._memory_coordinator = memory_coordinator
+        coord._host = host
 
         with patch(
             "lion_code.agent.build_dynamic_system_context",
             return_value="new dynamic",
         ):
-            agent._refresh_memory_context_after_dream(["project_changed.md"])
+            coord._refresh_memory_context_after_dream(["project_changed.md"])
 
-        agent._memory_coordinator.invalidate.assert_called_once_with(
+        memory_coordinator.invalidate.assert_called_once_with(
             ["project_changed.md"]
         )
-        self.assertEqual(agent._base_system_prompt, "static\n\nnew dynamic")
-        self.assertEqual(agent._system_prompt, "static\n\nnew dynamic")
+        self.assertEqual(host._base_system_prompt, "static\n\nnew dynamic")
+        self.assertEqual(host._system_prompt, "static\n\nnew dynamic")
 
 
 if __name__ == "__main__":

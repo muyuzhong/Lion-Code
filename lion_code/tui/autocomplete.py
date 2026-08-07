@@ -97,6 +97,7 @@ def build_completion_state(
     session_ids: Sequence[str] = (),
     session_options: Sequence[CompletionOption] = (),
     cwd: Path | None = None,
+    skill_names: Sequence[str] = (),
 ) -> CompletionState:
     """Build autocomplete suggestions for the current prompt text."""
     if not text.startswith("/") or text.startswith("//"):
@@ -138,6 +139,7 @@ def build_completion_state(
             token_end=token_end,
             registry=command_registry,
             prompt_templates=prompt_templates,
+            skill_names=skill_names,
         )
     )
 
@@ -324,6 +326,7 @@ def _command_completions(
     token_end: int,
     registry: CommandRegistry,
     prompt_templates: Sequence[PromptTemplate],
+    skill_names: Sequence[str] = (),
 ) -> tuple[CompletionItem, ...]:
     prefix = token.removeprefix("/").lower()
     command_suggestions: list[CompletionItem] = []
@@ -343,8 +346,21 @@ def _command_completions(
         for template in prompt_templates
         if template.name.lower().startswith(prefix)
     ]
+    skill_suggestions = [
+        CompletionItem(
+            display=f"/{name}",
+            replacement=f"/{name}",
+            start=0,
+            end=token_end,
+            description="Skill",
+            category="Skills",
+        )
+        for name in skill_names
+        if name.lower().startswith(prefix)
+    ]
     return (
         *sorted(command_suggestions, key=lambda item: _command_completion_sort_key(item, prefix)),
+        *sorted(skill_suggestions, key=lambda item: _command_completion_sort_key(item, prefix)),
         *sorted(prompt_suggestions, key=lambda item: _command_completion_sort_key(item, prefix)),
     )
 

@@ -68,13 +68,16 @@ class TestSessionMemoryCoordinator(unittest.IsolatedAsyncioTestCase):
         self._agent._session_memory_coord.show_active_task.assert_called_once_with()
 
     async def test_dream_public_entry_delegates_to_coordinator(self) -> None:
-        agent = Agent.__new__(Agent)
+        original = self._agent._session_memory_coord
         coordinator = Mock()
         coordinator.dream = AsyncMock(return_value="Dream 完成")
-        agent._session_memory_coord = coordinator
+        self._agent._session_memory_coord = coordinator
 
-        self.assertEqual(await agent.dream(), "Dream 完成")
-        coordinator.dream.assert_awaited_once_with()
+        try:
+            self.assertEqual(await self._agent.dream(), "Dream 完成")
+            coordinator.dream.assert_awaited_once_with()
+        finally:
+            self._agent._session_memory_coord = original
 
 
 if __name__ == "__main__":

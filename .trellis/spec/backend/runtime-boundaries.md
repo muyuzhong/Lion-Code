@@ -74,8 +74,12 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
   protocol-private histories or SDK clients.
 - `AgentRuntimeCoordinator` owns Core assembly, observer subscription order,
   `SessionRecorder`, context projection/compaction, background cleanup, output
-  capture, and chat/run/clear/restore/close orchestration through
-  `AgentRuntimeHost`. `Agent` remains the composition root for MCP discovery,
+  capture, and chat/run orchestration through four narrow host ports
+  (`UsageStateHost`, `RuntimeIdentityHost`, `SessionStateHost`,
+  `MemoryTurnHost`). Clear/restore/compact/close orchestration is delegated to
+  `SessionLifecycle` (in `session_lifecycle.py`), which calls back into the
+  coordinator for shared `reset_core_observers` / `reset_session_counters`.
+  `Agent` remains the composition root for MCP discovery,
   tools, Memory/Plan/Autonomy/Learning and UI callbacks, and exposes compatibility
   delegates such as `_core_runtime`, `_ensure_core_session_ready`, `chat()` and
   `close()`. The coordinator must not import `Agent` or create a second history,

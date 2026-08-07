@@ -17,18 +17,15 @@ from .agent_runtime import (
     AgentRunResult,
     AgentRuntimeCoordinator,
     LionAgentRuntime,
-    sync_usage_from_observer,
 )
 from .autonomy_runtime import AutonomyRuntime
 from .context import (
     ContextCompactor,
     ContextManager,
-    ContextRuntimeState,
     ModelLimitsResolver,
     effective_window_tokens,
     fallback_model_limits,
 )
-from .core.events import AgentEvent
 from .core.messages import AgentMessage, AssistantMessage, TextContent, UserMessage
 from .core.provider import ModelProvider
 from .hooks import load_pre_tool_use_hooks
@@ -286,7 +283,10 @@ class Agent:
         self._lifecycle = AgentLifecycle(self)
         provider = self._lifecycle.build_core_provider(self._thinking_level)
         self._runtime_coordinator = AgentRuntimeCoordinator(
-            self,
+            usage=self,
+            identity=self,
+            session=self,
+            memory=self,
             provider=provider,
             model=self.model,
             tool_runtime=self.tool_runtime,
@@ -311,107 +311,59 @@ class Agent:
     def _core_runtime(self) -> LionAgentRuntime:
         """兼容暴露唯一 Core Runtime；实际所有权在运行时协调器。"""
 
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            return self.__dict__["_legacy_core_runtime"]
-        return coordinator.core_runtime
+        return self._runtime_coordinator.core_runtime
 
     @_core_runtime.setter
     def _core_runtime(self, value: LionAgentRuntime) -> None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            object.__setattr__(self, "_legacy_core_runtime", value)
-            return
-        coordinator.core_runtime = value
+        self._runtime_coordinator.core_runtime = value
 
     @property
     def _session_recorder(self) -> SessionRecorder | None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            return self.__dict__.get("_legacy_session_recorder")
-        return coordinator.session_recorder
+        return self._runtime_coordinator.session_recorder
 
     @_session_recorder.setter
     def _session_recorder(self, value: SessionRecorder | None) -> None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            object.__setattr__(self, "_legacy_session_recorder", value)
-            return
-        coordinator.session_recorder = value
+        self._runtime_coordinator.session_recorder = value
 
     @property
     def _context_compactor(self) -> ContextCompactor | None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            return self.__dict__.get("_legacy_context_compactor")
-        return coordinator.context_compactor
+        return self._runtime_coordinator.context_compactor
 
     @_context_compactor.setter
     def _context_compactor(self, value: ContextCompactor | None) -> None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            object.__setattr__(self, "_legacy_context_compactor", value)
-            return
-        coordinator.context_compactor = value
+        self._runtime_coordinator.context_compactor = value
 
     @property
     def _context_manager(self) -> ContextManager:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            return self.__dict__["_legacy_context_manager"]
-        return coordinator.context_manager
+        return self._runtime_coordinator.context_manager
 
     @property
     def _resolved_model_limits_for(self) -> tuple[int, str] | None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            return self.__dict__.get("_legacy_resolved_model_limits_for")
-        return coordinator.resolved_model_limits_for
+        return self._runtime_coordinator.resolved_model_limits_for
 
     @_resolved_model_limits_for.setter
     def _resolved_model_limits_for(self, value: tuple[int, str] | None) -> None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            object.__setattr__(self, "_legacy_resolved_model_limits_for", value)
-            return
-        coordinator.resolved_model_limits_for = value
+        self._runtime_coordinator.resolved_model_limits_for = value
 
     @property
     def _core_compaction_required(self) -> bool:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            return self.__dict__.get("_legacy_core_compaction_required", False)
-        return coordinator.core_compaction_required
+        return self._runtime_coordinator.core_compaction_required
 
     @_core_compaction_required.setter
     def _core_compaction_required(self, value: bool) -> None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            object.__setattr__(self, "_legacy_core_compaction_required", value)
-            return
-        coordinator.core_compaction_required = value
+        self._runtime_coordinator.core_compaction_required = value
 
     @property
     def _usage_observer(self):
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            return self.__dict__.get("_legacy_usage_observer")
-        return coordinator.usage_observer
+        return self._runtime_coordinator.usage_observer
 
     @_usage_observer.setter
     def _usage_observer(self, value: Any) -> None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            object.__setattr__(self, "_legacy_usage_observer", value)
-            return
-        coordinator.usage_observer = value
+        self._runtime_coordinator.usage_observer = value
 
     @property
     def _terminal_renderer(self) -> TerminalRenderer | None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is None:
-            return self.__dict__.get("_legacy_terminal_renderer")
-        return coordinator.terminal_renderer
+        return self._runtime_coordinator.terminal_renderer
 
     def _create_terminal_renderer(self) -> TerminalRenderer:
         """在调用时读取本模块 Renderer，保留既有动态 patch 锚点。"""
@@ -461,11 +413,7 @@ class Agent:
 
     @_session_memory.setter
     def _session_memory(self, value: SessionMemory | None) -> None:
-        coordinator = getattr(self, "_session_memory_coord", None)
-        if coordinator is None:
-            object.__setattr__(self, "_legacy_session_memory", value)
-            return
-        coordinator.session_memory = value
+        self._session_memory_coord.session_memory = value
 
     @property
     def _session_memory_error(self) -> str | None:
@@ -485,18 +433,11 @@ class Agent:
 
     @property
     def _memory_coordinator(self) -> MemoryCoordinator:
-        coordinator = getattr(self, "_session_memory_coord", None)
-        if coordinator is None:
-            return getattr(self, "_legacy_memory_coordinator")
-        return coordinator.memory_coordinator
+        return self._session_memory_coord.memory_coordinator
 
     @_memory_coordinator.setter
     def _memory_coordinator(self, value: Any) -> None:
-        coordinator = getattr(self, "_session_memory_coord", None)
-        if coordinator is None:
-            object.__setattr__(self, "_legacy_memory_coordinator", value)
-            return
-        coordinator.memory_coordinator = value
+        self._session_memory_coord.memory_coordinator = value
 
     @property
     def _memory_injector(self) -> MemoryContextInjector:
@@ -586,95 +527,24 @@ class Agent:
         return self._session_memory_coord._build_core_memory_query_service()
 
     def abort(self) -> None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is not None:
-            coordinator.abort()
-            return
-        # 保留 Agent.__new__ 窄测试的兼容路径；正常实例始终委托协调器。
-        self._aborted = True
-        self._last_stop_reason = "aborted"
-        self._memory_coordinator.cancel_pending()
-        self._core_runtime.cancel()
-        compaction_task = getattr(self, "_core_compaction_task", None)
-        if compaction_task is not None:
-            compaction_task.cancel()
+        self._runtime_coordinator.abort()
 
     # ─── Core Runtime ────────────────────────────────────────
 
-    async def _prepare_core_context(
-        self, messages: list[AgentMessage]
-    ) -> list[AgentMessage]:
-        return await self._runtime_coordinator.prepare_core_context(messages)
-
-    async def _capture_core_text(self, event: AgentEvent) -> None:
-        await self._runtime_coordinator.capture_core_text(event)
-
     def _sync_core_usage(self) -> None:
-        coordinator = self.__dict__.get("_runtime_coordinator")
-        if coordinator is not None:
-            coordinator.sync_core_usage()
-            return
-        previous = self.__dict__.get("_legacy_last_synced_core_response_count", 0)
-        response_count = sync_usage_from_observer(
-            self,
-            self._usage_observer,
-            last_synced_response_count=previous,
-        )
-        object.__setattr__(
-            self,
-            "_legacy_last_synced_core_response_count",
-            response_count,
-        )
-
-    def _last_core_assistant(self) -> AssistantMessage | None:
-        return self._runtime_coordinator.last_core_assistant()
-
-    def _sync_core_outcome(self) -> None:
-        self._runtime_coordinator.sync_core_outcome()
-
-    def _before_core_tool_calls(self, _assistant: AssistantMessage) -> str | None:
-        return self._runtime_coordinator.before_core_tool_calls(_assistant)
-
-    def _reset_session_counters(self) -> None:
-        self._runtime_coordinator.reset_session_counters()
-
-    def _reset_core_observers(self) -> None:
-        self._runtime_coordinator.reset_core_observers()
+        self._runtime_coordinator.sync_core_usage()
 
     async def _ensure_core_session_ready(self) -> None:
         await self._runtime_coordinator.ensure_core_session_ready()
 
-    async def _resolve_core_model_limits(self) -> None:
-        await self._runtime_coordinator.resolve_core_model_limits()
-
-    def _context_runtime_state(self) -> ContextRuntimeState:
-        return self._runtime_coordinator.context_runtime_state()
-
-    async def _compact_core_context_if_needed(
-        self,
-        *,
-        force: bool = False,
-        keep_user_boundaries: int = 1,
-    ) -> bool:
-        return await self._runtime_coordinator.compact_core_context_if_needed(
-            force=force,
-            keep_user_boundaries=keep_user_boundaries,
-        )
-
     async def compact_core_context_for_overflow(self) -> bool:
         return await self._runtime_coordinator.compact_core_context_for_overflow()
-
-    async def _apply_pending_core_context_reset(self) -> bool:
-        return await self._runtime_coordinator.apply_pending_core_context_reset()
 
     def _schedule_background_operation(
         self,
         operation: Callable[[], Coroutine[Any, Any, object]],
     ) -> None:
         self._runtime_coordinator.schedule_background_operation(operation)
-
-    async def _flush_background_operations(self) -> None:
-        await self._runtime_coordinator.flush_background_operations()
 
     def set_terminal_output(self, enabled: bool) -> None:
         self._runtime_coordinator.set_terminal_output(enabled)
@@ -833,7 +703,9 @@ class Agent:
         try:
             definitions = await self._mcp_manager.discover_tools()
             for definition in definitions:
-                self.tool_registry.register(create_mcp_tool(self._mcp_manager, definition))
+                self.tool_registry.register(
+                    create_mcp_tool(self._mcp_manager, definition)
+                )
         except Exception as error:
             self._emit_notice(f"[mcp] Init failed: {error}")
 
@@ -936,13 +808,7 @@ class Agent:
 
     def _refresh_memory_context_after_dream(self, filenames: list[str]) -> None:
         """丢弃旧预取，并让本会话后续请求看到 Dream 后的索引和文件内容。"""
-        coordinator = getattr(self, "_session_memory_coord", None)
-        if coordinator is None:
-            # 保留 Agent.__new__ 形式窄单元测试的最小兼容边界。
-            self._memory_coordinator.invalidate(filenames)
-            self._refresh_dynamic_system_context()
-            return
-        coordinator._refresh_memory_context_after_dream(filenames)
+        self._session_memory_coord._refresh_memory_context_after_dream(filenames)
 
     async def learn_from_current_session(self) -> str:
         """运行一次内置 Meta-Skill，并按其结论直接沉淀当前会话经验。"""

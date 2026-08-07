@@ -74,15 +74,24 @@
 
 ## Acceptance Criteria
 
-- [ ] Git 根目录与其子目录得到相同项目键；非 Git cwd 得到稳定规范化项目键；不同 worktree 不共享状态。
-- [ ] AGENTS.md 与 CLAUDE.md 从项目根到 cwd 逐级加载，且优先级符合 R2。
-- [ ] 项目记忆、Session Memory、Auto Memory 按 项目记忆 > Session Memory > Auto Memory 的顺序只进入 Provider 投影；canonical 消息和 JSONL 不含注入块。
-- [ ] /clear 后同一项目的 Session Memory 保留；恢复旧 JSONL 时重新加载当前项目 Session Memory；新项目实例不泄漏旧项目状态。
-- [ ] 一次含工具调用的 chat 中，两次 Provider 调用看到的 Overlay 快照相同；下一用户轮才允许使用已完成的 Auto Memory 预取。
-- [ ] 工具事件可确定性记录成功的 write_file/edit_file 路径、识别测试命令通过或失败、并保留工具错误作为阻塞证据。
-- [ ] 任务完成后的候选提取拒绝临时进度、待办、文件列表、临时失败和下一步，只接受 R6 的五类长期内容。
-- [ ] /task、/session-memory、/handoff、/dream 的最小命令路径有单元或应用层测试。
-- [ ] 每个实施切片独立运行目标测试、执行 diff 检查，并以中文提交信息提交；无关工作区改动不被纳入提交。
+- [x] Git 根目录与其子目录得到相同项目键；非 Git cwd 得到稳定规范化项目键；不同 worktree 不共享状态。
+  （`project_identity.py` 用 `git rev-parse --show-toplevel`；`tests/test_project_identity.py` 验证）
+- [x] AGENTS.md 与 CLAUDE.md 从项目根到 cwd 逐级加载，且优先级符合 R2。
+  （`prompt.py` `load_project_context_files` 逐级加载；`tests/test_prompt.py` 验证）
+- [x] 项目记忆、Session Memory、Auto Memory 按 项目记忆 > Session Memory > Auto Memory 的顺序只进入 Provider 投影；canonical 消息和 JSONL 不含注入块。
+  （`MemoryContextInjector` 注入三层 Overlay；`tests/memory_runtime/test_injector.py` 验证不可变性）
+- [x] /clear 后同一项目的 Session Memory 保留；恢复旧 JSONL 时重新加载当前项目 Session Memory；新项目实例不泄漏旧项目状态。
+  （`SessionMemoryCoordinator` 在 clear/restore 中 `_reload_project_memory` + `_reload_session_memory`；集成测试验证）
+- [x] 一次含工具调用的 chat 中，两次 Provider 调用看到的 Overlay 快照相同；下一用户轮才允许使用已完成的 Auto Memory 预取。
+  （`_prepare_turn_memory_snapshot` 在轮次开始时固定 Overlay；`tests/test_agent_run.py` 验证）
+- [x] 工具事件可确定性记录成功的 write_file/edit_file 路径、识别测试命令通过或失败、并保留工具错误作为阻塞证据。
+  （`_update_session_memory_after_turn` 从 canonical 工具消息提取确定性证据）
+- [x] 任务完成后的候选提取拒绝临时进度、待办、文件列表、临时失败和下一步，只接受 R6 的五类长期内容。
+  （`dream.py` prompt 明确拒绝 progress/pending/next steps/file lists/temporary failures；`tests/test_dream.py` 验证）
+- [x] /task、/session-memory、/handoff、/dream 的最小命令路径有单元或应用层测试。
+  （`application/commands.py` 注册 4 个命令；`tests/application/test_coding_session.py` + `tests/tui/test_tui_app.py` 验证）
+- [x] 每个实施切片独立运行目标测试、执行 diff 检查，并以中文提交信息提交；无关工作区改动不被纳入提交。
+  （各切片已按此标准提交，全量 577 passed）
 
 ## Planning Note
 

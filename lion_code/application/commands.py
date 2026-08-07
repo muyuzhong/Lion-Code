@@ -115,6 +115,8 @@ class CommandResult:
     session_memory_requested: bool = False
     handoff_requested: bool = False
     dream_requested: bool = False
+    skills_list_requested: bool = False
+    skill_prompt: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,7 +186,7 @@ class CommandRegistry:
 
         command = self.get(name)
         if command is None:
-            return CommandResult(handled=False)
+            return _try_skill_fallback(name, args)
 
         return command.handler(
             CommandContext(session=session, registry=self, text=stripped, name=name, args=args)
@@ -227,6 +229,38 @@ def _task_command(ctx: CommandContext) -> CommandResult:
         handled=True,
         message="Usage: /task | /task switch <text> | /task done",
     )
+
+
+def _try_skill_fallback(name: str, args: str) -> CommandResult:
+    """未命中内置命令时，按 ``/<skill-name> [args]`` 尝试解析用户可调用 Skill。
+
+    与 REPL ``__main__.py`` 的 fallback 逻辑一致：
+    - ``inline`` Skill 直接把解析后的提示词交给 ``agent.chat``；
+    - ``fork`` Skill 改用 skill 工具调用入口。
+    """
+
+    from lion_code.skills import execute_skill, get_skill_by_name, resolve_skill_prompt
+
+    skill = get_skill_by_name(name)
+    if skill is None or not skill.user_invocable:
+        return CommandResult(handled=False)
+    if skill.context == "fork":
+        result = execute_skill(skill.name, args)
+        if result is None:
+            return CommandResult(handled=False)
+        prompt = (
+            f'Use the skill tool to invoke "{skill.name}" with args: '
+            f'{args or "(none)"}'
+        )
+    else:
+        prompt = resolve_skill_prompt(skill, args)
+    return CommandResult(handled=True, skill_prompt=prompt)
+
+
+def _skills_command(_ctx: CommandContext) -> CommandResult:
+    """/skills 列出可用 Skill。"""
+
+    return CommandResult(handled=True, skills_list_requested=True)
 
 
 def create_default_command_registry() -> CommandRegistry:
@@ -291,6 +325,12 @@ def create_default_command_registry() -> CommandRegistry:
             description="整理受限的 Auto Memory 候选",
             usage="/dream",
             handler=lambda _ctx: CommandResult(handled=True, dream_requested=True),
+        ),
+        SlashCommand(
+            name="skills",
+            description="列出可用 Skill",
+            usage="/skills",
+            handler=_skills_command,
         ),
         SlashCommand(
             name="model",
