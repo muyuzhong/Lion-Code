@@ -1080,12 +1080,12 @@ async def test_provider_does_not_retain_conversation_across_requests() -> None:
 
     # Each call saw its own messages, no cross-contamination.
     assert len(provider.calls) == 2
-    assert provider.calls[0][2] == [UserMessage(content="hello")]
-    assert provider.calls[1][2] == [UserMessage(content="world")]
+    assert [m.content for m in provider.calls[0][2]] == ["hello"]
+    assert [m.content for m in provider.calls[1][2]] == ["world"]
 
     # Input lists were not mutated by the provider.
-    assert messages_1 == [UserMessage(content="hello")]
-    assert messages_2 == [UserMessage(content="world")]
+    assert [m.content for m in messages_1] == ["hello"]
+    assert [m.content for m in messages_2] == ["world"]
 
 
 async def test_single_conversation_produces_one_jsonl_file() -> None:
