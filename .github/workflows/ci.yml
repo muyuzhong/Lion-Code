@@ -2,6 +2,9 @@
 #
 # 质量门禁使用已提交的机器基线，不解析 Ruff/mypy 的人类可读摘要。
 # 分支保护仍需在 GitHub 仓库设置中把本 workflow 设为 required check。
+#
+# 所有质量门禁步骤使用 if: always()，确保任一门禁失败不会阻止
+# 后续门禁执行——CI 应一次暴露所有问题，而非在第一个失败处停止。
 
 name: CI
 
@@ -39,8 +42,10 @@ jobs:
           pip install ".[dev]"
 
       # ---------- 用户指定的 5 条命令 ----------
+      # if: always() 确保每条命令独立执行，不因前序失败而跳过。
 
       - name: ruff check（JSON 基线比对）
+        if: always()
         run: |
           set +e
           python -m ruff check $QUALITY_PATHS --output-format=json > ruff.json
@@ -53,6 +58,7 @@ jobs:
           python scripts/check_quality_baseline.py ruff-check ruff.json --status "$STATUS" --baseline "$QUALITY_BASELINE"
 
       - name: ruff format --check（基线比对）
+        if: always()
         run: |
           set +e
           python -m ruff format --check $QUALITY_PATHS > ruff-format.txt 2>&1
@@ -65,17 +71,21 @@ jobs:
           python scripts/check_quality_baseline.py ruff-format ruff-format.txt --status "$STATUS" --baseline "$QUALITY_BASELINE"
 
       - name: python -m compileall -q lion_code tests scripts
+        if: always()
         run: python -m compileall -q lion_code tests scripts
 
       - name: python -m pytest -q（全量测试）
+        if: always()
         run: python -m pytest -q
 
       - name: git diff --check
+        if: always()
         run: git diff --check
 
       # ---------- 附加质量门禁 ----------
 
       - name: mypy 类型检查（JSON 基线比对）
+        if: always()
         run: |
           set +e
           python -m mypy lion_code --platform linux -O json > mypy.jsonl 2>&1
@@ -88,14 +98,17 @@ jobs:
           python scripts/check_quality_baseline.py mypy mypy.jsonl --status "$STATUS" --baseline "$QUALITY_BASELINE"
 
       - name: import-linter 架构契约
+        if: always()
         run: lint-imports --no-cache
 
       - name: radon D/E/F 复杂度门禁
+        if: always()
         run: |
           python -m radon cc lion_code -j > radon-cc.json
           python scripts/check_quality_baseline.py radon-complexity radon-cc.json --baseline "$QUALITY_BASELINE"
 
       - name: vulture 高置信候选门禁
+        if: always()
         run: |
           set +e
           python -m vulture lion_code tests --min-confidence 70 > vulture.txt 2>&1
@@ -108,6 +121,7 @@ jobs:
           python scripts/check_quality_baseline.py vulture vulture.txt --status "$STATUS" --baseline "$QUALITY_BASELINE"
 
       - name: 准备 changed-lines diff
+        if: always()
         env:
           BASE_REF: ${{ github.base_ref || 'master' }}
         run: |
@@ -115,6 +129,7 @@ jobs:
           git diff --unified=0 "origin/$BASE_REF...HEAD" -- lion_code > changed-lines.diff || true
 
       - name: 分支覆盖率与 changed-lines 覆盖率门禁
+        if: always()
         run: |
           python -m coverage run --branch -m pytest -q -p no:cacheprovider
           python -m coverage json -o coverage.json

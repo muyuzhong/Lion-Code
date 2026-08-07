@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import ast
+import tomllib
 from collections.abc import Iterable
 from pathlib import Path
+
+from _boundaries import ALL_ROOTS, BOUNDARIES
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
 
-CORE_FORBIDDEN_ROOTS = frozenset({"providers", "tooling", "application", "tui"})
-PROVIDER_ALLOWED_ROOTS = frozenset({"core", "providers"})
-TUI_ALLOWED_ROOTS = frozenset(
-    {"application", "config", "core", "prompt", "tui", "version"}
-)
+# Import-direction boundaries live in _boundaries.py (single source of truth).
+# AST tests and import-linter config both derive from those definitions.
+_CORE = BOUNDARIES[0]
+_PROVIDERS = BOUNDARIES[1]
+_APPLICATION = BOUNDARIES[2]
+_TUI = BOUNDARIES[3]
+_PRODUCTION = BOUNDARIES[4]
+
 LEGACY_MESSAGE_SYMBOLS = frozenset({"_anthropic_messages", "_openai_messages"})
 HARNESS_MUTATION_METHODS = frozenset({"clear_queues", "follow_up", "replace_messages"})
 SESSION_RECORDER_SITES = {
@@ -32,6 +38,12 @@ REMOVED_SKILL_COMMAND_SYMBOLS = frozenset(
 )
 MCP_LIFECYCLE_CLASS_NAMES = frozenset({"McpConnection", "McpManager"})
 PROVIDER_SHIM_EXPORTS = ("CancellationToken", "ModelProvider")
+
+# Dynamic import calls that bypass static import analysis (import-linter / AST).
+DYNAMIC_IMPORT_CALLS = frozenset({"import_module", "__import__"})
+# Modules allowed to use dynamic imports.  Currently empty — adding a dynamic
+# import requires consciously extending this allowlist.
+DYNAMIC_IMPORT_ALLOWLIST: frozenset[str] = frozenset()
 
 
 def _source_files(*parts: str) -> tuple[Path, ...]:
@@ -162,11 +174,22 @@ def _self_fields_from_target(target: ast.expr) -> set[str]:
     return set()
 
 
+_PRIVATE_HISTORY_KEYWORDS = frozenset(
+    {
+        "messages",
+        "history",
+        "conversation",
+        "transcript",
+        "turns",
+    }
+)
+
+
 def _private_history_fields(tree: ast.Module) -> frozenset[str]:
     return frozenset(
         field
         for field in _self_fields(tree)
-        if "messages" in field.casefold() or "history" in field.casefold()
+        if any(kw in field.casefold() for kw in _PRIVATE_HISTORY_KEYWORDS)
     )
 
 
@@ -477,10 +500,57 @@ def _agent_harness_references(tree: ast.Module) -> frozenset[str]:
     return frozenset(references)
 
 
+def _dynamic_import_calls(tree: ast.Module) -> frozenset[str]:
+    """Detect ``importlib.import_module()`` and ``__import__()`` calls."""
+    calls: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # importlib.import_module(...) or module.import_module(...)
+        if isinstance(func, ast.Attribute) and func.attr == "import_module":
+            calls.add("import_module")
+        # import_module(...) (bare name, from importlib import import_module)
+        elif isinstance(func, ast.Name) and func.id == "import_module":
+            calls.add("import_module")
+        # __import__(...)
+        elif isinstance(func, ast.Name) and func.id == "__import__":
+            calls.add("__import__")
+    return frozenset(calls)
+
+
+# Modules where session storage path literals may appear.
+_SESSION_PATH_OWNERS = frozenset({"session_runtime/repository.py"})
+
+
+def _string_literals_containing(tree: ast.Module, needle: str) -> frozenset[str]:
+    """Return string literals in *tree* that contain *needle*."""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and needle in node.value
+        ):
+            found.add(node.value)
+    return frozenset(found)
+
+
+def _assignment_targets(tree: ast.Module, name: str) -> frozenset[str]:
+    """Return sites where *name* is assigned at module level."""
+    sites: set[str] = set()
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == name:
+                    sites.add(target.id)
+    return frozenset(sites)
+
+
 def test_core_does_not_import_upper_runtime_layers() -> None:
     violations = _forbidden_imports(
         _source_files("core"),
-        forbidden=CORE_FORBIDDEN_ROOTS,
+        forbidden=_CORE.forbidden_roots,
     )
 
     assert not violations, f"Core imported an upper runtime layer: {violations}"
@@ -489,7 +559,7 @@ def test_core_does_not_import_upper_runtime_layers() -> None:
 def test_provider_product_imports_are_core_or_local() -> None:
     violations = _unexpected_imports(
         _source_files("providers"),
-        allowed=PROVIDER_ALLOWED_ROOTS,
+        allowed=_PROVIDERS.allowed_roots,
     )
 
     assert not violations, f"Provider crossed its Core boundary: {violations}"
@@ -498,7 +568,7 @@ def test_provider_product_imports_are_core_or_local() -> None:
 def test_tui_runtime_imports_stay_within_event_boundary() -> None:
     violations = _unexpected_imports(
         _source_files("tui"),
-        allowed=TUI_ALLOWED_ROOTS,
+        allowed=_TUI.allowed_roots,
     )
 
     assert not violations, f"TUI bypassed application/core events: {violations}"
@@ -566,6 +636,49 @@ def test_jsonl_writer_primitives_do_not_escape_persistence_boundary() -> None:
     }
 
     assert not violations, f"JSONL writer bypassed SessionRecorder: {violations}"
+
+
+def test_session_storage_path_literals_stay_in_repository() -> None:
+    """``.jsonl`` path literals must only appear in ``session_runtime/``."""
+    violations = {
+        _source_key(path): sorted(_string_literals_containing(_tree(path), ".jsonl"))
+        for path in _source_files()
+        if _source_key(path) not in _SESSION_PATH_OWNERS
+        and _string_literals_containing(_tree(path), ".jsonl")
+    }
+    assert not violations, (
+        f"Session storage path literals must stay in session_runtime/repository: "
+        f"{violations}"
+    )
+
+
+def test_session_dir_constant_has_single_definition() -> None:
+    """``SESSION_DIR`` must only be defined in ``session_runtime/repository.py``."""
+    sites: dict[str, frozenset[str]] = {}
+    for path in _source_files():
+        found = _assignment_targets(_tree(path), "SESSION_DIR")
+        if found:
+            sites[_source_key(path)] = found
+    assert sites == {"session_runtime/repository.py": frozenset({"SESSION_DIR"})}, (
+        f"SESSION_DIR must have a single owner: {sites}"
+    )
+
+
+def test_dynamic_imports_are_allowlisted() -> None:
+    """``importlib.import_module`` and ``__import__`` bypass static analysis.
+
+    They must not appear outside the explicit allowlist.
+    """
+    violations = {
+        _source_key(path): sorted(_dynamic_import_calls(_tree(path)))
+        for path in _source_files()
+        if _source_key(path) not in DYNAMIC_IMPORT_ALLOWLIST
+        and _dynamic_import_calls(_tree(path))
+    }
+    assert not violations, (
+        f"Dynamic imports bypass static architecture checks: {violations}. "
+        f"Add to DYNAMIC_IMPORT_ALLOWLIST if intentional."
+    )
 
 
 def test_memory_overlay_code_cannot_mutate_harness_messages() -> None:
@@ -657,6 +770,9 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
         "    def __init__(self) -> None:\n"
         "        self._messages = []\n"
         "        setattr(self, '_history', [])\n"
+        "        self._conversation = []\n"
+        "        self._transcript = []\n"
+        "        self._turns = []\n"
     )
     sink = ast.parse("def configure(ui):\n    return getattr(ui, 'set_sink')\n")
     writer = ast.parse("def create_writer():\n    return SessionRecorder()\n")
@@ -679,8 +795,22 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     old_skill = ast.parse("def parse_skill_invocation():\n    return '/skill:'\n")
     mcp_lifecycle = ast.parse("class McpClient:\n    pass\n")
     mcp_disconnect = ast.parse("def close(manager):\n    manager.disconnect_all()\n")
+    dynamic_importlib = ast.parse(
+        "import importlib\ndef load(name):\n    return importlib.import_module(name)\n"
+    )
+    dynamic_builtin = ast.parse("def load(name):\n    return __import__(name)\n")
+    jsonl_literal = ast.parse("path = 'session.jsonl'\n")
+    session_dir_assign = ast.parse("SESSION_DIR = Path.home() / 'sessions'\n")
 
-    assert _private_history_fields(provider) == frozenset({"_history", "_messages"})
+    assert _private_history_fields(provider) == frozenset(
+        {
+            "_conversation",
+            "_history",
+            "_messages",
+            "_transcript",
+            "_turns",
+        }
+    )
     assert _sink_symbols(sink) == frozenset({"set_sink"})
     assert _session_recorder_calls(writer).sites == {"create_writer"}
     assert _session_recorder_aliases(writer_alias) == frozenset({"Writer"})
@@ -700,4 +830,97 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     assert _mcp_lifecycle_classes(mcp_lifecycle) == frozenset({"McpClient"})
     assert _attribute_call_sites(mcp_disconnect, "disconnect_all") == frozenset(
         {"close"}
+    )
+    assert _dynamic_import_calls(dynamic_importlib) == frozenset({"import_module"})
+    assert _dynamic_import_calls(dynamic_builtin) == frozenset({"__import__"})
+    assert _string_literals_containing(jsonl_literal, ".jsonl") == frozenset(
+        {"session.jsonl"}
+    )
+    assert _assignment_targets(session_dir_assign, "SESSION_DIR") == frozenset(
+        {"SESSION_DIR"}
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unified boundary validation
+# ---------------------------------------------------------------------------
+
+
+def _external_package_imports(
+    tree: ast.Module, packages: frozenset[str]
+) -> frozenset[str]:
+    """Return top-level external package imports matching *packages*."""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                if top in packages:
+                    found.add(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            top = node.module.split(".")[0]
+            if top in packages:
+                found.add(node.module)
+    return frozenset(found)
+
+
+def test_all_roots_matches_filesystem() -> None:
+    """``ALL_ROOTS`` in ``_boundaries.py`` must match the actual source tree."""
+    from _boundaries import _discover_all_roots
+
+    discovered = _discover_all_roots()
+    assert ALL_ROOTS == discovered, (
+        f"ALL_ROOTS is stale; expected {sorted(discovered)}, got {sorted(ALL_ROOTS)}"
+    )
+
+
+def test_import_linter_config_matches_boundaries() -> None:
+    """Every import-linter contract in ``pyproject.toml`` must match the
+    corresponding ``Boundary`` definition in ``_boundaries.py``."""
+    pyproject = REPOSITORY_ROOT / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    contracts = data["tool"]["importlinter"]["contracts"]
+    lint_by_name: dict[str, dict] = {c["name"]: c for c in contracts}
+
+    assert set(lint_by_name) == {b.contract_name for b in BOUNDARIES}, (
+        f"Contract names mismatch:\n"
+        f"  import-linter: {sorted(lint_by_name)}\n"
+        f"  boundaries:    {sorted(b.contract_name for b in BOUNDARIES)}"
+    )
+
+    for boundary in BOUNDARIES:
+        contract = lint_by_name[boundary.contract_name]
+
+        assert contract["type"] == "forbidden", (
+            f"{boundary.contract_name}: expected type 'forbidden'"
+        )
+        assert contract["source_modules"] == [boundary.source_package], (
+            f"{boundary.contract_name}: source_modules mismatch"
+        )
+
+        expected_forbidden = sorted(boundary.import_linter_forbidden_modules)
+        actual_forbidden = sorted(contract["forbidden_modules"])
+        assert actual_forbidden == expected_forbidden, (
+            f"{boundary.contract_name}: forbidden_modules drift\n"
+            f"  expected ({len(expected_forbidden)}): {expected_forbidden}\n"
+            f"  actual   ({len(actual_forbidden)}): {actual_forbidden}"
+        )
+
+        expected_indirect = "True" if boundary.allow_indirect else "False"
+        assert contract.get("allow_indirect_imports", "False") == expected_indirect, (
+            f"{boundary.contract_name}: allow_indirect_imports mismatch"
+        )
+
+
+def test_production_code_does_not_import_tests_or_benchmarks() -> None:
+    """Production code must not import from ``tests`` or ``benchmarks``."""
+    targets = _PRODUCTION.forbidden
+    assert targets is not None
+    violations = {
+        _source_key(path): sorted(_external_package_imports(_tree(path), targets))
+        for path in _source_files()
+        if _external_package_imports(_tree(path), targets)
+    }
+    assert not violations, (
+        f"Production code must not import tests/benchmarks: {violations}"
     )
