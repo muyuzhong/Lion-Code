@@ -39,6 +39,12 @@ REMOVED_SKILL_COMMAND_SYMBOLS = frozenset(
 MCP_LIFECYCLE_CLASS_NAMES = frozenset({"McpConnection", "McpManager"})
 PROVIDER_SHIM_EXPORTS = ("CancellationToken", "ModelProvider")
 
+# Dynamic import calls that bypass static import analysis (import-linter / AST).
+DYNAMIC_IMPORT_CALLS = frozenset({"import_module", "__import__"})
+# Modules allowed to use dynamic imports.  Currently empty — adding a dynamic
+# import requires consciously extending this allowlist.
+DYNAMIC_IMPORT_ALLOWLIST: frozenset[str] = frozenset()
+
 
 def _source_files(*parts: str) -> tuple[Path, ...]:
     root = SOURCE_ROOT.joinpath(*parts)
@@ -168,11 +174,16 @@ def _self_fields_from_target(target: ast.expr) -> set[str]:
     return set()
 
 
+_PRIVATE_HISTORY_KEYWORDS = frozenset({
+    "messages", "history", "conversation", "transcript", "turns",
+})
+
+
 def _private_history_fields(tree: ast.Module) -> frozenset[str]:
     return frozenset(
         field
         for field in _self_fields(tree)
-        if "messages" in field.casefold() or "history" in field.casefold()
+        if any(kw in field.casefold() for kw in _PRIVATE_HISTORY_KEYWORDS)
     )
 
 
@@ -483,6 +494,53 @@ def _agent_harness_references(tree: ast.Module) -> frozenset[str]:
     return frozenset(references)
 
 
+def _dynamic_import_calls(tree: ast.Module) -> frozenset[str]:
+    """Detect ``importlib.import_module()`` and ``__import__()`` calls."""
+    calls: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # importlib.import_module(...) or module.import_module(...)
+        if isinstance(func, ast.Attribute) and func.attr == "import_module":
+            calls.add("import_module")
+        # import_module(...) (bare name, from importlib import import_module)
+        elif isinstance(func, ast.Name) and func.id == "import_module":
+            calls.add("import_module")
+        # __import__(...)
+        elif isinstance(func, ast.Name) and func.id == "__import__":
+            calls.add("__import__")
+    return frozenset(calls)
+
+
+# Modules where session storage path literals may appear.
+_SESSION_PATH_OWNERS = frozenset({"session_runtime/repository.py"})
+
+
+def _string_literals_containing(tree: ast.Module, needle: str) -> frozenset[str]:
+    """Return string literals in *tree* that contain *needle*."""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and needle in node.value
+        ):
+            found.add(node.value)
+    return frozenset(found)
+
+
+def _assignment_targets(tree: ast.Module, name: str) -> frozenset[str]:
+    """Return sites where *name* is assigned at module level."""
+    sites: set[str] = set()
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == name:
+                    sites.add(target.id)
+    return frozenset(sites)
+
+
 def test_core_does_not_import_upper_runtime_layers() -> None:
     violations = _forbidden_imports(
         _source_files("core"),
@@ -574,6 +632,49 @@ def test_jsonl_writer_primitives_do_not_escape_persistence_boundary() -> None:
     assert not violations, f"JSONL writer bypassed SessionRecorder: {violations}"
 
 
+def test_session_storage_path_literals_stay_in_repository() -> None:
+    """``.jsonl`` path literals must only appear in ``session_runtime/``."""
+    violations = {
+        _source_key(path): sorted(_string_literals_containing(_tree(path), ".jsonl"))
+        for path in _source_files()
+        if _source_key(path) not in _SESSION_PATH_OWNERS
+        and _string_literals_containing(_tree(path), ".jsonl")
+    }
+    assert not violations, (
+        f"Session storage path literals must stay in session_runtime/repository: "
+        f"{violations}"
+    )
+
+
+def test_session_dir_constant_has_single_definition() -> None:
+    """``SESSION_DIR`` must only be defined in ``session_runtime/repository.py``."""
+    sites: dict[str, frozenset[str]] = {}
+    for path in _source_files():
+        found = _assignment_targets(_tree(path), "SESSION_DIR")
+        if found:
+            sites[_source_key(path)] = found
+    assert sites == {"session_runtime/repository.py": frozenset({"SESSION_DIR"})}, (
+        f"SESSION_DIR must have a single owner: {sites}"
+    )
+
+
+def test_dynamic_imports_are_allowlisted() -> None:
+    """``importlib.import_module`` and ``__import__`` bypass static analysis.
+
+    They must not appear outside the explicit allowlist.
+    """
+    violations = {
+        _source_key(path): sorted(_dynamic_import_calls(_tree(path)))
+        for path in _source_files()
+        if _source_key(path) not in DYNAMIC_IMPORT_ALLOWLIST
+        and _dynamic_import_calls(_tree(path))
+    }
+    assert not violations, (
+        f"Dynamic imports bypass static architecture checks: {violations}. "
+        f"Add to DYNAMIC_IMPORT_ALLOWLIST if intentional."
+    )
+
+
 def test_memory_overlay_code_cannot_mutate_harness_messages() -> None:
     paths = (
         *_source_files("memory_runtime"),
@@ -663,6 +764,9 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
         "    def __init__(self) -> None:\n"
         "        self._messages = []\n"
         "        setattr(self, '_history', [])\n"
+        "        self._conversation = []\n"
+        "        self._transcript = []\n"
+        "        self._turns = []\n"
     )
     sink = ast.parse("def configure(ui):\n    return getattr(ui, 'set_sink')\n")
     writer = ast.parse("def create_writer():\n    return SessionRecorder()\n")
@@ -685,8 +789,17 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     old_skill = ast.parse("def parse_skill_invocation():\n    return '/skill:'\n")
     mcp_lifecycle = ast.parse("class McpClient:\n    pass\n")
     mcp_disconnect = ast.parse("def close(manager):\n    manager.disconnect_all()\n")
+    dynamic_importlib = ast.parse(
+        "import importlib\n"
+        "def load(name):\n    return importlib.import_module(name)\n"
+    )
+    dynamic_builtin = ast.parse("def load(name):\n    return __import__(name)\n")
+    jsonl_literal = ast.parse("path = 'session.jsonl'\n")
+    session_dir_assign = ast.parse("SESSION_DIR = Path.home() / 'sessions'\n")
 
-    assert _private_history_fields(provider) == frozenset({"_history", "_messages"})
+    assert _private_history_fields(provider) == frozenset({
+        "_conversation", "_history", "_messages", "_transcript", "_turns",
+    })
     assert _sink_symbols(sink) == frozenset({"set_sink"})
     assert _session_recorder_calls(writer).sites == {"create_writer"}
     assert _session_recorder_aliases(writer_alias) == frozenset({"Writer"})
@@ -706,6 +819,14 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     assert _mcp_lifecycle_classes(mcp_lifecycle) == frozenset({"McpClient"})
     assert _attribute_call_sites(mcp_disconnect, "disconnect_all") == frozenset(
         {"close"}
+    )
+    assert _dynamic_import_calls(dynamic_importlib) == frozenset({"import_module"})
+    assert _dynamic_import_calls(dynamic_builtin) == frozenset({"__import__"})
+    assert _string_literals_containing(jsonl_literal, ".jsonl") == frozenset(
+        {"session.jsonl"}
+    )
+    assert _assignment_targets(session_dir_assign, "SESSION_DIR") == frozenset(
+        {"SESSION_DIR"}
     )
 
 
