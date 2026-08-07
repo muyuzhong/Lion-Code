@@ -109,9 +109,16 @@ BOUNDARIES: tuple[Boundary, ...] = (
     Boundary(
         contract_name="TUI 只经 Application/Core 接触运行时",
         source_package="lion_code.tui",
-        allowed=frozenset({
-            "application", "config", "core", "prompt", "tui", "version",
-        }),
+        allowed=frozenset(
+            {
+                "application",
+                "config",
+                "core",
+                "prompt",
+                "tui",
+                "version",
+            }
+        ),
         allow_indirect=True,
     ),
     Boundary(

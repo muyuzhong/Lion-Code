@@ -5,7 +5,7 @@ import tomllib
 from collections.abc import Iterable
 from pathlib import Path
 
-from _boundaries import ALL_ROOTS, BOUNDARIES, Boundary
+from _boundaries import ALL_ROOTS, BOUNDARIES
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
@@ -174,9 +174,15 @@ def _self_fields_from_target(target: ast.expr) -> set[str]:
     return set()
 
 
-_PRIVATE_HISTORY_KEYWORDS = frozenset({
-    "messages", "history", "conversation", "transcript", "turns",
-})
+_PRIVATE_HISTORY_KEYWORDS = frozenset(
+    {
+        "messages",
+        "history",
+        "conversation",
+        "transcript",
+        "turns",
+    }
+)
 
 
 def _private_history_fields(tree: ast.Module) -> frozenset[str]:
@@ -790,16 +796,21 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     mcp_lifecycle = ast.parse("class McpClient:\n    pass\n")
     mcp_disconnect = ast.parse("def close(manager):\n    manager.disconnect_all()\n")
     dynamic_importlib = ast.parse(
-        "import importlib\n"
-        "def load(name):\n    return importlib.import_module(name)\n"
+        "import importlib\ndef load(name):\n    return importlib.import_module(name)\n"
     )
     dynamic_builtin = ast.parse("def load(name):\n    return __import__(name)\n")
     jsonl_literal = ast.parse("path = 'session.jsonl'\n")
     session_dir_assign = ast.parse("SESSION_DIR = Path.home() / 'sessions'\n")
 
-    assert _private_history_fields(provider) == frozenset({
-        "_conversation", "_history", "_messages", "_transcript", "_turns",
-    })
+    assert _private_history_fields(provider) == frozenset(
+        {
+            "_conversation",
+            "_history",
+            "_messages",
+            "_transcript",
+            "_turns",
+        }
+    )
     assert _sink_symbols(sink) == frozenset({"set_sink"})
     assert _session_recorder_calls(writer).sites == {"create_writer"}
     assert _session_recorder_aliases(writer_alias) == frozenset({"Writer"})
@@ -859,8 +870,7 @@ def test_all_roots_matches_filesystem() -> None:
 
     discovered = _discover_all_roots()
     assert ALL_ROOTS == discovered, (
-        f"ALL_ROOTS is stale; expected {sorted(discovered)}, "
-        f"got {sorted(ALL_ROOTS)}"
+        f"ALL_ROOTS is stale; expected {sorted(discovered)}, got {sorted(ALL_ROOTS)}"
     )
 
 
