@@ -39,21 +39,23 @@ def test_overlay_is_ephemeral_and_each_projection_contains_one_block() -> None:
     snapshot = messages[0].model_dump(mode="json")
     injector = MemoryContextInjector()
 
-    first, first_report = injector.inject(messages, [_overlay()])
-    second, second_report = injector.inject(messages, [_overlay()])
+    first, first_report = injector.inject(tuple(messages), [_overlay()])
+    second, second_report = injector.inject(tuple(messages), [_overlay()])
 
     assert messages[0].model_dump(mode="json") == snapshot
     assert "<relevant-memory>" not in messages[0].text
     assert first[-1].text.count("<relevant-memory>") == 1
     assert second[-1].text.count("<relevant-memory>") == 1
-    assert first_report.injected_paths == second_report.injected_paths == ("project.md",)
+    assert (
+        first_report.injected_paths == second_report.injected_paths == ("project.md",)
+    )
 
 
 def test_multimodal_user_content_keeps_the_image() -> None:
     image = ImageContent(data="encoded", mime_type="image/png")
     messages = [UserMessage(content=[TextContent(text="look"), image])]
 
-    projected, _ = MemoryContextInjector().inject(messages, [_overlay()])
+    projected, _ = MemoryContextInjector().inject(tuple(messages), [_overlay()])
 
     assert projected[0].content[1] == image
     assert projected[0].content[1] is not messages[0].content[1]
@@ -67,7 +69,7 @@ def test_overlay_never_splits_tool_call_and_result() -> None:
     )
     injector = MemoryContextInjector()
 
-    unresolved, report = injector.inject([call], [_overlay()])
+    unresolved, report = injector.inject((call,), [_overlay()])
     assert len(unresolved) == 1
     assert report.skipped_paths == ("project.md",)
 
@@ -76,7 +78,7 @@ def test_overlay_never_splits_tool_call_and_result() -> None:
         tool_name="read_file",
         content="result",
     )
-    complete, report = injector.inject([call, result], [_overlay()])
+    complete, report = injector.inject((call, result), [_overlay()])
     assert [message.role for message in complete] == [
         "assistant",
         "toolResult",
@@ -92,7 +94,7 @@ def test_injection_respects_byte_and_final_token_budgets() -> None:
     messages = [UserMessage(content="question")]
 
     projected, report = injector.inject(
-        messages,
+        tuple(messages),
         [_overlay("a.md", "1234"), _overlay("b.md", "5678")],
     )
     assert report.injected_paths == ("a.md",)
@@ -101,7 +103,7 @@ def test_injection_respects_byte_and_final_token_budgets() -> None:
 
     baseline_tokens = estimate_messages_tokens(messages)
     projected, report = injector.inject(
-        messages,
+        tuple(messages),
         [_overlay("large.md", "x" * 100)],
         max_tokens=baseline_tokens,
     )
@@ -111,7 +113,7 @@ def test_injection_respects_byte_and_final_token_budgets() -> None:
 
 def test_duplicate_overlay_path_is_injected_once() -> None:
     projected, report = MemoryContextInjector().inject(
-        [UserMessage(content="question")],
+        (UserMessage(content="question"),),
         [_overlay(), _overlay()],
     )
 
@@ -126,7 +128,7 @@ def test_project_and_session_layers_precede_and_outlive_auto_budget() -> None:
     )
 
     projected, report = injector.inject(
-        [UserMessage(content="question")],
+        (UserMessage(content="question"),),
         [
             _overlay("auto.md", "auto"),
             _overlay("session.md", "session", source="session"),

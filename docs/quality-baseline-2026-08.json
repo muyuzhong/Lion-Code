@@ -237,7 +237,7 @@
         "lion_code/dream.py:328:4:override",
         "lion_code/hooks.py:186:33:arg-type",
         "lion_code/hooks.py:553:26:attr-defined",
-        "lion_code/memory_runtime/injector.py:125:22:assignment",
+        "lion_code/memory_runtime/injector.py:128:22:assignment",
         "lion_code/prompt.py:188:22:assignment",
         "lion_code/prompt.py:225:17:call-overload",
         "lion_code/prompt.py:226:14:call-overload",
