@@ -20,6 +20,7 @@ from .memory_runtime import (
     MemoryInjectionReport,
     MemoryOverlay,
     ProviderTextQueryService,
+    ReadOnlyMessageSource,
 )
 from .project_identity import ProjectIdentity
 from .session_memory import (
@@ -49,7 +50,10 @@ class SessionMemoryHost(Protocol):
     """协调器使用的 Agent 窄协议，不持有 Provider 或 TUI。"""
 
     _aborted: bool
-    _core_runtime: Any
+
+    @property
+    def _core_runtime(self) -> ReadOnlyMessageSource: ...
+
     _session_repository: Any
     is_sub_agent: bool
     model: str

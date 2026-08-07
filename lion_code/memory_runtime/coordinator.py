@@ -135,7 +135,10 @@ class MemoryCoordinator:
         targets = set(filenames)
         target_names = {name.replace("\\", "/").rsplit("/", 1)[-1] for name in targets}
         for path in tuple(self._active):
-            if path in targets or path.replace("\\", "/").rsplit("/", 1)[-1] in target_names:
+            if (
+                path in targets
+                or path.replace("\\", "/").rsplit("/", 1)[-1] in target_names
+            ):
                 del self._active[path]
         self._already_surfaced = {
             path
