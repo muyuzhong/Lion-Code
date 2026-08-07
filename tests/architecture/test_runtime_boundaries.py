@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import ast
+import tomllib
 from collections.abc import Iterable
 from pathlib import Path
+
+from _boundaries import ALL_ROOTS, BOUNDARIES, Boundary
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
 
-CORE_FORBIDDEN_ROOTS = frozenset({"providers", "tooling", "application", "tui"})
-PROVIDER_ALLOWED_ROOTS = frozenset({"core", "providers"})
-TUI_ALLOWED_ROOTS = frozenset(
-    {"application", "config", "core", "prompt", "tui", "version"}
-)
+# Import-direction boundaries live in _boundaries.py (single source of truth).
+# AST tests and import-linter config both derive from those definitions.
+_CORE = BOUNDARIES[0]
+_PROVIDERS = BOUNDARIES[1]
+_APPLICATION = BOUNDARIES[2]
+_TUI = BOUNDARIES[3]
+_PRODUCTION = BOUNDARIES[4]
+
 LEGACY_MESSAGE_SYMBOLS = frozenset({"_anthropic_messages", "_openai_messages"})
 HARNESS_MUTATION_METHODS = frozenset({"clear_queues", "follow_up", "replace_messages"})
 SESSION_RECORDER_SITES = {
@@ -480,7 +486,7 @@ def _agent_harness_references(tree: ast.Module) -> frozenset[str]:
 def test_core_does_not_import_upper_runtime_layers() -> None:
     violations = _forbidden_imports(
         _source_files("core"),
-        forbidden=CORE_FORBIDDEN_ROOTS,
+        forbidden=_CORE.forbidden_roots,
     )
 
     assert not violations, f"Core imported an upper runtime layer: {violations}"
@@ -489,7 +495,7 @@ def test_core_does_not_import_upper_runtime_layers() -> None:
 def test_provider_product_imports_are_core_or_local() -> None:
     violations = _unexpected_imports(
         _source_files("providers"),
-        allowed=PROVIDER_ALLOWED_ROOTS,
+        allowed=_PROVIDERS.allowed_roots,
     )
 
     assert not violations, f"Provider crossed its Core boundary: {violations}"
@@ -498,7 +504,7 @@ def test_provider_product_imports_are_core_or_local() -> None:
 def test_tui_runtime_imports_stay_within_event_boundary() -> None:
     violations = _unexpected_imports(
         _source_files("tui"),
-        allowed=TUI_ALLOWED_ROOTS,
+        allowed=_TUI.allowed_roots,
     )
 
     assert not violations, f"TUI bypassed application/core events: {violations}"
@@ -700,4 +706,90 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     assert _mcp_lifecycle_classes(mcp_lifecycle) == frozenset({"McpClient"})
     assert _attribute_call_sites(mcp_disconnect, "disconnect_all") == frozenset(
         {"close"}
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unified boundary validation
+# ---------------------------------------------------------------------------
+
+
+def _external_package_imports(
+    tree: ast.Module, packages: frozenset[str]
+) -> frozenset[str]:
+    """Return top-level external package imports matching *packages*."""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                if top in packages:
+                    found.add(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            top = node.module.split(".")[0]
+            if top in packages:
+                found.add(node.module)
+    return frozenset(found)
+
+
+def test_all_roots_matches_filesystem() -> None:
+    """``ALL_ROOTS`` in ``_boundaries.py`` must match the actual source tree."""
+    from _boundaries import _discover_all_roots
+
+    discovered = _discover_all_roots()
+    assert ALL_ROOTS == discovered, (
+        f"ALL_ROOTS is stale; expected {sorted(discovered)}, "
+        f"got {sorted(ALL_ROOTS)}"
+    )
+
+
+def test_import_linter_config_matches_boundaries() -> None:
+    """Every import-linter contract in ``pyproject.toml`` must match the
+    corresponding ``Boundary`` definition in ``_boundaries.py``."""
+    pyproject = REPOSITORY_ROOT / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    contracts = data["tool"]["importlinter"]["contracts"]
+    lint_by_name: dict[str, dict] = {c["name"]: c for c in contracts}
+
+    assert set(lint_by_name) == {b.contract_name for b in BOUNDARIES}, (
+        f"Contract names mismatch:\n"
+        f"  import-linter: {sorted(lint_by_name)}\n"
+        f"  boundaries:    {sorted(b.contract_name for b in BOUNDARIES)}"
+    )
+
+    for boundary in BOUNDARIES:
+        contract = lint_by_name[boundary.contract_name]
+
+        assert contract["type"] == "forbidden", (
+            f"{boundary.contract_name}: expected type 'forbidden'"
+        )
+        assert contract["source_modules"] == [boundary.source_package], (
+            f"{boundary.contract_name}: source_modules mismatch"
+        )
+
+        expected_forbidden = sorted(boundary.import_linter_forbidden_modules)
+        actual_forbidden = sorted(contract["forbidden_modules"])
+        assert actual_forbidden == expected_forbidden, (
+            f"{boundary.contract_name}: forbidden_modules drift\n"
+            f"  expected ({len(expected_forbidden)}): {expected_forbidden}\n"
+            f"  actual   ({len(actual_forbidden)}): {actual_forbidden}"
+        )
+
+        expected_indirect = "True" if boundary.allow_indirect else "False"
+        assert contract.get("allow_indirect_imports", "False") == expected_indirect, (
+            f"{boundary.contract_name}: allow_indirect_imports mismatch"
+        )
+
+
+def test_production_code_does_not_import_tests_or_benchmarks() -> None:
+    """Production code must not import from ``tests`` or ``benchmarks``."""
+    targets = _PRODUCTION.forbidden
+    assert targets is not None
+    violations = {
+        _source_key(path): sorted(_external_package_imports(_tree(path), targets))
+        for path in _source_files()
+        if _external_package_imports(_tree(path), targets)
+    }
+    assert not violations, (
+        f"Production code must not import tests/benchmarks: {violations}"
     )
