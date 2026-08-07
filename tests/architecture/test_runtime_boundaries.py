@@ -45,6 +45,46 @@ DYNAMIC_IMPORT_CALLS = frozenset({"import_module", "__import__"})
 # import requires consciously extending this allowlist.
 DYNAMIC_IMPORT_ALLOWLIST: frozenset[str] = frozenset()
 
+# Frozen allowlist of self.* fields in provider files.  Any new field requires
+# updating this mapping to force conscious review of whether it constitutes
+# conversation history storage.
+PROVIDER_STATE_ALLOWLIST: dict[str, frozenset[str]] = {
+    "providers/anthropic.py": frozenset(
+        {
+            "_client",
+            "_config",
+            "_owns_client",
+            "arguments_parts",
+            "id",
+            "name",
+        }
+    ),
+    "providers/fake.py": frozenset({"_streams", "calls"}),
+    "providers/openai_compatible.py": frozenset(
+        {
+            "_client",
+            "_config",
+            "_content_parts",
+            "_finish_reason",
+            "_owns_client",
+            "_reasoning_items",
+            "_status",
+            "_thinking_parts",
+            "_thinking_signature",
+            "_tool_call_builders",
+            "_usage",
+            "arguments_final",
+            "arguments_parts",
+            "call_id",
+            "emitted_content",
+            "fatal",
+            "id",
+            "name",
+            "output_index",
+        }
+    ),
+}
+
 
 def _source_files(*parts: str) -> tuple[Path, ...]:
     root = SOURCE_ROOT.joinpath(*parts)
@@ -586,6 +626,36 @@ def test_providers_do_not_store_private_message_history() -> None:
     )
 
 
+def test_provider_state_fields_match_frozen_allowlist() -> None:
+    """Provider self.* fields must match the frozen allowlist.
+
+    Any new field requires updating PROVIDER_STATE_ALLOWLIST to force
+    conscious review of whether it constitutes conversation history.
+    """
+    unregistered: list[str] = []
+    drifted: dict[str, dict[str, list[str]]] = {}
+    for path in _source_files("providers"):
+        key = _source_key(path)
+        actual = _self_fields(_tree(path))
+        if not actual:
+            continue
+        if key not in PROVIDER_STATE_ALLOWLIST:
+            unregistered.append(key)
+            continue
+        expected = PROVIDER_STATE_ALLOWLIST[key]
+        added = actual - expected
+        removed = expected - actual
+        if added or removed:
+            drifted[key] = {
+                "added": sorted(added),
+                "removed": sorted(removed),
+            }
+    assert not unregistered, (
+        f"Provider files with state fields not in allowlist: {unregistered}"
+    )
+    assert not drifted, f"Provider state fields drifted from allowlist: {drifted}"
+
+
 def test_legacy_message_paths_are_confined_to_read_only_migration() -> None:
     locations = _legacy_symbol_locations(_source_files())
 
@@ -924,3 +994,102 @@ def test_production_code_does_not_import_tests_or_benchmarks() -> None:
     assert not violations, (
         f"Production code must not import tests/benchmarks: {violations}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Behavioral / runtime boundary tests
+# ---------------------------------------------------------------------------
+
+
+async def test_provider_does_not_retain_conversation_across_requests() -> None:
+    """A Provider must not retain or mix conversation messages between requests.
+
+    This is the runtime complement to the AST keyword/allowlist scans: it
+    verifies the *behavior* regardless of field names.
+    """
+    from lion_code.core.messages import AssistantMessage, UserMessage
+    from lion_code.core.provider_events import AssistantDoneEvent
+    from lion_code.providers.fake import FakeProvider
+
+    provider = FakeProvider(
+        [
+            [
+                AssistantDoneEvent(
+                    reason="stop",
+                    message=AssistantMessage(model="test", content="first"),
+                )
+            ],
+            [
+                AssistantDoneEvent(
+                    reason="stop",
+                    message=AssistantMessage(model="test", content="second"),
+                )
+            ],
+        ]
+    )
+
+    messages_1 = [UserMessage(content="hello")]
+    messages_2 = [UserMessage(content="world")]
+
+    async for _ in provider.stream_response(
+        model="test",
+        system="",
+        messages=messages_1,
+        tools=[],
+    ):
+        pass
+
+    async for _ in provider.stream_response(
+        model="test",
+        system="",
+        messages=messages_2,
+        tools=[],
+    ):
+        pass
+
+    # Each call saw its own messages, no cross-contamination.
+    assert len(provider.calls) == 2
+    assert provider.calls[0][2] == [UserMessage(content="hello")]
+    assert provider.calls[1][2] == [UserMessage(content="world")]
+
+    # Input lists were not mutated by the provider.
+    assert messages_1 == [UserMessage(content="hello")]
+    assert messages_2 == [UserMessage(content="world")]
+
+
+async def test_single_conversation_produces_one_jsonl_file() -> None:
+    """One conversation must produce exactly one session JSONL file.
+
+    No module outside the SessionRecorder / JsonlSessionStorage boundary
+    may create additional .jsonl files in the session directory.
+    """
+    import tempfile
+
+    from lion_code.core.messages import AssistantMessage, UserMessage
+    from lion_code.core.session import JsonlSessionStorage
+    from lion_code.session_runtime import SessionRecorder
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        storage = JsonlSessionStorage(tmp_path / "s1.jsonl")
+        recorder = SessionRecorder(
+            session_id="s1",
+            model="test",
+            thinking_level="disabled",
+            cwd=tmp_path,
+            storage=storage,
+        )
+
+        await recorder.record_message(UserMessage(content="hello"))
+        await recorder.record_message(AssistantMessage(model="test", content="hi"))
+        await recorder.record_message(UserMessage(content="bye"))
+        await recorder.record_message(AssistantMessage(model="test", content="bye"))
+
+        jsonl_files = list(tmp_path.glob("*.jsonl"))
+        assert len(jsonl_files) == 1, (
+            f"Expected 1 JSONL file, found {len(jsonl_files)}: {jsonl_files}"
+        )
+
+        entries = await storage.read_all()
+        message_entries = [e for e in entries if e.type == "message"]
+        assert len(message_entries) == 4
