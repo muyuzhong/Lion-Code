@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Check single-writer/read-view/command mutation rules, Plan/Permission separation, host boundaries, import contracts, validation matrix, and architecture enforcement."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check focused/full validation, source comments, regression tests, dependency changes, and truthful spec synchronization."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit the full Plan transaction across Agent, Permission, ToolRuntime, lifecycle, context reset, Application, and TUI."}
+{"file":".trellis/tasks/08-09-plan-runtime-ownership/research/current-plan-ownership.md","reason":"Compare the implementation against the complete writer/reader inventory, behavior matrix, regression gaps, and explicit out-of-scope boundary."}
