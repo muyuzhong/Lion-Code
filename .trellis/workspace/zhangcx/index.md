@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 26
-- **Last Active**: 2026-08-04
+- **Total Sessions**: 27
+- **Last Active**: 2026-08-09
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~968 | Active |
+| `journal-1.md` | ~989 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 27 | 2026-08-09 | 完成 Session 与 Cancellation 状态所有权迁移 | `2b77174` | `master` |
 | 26 | 2026-08-04 | 完成 Agent 运行时拆分路线验收 | `921f5b7` | `muyuzhong/phase3-subagent-factory` |
 | 25 | 2026-08-04 | 收敛 Agent Runtime 协调 | `37385e3` | `muyuzhong/phase3-subagent-factory` |
 | 24 | 2026-08-04 | 完成 S5 Agent 生命周期提取 | `9874f28` | `muyuzhong/phase3-subagent-factory` |

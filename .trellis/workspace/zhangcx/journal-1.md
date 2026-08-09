@@ -966,3 +966,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 27: 完成 Session 与 Cancellation 状态所有权迁移
+
+**Date**: 2026-08-09
+**Task**: 完成 Session 与 Cancellation 状态所有权迁移
+**Branch**: `master`
+
+### Summary
+
+建立 SessionIdentityState、ExecutionControl 与共享 CancellationToken，删除 Agent 和 ToolContext 镜像状态，补齐架构契约及回归测试；全量 602 passed。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2b77174` | (see git log) |
+
+### Status
+
+[OK] **Completed**
