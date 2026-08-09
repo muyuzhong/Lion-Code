@@ -41,6 +41,11 @@ from .memory_runtime import (
     MemoryOverlay,
 )
 from .observers import TerminalRenderer
+from .permission_state import (
+    PermissionController,
+    PermissionMode,
+    PermissionState,
+)
 from .project_identity import ProjectIdentity, resolve_project_identity
 from .prompt import (
     build_dynamic_system_context,
@@ -117,7 +122,7 @@ class Agent:
     def __init__(
         self,
         *,
-        permission_mode: str = "default",
+        permission_mode: PermissionMode = "default",
         model: str = "claude-opus-4-6",
         api_base: str | None = None,
         anthropic_base_url: str | None = None,
@@ -139,7 +144,9 @@ class Agent:
         terminal_output: bool = True,
         mcp_enabled: bool = True,
     ):
-        self.permission_mode = permission_mode
+        self._permission_controller = PermissionController(
+            PermissionState(mode=permission_mode)
+        )
         self.thinking = thinking
         self.model = model
         self.use_openai = bool(api_base)
@@ -183,11 +190,8 @@ class Agent:
         # 最近一次 chat/run 的终止原因，供 run() 结构化返回；chat 自身不读取。
         self._last_stop_reason: str | None = None
 
-        # 仅缓存用户已确认的具体路径，不缓存宽泛的确认原因。
-        self._confirmed_paths: set[str] = set()
-
         # Plan 模式需保存进入前的权限模式，退出时恢复。
-        self._pre_plan_mode: str | None = None
+        self._pre_plan_mode: PermissionMode | None = None
         self._plan_file_path: str | None = None
         self._plan_approval_fn: Callable[[str], Awaitable[dict]] | None = None
         self._pending_core_context_reset: str | None = None
@@ -221,14 +225,13 @@ class Agent:
             cwd=Path.cwd(),
             controller=self,
             registry=self.tool_registry,
-            permission_mode=self.permission_mode,
+            permission=self._permission_controller,
             plan_file_path=self._plan_file_path,
             read_file_state=self._read_file_state,
             confirm_fn=self._confirm_dangerous,
             hooks=self._pre_tool_use_hooks,
             confirm_hook_trust=self._confirm_hook_trust,
             auto_permission_fn=self._classify_tool_call,
-            confirmed_paths=self._confirmed_paths,
         )
         self._session_memory_coord = SessionMemoryCoordinator(
             self,
@@ -243,7 +246,10 @@ class Agent:
             [
                 CancellationMiddleware(),
                 PreToolHookMiddleware(),
-                PermissionMiddleware(self._permission_policy),
+                PermissionMiddleware(
+                    self._permission_policy,
+                    self._permission_controller,
+                ),
                 ReadFreshnessMiddleware(),
                 ResultPolicyMiddleware(self._result_store),
                 AuditMiddleware(),
@@ -390,6 +396,12 @@ class Agent:
     @property
     def session_start_time(self) -> str:
         return self._session_state.started_at
+
+    @property
+    def permission_mode(self) -> PermissionMode:
+        """返回当前权限模式的只读视图。"""
+
+        return self._permission_controller.mode
 
     @property
     def is_aborted(self) -> bool:
@@ -609,22 +621,20 @@ class Agent:
 
     def toggle_plan_mode(self) -> str:
         if self.permission_mode == "plan":
-            self.permission_mode = self._pre_plan_mode or "default"
+            self._permission_controller.set_mode(self._pre_plan_mode or "default")
             self._pre_plan_mode = None
             self._plan_file_path = None
             self._system_prompt = self._base_system_prompt
-            self.tool_context.permission_mode = self.permission_mode
             self.tool_context.plan_file_path = self._plan_file_path
             self._emit_notice(f"Exited plan mode → {self.permission_mode} mode")
             return self.permission_mode
         else:
             self._pre_plan_mode = self.permission_mode
-            self.permission_mode = "plan"
+            self._permission_controller.set_mode("plan")
             self._plan_file_path = self._generate_plan_file_path()
             self._system_prompt = (
                 self._base_system_prompt + self._build_plan_mode_prompt()
             )
-            self.tool_context.permission_mode = self.permission_mode
             self.tool_context.plan_file_path = self._plan_file_path
             self._emit_notice(f"Entered plan mode. Plan file: {self._plan_file_path}")
             return "plan"
@@ -975,7 +985,7 @@ class Agent:
             "terminal_output": self._terminal_output,
         }
 
-    def _child_permission_mode(self) -> str:
+    def _child_permission_mode(self) -> PermissionMode:
         """确定子 Agent 继承的权限模式。
 
         plan 与 auto 必须向下传递；否则默认 bypassPermissions 会让主模型借子 Agent
@@ -1105,7 +1115,6 @@ class Agent:
         inp: dict,
         tool_call_id: str = "",
     ) -> str:
-        self.tool_context.permission_mode = self.permission_mode
         self.tool_context.plan_file_path = self._plan_file_path
         result = await self.tool_runtime.execute(
             tool_call_id=tool_call_id,
@@ -1217,12 +1226,11 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
             if self.permission_mode == "plan":
                 return "Already in plan mode."
             self._pre_plan_mode = self.permission_mode
-            self.permission_mode = "plan"
+            self._permission_controller.set_mode("plan")
             self._plan_file_path = self._generate_plan_file_path()
             self._system_prompt = (
                 self._base_system_prompt + self._build_plan_mode_prompt()
             )
-            self.tool_context.permission_mode = self.permission_mode
             self.tool_context.plan_file_path = self._plan_file_path
             self._emit_notice(
                 "Entered plan mode (read-only). Plan file: " + self._plan_file_path
@@ -1250,6 +1258,7 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                     )
 
                 # 根据用户选择确定退出 Plan 后的权限模式。
+                target_mode: PermissionMode
                 if choice == "clear-and-execute":
                     target_mode = "acceptEdits"
                 elif choice == "execute":
@@ -1258,12 +1267,11 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                     target_mode = self._pre_plan_mode or "default"
 
                 # 先完整退出 Plan，再把批准后的计划交回模型执行。
-                self.permission_mode = target_mode
+                self._permission_controller.set_mode(target_mode)
                 self._pre_plan_mode = None
                 saved_plan_path = self._plan_file_path
                 self._plan_file_path = None
                 self._system_prompt = self._base_system_prompt
-                self.tool_context.permission_mode = self.permission_mode
                 self.tool_context.plan_file_path = self._plan_file_path
 
                 if choice == "clear-and-execute":
@@ -1289,11 +1297,10 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
                 )
 
             # 子 Agent 等无审批回调场景直接恢复原权限模式，不伪造用户批准。
-            self.permission_mode = self._pre_plan_mode or "default"
+            self._permission_controller.set_mode(self._pre_plan_mode or "default")
             self._pre_plan_mode = None
             self._plan_file_path = None
             self._system_prompt = self._base_system_prompt
-            self.tool_context.permission_mode = self.permission_mode
             self.tool_context.plan_file_path = self._plan_file_path
             self._emit_notice(
                 "Exited plan mode. Restored to " + self.permission_mode + " mode."

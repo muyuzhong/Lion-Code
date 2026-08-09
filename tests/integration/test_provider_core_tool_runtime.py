@@ -20,6 +20,7 @@ import httpx
 from lion_code.adapters import adapt_active_tools
 from lion_code.core import AgentHarness, AgentHarnessConfig
 from lion_code.core.cancellation import CancellationToken
+from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.providers.config import OpenAICompatibleConfig
 from lion_code.providers.openai_compatible import OpenAICompatibleProvider
 from lion_code.session_identity import SessionIdentityState
@@ -40,7 +41,7 @@ def _context(registry: ToolRegistry) -> ToolContext:
         cwd=Path.cwd(),
         controller=_Controller(),
         registry=registry,
-        permission_mode="default",
+        permission=PermissionController(PermissionState("default")),
         plan_file_path=None,
         read_file_state={},
     )

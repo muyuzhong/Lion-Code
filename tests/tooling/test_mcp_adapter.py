@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 from lion_code.agent import Agent
 from lion_code.core.cancellation import CancellationToken
 from lion_code.mcp_client import DiscoveredMcpTool, McpManager
+from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.environment import ToolEnvironment
@@ -35,14 +36,14 @@ def _definition() -> DiscoveredMcpTool:
     )
 
 
-def _context(registry, *, confirm_fn=None):
+def _context(registry, *, confirm_fn=None, permission=None):
     return ToolContext(
         session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
         cancellation=CancellationToken(),
         cwd=Path.cwd(),
         controller=object(),
         registry=registry,
-        permission_mode="default",
+        permission=permission or PermissionController(PermissionState("default")),
         plan_file_path=None,
         read_file_state={},
         confirm_fn=confirm_fn,
@@ -90,10 +91,11 @@ class TestMcpAdapter(unittest.IsolatedAsyncioTestCase):
         tool = create_mcp_tool(manager, _definition())
         registry = ToolRegistry()
         registry.register(tool)
+        permission = PermissionController(PermissionState("default"))
         runtime = ToolRuntime(
             registry,
-            _context(registry),
-            [PermissionMiddleware(PermissionPolicy())],
+            _context(registry, permission=permission),
+            [PermissionMiddleware(PermissionPolicy(), permission)],
         )
 
         result = await runtime.execute(

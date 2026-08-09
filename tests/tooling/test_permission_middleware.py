@@ -7,6 +7,11 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from lion_code.core.cancellation import CancellationToken
+from lion_code.permission_state import (
+    PermissionController,
+    PermissionMode,
+    PermissionState,
+)
 from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.middleware import PermissionMiddleware
@@ -31,21 +36,38 @@ def _tool(name: str, capabilities: ToolCapabilities, executed: list[str]) -> Lio
     )
 
 
-def _runtime(tool, *, mode, policy, confirm_fn=None):
+def _runtime(
+    tool,
+    *,
+    mode: PermissionMode,
+    policy,
+    confirm_fn=None,
+    auto_permission_fn=None,
+):
     registry = ToolRegistry()
     registry.register(tool)
+    permission = PermissionController(PermissionState(mode))
     context = ToolContext(
         session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
         cancellation=CancellationToken(),
         cwd=policy.cwd,
         controller=object(),
         registry=registry,
-        permission_mode=mode,
+        permission=permission,
         plan_file_path=None,
         read_file_state={},
         confirm_fn=confirm_fn,
+        auto_permission_fn=auto_permission_fn,
     )
-    return ToolRuntime(registry, context, [PermissionMiddleware(policy)]), context
+    return (
+        ToolRuntime(
+            registry,
+            context,
+            [PermissionMiddleware(policy, permission)],
+        ),
+        context,
+        permission,
+    )
 
 
 class TestPermissionMiddleware(unittest.IsolatedAsyncioTestCase):
@@ -62,7 +84,7 @@ class TestPermissionMiddleware(unittest.IsolatedAsyncioTestCase):
                 encoding="utf-8",
             )
             policy = PermissionPolicy(home=Path(home_dir), cwd=Path(cwd_dir))
-            runtime, _ = _runtime(
+            runtime, _, _ = _runtime(
                 _tool("run_shell", ToolCapabilities(executes_process=True), executed),
                 mode="bypassPermissions",
                 policy=policy,
@@ -80,7 +102,7 @@ class TestPermissionMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_plan_mode_blocks_mutating_tool(self):
         executed = []
         policy = PermissionPolicy()
-        runtime, context = _runtime(
+        runtime, context, _ = _runtime(
             _tool("write_file", ToolCapabilities(mutates_workspace=True), executed),
             mode="plan",
             policy=policy,
@@ -100,7 +122,7 @@ class TestPermissionMiddleware(unittest.IsolatedAsyncioTestCase):
         executed = []
         confirm = AsyncMock(return_value=True)
         policy = PermissionPolicy()
-        runtime, _ = _runtime(
+        runtime, _, permission = _runtime(
             _tool(
                 "external",
                 ToolCapabilities(requires_confirmation=True),
@@ -120,7 +142,66 @@ class TestPermissionMiddleware(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result.is_error)
 
         confirm.assert_awaited_once()
+        self.assertTrue(permission.is_confirmed("use tool: external"))
         self.assertEqual(executed, ["external", "external"])
+
+    async def test_auto_confirmation_is_not_cached(self):
+        executed = []
+        confirm = AsyncMock(return_value=True)
+        classify = AsyncMock(
+            return_value={"action": "confirm", "message": "use external"}
+        )
+        runtime, _, permission = _runtime(
+            _tool(
+                "external",
+                ToolCapabilities(requires_confirmation=True),
+                executed,
+            ),
+            mode="auto",
+            policy=PermissionPolicy(),
+            confirm_fn=confirm,
+            auto_permission_fn=classify,
+        )
+
+        for call_id in ("call-1", "call-2"):
+            result = await runtime.execute(
+                tool_call_id=call_id,
+                name="external",
+                arguments={},
+            )
+            self.assertFalse(result.is_error)
+
+        self.assertEqual(confirm.await_count, 2)
+        self.assertEqual(classify.await_count, 2)
+        self.assertFalse(permission.is_confirmed("use external"))
+        self.assertEqual(executed, ["external", "external"])
+
+    async def test_existing_context_observes_live_mode_change(self):
+        executed = []
+        confirm = AsyncMock(return_value=False)
+        runtime, context, permission = _runtime(
+            _tool(
+                "external",
+                ToolCapabilities(requires_confirmation=True),
+                executed,
+            ),
+            mode="default",
+            policy=PermissionPolicy(),
+            confirm_fn=confirm,
+        )
+
+        permission.set_mode("bypassPermissions")
+        result = await runtime.execute(
+            tool_call_id="call-1",
+            name="external",
+            arguments={},
+        )
+
+        self.assertIs(context.permission, permission)
+        self.assertEqual(context.permission.mode, "bypassPermissions")
+        self.assertFalse(result.is_error)
+        confirm.assert_not_awaited()
+        self.assertEqual(executed, ["external"])
 
 
 if __name__ == "__main__":

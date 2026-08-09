@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from ..hooks import HookOutcome, run_pre_tool_use_hooks
+from ..permission_state import PermissionConfirmationSink
 from .context import ToolContext
 from .permission import PermissionDecision, PermissionPolicy
 from .result_store import ResultStore
@@ -102,8 +103,13 @@ class PreToolHookMiddleware:
 class PermissionMiddleware:
     phase: Literal["pre"] = "pre"
 
-    def __init__(self, policy: PermissionPolicy):
+    def __init__(
+        self,
+        policy: PermissionPolicy,
+        confirmations: PermissionConfirmationSink,
+    ) -> None:
         self.policy = policy
+        self.confirmations = confirmations
 
     async def _decision(
         self,
@@ -114,17 +120,17 @@ class PermissionMiddleware:
         hard = self.policy.check_hard_boundaries(
             tool=tool,
             arguments=arguments,
-            mode=context.permission_mode,
+            mode=context.permission.mode,
             plan_file_path=context.plan_file_path,
         )
         if hard is not None:
             return hard
 
-        if context.permission_mode != "auto":
+        if context.permission.mode != "auto":
             return self.policy.check(
                 tool=tool,
                 arguments=arguments,
-                mode=context.permission_mode,
+                mode=context.permission.mode,
                 plan_file_path=context.plan_file_path,
             )
 
@@ -163,8 +169,8 @@ class PermissionMiddleware:
                     content="Confirmation unavailable.",
                     is_error=True,
                 )
-            cacheable = context.permission_mode != "auto"
-            if not cacheable or decision.message not in context.confirmed_paths:
+            cacheable = context.permission.mode != "auto"
+            if not cacheable or not context.permission.is_confirmed(decision.message):
                 approved = await context.confirm_fn(decision.message)
                 if not approved:
                     return ToolResult(
@@ -172,7 +178,7 @@ class PermissionMiddleware:
                         is_error=True,
                     )
                 if cacheable:
-                    context.confirmed_paths.add(decision.message)
+                    self.confirmations.confirm(decision.message)
 
         return await call_next()
 

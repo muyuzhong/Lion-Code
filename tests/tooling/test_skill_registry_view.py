@@ -128,7 +128,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             api_base="https://new.example.test/v1",
             api_key="new-key",
         )
-        parent.permission_mode = "auto"
+        parent._permission_controller.set_mode("auto")
         skill_result = {
             "context": "fork",
             "allowed_tools": ["read_file"],
@@ -150,7 +150,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             )
             agent_kwargs = dict(_ChildAgent.created_with)
 
-            parent.permission_mode = "plan"
+            parent._permission_controller.set_mode("plan")
             await parent._execute_skill_tool(
                 {"skill_name": "research", "args": "find docs"}
             )
@@ -162,6 +162,15 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(kwargs["api_key"], "new-key")
         self.assertEqual(agent_kwargs["permission_mode"], "auto")
         self.assertEqual(skill_kwargs["permission_mode"], "plan")
+
+    async def test_permission_mode_is_a_read_only_facade(self):
+        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
+            parent = Agent(api_key="test-key", permission_mode="auto")
+
+        with self.assertRaises(AttributeError):
+            setattr(parent, "permission_mode", "plan")
+
+        self.assertEqual(parent.permission_mode, "auto")
 
     async def test_agent_tool_error_emits_end_before_closing_without_charging_usage(self):
         with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):

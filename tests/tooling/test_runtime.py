@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from lion_code.core.cancellation import CancellationToken
+from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
@@ -22,7 +23,7 @@ def _context(registry):
         cwd=Path.cwd(),
         controller=_Controller(),
         registry=registry,
-        permission_mode="default",
+        permission=PermissionController(PermissionState("default")),
         plan_file_path=None,
         read_file_state={},
     )
@@ -48,7 +49,7 @@ class TestToolRuntime(unittest.IsolatedAsyncioTestCase):
             cwd=Path.cwd(),
             controller=_Controller(),
             registry=registry,
-            permission_mode="default",
+            permission=PermissionController(PermissionState("default")),
             plan_file_path=None,
             read_file_state={},
         )

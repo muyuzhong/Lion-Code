@@ -748,6 +748,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 terminal_output=False,
             )
         agent._mcp_initialized = True
+        permission = agent.tool_context.permission
         agent.tool_registry.activate("exit_plan_mode")
         plan_path = Path(self._temp_dir.name) / "approved-plan.md"
         plan_path.write_text("1. change code\n2. run tests", encoding="utf-8")
@@ -768,7 +769,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             ["user", "assistant"],
         )
         self.assertEqual(agent._core_runtime.messages[-1].text, "implemented")
-        self.assertEqual(agent.tool_context.permission_mode, "acceptEdits")
+        self.assertIs(agent.tool_context.permission, permission)
+        self.assertEqual(permission.mode, "acceptEdits")
+        self.assertEqual(agent.permission_mode, "acceptEdits")
 
         state = await self._session_repository.load(agent.session_id)
         self.assertEqual(

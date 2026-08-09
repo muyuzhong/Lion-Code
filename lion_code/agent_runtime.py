@@ -50,6 +50,7 @@ from lion_code.memory_runtime import (
     ReadOnlyMessageSource,
 )
 from lion_code.observers import TerminalRenderer, UsageObserver
+from lion_code.permission_state import PermissionMode
 from lion_code.providers.thinking import ThinkingLevel
 from lion_code.session_identity import SessionIdentityState
 from lion_code.session_lifecycle import SessionLifecycle
@@ -252,7 +253,6 @@ class RuntimeIdentityHost(Protocol):
 class SessionStateHost(Protocol):
     """会话标识、仓库、Plan 模式与工具环境所需的宿主边界。"""
 
-    permission_mode: str
     _plan_file_path: str | None
     _pending_core_context_reset: str | None
     _base_system_prompt: str
@@ -262,6 +262,9 @@ class SessionStateHost(Protocol):
 
     @property
     def session_state(self) -> SessionIdentityState: ...
+
+    @property
+    def permission_mode(self) -> PermissionMode: ...
 
     def _generate_plan_file_path(self) -> str: ...
 

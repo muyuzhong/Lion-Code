@@ -1,10 +1,11 @@
-# Runtime, Provider, Session, Memory, and Frontend Boundaries
+# Runtime, Provider, Permission, Session, Memory, and Frontend Boundaries
 
 ## 1. Scope / Trigger
 
 Use this contract when changing Agent construction, Provider configuration, child
-agents, project identity, memory boundaries, session persistence or migration, or a
-frontend that consumes Agent output.
+agents, permission ownership or policy consumption, project identity, memory
+boundaries, session persistence or migration, or a frontend that consumes Agent
+output.
 These layers share one canonical Core history; adding a second message store, writer,
 or process-global output bridge is an architecture regression.
 
@@ -39,6 +40,34 @@ class SessionView(Protocol):
 
 class SessionIdentityState:
     def reset(self, id: str, started_at: str) -> None: ...
+
+PermissionMode = Literal[
+    "default",
+    "acceptEdits",
+    "bypassPermissions",
+    "dontAsk",
+    "plan",
+    "auto",
+]
+
+class PermissionView(Protocol):
+    @property
+    def mode(self) -> PermissionMode: ...
+    def is_confirmed(self, value: str) -> bool: ...
+
+class PermissionConfirmationSink(Protocol):
+    def confirm(self, value: str) -> None: ...
+
+class PermissionState:
+    mode: PermissionMode
+    confirmed_values: set[str]
+
+class PermissionController:
+    @property
+    def mode(self) -> PermissionMode: ...
+    def set_mode(self, mode: PermissionMode) -> None: ...
+    def is_confirmed(self, value: str) -> bool: ...
+    def confirm(self, value: str) -> None: ...
 
 def Agent.configure_api(
     *,
@@ -118,6 +147,14 @@ Core stream, compaction, explicit abort, and timeout side effects. Standalone
 `AgentHarness` owns its local token only when no external cancellation view is
 supplied.
 
+For permission state, `PermissionController` owns one `PermissionState` containing
+the active `PermissionMode` and `confirmed_values`. `Agent.permission_mode` is a
+read-only facade, `ToolContext.permission` is the same live `PermissionView`, and
+`PermissionMiddleware` receives only a `PermissionConfirmationSink` for cache writes.
+Plan transitions remain orchestrated by `Agent` but change mode only through
+`PermissionController.set_mode()`; no consumer stores or synchronizes a primitive
+mode or confirmation-set mirror.
+
 ### Runtime and Provider
 
 - Every `Agent` composes one `AgentRuntimeCoordinator`, which owns exactly one
@@ -155,6 +192,11 @@ supplied.
   `CancellationToken` reaches the Provider stream and Tool adapter. `ToolContext`
   stores `session: SessionView` and `cancellation: CancellationView`, never
   `session_id`, `cancellation_fn`, or a synthesized callback mirror.
+- Permission policy remains stateless. It receives `PermissionMode` plus the current
+  Plan file path and preserves explicit-deny and Plan hard-boundary precedence.
+  Middleware reads `ToolContext.permission.mode` and `is_confirmed()` for every call;
+  default-mode approvals are cached through the narrow confirmation sink, while Auto
+  classifier confirmations are deliberately not cached.
 - `Agent._create_provider(**kwargs)` is the required host factory boundary. It reads
   `lion_code.agent.create_provider` at call time, so existing patches of that name
   affect initial construction, Provider swaps, and Thinking rebuilds. Do not import
@@ -279,6 +321,12 @@ supplied.
 | Explicit abort before Provider or Tool work starts | The shared token remains cancelled and the operation terminates as `aborted` |
 | Timeout during a run | Use the shared cancellation command but report `timeout`, not `aborted` |
 | New chat after an aborted run | Reset cancellation at the operation boundary before setup and complete normally |
+| Controller changes mode after ToolContext construction | The existing `PermissionView` observes the new mode without replacement or synchronization |
+| Repeated default-mode confirmation reason | Ask once, then read the Controller-owned confirmation cache |
+| Repeated Auto classifier `confirm` decision | Ask every time and do not populate the confirmation cache |
+| Plan enter, exit, approval, or clear | Preserve the current Plan transaction while changing permission mode only through the Controller |
+| Child construction | Inherit `plan` and `auto`; map every other parent mode to `bypassPermissions` |
+| Hook trust in `dontAsk` | Continue to deny trust without treating tool permission bypass as Hook trust |
 
 ## 5. Good / Base / Bad Cases
 
@@ -315,6 +363,14 @@ supplied.
   recreates mirrored state and makes lifecycle transitions require manual sync.
 - Bad: resetting cancellation inside an async generator can erase a cancel command
   issued after generator construction but before its first iteration.
+- Good: an existing `ToolContext` observes `controller.set_mode("plan")` through its
+  live `PermissionView`, and middleware records a default approval through
+  `PermissionConfirmationSink.confirm()`.
+- Base: `Agent.permission_mode`, Application, TUI, Session Memory, and child-agent
+  construction read the current typed facade without receiving `PermissionState`.
+- Bad: assigning `Agent.permission_mode`, copying it into
+  `ToolContext.permission_mode`, or mutating `confirmed_values` in middleware creates
+  multiple writers and requires manual synchronization.
 
 ## 6. Executable Enforcement
 
@@ -328,8 +384,8 @@ python -m pytest -q tests/architecture/test_runtime_boundaries.py
 
 pyproject.toml contains these five import-linter contracts:
 
-- core cannot depend on providers, tooling, application, or tui, including
-  indirect paths.
+- core cannot depend on providers, tooling, permission state, application, or tui,
+  including indirect paths.
 - providers cannot depend on any Lion runtime layer other than core; direct
   import validation also requires provider source to use only core or its own
   package.
@@ -359,6 +415,10 @@ also rejects patterns an import graph cannot express:
 - `Agent._aborted`, `ToolContext.session_id`, `ToolContext.cancellation_fn`, duplicate
   Provider/Tool cancellation token protocols, or Session identity reset calls outside
   `SessionLifecycle`.
+- `Agent.permission_mode` or `_confirmed_paths` instance fields,
+  `ToolContext.permission_mode` or `confirmed_paths`, Permission state construction
+  outside the Agent composition root, direct state writes outside
+  `permission_state.py`, or `set_mode()` calls outside Agent Plan transitions.
 
 When a legitimate architecture move requires a new exception, change the
 runtime code, this contract, the AST allowlist, and the focused test in one
@@ -387,6 +447,17 @@ exception, or silently broaden an allowlist to make a regression pass.
 - `tests/integration/test_agent_core_runtime.py`: clear/restore updates the single
   Session identity, ToolContext observes the live view, and a cancelled run can be
   followed by a successful turn.
+- `tests/tooling/test_permission_policy.py` and
+  `tests/tooling/test_permission_middleware.py`: explicit deny and Plan hard
+  boundaries, live mode reads, default confirmation caching, Auto non-caching, and
+  narrow confirmation writes.
+- `tests/tooling/test_skill_registry_view.py`, `tests/test_hooks.py`, and
+  `tests/integration/test_agent_core_runtime.py`: read-only Agent facade, live child
+  inheritance, `dontAsk` Hook trust, and Plan approval transitions without
+  ToolContext permission synchronization.
+- `tests/architecture/test_runtime_boundaries.py`: the PermissionState/Controller
+  composition count, removed mirrors, write-site confinement, middleware port shape,
+  and Core/Provider import ownership.
 - `tests/tui/test_tui_app.py`: two streaming turns, tool-row identity, one notice per
   action, no normal-delta full redraw, and shared Session Memory command dispatch.
 - tests/architecture/test_runtime_boundaries.py: import ownership, Provider private
@@ -414,6 +485,9 @@ self._openai_messages = []
 self._anthropic_messages = []
 self.tool_context.session_id = self.session_id
 self.tool_context.cancellation_fn = lambda: self._aborted
+self.permission_mode = "plan"
+self.tool_context.permission_mode = self.permission_mode
+self.tool_context.confirmed_paths.add(reason)
 ui.set_sink(tui_sink)
 legacy_path.replace(jsonl_path)
 # agent_lifecycle.py: from .providers.factory import create_provider
@@ -425,6 +499,9 @@ legacy_path.replace(jsonl_path)
 history = agent.core_runtime.messages
 session_id = agent.tool_context.session.id
 cancelled = agent.tool_context.cancellation.cancelled
+permission_mode = agent.tool_context.permission.mode
+confirmed = agent.tool_context.permission.is_confirmed(reason)
+self._permission_controller.set_mode("plan")
 session = LionCodingSession(agent, terminal_output=False)
 session.set_notice_fn(app_notice)
 storage = repository.storage_for(session_id)

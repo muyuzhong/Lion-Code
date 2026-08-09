@@ -12,6 +12,7 @@ from .agent import Agent
 from .application.session import LionCodingSession
 from .config import load_api_config
 from .memory import list_memories
+from .permission_state import PermissionMode
 from .skills import (
     discover_skills,
     execute_skill,
@@ -51,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _resolve_permission_mode(args: argparse.Namespace) -> str:
+def _resolve_permission_mode(args: argparse.Namespace) -> PermissionMode:
     if args.yolo:
         return "bypassPermissions"
     if args.plan:

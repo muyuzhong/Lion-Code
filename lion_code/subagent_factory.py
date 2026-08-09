@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
+from .permission_state import PermissionMode
 from .subagent import get_sub_agent_config
 from .tooling import ToolEnvironment, ToolRegistry
 from .tooling.selection import ToolSelectionPolicy, select_tools
@@ -20,7 +21,7 @@ class SubagentFactoryHost(Protocol):
 
     def _child_api_kwargs(self) -> dict[str, Any]: ...
 
-    def _child_permission_mode(self) -> str: ...
+    def _child_permission_mode(self) -> PermissionMode: ...
 
 
 class SubagentFactory:

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from lion_code.core.cancellation import CancellationToken
 from lion_code.hooks import HookChainResult, HookOutcome, HookResult
+from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.middleware import PermissionMiddleware, PreToolHookMiddleware
@@ -36,13 +37,14 @@ class TestHookMiddleware(unittest.IsolatedAsyncioTestCase):
         )
         registry = ToolRegistry()
         registry.register(tool)
+        permission = PermissionController(PermissionState("default"))
         context = ToolContext(
             session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
             cancellation=CancellationToken(),
             cwd=Path.cwd(),
             controller=object(),
             registry=registry,
-            permission_mode="default",
+            permission=permission,
             plan_file_path=None,
             read_file_state={},
             hooks=[object()],
@@ -62,7 +64,10 @@ class TestHookMiddleware(unittest.IsolatedAsyncioTestCase):
         runtime = ToolRuntime(
             registry,
             context,
-            [PreToolHookMiddleware(), PermissionMiddleware(_FailingPolicy())],
+            [
+                PreToolHookMiddleware(),
+                PermissionMiddleware(_FailingPolicy(), permission),
+            ],
         )
 
         with patch(

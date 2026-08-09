@@ -22,6 +22,7 @@ from .memory_runtime import (
     ProviderTextQueryService,
     ReadOnlyMessageSource,
 )
+from .permission_state import PermissionMode
 from .project_identity import ProjectIdentity
 from .session_memory import (
     SessionMemory,
@@ -58,12 +59,14 @@ class SessionMemoryHost(Protocol):
     _session_repository: Any
     is_sub_agent: bool
     model: str
-    permission_mode: str
     tool_environment: Any
     tool_registry: Any
     total_input_tokens: int
     total_output_tokens: int
     tool_context: Any
+
+    @property
+    def permission_mode(self) -> PermissionMode: ...
 
     def _child_api_kwargs(self) -> dict[str, Any]: ...
 

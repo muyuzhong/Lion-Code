@@ -13,7 +13,7 @@ from .memory import rebuild_memory_index_if_needed
 
 # ─── 权限模式 ───────────────────────────────────────────────
 
-PermissionMode = str  # 可用值由 CLI 的权限模式选项约束。
+# PermissionMode 的权威定义位于 permission_state.py，工具实现不再声明权限状态。
 
 IS_WIN = sys.platform == "win32"
 

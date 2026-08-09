@@ -20,6 +20,7 @@ from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent
 from lion_code.core.cancellation import CancellationToken
 from lion_code.core.provider_events import AssistantDoneEvent
 from lion_code.observers import TerminalRenderer, UsageObserver
+from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
@@ -38,7 +39,7 @@ def _context(registry: ToolRegistry) -> ToolContext:
         cwd=Path.cwd(),
         controller=_Controller(),
         registry=registry,
-        permission_mode="default",
+        permission=PermissionController(PermissionState("default")),
         plan_file_path=None,
         read_file_state={},
     )

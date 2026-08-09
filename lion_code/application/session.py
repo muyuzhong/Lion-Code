@@ -43,6 +43,7 @@ from .skills import Skill
 
 if TYPE_CHECKING:
     from lion_code.agent import Agent
+    from lion_code.permission_state import PermissionMode
 
 type StreamingBehavior = Literal["steer", "follow_up"]
 
@@ -67,7 +68,6 @@ def _is_context_overflow_error(message: AssistantMessage | None) -> bool:
         return False
     normalized = (message.error_message or "").lower()
     return any(marker in normalized for marker in _CONTEXT_OVERFLOW_MARKERS)
-
 
 
 
@@ -97,7 +97,7 @@ class LionCodingSession:
         return "openai-compatible" if self._agent.use_openai else "anthropic"
 
     @property
-    def permission_mode(self) -> str:
+    def permission_mode(self) -> PermissionMode:
         return self._agent.permission_mode
 
     @property

@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from lion_code.core.cancellation import CancellationToken
+from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.builtin import BUILTIN_TOOL_NAMES, create_builtin_tools
 from lion_code.tooling.context import ToolContext
@@ -39,7 +40,7 @@ class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
                 cwd=Path(directory),
                 controller=object(),
                 registry=registry,
-                permission_mode="default",
+                permission=PermissionController(PermissionState("default")),
                 plan_file_path=None,
                 read_file_state={},
             )
