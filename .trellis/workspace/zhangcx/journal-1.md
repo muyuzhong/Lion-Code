@@ -987,3 +987,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 28: 完成 Permission 状态所有权迁移
+
+**Date**: 2026-08-09
+**Task**: 完成 Permission 状态所有权迁移
+**Branch**: `master`
+
+### Summary
+
+建立 PermissionState、PermissionController 与只读 PermissionView，删除 Agent/ToolContext 权限镜像并补齐架构门禁；全量 609 passed。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f8405f0` | (see git log) |
+
+### Status
+
+[OK] **Completed**
