@@ -37,7 +37,7 @@ Ruff check、Ruff format 与 mypy 按 `.github/workflows/ci.yml` 和 `docs/quali
 
 ## Review Gates
 
-- `rg "_pre_plan_mode|_plan_file_path|_plan_approval_fn|_pending_core_context_reset|tool_context\.plan_file_path|context\.plan_file_path" lion_code tests` 只能命中架构断言字符串。
+- `rg '(^|[^A-Za-z0-9_])(_pre_plan_mode|_plan_file_path|_plan_approval_fn|_pending_core_context_reset)\b|tool_context\.plan_file_path|context\.plan_file_path' lion_code tests` 只能命中架构断言字符串。
 - Agent 不再定义 Plan transaction helper；PlanRuntime 是唯一 PlanState writer 和 Permission mode command caller。
 - ToolContext 现有 PlanView 对象在 enter/exit/clear 后 identity 不变且读取最新 path。
 - keep-planning、approval exception、missing file 和 context-reset failure 均不会产生半退出状态。
