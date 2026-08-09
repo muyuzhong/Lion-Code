@@ -1,4 +1,4 @@
-{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Defines State Ownership, AgentRuntimeCoordinator hosts, observers, budgets, Application/TUI, import boundaries, and the seven-section contract Usage must extend."}
+{"file":".trellis/spec/backend/usage-ownership.md","reason":"Defines the complete seven-section Usage ownership, aggregation, budget, lifecycle, projection, import, and executable enforcement contract."}
 {"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines source conventions, focused/full verification, tests, comments, and Chinese commit requirements."}
 {"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Usage crosses Core events, observers, Agent, Runtime, child agents, Dream, Autonomy, Session lifecycle, Application, and TUI; use this guide to prevent partial propagation."}
 {"file":".trellis/tasks/08-09-usage-ownership/research/current-usage-ownership.md","reason":"Records every current usage owner, mirror, writer, reader, behavior invariant, coverage gap, and migration boundary."}
