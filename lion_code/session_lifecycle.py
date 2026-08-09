@@ -1,7 +1,7 @@
 """会话生命周期协调：clear/restore/compact/close。
 
 从 ``AgentRuntimeCoordinator`` 拆出，收敛 JSONL 会话的创建、恢复、压缩与关闭。
-不复制 coordinator 的 ``reset_core_observers`` / ``reset_session_counters``
+不复制 coordinator 的 ``reset_core_observers`` / ``reset_session_usage``
 逻辑，而是通过持有 coordinator 引用调用。
 """
 
@@ -22,7 +22,6 @@ if TYPE_CHECKING:
         MemoryTurnHost,
         RuntimeIdentityHost,
         SessionStateHost,
-        UsageStateHost,
     )
 
 
@@ -31,10 +30,6 @@ class SessionLifecycle:
 
     def __init__(self, coordinator: AgentRuntimeCoordinator) -> None:
         self._coord = coordinator
-
-    @property
-    def _usage(self) -> UsageStateHost:
-        return self._coord._usage
 
     @property
     def _identity(self) -> RuntimeIdentityHost:
@@ -75,7 +70,7 @@ class SessionLifecycle:
         coord._runtime.harness.replace_messages([])
         coord.reset_core_observers()
         await coord.ensure_core_session_ready()
-        coord.reset_session_counters()
+        coord.reset_session_usage()
         memory._turn_memory_overlays = memory._build_turn_memory_overlays()
         identity._emit_notice("Conversation cleared.")
 
@@ -102,7 +97,7 @@ class SessionLifecycle:
         coord._runtime.harness.replace_messages(state.messages)
         if state.model is not None:
             identity.model = state.model
-            self._usage.effective_window = effective_window_tokens(
+            identity.effective_window = effective_window_tokens(
                 fallback_model_limits(identity.model)
             )
             coord._resolved_model_limits_for = None
@@ -119,7 +114,7 @@ class SessionLifecycle:
         session.session_state.reset(session_id, started_at)
         coord.reset_core_observers()
         await coord.ensure_core_session_ready()
-        coord.reset_session_counters()
+        coord.reset_session_usage()
         memory._turn_memory_overlays = memory._build_turn_memory_overlays()
         identity._emit_notice(f"Session restored ({len(state.messages)} messages).")
         return True

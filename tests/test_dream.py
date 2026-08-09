@@ -27,6 +27,7 @@ from lion_code.session_memory import SessionMemory
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.builtin import create_builtin_tools
 from lion_code.tooling.registry import ToolRegistry
+from lion_code.usage import UsageLedger
 
 
 def _write_memory(path: Path, name: str, memory_type: str, body: str) -> None:
@@ -368,9 +369,10 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
                 sessions=[{"id": "s1", "messages": []}],
                 memory_snapshot={},
             )
+            usage = UsageLedger()
+            usage.record_child_usage(10, 20)
             parent = SimpleNamespace(
-                total_input_tokens=10,
-                total_output_tokens=20,
+                _usage=usage,
                 _session_repository=Mock(),
             )
             child = SimpleNamespace(
@@ -398,8 +400,8 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
         build_context.assert_awaited_once_with(parent._session_repository)
         child.run_once.assert_awaited_once()
         child.close.assert_awaited_once()
-        self.assertEqual(parent.total_input_tokens, 13)
-        self.assertEqual(parent.total_output_tokens, 24)
+        self.assertEqual(parent._usage.snapshot().input_tokens, 13)
+        self.assertEqual(parent._usage.snapshot().output_tokens, 24)
         apply.assert_called_once()
 
 

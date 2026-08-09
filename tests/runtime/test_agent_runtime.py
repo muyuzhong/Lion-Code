@@ -26,6 +26,7 @@ from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
+from lion_code.usage import UsageLedger
 
 
 class _Controller:
@@ -257,7 +258,8 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
         )
 
         renderer = TerminalRenderer()
-        usage = UsageObserver()
+        ledger = UsageLedger()
+        usage = UsageObserver(ledger)
         with (
             patch("lion_code.observers.terminal.start_spinner"),
             patch("lion_code.observers.terminal.stop_spinner"),
@@ -270,9 +272,10 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
             runtime.subscribe(usage.handle)
             await runtime.prompt("hello")
 
-            # UsageObserver 累计了最终助手消息的用量。
-            self.assertEqual(usage.totals.input_tokens, 10)
-            self.assertEqual(usage.totals.output_tokens, 5)
+            # UsageObserver 把最终助手消息转发到了唯一 Ledger。
+            snapshot = ledger.snapshot()
+            self.assertEqual(snapshot.input_tokens, 10)
+            self.assertEqual(snapshot.output_tokens, 5)
             # TerminalRenderer 仍委托终端函数渲染工具与结束分隔线。
             tool_call.assert_called_once()
             tool_result.assert_called_once()

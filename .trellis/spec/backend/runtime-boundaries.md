@@ -194,6 +194,9 @@ The Agent composition root gives one `PlanState` to its only writer, `PlanRuntim
 `ToolContext.plan` is the same live read-only View; Agent and lifecycle APIs are
 delegates. Pending reset is completed only after persistence, replay and Core reset.
 
+Usage has its own executable contract in
+[Usage Ownership](./usage-ownership.md); this runtime composes that single Owner.
+
 ### Runtime and Provider
 
 - Every `Agent` composes one `AgentRuntimeCoordinator`, which owns exactly one
@@ -204,11 +207,12 @@ delegates. Pending reset is completed only after persistence, replay and Core re
   protocol-private histories or SDK clients.
 - `AgentRuntimeCoordinator` owns Core assembly, observer subscription order,
   `SessionRecorder`, context projection/compaction, background cleanup, output
-  capture, the supplied `ExecutionControl`, and chat/run orchestration through four narrow host ports
-  (`UsageStateHost`, `RuntimeIdentityHost`, `SessionStateHost`,
-  `MemoryTurnHost`). Clear/restore/compact/close orchestration is delegated to
+  capture, the supplied `ExecutionControl`, shared `UsageLedger` / `BudgetPolicy`,
+  and chat/run orchestration through three narrow host ports
+  (`RuntimeIdentityHost`, `SessionStateHost`, `MemoryTurnHost`).
+  Clear/restore/compact/close orchestration is delegated to
   `SessionLifecycle` (in `session_lifecycle.py`), which calls back into the
-  coordinator for shared `reset_core_observers` / `reset_session_counters`.
+  coordinator for shared `reset_core_observers` / `reset_session_usage`.
   `Agent` remains the composition root for MCP discovery,
   tools, Memory/Plan/Autonomy/Learning and UI callbacks, and exposes compatibility
   delegates such as `_core_runtime`, `_ensure_core_session_ready`, `chat()` and
@@ -441,8 +445,8 @@ python -m pytest -q tests/architecture/test_runtime_boundaries.py
 
 pyproject.toml contains these five import-linter contracts:
 
-- core cannot depend on providers, tooling, permission/Plan state, application, or tui,
-  including indirect paths.
+- core cannot depend on providers, tooling, permission/Plan/Usage state, observers,
+  application, or tui, including indirect paths.
 - providers cannot depend on any Lion runtime layer other than core, including
   `plan_runtime`; direct
   import validation also requires provider source to use only core or its own
@@ -480,6 +484,8 @@ also rejects patterns an import graph cannot express:
 - Former Agent Plan fields/helpers; `ToolContext.plan_file_path`; PlanState
   construction or mutation outside its owner; or lifecycle code rebuilding Plan
   state, permission or prompt by hand.
+- Usage single-writer, composition, projection, and reverse-import scanners follow
+  [Usage Ownership](./usage-ownership.md).
 
 When a legitimate architecture move requires a new exception, change the
 runtime code, this contract, the AST allowlist, and the focused test in one

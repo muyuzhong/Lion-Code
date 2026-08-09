@@ -125,6 +125,47 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(result.wall_time_seconds, 0.0)
         self.assertGreaterEqual(result.cost_usd, 0.0)
 
+    async def test_run_returns_only_the_current_invocation_usage_delta(self) -> None:
+        provider = FakeProvider(
+            [
+                _stop_event(usage=Usage(input=12, output=7, cache_read=4)),
+                _stop_event(usage=Usage(input=5, output=2, cache_read=3)),
+            ]
+        )
+        agent = self._agent(provider)
+
+        first = await agent.run("first")
+        second = await agent.run("second")
+        await agent.close()
+
+        self.assertEqual(
+            (first.input_tokens, first.output_tokens, first.cache_read_tokens),
+            (12, 7, 4),
+        )
+        self.assertEqual(
+            (second.input_tokens, second.output_tokens, second.cache_read_tokens),
+            (5, 2, 3),
+        )
+        self.assertAlmostEqual(second.cost_usd, 45.9 / 1_000_000)
+
+    async def test_run_once_returns_only_the_current_invocation_usage_delta(
+        self,
+    ) -> None:
+        provider = FakeProvider(
+            [
+                _stop_event(usage=Usage(input=12, output=7)),
+                _stop_event(usage=Usage(input=5, output=2)),
+            ]
+        )
+        agent = self._agent(provider)
+
+        first = await agent.run_once("first")
+        second = await agent.run_once("second")
+        await agent.close()
+
+        self.assertEqual(first["tokens"], {"input": 12, "output": 7})
+        self.assertEqual(second["tokens"], {"input": 5, "output": 2})
+
     async def test_max_turns_records_canonical_tool_result(self) -> None:
         agent = self._agent(FakeProvider([_tool_use_event()]), max_turns=1)
         encoding_error = UnicodeEncodeError(

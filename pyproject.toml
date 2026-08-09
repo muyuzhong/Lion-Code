@@ -119,9 +119,11 @@ forbidden_modules = [
     "lion_code.providers",
     "lion_code.tooling",
     "lion_code.application",
+    "lion_code.observers",
     "lion_code.tui",
     "lion_code.permission_state",
     "lion_code.plan_runtime",
+    "lion_code.usage",
 ]
 ignore_imports = []
 allow_indirect_imports = "False"
@@ -165,6 +167,7 @@ forbidden_modules = [
     "lion_code.tools",
     "lion_code.tui",
     "lion_code.ui",
+    "lion_code.usage",
     "lion_code.version",
 ]
 ignore_imports = []
@@ -214,6 +217,7 @@ forbidden_modules = [
     "lion_code.tools",
     "lion_code.tooling",
     "lion_code.ui",
+    "lion_code.usage",
 ]
 ignore_imports = []
 # TUI 通过 application.session 间接使用 Agent；只阻止新增的直接引擎 import。

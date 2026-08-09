@@ -96,6 +96,7 @@ from .ui import (
     print_sub_agent_end,
     print_sub_agent_start,
 )
+from .usage import BudgetPolicy, UsageLedger, UsageSnapshot
 
 # ─── Thinking 能力检测 ──────────────────────────────────────
 
@@ -163,8 +164,6 @@ class Agent:
         self._api_base = api_base
         self._anthropic_base_url = anthropic_base_url
         self._pre_tool_use_hooks = load_pre_tool_use_hooks()
-        self.max_cost_usd = max_cost_usd
-        self.max_turns = max_turns
         self.confirm_fn = confirm_fn
         self.effective_window = effective_window_tokens(fallback_model_limits(model))
         self._session_state = SessionIdentityState(
@@ -173,17 +172,18 @@ class Agent:
         )
         self._session_repository = session_repository or SessionRepository()
         execution = ExecutionControl()
-
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_cache_read_tokens = 0  # Prompt cache 命中按约 0.1 倍计费。
-        self.total_cache_creation_tokens = 0  # Prompt cache 写入按约 1.25 倍计费。
-        self.last_input_token_count = 0
-        self.current_turns = 0
-        self.last_api_call_time = 0.0
+        self._usage = UsageLedger()
+        self._budget = BudgetPolicy(
+            max_cost_usd=max_cost_usd,
+            max_turns=max_turns,
+        )
 
         # /goal、/loop 与 Auto Mode 的状态和协调循环由 AutonomyRuntime 拥有。
-        self._autonomy = AutonomyRuntime(self)
+        self._autonomy = AutonomyRuntime(
+            self,
+            usage=self._usage,
+            budget=self._budget,
+        )
         self._learning = LearningRuntime(self)
 
         # 当前异步任务用于把 Ctrl+C 传播到正在等待的模型或工具调用。
@@ -288,7 +288,8 @@ class Agent:
         self._lifecycle = AgentLifecycle(self)
         provider = self._lifecycle.build_core_provider(self._thinking_level)
         self._runtime_coordinator = AgentRuntimeCoordinator(
-            usage=self,
+            usage=self._usage,
+            budget=self._budget,
             identity=self,
             session=self,
             memory=self,
@@ -358,14 +359,6 @@ class Agent:
     @_core_compaction_required.setter
     def _core_compaction_required(self, value: bool) -> None:
         self._runtime_coordinator.core_compaction_required = value
-
-    @property
-    def _usage_observer(self):
-        return self._runtime_coordinator.usage_observer
-
-    @_usage_observer.setter
-    def _usage_observer(self, value: Any) -> None:
-        self._runtime_coordinator.usage_observer = value
 
     @property
     def _terminal_renderer(self) -> TerminalRenderer | None:
@@ -555,9 +548,6 @@ class Agent:
 
     # ─── Core Runtime ────────────────────────────────────────
 
-    def _sync_core_usage(self) -> None:
-        self._runtime_coordinator.sync_core_usage()
-
     async def _ensure_core_session_ready(self) -> None:
         await self._runtime_coordinator.ensure_core_session_ready()
 
@@ -617,8 +607,8 @@ class Agent:
     def toggle_plan_mode(self) -> str:
         return self.plan.toggle()
 
-    def get_token_usage(self) -> dict:
-        return {"input": self.total_input_tokens, "output": self.total_output_tokens}
+    def get_token_usage(self) -> UsageSnapshot:
+        return self._usage.snapshot()
 
     # ─── 运行时模型/凭证配置（TUI /model 的后端）──────────────
 
@@ -745,53 +735,24 @@ class Agent:
         await self._runtime_coordinator.clear_history()
 
     def show_cost(self) -> None:
-        total = self._get_current_cost_usd()
-        budget_info = f" / ${self.max_cost_usd} budget" if self.max_cost_usd else ""
+        usage = self._usage.snapshot()
+        max_cost = self._budget.max_cost_usd
+        max_turns = self._budget.max_turns
+        budget_info = f" / ${max_cost} budget" if max_cost else ""
         turn_info = (
-            f" | Turns: {self.current_turns}/{self.max_turns}" if self.max_turns else ""
+            f" | Turns: {usage.turns}/{max_turns}" if max_turns else ""
         )
-        cached = self.total_cache_read_tokens
-        billed_input = (
-            self.total_input_tokens + self.total_cache_creation_tokens + cached
-        )
+        cached = usage.cache_read_tokens
+        billed_input = usage.input_tokens + usage.cache_write_tokens + cached
         hit_rate = round((cached / billed_input) * 100) if billed_input > 0 else 0
         cache_info = (
-            f"\n  Cache: {cached} read / {self.total_cache_creation_tokens} write ({hit_rate}% of input from cache)"
-            if (cached or self.total_cache_creation_tokens)
+            f"\n  Cache: {cached} read / {usage.cache_write_tokens} write ({hit_rate}% of input from cache)"
+            if (cached or usage.cache_write_tokens)
             else ""
         )
         self._emit_notice(
-            f"Tokens: {self.total_input_tokens} in / {self.total_output_tokens} out{cache_info}\n  Estimated cost: ${total:.4f}{budget_info}{turn_info}"
+            f"Tokens: {usage.input_tokens} in / {usage.output_tokens} out{cache_info}\n  Estimated cost: ${usage.cost_usd:.4f}{budget_info}{turn_info}"
         )
-
-    def _get_current_cost_usd(self) -> float:
-        # 统一按基础输入 $3/Mtok、缓存读取 0.1 倍、缓存写入 1.25 倍估算；
-        # 这是预算控制使用的近似值，不代表所有兼容供应商的实际账单。
-        M = 1_000_000
-        return (
-            (self.total_input_tokens / M) * 3
-            + (self.total_cache_read_tokens / M) * 0.3
-            + (self.total_cache_creation_tokens / M) * 3.75
-            + (self.total_output_tokens / M) * 15
-        )
-
-    def _check_budget(self) -> dict:
-        if (
-            self.max_cost_usd is not None
-            and self._get_current_cost_usd() >= self.max_cost_usd
-        ):
-            return {
-                "exceeded": True,
-                "kind": "max_cost",
-                "reason": f"Cost limit reached (${self._get_current_cost_usd():.4f} >= ${self.max_cost_usd})",
-            }
-        if self.max_turns is not None and self.current_turns >= self.max_turns:
-            return {
-                "exceeded": True,
-                "kind": "max_turns",
-                "reason": f"Turn limit reached ({self.current_turns} >= {self.max_turns})",
-            }
-        return {"exceeded": False}
 
     async def compact(self) -> None:
         await self._runtime_coordinator.compact()
@@ -1152,8 +1113,10 @@ class Agent:
                 sub_result = await sub_agent.run_once(
                     inp.get("args") or "Execute this skill task."
                 )
-                self.total_input_tokens += sub_result["tokens"]["input"]
-                self.total_output_tokens += sub_result["tokens"]["output"]
+                self._usage.record_child_usage(
+                    sub_result["tokens"]["input"],
+                    sub_result["tokens"]["output"],
+                )
                 self._emit_subagent_status(
                     "skill-fork", inp.get("skill_name", ""), started=False
                 )
@@ -1179,8 +1142,10 @@ class Agent:
 
         try:
             result = await sub_agent.run_once(prompt)
-            self.total_input_tokens += result["tokens"]["input"]
-            self.total_output_tokens += result["tokens"]["output"]
+            self._usage.record_child_usage(
+                result["tokens"]["input"],
+                result["tokens"]["output"],
+            )
             self._emit_subagent_status(agent_type, description, started=False)
             return result["text"] or "(Sub-agent produced no output)"
         except Exception as e:

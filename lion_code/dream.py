@@ -544,8 +544,10 @@ class DreamCoordinator:
         dream_agent = self._create_agent(context)
         try:
             raw_result = await dream_agent.run_once(self._build_prompt(context))
-            self.agent.total_input_tokens += raw_result["tokens"]["input"]
-            self.agent.total_output_tokens += raw_result["tokens"]["output"]
+            self.agent._usage.record_child_usage(
+                raw_result["tokens"]["input"],
+                raw_result["tokens"]["output"],
+            )
         finally:
             await dream_agent.close()
 

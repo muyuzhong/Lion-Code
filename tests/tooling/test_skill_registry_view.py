@@ -79,6 +79,9 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         kwargs = _ChildAgent.created_with
         child_registry = kwargs["tool_registry"]
         self.assertEqual(result, "skill result")
+        usage = parent.get_token_usage()
+        self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
+        self.assertEqual((usage.responses, usage.turns), (0, 0))
         self.assertIs(child_registry.resolve(mcp_name), parent.tool_registry.resolve(mcp_name))
         with self.assertRaises(LookupError):
             child_registry.resolve("agent")
@@ -204,7 +207,8 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, "Sub-agent error: boom")
-        self.assertEqual(parent.get_token_usage(), {"input": 0, "output": 0})
+        usage = parent.get_token_usage()
+        self.assertEqual((usage.input_tokens, usage.output_tokens), (0, 0))
         self.assertEqual(
             events,
             [("status", True), ("status", False), "close"],
@@ -246,6 +250,9 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             parent.tool_environment.mcp_manager,
         )
         self.assertFalse(kwargs["tool_environment"].owns_mcp_manager)
+        usage = parent.get_token_usage()
+        self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
+        self.assertEqual((usage.responses, usage.turns), (0, 0))
         _ChildAgent.last_instance.close.assert_awaited_once_with()
 
 

@@ -99,9 +99,11 @@ BOUNDARIES: tuple[Boundary, ...] = (
                 "providers",
                 "tooling",
                 "application",
+                "observers",
                 "tui",
                 "permission_state",
                 "plan_runtime",
+                "usage",
             }
         ),
     ),

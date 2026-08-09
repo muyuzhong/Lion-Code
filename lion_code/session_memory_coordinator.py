@@ -61,8 +61,6 @@ class SessionMemoryHost(Protocol):
     model: str
     tool_environment: Any
     tool_registry: Any
-    total_input_tokens: int
-    total_output_tokens: int
     tool_context: Any
 
     @property

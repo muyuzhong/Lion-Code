@@ -48,6 +48,37 @@ REMOVED_RUNTIME_SYMBOLS = frozenset(
         "confirmed_paths",
     }
 )
+REMOVED_USAGE_SYMBOLS = frozenset(
+    {
+        "UsageStateHost",
+        "UsageTotals",
+        "_check_budget",
+        "_get_current_cost_usd",
+        "current_turns",
+        "last_api_call_time",
+        "last_input_token_count",
+        "sync_core_usage",
+        "sync_usage_from_observer",
+        "total_cache_creation_tokens",
+        "total_cache_read_tokens",
+        "total_input_tokens",
+        "total_output_tokens",
+    }
+)
+_USAGE_LEDGER_FIELDS = frozenset(
+    {
+        "_cache_read_tokens",
+        "_cache_write_tokens",
+        "_input_tokens",
+        "_last_prompt_tokens",
+        "_last_response_at",
+        "_output_tokens",
+        "_reasoning_tokens",
+        "_reported_cost_usd",
+        "_responses",
+        "_turns",
+    }
+)
 _PERMISSION_STATE_BASE_NAMES = frozenset(
     {"state", "_state", "permission_state", "_permission_state"}
 )
@@ -518,11 +549,154 @@ def _attribute_references(tree: ast.Module, name: str) -> frozenset[str]:
     )
 
 
+def _attribute_mutations(
+    tree: ast.Module,
+    names: frozenset[str],
+) -> frozenset[str]:
+    """返回指定属性的赋值、删除或动态属性写入。"""
+
+    mutation_call_aliases: dict[str, int] = {"delattr": 1, "setattr": 1}
+    delete_call_aliases = {"delattr"}
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "builtins":
+                for imported in node.names:
+                    if imported.name not in {"delattr", "setattr"}:
+                        continue
+                    local_name = imported.asname or imported.name
+                    if local_name not in mutation_call_aliases:
+                        mutation_call_aliases[local_name] = 1
+                        changed = True
+                    if (
+                        imported.name == "delattr"
+                        and local_name not in delete_call_aliases
+                    ):
+                        delete_call_aliases.add(local_name)
+                        changed = True
+                continue
+
+            target: ast.expr | None = None
+            value: ast.expr | None = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                value = node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                target = node.target
+                value = node.value
+            if not isinstance(target, ast.Name) or value is None:
+                continue
+
+            field_arg_index: int | None = None
+            if isinstance(value, ast.Name):
+                field_arg_index = mutation_call_aliases.get(value.id)
+            elif isinstance(value, ast.Attribute) and value.attr in {
+                "__delattr__",
+                "__setattr__",
+                "delattr",
+                "setattr",
+            }:
+                field_arg_index = (
+                    1
+                    if isinstance(value.value, ast.Name)
+                    and value.value.id in {"builtins", "object"}
+                    else 0
+                )
+            if (
+                field_arg_index is not None
+                and mutation_call_aliases.get(target.id) != field_arg_index
+            ):
+                mutation_call_aliases[target.id] = field_arg_index
+                changed = True
+            if (
+                (isinstance(value, ast.Name) and value.id in delete_call_aliases)
+                or (isinstance(value, ast.Attribute) and "delattr" in value.attr)
+            ) and target.id not in delete_call_aliases:
+                delete_call_aliases.add(target.id)
+                changed = True
+
+    mutations: set[str] = set()
+    for node in ast.walk(tree):
+        targets: tuple[ast.expr, ...] = ()
+        if isinstance(node, ast.Assign):
+            targets = tuple(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            targets = (node.target,)
+        elif isinstance(node, ast.AugAssign):
+            targets = (node.target,)
+        elif isinstance(node, ast.Delete):
+            targets = tuple(node.targets)
+        for target in targets:
+            for attribute in _assignment_attribute_targets(target):
+                if attribute.attr in names:
+                    mutations.add(attribute.attr)
+        if not isinstance(node, ast.Call):
+            continue
+        field_arg_index: int | None = None
+        operation = "setattr"
+        if isinstance(node.func, ast.Name):
+            field_arg_index = mutation_call_aliases.get(node.func.id)
+            if node.func.id in delete_call_aliases:
+                operation = "delattr"
+        elif isinstance(node.func, ast.Attribute) and node.func.attr in {
+            "__delattr__",
+            "__setattr__",
+            "delattr",
+            "setattr",
+        }:
+            operation = "delattr" if "delattr" in node.func.attr else "setattr"
+            field_arg_index = (
+                1
+                if isinstance(node.func.value, ast.Name)
+                and node.func.value.id in {"builtins", "object"}
+                else 0
+            )
+        if field_arg_index is None or len(node.args) <= field_arg_index:
+            continue
+        field_arg = node.args[field_arg_index]
+        if isinstance(field_arg, ast.Constant) and field_arg.value in names:
+            mutations.add(f"{operation}:{field_arg.value}")
+    return frozenset(mutations)
+
+
 def _named_constructor_count(tree: ast.Module, name: str) -> int:
+    aliases = {name}
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for imported in node.names:
+                    if imported.name != name:
+                        continue
+                    local_name = imported.asname or imported.name
+                    if local_name not in aliases:
+                        aliases.add(local_name)
+                        changed = True
+                continue
+
+            target: ast.expr | None = None
+            value: ast.expr | None = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                value = node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                target = node.target
+                value = node.value
+            if not isinstance(target, ast.Name) or value is None:
+                continue
+            is_alias = (isinstance(value, ast.Name) and value.id in aliases) or (
+                isinstance(value, ast.Attribute) and value.attr == name
+            )
+            if is_alias and target.id not in aliases:
+                aliases.add(target.id)
+                changed = True
+
     return sum(
         isinstance(node, ast.Call)
         and (
-            (isinstance(node.func, ast.Name) and node.func.id == name)
+            (isinstance(node.func, ast.Name) and node.func.id in aliases)
             or (isinstance(node.func, ast.Attribute) and node.func.attr == name)
         )
         for node in ast.walk(tree)
@@ -991,6 +1165,99 @@ def test_session_and_cancellation_state_have_single_owners() -> None:
     }
 
 
+def test_usage_state_has_one_owner_and_command_only_writes() -> None:
+    removed = {
+        _source_key(path): sorted(
+            _referenced_symbols(_tree(path), REMOVED_USAGE_SYMBOLS)
+        )
+        for path in _source_files()
+        if _referenced_symbols(_tree(path), REMOVED_USAGE_SYMBOLS)
+    }
+    assert not removed, f"Removed Usage mirrors must not return: {removed}"
+
+    agent_fields = _self_fields(_tree(SOURCE_ROOT / "agent.py"))
+    assert not REMOVED_USAGE_SYMBOLS & agent_fields
+    assert "_usage_observer" not in agent_fields
+
+    ledger_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "UsageLedger")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "UsageLedger")
+    }
+    policy_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "BudgetPolicy")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "BudgetPolicy")
+    }
+    assert ledger_constructors == {"agent.py": 1}
+    assert policy_constructors == {"agent.py": 1}
+
+    observer_fields = _self_fields(_tree(SOURCE_ROOT / "observers" / "usage.py"))
+    assert observer_fields == {"_ledger"}
+
+    external_mutations = {
+        _source_key(path): sorted(
+            _attribute_mutations(_tree(path), _USAGE_LEDGER_FIELDS)
+        )
+        for path in _source_files()
+        if _source_key(path) != "usage.py"
+        and _attribute_mutations(_tree(path), _USAGE_LEDGER_FIELDS)
+    }
+    assert not external_mutations, (
+        f"UsageLedger fields must only be written in usage.py: {external_mutations}"
+    )
+
+    record_model_sites = {
+        _source_key(path): sorted(
+            _attribute_call_sites(_tree(path), "record_model_usage")
+        )
+        for path in _source_files()
+        if _attribute_call_sites(_tree(path), "record_model_usage")
+    }
+    record_child_sites = {
+        _source_key(path): sorted(
+            _attribute_call_sites(_tree(path), "record_child_usage")
+        )
+        for path in _source_files()
+        if _attribute_call_sites(_tree(path), "record_child_usage")
+    }
+    record_turn_sites = {
+        _source_key(path): sorted(_attribute_call_sites(_tree(path), "record_turn"))
+        for path in _source_files()
+        if _attribute_call_sites(_tree(path), "record_turn")
+    }
+    reset_sites = {
+        _source_key(path): sorted(_attribute_call_sites(_tree(path), "reset"))
+        for path in _source_files()
+        if _source_key(path) == "agent_runtime.py"
+        and _attribute_call_sites(_tree(path), "reset")
+    }
+    context_reset_sites = {
+        _source_key(path): sorted(
+            _attribute_call_sites(_tree(path), "reset_context_tracking")
+        )
+        for path in _source_files()
+        if _attribute_call_sites(_tree(path), "reset_context_tracking")
+    }
+    assert record_model_sites == {"observers/usage.py": ["UsageObserver.handle"]}
+    assert record_child_sites == {
+        "agent.py": ["Agent._execute_agent_tool", "Agent._execute_skill_tool"],
+        "dream.py": ["DreamCoordinator.run"],
+    }
+    assert record_turn_sites == {
+        "agent_runtime.py": ["AgentRuntimeCoordinator.before_core_tool_calls"]
+    }
+    assert reset_sites == {
+        "agent_runtime.py": ["AgentRuntimeCoordinator.reset_session_usage"]
+    }
+    assert context_reset_sites == {
+        "agent_runtime.py": [
+            "AgentRuntimeCoordinator.apply_plan_context_reset",
+            "AgentRuntimeCoordinator.compact_core_context_if_needed",
+        ]
+    }
+
+
 def test_permission_state_has_one_owner_and_live_read_ports() -> None:
     context_tree = _tree(SOURCE_ROOT / "tooling" / "context.py")
     context_fields = _class_annotated_fields(context_tree, "ToolContext")
@@ -1341,6 +1608,24 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     plan_path_mirror = ast.parse(
         "def sync(alias):\n    alias.plan_file_path = 'plan.md'\n"
     )
+    usage_mutation = ast.parse(
+        "def bypass(ledger):\n"
+        "    alias = ledger\n"
+        "    ledger._input_tokens = 1\n"
+        "    alias._turns += 1\n"
+        "    write = object.__setattr__\n"
+        "    write(alias, '_responses', 2)\n"
+        "    remove = delattr\n"
+        "    remove(alias, '_last_prompt_tokens')\n"
+        "    bound_write = alias.__setattr__\n"
+        "    bound_write('_output_tokens', 3)\n"
+    )
+    constructor_alias = ast.parse(
+        "from lion_code.usage import UsageLedger as Ledger\n"
+        "Owner = Ledger\n"
+        "def build():\n"
+        "    return Owner()\n"
+    )
 
     assert _private_history_fields(provider) == frozenset(
         {
@@ -1401,6 +1686,19 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     assert _attribute_references(plan_path_mirror, "plan_file_path") == frozenset(
         {"plan_file_path"}
     )
+    assert _attribute_mutations(
+        usage_mutation,
+        _USAGE_LEDGER_FIELDS,
+    ) == frozenset(
+        {
+            "_input_tokens",
+            "_turns",
+            "delattr:_last_prompt_tokens",
+            "setattr:_output_tokens",
+            "setattr:_responses",
+        }
+    )
+    assert _named_constructor_count(constructor_alias, "UsageLedger") == 1
 
 
 # ---------------------------------------------------------------------------

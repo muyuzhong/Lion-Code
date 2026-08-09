@@ -2,7 +2,7 @@
 
 纯提示词与解析函数在 :mod:`lion_code.autonomy`;本模块承载它们的运行时状态与
 驱动循环。``AutonomyRuntime`` 经一个窄 ``AutonomyHost`` 协议回调 ``Agent`` 的
-``chat``/``_emit_notice``/``_check_budget`` 与 side-query 工具,自身不持有 Provider
+``chat``/``_emit_notice`` 与 side-query 工具,自身不持有 Provider
 或 TUI,从而把「自主运行」与「Provider 切换/TUI 输出」分离。
 """
 
@@ -38,6 +38,7 @@ from .prompt import load_claude_md
 from .tooling.internal import create_schedule_wakeup_tool
 from .tooling.middleware import is_auto_fast_path
 from .tooling.types import JSONValue
+from .usage import BudgetPolicy, UsageLedger
 
 
 @runtime_checkable
@@ -48,7 +49,6 @@ class AutonomyHost(Protocol):
     只约束本模块实际回调的方法签名。
     """
 
-    max_turns: int | None
     confirm_fn: Any
     tool_registry: Any
     _core_runtime: Any
@@ -62,8 +62,6 @@ class AutonomyHost(Protocol):
     def _emit_notice(
         self, message: str, *, role: Literal["info", "error"] = "info"
     ) -> None: ...
-
-    def _check_budget(self) -> dict: ...
 
     async def chat(self, user_message: str) -> None: ...
 
@@ -79,8 +77,16 @@ class AutonomyHost(Protocol):
 class AutonomyRuntime:
     """拥有 /goal、/loop 与 Auto Mode 的状态与驱动循环。"""
 
-    def __init__(self, host: AutonomyHost) -> None:
+    def __init__(
+        self,
+        host: AutonomyHost,
+        *,
+        usage: UsageLedger,
+        budget: BudgetPolicy,
+    ) -> None:
         self._host = host
+        self._usage = usage
+        self._budget = budget
         # /goal 是跨轮次、会话级的 Stop-hook 条件。
         self.active_goal: dict | None = None
         self.goal_stop = False  # 中断时置位,使目标追踪循环尽快退出。
@@ -151,9 +157,9 @@ class AutonomyRuntime:
                     f"Hooks: Prompt hook condition was not met: {verdict['reason']}"
                 )
 
-                budget = self._host._check_budget()
-                if budget["exceeded"]:
-                    self._host._emit_notice(f"Goal stopped: {budget['reason']}")
+                decision = self._budget.check(self._usage.snapshot())
+                if decision.exceeded:
+                    self._host._emit_notice(f"Goal stopped: {decision.reason}")
                     break
                 # --max-turns 只统计执行工具的轮次;纯文本目标循环可能永远不触发它,
                 # 因此仍需独立的无条件硬上限。
@@ -245,14 +251,17 @@ class AutonomyRuntime:
             self._host._emit_notice(f"⟳ loop tick {iterations}")
             await self._host.chat(spec["prompt"])
 
-            budget = self._host._check_budget()
-            if budget["exceeded"]:
-                self._host._emit_notice(f"Loop stopped: {budget['reason']}")
+            decision = self._budget.check(self._usage.snapshot())
+            if decision.exceeded:
+                self._host._emit_notice(f"Loop stopped: {decision.reason}")
                 break
             # 工具轮次计数无法约束纯文本 loop,因此这里同时把 --max-turns 解释为 tick 上限。
-            if self._host.max_turns is not None and iterations >= self._host.max_turns:
+            if (
+                self._budget.max_turns is not None
+                and iterations >= self._budget.max_turns
+            ):
                 self._host._emit_notice(
-                    f"Loop stopped: tick limit reached ({iterations} >= {self._host.max_turns})."
+                    f"Loop stopped: tick limit reached ({iterations} >= {self._budget.max_turns})."
                 )
                 break
             if iterations >= LOOP_MAX_ITERATIONS:
@@ -290,16 +299,16 @@ class AutonomyRuntime:
                             f"⟳ Loop converged after {iterations} tick{plural} (model scheduled no wakeup)."
                         )
                         break
-                    budget = self._host._check_budget()
-                    if budget["exceeded"]:
-                        self._host._emit_notice(f"Loop stopped: {budget['reason']}")
+                    decision = self._budget.check(self._usage.snapshot())
+                    if decision.exceeded:
+                        self._host._emit_notice(f"Loop stopped: {decision.reason}")
                         break
                     if (
-                        self._host.max_turns is not None
-                        and iterations >= self._host.max_turns
+                        self._budget.max_turns is not None
+                        and iterations >= self._budget.max_turns
                     ):
                         self._host._emit_notice(
-                            f"Loop stopped: tick limit reached ({iterations} >= {self._host.max_turns})."
+                            f"Loop stopped: tick limit reached ({iterations} >= {self._budget.max_turns})."
                         )
                         break
                     if iterations >= LOOP_MAX_ITERATIONS:
