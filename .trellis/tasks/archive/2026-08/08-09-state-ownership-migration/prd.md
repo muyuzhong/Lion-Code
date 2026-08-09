@@ -44,13 +44,13 @@
 
 ## Acceptance Criteria
 
-- [ ] 四个子任务均独立通过各自验收、中文提交并归档。
-- [ ] Session、Permission、Plan、Cancellation 与 Usage 不再由 `Agent` 保存可变镜像。
-- [ ] ToolRuntime 只通过只读依赖读取上述状态，不能直接修改它们。
-- [ ] 跨域状态切换通过明确命令边界完成，Plan 与 Permission 不合并为一个 Domain。
-- [ ] Memory、ToolRegistry、Provider configuration 与 read freshness 不被顺手重构。
-- [ ] 架构测试能够阻止已删除镜像字段和多 writer 路径回归。
-- [ ] 全量测试、compileall、import-linter、架构测试和 `git diff --check` 通过。
+- [x] 四个子任务均独立通过各自验收、中文提交并归档。
+- [x] Session、Permission、Plan、Cancellation 与 Usage 不再由 `Agent` 保存可变镜像。
+- [x] ToolRuntime 只通过只读依赖读取上述状态，不能直接修改它们。
+- [x] 跨域状态切换通过明确命令边界完成，Plan 与 Permission 不合并为一个 Domain。
+- [x] Memory、ToolRegistry、Provider configuration 与 read freshness 不被顺手重构。
+- [x] 架构测试能够阻止已删除镜像字段和多 writer 路径回归。
+- [x] 全量测试、compileall、import-linter、架构测试和任务范围 `git diff --check` 通过。
 
 ## Out of Scope
 
