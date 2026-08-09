@@ -1029,3 +1029,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 30: 完成 State Ownership 分阶段迁移
+
+**Date**: 2026-08-09
+**Task**: 完成 State Ownership 分阶段迁移
+**Branch**: `master`
+
+### Summary
+
+完成 Session/Cancellation、Permission、PlanRuntime、Usage 四个独立状态所有权切片；最终全量 629 passed、6 skipped、20 subtests，架构与静态门禁通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `66a7a04` | (see git log) |
+
+### Status
+
+[OK] **Completed**
