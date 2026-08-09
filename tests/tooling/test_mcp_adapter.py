@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from core.fakes import FakePlanView
+
 from lion_code.agent import Agent
 from lion_code.core.cancellation import CancellationToken
 from lion_code.mcp_client import DiscoveredMcpTool, McpManager
@@ -44,7 +46,7 @@ def _context(registry, *, confirm_fn=None, permission=None):
         controller=object(),
         registry=registry,
         permission=permission or PermissionController(PermissionState("default")),
-        plan_file_path=None,
+        plan=FakePlanView(),
         read_file_state={},
         confirm_fn=confirm_fn,
     )

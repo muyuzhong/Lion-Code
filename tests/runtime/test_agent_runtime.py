@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from core.fakes import FakeProvider
+from core.fakes import FakePlanView, FakeProvider
 
 from lion_code.agent_runtime import AgentRuntimeCoordinator, LionAgentRuntime
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
@@ -40,7 +40,7 @@ def _context(registry: ToolRegistry) -> ToolContext:
         controller=_Controller(),
         registry=registry,
         permission=PermissionController(PermissionState("default")),
-        plan_file_path=None,
+        plan=FakePlanView(),
         read_file_state={},
     )
 

@@ -737,7 +737,15 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 _stop_event("implemented"),
             ]
         )
-        with patch("lion_code.agent.create_provider", return_value=fake):
+        plan_path = Path(self._temp_dir.name) / "approved-plan.md"
+        plan_path.write_text("1. change code\n2. run tests", encoding="utf-8")
+        with (
+            patch("lion_code.agent.create_provider", return_value=fake),
+            patch(
+                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                return_value=plan_path,
+            ),
+        ):
             agent = Agent(
                 permission_mode="plan",
                 api_base="https://example.test/v1",
@@ -750,10 +758,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         agent._mcp_initialized = True
         permission = agent.tool_context.permission
         agent.tool_registry.activate("exit_plan_mode")
-        plan_path = Path(self._temp_dir.name) / "approved-plan.md"
-        plan_path.write_text("1. change code\n2. run tests", encoding="utf-8")
-        agent._plan_file_path = str(plan_path)
-        agent.tool_context.plan_file_path = str(plan_path)
 
         async def approve(_plan: str) -> dict:
             return {"choice": "clear-and-execute"}
@@ -781,6 +785,48 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(state.compaction_entries), 1)
         self.assertEqual(len(state.compaction_entries[0].replaces_entry_ids), 3)
         self.assertGreater(len(state.entries), len(state.messages))
+
+    async def test_plan_context_reset_failure_keeps_pending_command(self) -> None:
+        fake = FakeProvider([])
+        plan_path = Path(self._temp_dir.name) / "failing-reset-plan.md"
+        plan_path.write_text("keep this plan", encoding="utf-8")
+        with (
+            patch("lion_code.agent.create_provider", return_value=fake),
+            patch(
+                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                return_value=plan_path,
+            ),
+        ):
+            agent = Agent(
+                permission_mode="plan",
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+                session_memory_repository=self._session_memory_repository,
+                terminal_output=False,
+            )
+
+        async def approve(_plan: str) -> dict:
+            return {"choice": "clear-and-execute"}
+
+        agent.set_plan_approval_fn(approve)
+        outcome = await agent.exit_plan_mode_tool()
+        self.assertTrue(outcome.terminate)
+        pending = agent.plan.pending_context_reset
+        self.assertIsNotNone(pending)
+        await agent._ensure_core_session_ready()
+
+        with patch.object(
+            agent._core_runtime,
+            "reset_active_context",
+            AsyncMock(side_effect=RuntimeError("reset failed")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "reset failed"):
+                await agent._runtime_coordinator.apply_plan_context_reset()
+
+        self.assertEqual(agent.plan.pending_context_reset, pending)
+        await agent.close()
 
     async def test_configure_api_replaces_provider_in_existing_runtime(self) -> None:
         """换 key/base 原位替换 Provider，并保留 Harness 与 canonical history。"""

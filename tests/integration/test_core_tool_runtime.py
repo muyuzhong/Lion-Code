@@ -12,7 +12,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from core.fakes import FakeProvider
+from core.fakes import FakePlanView, FakeProvider
 
 from lion_code.adapters import adapt_active_tools
 from lion_code.core import (
@@ -44,7 +44,7 @@ def _context(registry: ToolRegistry) -> ToolContext:
         controller=_Controller(),
         registry=registry,
         permission=PermissionController(PermissionState("default")),
-        plan_file_path=None,
+        plan=FakePlanView(),
         read_file_state={},
     )
 

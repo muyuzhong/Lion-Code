@@ -124,11 +124,11 @@ def _matches_rule(
     return value == pattern
 
 
-def _same_path(first: str, second: str) -> bool:
+def _same_path(first: str, second: Path) -> bool:
     try:
-        return Path(first).resolve() == Path(second).resolve()
+        return Path(first).resolve() == second.resolve()
     except (OSError, ValueError):
-        return first == second
+        return first == str(second)
 
 
 class PermissionPolicy:
@@ -156,7 +156,7 @@ class PermissionPolicy:
         tool: LionTool,
         arguments: Mapping[str, JSONValue],
         mode: PermissionMode,
-        plan_file_path: str | None,
+        plan_file_path: Path | None,
     ) -> PermissionDecision | None:
         """先执行显式 deny 与 Plan 硬约束，二者不能被任何模式绕过。"""
         if self._rule_action(tool, arguments) == "deny":
@@ -191,7 +191,7 @@ class PermissionPolicy:
         tool: LionTool,
         arguments: Mapping[str, JSONValue],
         mode: PermissionMode,
-        plan_file_path: str | None,
+        plan_file_path: Path | None,
     ) -> PermissionDecision:
         hard = self.check_hard_boundaries(
             tool=tool,

@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from core.fakes import FakePlanView
+
 from lion_code.core.cancellation import CancellationToken
 from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.session_identity import SessionIdentityState
@@ -93,7 +95,7 @@ class TestResultStore(unittest.IsolatedAsyncioTestCase):
             controller=object(),
             registry=registry,
             permission=PermissionController(PermissionState("default")),
-            plan_file_path=None,
+            plan=FakePlanView(),
             read_file_state={},
         )
         with tempfile.TemporaryDirectory() as directory:

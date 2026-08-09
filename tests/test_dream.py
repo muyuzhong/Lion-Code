@@ -20,6 +20,8 @@ from lion_code.core import (
     UserMessage,
 )
 from lion_code.frontmatter import format_frontmatter, parse_frontmatter
+from lion_code.permission_state import PermissionController, PermissionState
+from lion_code.plan_runtime import PlanRuntime, PlanState
 from lion_code.project_identity import ProjectIdentity
 from lion_code.session_memory import SessionMemory
 from lion_code.session_runtime import SessionRepository
@@ -412,6 +414,13 @@ class TestAgentDreamRefresh(unittest.TestCase):
             _static_system_prompt="static",
             _base_system_prompt="old base",
             _system_prompt="old system",
+            session_id="session",
+            _emit_notice=Mock(),
+        )
+        host.plan = PlanRuntime(
+            host,
+            PermissionController(PermissionState("default")),
+            PlanState(),
         )
         host._refresh_dynamic_system_context = Agent._refresh_dynamic_system_context.__get__(host)
         coord = SessionMemoryCoordinator.__new__(SessionMemoryCoordinator)

@@ -46,6 +46,7 @@ from .permission_state import (
     PermissionMode,
     PermissionState,
 )
+from .plan_runtime import PlanRuntime, PlanState
 from .project_identity import ProjectIdentity, resolve_project_identity
 from .prompt import (
     build_dynamic_system_context,
@@ -190,12 +191,6 @@ class Agent:
         # 最近一次 chat/run 的终止原因，供 run() 结构化返回；chat 自身不读取。
         self._last_stop_reason: str | None = None
 
-        # Plan 模式需保存进入前的权限模式，退出时恢复。
-        self._pre_plan_mode: PermissionMode | None = None
-        self._plan_file_path: str | None = None
-        self._plan_approval_fn: Callable[[str], Awaitable[dict]] | None = None
-        self._pending_core_context_reset: str | None = None
-
         # 根据用户开关和模型能力解析实际 Thinking 模式。
         self._thinking_mode = self._resolve_thinking_mode()
         # Core 路径采用 Tau 6 档词汇(off..xhigh);由 ``thinking`` 开关推导初始档,
@@ -219,6 +214,29 @@ class Agent:
                     self.tool_registry.register(tool)
         else:
             self.tool_registry = tool_registry
+
+        # 系统提示词按前缀缓存拆成静态核心和动态尾部。项目指令改由 Provider
+        # Overlay 注入，既不破坏缓存边界，也不污染 canonical Session history。
+        if custom_system_prompt:
+            self._static_system_prompt = custom_system_prompt
+            self._dynamic_system_context = ""
+        else:
+            self._static_system_prompt = build_static_system_prompt()
+            self._dynamic_system_context = build_dynamic_system_context(
+                self.tool_registry.deferred_tool_names()
+            )
+        self._base_system_prompt = (
+            self._static_system_prompt + "\n\n" + self._dynamic_system_context
+            if self._dynamic_system_context
+            else self._static_system_prompt
+        )
+        self._system_prompt = self._base_system_prompt
+        self.plan = PlanRuntime(
+            self,
+            self._permission_controller,
+            PlanState(),
+        )
+        self.plan.initialize()
         self.tool_context = ToolContext(
             session=self._session_state,
             cancellation=execution.cancellation,
@@ -226,7 +244,7 @@ class Agent:
             controller=self,
             registry=self.tool_registry,
             permission=self._permission_controller,
-            plan_file_path=self._plan_file_path,
+            plan=self.plan,
             read_file_state=self._read_file_state,
             confirm_fn=self._confirm_dangerous,
             hooks=self._pre_tool_use_hooks,
@@ -266,29 +284,6 @@ class Agent:
         self._mcp_manager = self.tool_environment.mcp_manager
         self._mcp_initialized = False
         self._subagent_factory = SubagentFactory(self)
-
-        # 系统提示词按前缀缓存拆成静态核心和动态尾部。项目指令改由 Provider
-        # Overlay 注入，既不破坏缓存边界，也不污染 canonical Session history。
-        if custom_system_prompt:
-            self._static_system_prompt = custom_system_prompt
-            self._dynamic_system_context = ""
-        else:
-            self._static_system_prompt = build_static_system_prompt()
-            self._dynamic_system_context = build_dynamic_system_context(
-                self.tool_registry.deferred_tool_names()
-            )
-        self._base_system_prompt = (
-            self._static_system_prompt + "\n\n" + self._dynamic_system_context
-            if self._dynamic_system_context
-            else self._static_system_prompt
-        )
-        if self.permission_mode == "plan":
-            self._plan_file_path = self._generate_plan_file_path()
-            self._system_prompt = (
-                self._base_system_prompt + self._build_plan_mode_prompt()
-            )
-        else:
-            self._system_prompt = self._base_system_prompt
 
         self._lifecycle = AgentLifecycle(self)
         provider = self._lifecycle.build_core_provider(self._thinking_level)
@@ -615,29 +610,12 @@ class Agent:
         self.confirm_fn = fn
 
     def set_plan_approval_fn(self, fn: Callable[[str], Awaitable[dict]] | None) -> None:
-        self._plan_approval_fn = fn
+        self.plan.set_approval_fn(fn)
 
     # ─── Plan 模式切换 ───────────────────────────────────────
 
     def toggle_plan_mode(self) -> str:
-        if self.permission_mode == "plan":
-            self._permission_controller.set_mode(self._pre_plan_mode or "default")
-            self._pre_plan_mode = None
-            self._plan_file_path = None
-            self._system_prompt = self._base_system_prompt
-            self.tool_context.plan_file_path = self._plan_file_path
-            self._emit_notice(f"Exited plan mode → {self.permission_mode} mode")
-            return self.permission_mode
-        else:
-            self._pre_plan_mode = self.permission_mode
-            self._permission_controller.set_mode("plan")
-            self._plan_file_path = self._generate_plan_file_path()
-            self._system_prompt = (
-                self._base_system_prompt + self._build_plan_mode_prompt()
-            )
-            self.tool_context.plan_file_path = self._plan_file_path
-            self._emit_notice(f"Entered plan mode. Plan file: {self._plan_file_path}")
-            return "plan"
+        return self.plan.toggle()
 
     def get_token_usage(self) -> dict:
         return {"input": self.total_input_tokens, "output": self.total_output_tokens}
@@ -831,7 +809,7 @@ class Agent:
         self._base_system_prompt = (
             self._static_system_prompt + "\n\n" + self._dynamic_system_context
         )
-        self._system_prompt = self._base_system_prompt
+        self.plan.refresh_prompt()
 
     def _refresh_memory_context_after_dream(self, filenames: list[str]) -> None:
         """丢弃旧预取，并让本会话后续请求看到 Dream 后的索引和文件内容。"""
@@ -1115,7 +1093,6 @@ class Agent:
         inp: dict,
         tool_call_id: str = "",
     ) -> str:
-        self.tool_context.plan_file_path = self._plan_file_path
         result = await self.tool_runtime.execute(
             tool_call_id=tool_call_id,
             name=name,
@@ -1139,15 +1116,13 @@ class Agent:
 
     async def enter_plan_mode_tool(self) -> ToolResult:
         """进入 Plan 模式并返回结构化工具结果。"""
-        return ToolResult(content=await self._execute_plan_mode_tool("enter_plan_mode"))
+        outcome = self.plan.enter()
+        return ToolResult(content=outcome.content, terminate=outcome.terminate)
 
     async def exit_plan_mode_tool(self) -> ToolResult:
         """退出 Plan 模式并返回结构化工具结果。"""
-        content = await self._execute_plan_mode_tool("exit_plan_mode")
-        return ToolResult(
-            content=content,
-            terminate=self._pending_core_context_reset is not None,
-        )
+        outcome = await self.plan.exit()
+        return ToolResult(content=outcome.content, terminate=outcome.terminate)
 
     async def schedule_wakeup_tool(
         self,
@@ -1192,122 +1167,6 @@ class Agent:
                 await sub_agent.close()
 
         return f'[Skill "{inp.get("skill_name", "")}" activated]\n\n{result["prompt"]}'
-
-    # ─── Plan 模式辅助 ───────────────────────────────────────
-
-    def _generate_plan_file_path(self) -> str:
-        d = Path.home() / ".claude" / "plans"
-        d.mkdir(parents=True, exist_ok=True)
-        return str(d / f"plan-{self.session_id}.md")
-
-    def _build_plan_mode_prompt(self) -> str:
-        return f"""
-
-# Plan Mode Active
-
-Plan mode is active. You MUST NOT make any edits (except the plan file below), run non-readonly tools, or make any changes to the system.
-
-## Plan File: {self._plan_file_path}
-Write your plan incrementally to this file using write_file or edit_file. This is the ONLY file you are allowed to edit.
-
-## Workflow
-1. **Explore**: Read code to understand the task. Use read_file, list_files, grep_search.
-2. **Design**: Design your implementation approach. Use the agent tool with type="plan" if the task is complex.
-3. **Write Plan**: Write a structured plan to the plan file including:
-   - **Context**: Why this change is needed
-   - **Steps**: Implementation steps with critical file paths
-   - **Verification**: How to test the changes
-4. **Exit**: Call exit_plan_mode when your plan is ready for user review.
-
-IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask the user to approve — exit_plan_mode handles that."""
-
-    async def _execute_plan_mode_tool(self, name: str) -> str:
-        if name == "enter_plan_mode":
-            if self.permission_mode == "plan":
-                return "Already in plan mode."
-            self._pre_plan_mode = self.permission_mode
-            self._permission_controller.set_mode("plan")
-            self._plan_file_path = self._generate_plan_file_path()
-            self._system_prompt = (
-                self._base_system_prompt + self._build_plan_mode_prompt()
-            )
-            self.tool_context.plan_file_path = self._plan_file_path
-            self._emit_notice(
-                "Entered plan mode (read-only). Plan file: " + self._plan_file_path
-            )
-            return f"Entered plan mode. You are now in read-only mode.\n\nYour plan file: {self._plan_file_path}\nWrite your plan to this file. This is the only file you can edit.\n\nWhen your plan is complete, call exit_plan_mode."
-
-        if name == "exit_plan_mode":
-            if self.permission_mode != "plan":
-                return "Not in plan mode."
-            plan_content = "(No plan file found)"
-            if self._plan_file_path and Path(self._plan_file_path).exists():
-                plan_content = Path(self._plan_file_path).read_text()
-
-            # 主 Agent 有审批回调时进入交互式选择流程。
-            if self._plan_approval_fn:
-                result = await self._plan_approval_fn(plan_content)
-                choice = result.get("choice", "manual-execute")
-
-                if choice == "keep-planning":
-                    feedback = result.get("feedback") or "Please revise the plan."
-                    return (
-                        f"User rejected the plan and wants to keep planning.\n\n"
-                        f"User feedback: {feedback}\n\n"
-                        f"Please revise your plan based on this feedback. When done, call exit_plan_mode again."
-                    )
-
-                # 根据用户选择确定退出 Plan 后的权限模式。
-                target_mode: PermissionMode
-                if choice == "clear-and-execute":
-                    target_mode = "acceptEdits"
-                elif choice == "execute":
-                    target_mode = "acceptEdits"
-                else:  # 手动审批编辑时恢复进入 Plan 前的模式。
-                    target_mode = self._pre_plan_mode or "default"
-
-                # 先完整退出 Plan，再把批准后的计划交回模型执行。
-                self._permission_controller.set_mode(target_mode)
-                self._pre_plan_mode = None
-                saved_plan_path = self._plan_file_path
-                self._plan_file_path = None
-                self._system_prompt = self._base_system_prompt
-                self.tool_context.plan_file_path = self._plan_file_path
-
-                if choice == "clear-and-execute":
-                    self._pending_core_context_reset = (
-                        f"Approved plan:\n{plan_content}\n\n"
-                        "Proceed with implementation."
-                    )
-                    self._emit_notice(
-                        f"Plan approved. Context cleared, executing in {target_mode} mode."
-                    )
-                    return (
-                        f"User approved the plan. Context was cleared. Permission mode: {target_mode}\n\n"
-                        f"Plan file: {saved_plan_path}\n\n"
-                        f"## Approved Plan:\n{plan_content}\n\n"
-                        f"Proceed with implementation."
-                    )
-
-                self._emit_notice(f"Plan approved. Executing in {target_mode} mode.")
-                return (
-                    f"User approved the plan. Permission mode: {target_mode}\n\n"
-                    f"## Approved Plan:\n{plan_content}\n\n"
-                    f"Proceed with implementation."
-                )
-
-            # 子 Agent 等无审批回调场景直接恢复原权限模式，不伪造用户批准。
-            self._permission_controller.set_mode(self._pre_plan_mode or "default")
-            self._pre_plan_mode = None
-            self._plan_file_path = None
-            self._system_prompt = self._base_system_prompt
-            self.tool_context.plan_file_path = self._plan_file_path
-            self._emit_notice(
-                "Exited plan mode. Restored to " + self.permission_mode + " mode."
-            )
-            return f"Exited plan mode. Permission mode restored to: {self.permission_mode}\n\n## Your Plan:\n{plan_content}"
-
-        return f"Unknown plan mode tool: {name}"
 
     async def _execute_agent_tool(self, inp: dict) -> str:
         agent_type = inp.get("type", "general")

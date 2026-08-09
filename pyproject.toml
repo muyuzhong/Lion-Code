@@ -121,6 +121,7 @@ forbidden_modules = [
     "lion_code.application",
     "lion_code.tui",
     "lion_code.permission_state",
+    "lion_code.plan_runtime",
 ]
 ignore_imports = []
 allow_indirect_imports = "False"
@@ -149,6 +150,7 @@ forbidden_modules = [
     "lion_code.memory_runtime",
     "lion_code.observers",
     "lion_code.permission_state",
+    "lion_code.plan_runtime",
     "lion_code.project_identity",
     "lion_code.prompt",
     "lion_code.session_identity",
@@ -198,6 +200,7 @@ forbidden_modules = [
     "lion_code.memory_runtime",
     "lion_code.observers",
     "lion_code.permission_state",
+    "lion_code.plan_runtime",
     "lion_code.project_identity",
     "lion_code.providers",
     "lion_code.session_identity",

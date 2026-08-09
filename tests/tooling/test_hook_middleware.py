@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from core.fakes import FakePlanView
+
 from lion_code.core.cancellation import CancellationToken
 from lion_code.hooks import HookChainResult, HookOutcome, HookResult
 from lion_code.permission_state import PermissionController, PermissionState
@@ -45,7 +47,7 @@ class TestHookMiddleware(unittest.IsolatedAsyncioTestCase):
             controller=object(),
             registry=registry,
             permission=permission,
-            plan_file_path=None,
+            plan=FakePlanView(),
             read_file_state={},
             hooks=[object()],
         )

@@ -95,7 +95,14 @@ BOUNDARIES: tuple[Boundary, ...] = (
         contract_name="Core 不依赖上层运行时包",
         source_package="lion_code.core",
         forbidden=frozenset(
-            {"providers", "tooling", "application", "tui", "permission_state"}
+            {
+                "providers",
+                "tooling",
+                "application",
+                "tui",
+                "permission_state",
+                "plan_runtime",
+            }
         ),
     ),
     Boundary(

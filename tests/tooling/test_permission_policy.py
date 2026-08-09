@@ -53,7 +53,7 @@ class TestPermissionPolicy(unittest.TestCase):
             tool=_tool("write_file", mutates_workspace=True),
             arguments={"file_path": "other.md"},
             mode="plan",
-            plan_file_path="plan.md",
+            plan_file_path=Path("plan.md"),
         )
 
         self.assertEqual(decision.action, "deny")
@@ -63,17 +63,17 @@ class TestPermissionPolicy(unittest.TestCase):
             tool=_tool("read_file", read_only=True, allowed_in_plan=True),
             arguments={"file_path": "README.md"},
             mode="plan",
-            plan_file_path="plan.md",
+            plan_file_path=Path("plan.md"),
         )
 
         self.assertEqual(decision.action, "allow")
 
     def test_plan_file_is_only_mutating_exception(self):
         with tempfile.TemporaryDirectory() as directory:
-            plan = str(Path(directory) / "plan.md")
+            plan = Path(directory) / "plan.md"
             decision = PermissionPolicy().check(
                 tool=_tool("write_file", mutates_workspace=True),
-                arguments={"file_path": plan},
+                arguments={"file_path": str(plan)},
                 mode="plan",
                 plan_file_path=plan,
             )

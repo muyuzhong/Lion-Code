@@ -68,19 +68,13 @@ class SessionLifecycle:
             uuid.uuid4().hex[:8],
             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         )
-        session._pending_core_context_reset = None
+        session.plan.reset_for_new_session()
         coord._core_compaction_required = False
         coord._last_context_actions = ()
-        if session.permission_mode == "plan":
-            session._plan_file_path = session._generate_plan_file_path()
-            identity._system_prompt = (
-                session._base_system_prompt + session._build_plan_mode_prompt()
-            )
         coord._runtime.harness.clear_queues()
         coord._runtime.harness.replace_messages([])
         coord.reset_core_observers()
         await coord.ensure_core_session_ready()
-        session.tool_context.plan_file_path = session._plan_file_path
         coord.reset_session_counters()
         memory._turn_memory_overlays = memory._build_turn_memory_overlays()
         identity._emit_notice("Conversation cleared.")
@@ -101,7 +95,7 @@ class SessionLifecycle:
         memory._reload_session_memory()
         memory._last_memory_injection = MemoryInjectionReport()
         started_at = session.session_state.started_at
-        session._pending_core_context_reset = None
+        session.plan.reset_after_restore()
         coord._core_compaction_required = False
         coord._last_context_actions = ()
         coord._runtime.harness.clear_queues()

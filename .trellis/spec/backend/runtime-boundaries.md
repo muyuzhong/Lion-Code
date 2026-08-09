@@ -69,6 +69,42 @@ class PermissionController:
     def is_confirmed(self, value: str) -> bool: ...
     def confirm(self, value: str) -> None: ...
 
+PlanStatus = Literal["inactive", "active"]
+PlanApprovalFn = Callable[[str], Awaitable[dict[str, Any]]]
+
+class PlanView(Protocol):
+    @property
+    def is_active(self) -> bool: ...
+    @property
+    def file_path(self) -> Path | None: ...
+
+class PlanState:
+    status: PlanStatus
+    file_path: Path | None
+    previous_permission_mode: PermissionMode | None
+    pending_context_reset: str | None
+
+class PlanToolOutcome:
+    content: str
+    terminate: bool = False
+
+class PlanRuntime:
+    @property
+    def is_active(self) -> bool: ...
+    @property
+    def file_path(self) -> Path | None: ...
+    @property
+    def pending_context_reset(self) -> str | None: ...
+    def initialize(self) -> None: ...
+    def set_approval_fn(self, fn: PlanApprovalFn | None) -> None: ...
+    def toggle(self) -> PermissionMode: ...
+    def enter(self) -> PlanToolOutcome: ...
+    async def exit(self) -> PlanToolOutcome: ...
+    def reset_for_new_session(self) -> None: ...
+    def reset_after_restore(self) -> None: ...
+    def complete_context_reset(self) -> None: ...
+    def refresh_prompt(self) -> None: ...
+
 def Agent.configure_api(
     *,
     model: str | None = None,
@@ -151,9 +187,12 @@ For permission state, `PermissionController` owns one `PermissionState` containi
 the active `PermissionMode` and `confirmed_values`. `Agent.permission_mode` is a
 read-only facade, `ToolContext.permission` is the same live `PermissionView`, and
 `PermissionMiddleware` receives only a `PermissionConfirmationSink` for cache writes.
-Plan transitions remain orchestrated by `Agent` but change mode only through
-`PermissionController.set_mode()`; no consumer stores or synchronizes a primitive
-mode or confirmation-set mirror.
+`PlanRuntime` is the only business caller of `PermissionController.set_mode()`;
+other layers invoke complete Plan commands.
+
+The Agent composition root gives one `PlanState` to its only writer, `PlanRuntime`.
+`ToolContext.plan` is the same live read-only View; Agent and lifecycle APIs are
+delegates. Pending reset is completed only after persistence, replay and Core reset.
 
 ### Runtime and Provider
 
@@ -193,10 +232,16 @@ mode or confirmation-set mirror.
   stores `session: SessionView` and `cancellation: CancellationView`, never
   `session_id`, `cancellation_fn`, or a synthesized callback mirror.
 - Permission policy remains stateless. It receives `PermissionMode` plus the current
-  Plan file path and preserves explicit-deny and Plan hard-boundary precedence.
-  Middleware reads `ToolContext.permission.mode` and `is_confirmed()` for every call;
+  `Path | None` Plan file and preserves explicit-deny and Plan hard-boundary
+  precedence. Middleware reads `ToolContext.permission.mode`, `is_confirmed()`, and
+  `ToolContext.plan.file_path` for every call;
   default-mode approvals are cached through the narrow confirmation sink, while Auto
   classifier confirmations are deliberately not cached.
+- Enter/exit, approval, path and prompt form one Runtime transaction.
+  `keep-planning`, read errors and callback errors do not transition state.
+  `clear-and-execute` retains pending until compaction, replay and Core reset finish.
+- `/clear` regenerates an active path after Session identity reset; restore retains
+  it. Base prompt changes always call `PlanRuntime.refresh_prompt()`.
 - `Agent._create_provider(**kwargs)` is the required host factory boundary. It reads
   `lion_code.agent.create_provider` at call time, so existing patches of that name
   affect initial construction, Provider swaps, and Thinking rebuilds. Do not import
@@ -324,7 +369,14 @@ mode or confirmation-set mirror.
 | Controller changes mode after ToolContext construction | The existing `PermissionView` observes the new mode without replacement or synchronization |
 | Repeated default-mode confirmation reason | Ask once, then read the Controller-owned confirmation cache |
 | Repeated Auto classifier `confirm` decision | Ask every time and do not populate the confirmation cache |
-| Plan enter, exit, approval, or clear | Preserve the current Plan transaction while changing permission mode only through the Controller |
+| Initial `permission_mode="plan"` | Create one active Plan path/prompt; exit falls back to `default` |
+| Approval returns `keep-planning` or raises | Preserve active status, path, permission and Plan prompt for retry |
+| `execute` / `clear-and-execute` | Exit to `acceptEdits`; only clear-and-execute records pending and terminates |
+| Approval callback absent | Restore the entering mode without claiming user approval |
+| Plan file missing / unreadable | Use `(No plan file found)` when absent; propagate read errors without partial exit |
+| Active Plan clear / restore | Clear generates a new-session path; restore retains the active path |
+| Active Plan new-session path generation fails | Surface the error and preserve the current Plan path, permission, and prompt |
+| Context reset step fails | Keep `pending_context_reset`; never acknowledge a half-applied switch |
 | Child construction | Inherit `plan` and `auto`; map every other parent mode to `bypassPermissions` |
 | Hook trust in `dontAsk` | Continue to deny trust without treating tool permission bypass as Hook trust |
 
@@ -371,6 +423,11 @@ mode or confirmation-set mirror.
 - Bad: assigning `Agent.permission_mode`, copying it into
   `ToolContext.permission_mode`, or mutating `confirmed_values` in middleware creates
   multiple writers and requires manual synchronization.
+- Good: `PlanRuntime.enter()` updates its state, permission and prompt; the existing
+  `ToolContext.plan` immediately observes the new `Path`.
+- Good: clear-and-execute keeps pending until replay and Core reset succeed.
+- Bad: copying the path, clearing pending early, or rebuilding Plan prompt in a
+  lifecycle layer creates a second writer.
 
 ## 6. Executable Enforcement
 
@@ -384,9 +441,10 @@ python -m pytest -q tests/architecture/test_runtime_boundaries.py
 
 pyproject.toml contains these five import-linter contracts:
 
-- core cannot depend on providers, tooling, permission state, application, or tui,
+- core cannot depend on providers, tooling, permission/Plan state, application, or tui,
   including indirect paths.
-- providers cannot depend on any Lion runtime layer other than core; direct
+- providers cannot depend on any Lion runtime layer other than core, including
+  `plan_runtime`; direct
   import validation also requires provider source to use only core or its own
   package.
 - application cannot depend on tui.
@@ -418,7 +476,10 @@ also rejects patterns an import graph cannot express:
 - `Agent.permission_mode` or `_confirmed_paths` instance fields,
   `ToolContext.permission_mode` or `confirmed_paths`, Permission state construction
   outside the Agent composition root, direct state writes outside
-  `permission_state.py`, or `set_mode()` calls outside Agent Plan transitions.
+  `permission_state.py`, or `set_mode()` business calls outside `plan_runtime.py`.
+- Former Agent Plan fields/helpers; `ToolContext.plan_file_path`; PlanState
+  construction or mutation outside its owner; or lifecycle code rebuilding Plan
+  state, permission or prompt by hand.
 
 When a legitimate architecture move requires a new exception, change the
 runtime code, this contract, the AST allowlist, and the focused test in one
@@ -451,6 +512,11 @@ exception, or silently broaden an allowlist to make a regression pass.
   `tests/tooling/test_permission_middleware.py`: explicit deny and Plan hard
   boundaries, live mode reads, default confirmation caching, Auto non-caching, and
   narrow confirmation writes.
+- `tests/test_plan_runtime.py`: initialization, permissions, approvals, file errors,
+  clear/restore, prompt refresh, pending and View identity.
+- `tests/tooling/test_agent_runtime.py` and
+  `tests/integration/test_agent_core_runtime.py`: Agent facade delegation, existing
+  live View, clear-and-execute continuation, and reset failure.
 - `tests/tooling/test_skill_registry_view.py`, `tests/test_hooks.py`, and
   `tests/integration/test_agent_core_runtime.py`: read-only Agent facade, live child
   inheritance, `dontAsk` Hook trust, and Plan approval transitions without
@@ -487,6 +553,9 @@ self.tool_context.session_id = self.session_id
 self.tool_context.cancellation_fn = lambda: self._aborted
 self.permission_mode = "plan"
 self.tool_context.permission_mode = self.permission_mode
+self._plan_file_path = self._generate_plan_file_path()
+self.tool_context.plan_file_path = self._plan_file_path
+self._pending_core_context_reset = None
 self.tool_context.confirmed_paths.add(reason)
 ui.set_sink(tui_sink)
 legacy_path.replace(jsonl_path)
@@ -501,7 +570,11 @@ session_id = agent.tool_context.session.id
 cancelled = agent.tool_context.cancellation.cancelled
 permission_mode = agent.tool_context.permission.mode
 confirmed = agent.tool_context.permission.is_confirmed(reason)
-self._permission_controller.set_mode("plan")
+plan_path = agent.tool_context.plan.file_path
+outcome = agent.plan.enter()
+await agent.plan.exit()
+agent.plan.reset_for_new_session()
+agent.plan.complete_context_reset()
 session = LionCodingSession(agent, terminal_output=False)
 session.set_notice_fn(app_notice)
 storage = repository.storage_for(session_id)

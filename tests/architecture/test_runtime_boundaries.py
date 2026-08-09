@@ -51,6 +51,26 @@ REMOVED_RUNTIME_SYMBOLS = frozenset(
 _PERMISSION_STATE_BASE_NAMES = frozenset(
     {"state", "_state", "permission_state", "_permission_state"}
 )
+_PLAN_STATE_BASE_NAMES = frozenset({"state", "_state", "plan_state", "_plan_state"})
+_PLAN_STATE_FIELDS = frozenset(
+    {
+        "status",
+        "file_path",
+        "previous_permission_mode",
+        "pending_context_reset",
+    }
+)
+_REMOVED_AGENT_PLAN_SYMBOLS = frozenset(
+    {
+        "_pre_plan_mode",
+        "_plan_file_path",
+        "_plan_approval_fn",
+        "_pending_core_context_reset",
+        "_generate_plan_file_path",
+        "_build_plan_mode_prompt",
+        "_execute_plan_mode_tool",
+    }
+)
 _MUTATING_SET_METHODS = frozenset(
     {
         "add",
@@ -423,6 +443,79 @@ def _permission_state_mutations(tree: ast.Module) -> frozenset[str]:
         ):
             mutations.add(f"setattr:{node.args[1].value}")
     return frozenset(mutations)
+
+
+def _plan_state_mutations(tree: ast.Module) -> frozenset[str]:
+    """返回绕过 PlanRuntime 的直接 PlanState 写入形状。"""
+
+    aliases = set(_PLAN_STATE_BASE_NAMES)
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            target: ast.expr | None = None
+            value: ast.expr | None = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                value = node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                target = node.target
+                value = node.value
+            if not isinstance(target, ast.Name) or value is None:
+                continue
+            value_names = _attribute_chain_names(value)
+            constructs_state = isinstance(value, ast.Call) and (
+                (isinstance(value.func, ast.Name) and value.func.id == "PlanState")
+                or (
+                    isinstance(value.func, ast.Attribute)
+                    and value.func.attr == "PlanState"
+                )
+            )
+            if constructs_state or value_names & aliases:
+                if target.id not in aliases:
+                    aliases.add(target.id)
+                    changed = True
+
+    mutations: set[str] = set()
+    for node in ast.walk(tree):
+        targets: tuple[ast.expr, ...] = ()
+        if isinstance(node, ast.Assign):
+            targets = tuple(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            targets = (node.target,)
+        elif isinstance(node, ast.AugAssign):
+            targets = (node.target,)
+        elif isinstance(node, ast.Delete):
+            targets = tuple(node.targets)
+        for target in targets:
+            for attribute in _assignment_attribute_targets(target):
+                if (
+                    attribute.attr in _PLAN_STATE_FIELDS
+                    and _attribute_chain_names(attribute.value) & aliases
+                ):
+                    mutations.add(attribute.attr)
+
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "setattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value in _PLAN_STATE_FIELDS
+            and _attribute_chain_names(node.args[0]) & aliases
+        ):
+            mutations.add(f"setattr:{node.args[1].value}")
+    return frozenset(mutations)
+
+
+def _attribute_references(tree: ast.Module, name: str) -> frozenset[str]:
+    """返回属性访问，避免兼容镜像借不同宿主变量名回归。"""
+
+    return frozenset(
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == name
+    )
 
 
 def _named_constructor_count(tree: ast.Module, name: str) -> int:
@@ -936,13 +1029,90 @@ def test_permission_state_has_one_owner_and_live_read_ports() -> None:
         and _attribute_call_sites(_tree(path), "set_mode")
     }
     assert set_mode_sites == {
-        "agent.py": ["Agent._execute_plan_mode_tool", "Agent.toggle_plan_mode"]
+        "plan_runtime.py": ["PlanRuntime._enter", "PlanRuntime._leave"]
     }
 
     middleware_tree = _tree(SOURCE_ROOT / "tooling" / "middleware.py")
     assert not _contains_attr_call(middleware_tree, "set_mode")
     assert _type_annotation_mentions(middleware_tree, "PermissionConfirmationSink")
     assert not _type_annotation_mentions(middleware_tree, "PermissionController")
+
+
+def test_plan_state_has_one_owner_and_live_read_port() -> None:
+    context_path = SOURCE_ROOT / "tooling" / "context.py"
+    context_tree = _tree(context_path)
+    context_fields = _class_annotated_fields(context_tree, "ToolContext")
+    assert "plan" in context_fields
+    assert "plan_file_path" not in context_fields
+    assert _type_annotation_mentions(context_tree, "PlanView")
+
+    plan_tree = _tree(SOURCE_ROOT / "plan_runtime.py")
+    assert _class_annotated_fields(plan_tree, "PlanState") == _PLAN_STATE_FIELDS
+
+    agent_fields = _self_fields(_tree(SOURCE_ROOT / "agent.py"))
+    assert not _REMOVED_AGENT_PLAN_SYMBOLS & agent_fields
+    removed_symbols = {
+        _source_key(path): sorted(
+            _referenced_symbols(_tree(path), _REMOVED_AGENT_PLAN_SYMBOLS)
+        )
+        for path in _source_files()
+        if _referenced_symbols(_tree(path), _REMOVED_AGENT_PLAN_SYMBOLS)
+    }
+    assert not removed_symbols, (
+        f"Removed Plan mirrors must not return: {removed_symbols}"
+    )
+
+    path_mirrors = {
+        _source_key(path): sorted(_attribute_references(_tree(path), "plan_file_path"))
+        for path in _source_files()
+        if _attribute_references(_tree(path), "plan_file_path")
+    }
+    assert not path_mirrors, (
+        f"ToolContext Plan path mirrors must not return: {path_mirrors}"
+    )
+
+    host_tree = _tree(SOURCE_ROOT / "agent_runtime.py")
+    host_fields = _class_annotated_fields(host_tree, "SessionStateHost")
+    assert "plan" in host_fields
+    assert not _REMOVED_AGENT_PLAN_SYMBOLS & host_fields
+
+    lifecycle_tree = _tree(SOURCE_ROOT / "session_lifecycle.py")
+    lifecycle_prompt_symbols = frozenset(
+        {
+            "_base_system_prompt",
+            "_system_prompt",
+            "_build_prompt",
+            "_build_plan_mode_prompt",
+            "_generate_file_path",
+        }
+    )
+    assert not _referenced_symbols(lifecycle_tree, lifecycle_prompt_symbols)
+
+    state_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "PlanState")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "PlanState")
+    }
+    runtime_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "PlanRuntime")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "PlanRuntime")
+    }
+    assert state_constructors == {"agent.py": 1}
+    assert runtime_constructors == {"agent.py": 1}
+
+    mutations = {
+        _source_key(path): sorted(_plan_state_mutations(_tree(path)))
+        for path in _source_files()
+        if _source_key(path) != "plan_runtime.py" and _plan_state_mutations(_tree(path))
+    }
+    assert not mutations, f"PlanState writes must stay in PlanRuntime: {mutations}"
+
+    middleware_source = (SOURCE_ROOT / "tooling" / "middleware.py").read_text(
+        encoding="utf-8"
+    )
+    assert "context.plan_file_path" not in middleware_source
+    assert middleware_source.count("context.plan.file_path") == 2
 
 
 def test_jsonl_writer_primitives_do_not_escape_persistence_boundary() -> None:
@@ -1160,6 +1330,17 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     permission_mirror = ast.parse(
         "class Agent:\n    def change(self):\n        self.permission_mode = 'plan'\n"
     )
+    plan_mutation = ast.parse(
+        "def bypass(plan_state):\n"
+        "    plan_state.status = 'active'\n"
+        "    plan_state.file_path = path\n"
+        "    renamed = plan_state\n"
+        "    renamed.previous_permission_mode = 'default'\n"
+        "    setattr(plan_state, 'pending_context_reset', 'summary')\n"
+    )
+    plan_path_mirror = ast.parse(
+        "def sync(alias):\n    alias.plan_file_path = 'plan.md'\n"
+    )
 
     assert _private_history_fields(provider) == frozenset(
         {
@@ -1208,6 +1389,17 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     )
     assert _permission_state_mutations(permission_mirror) == frozenset(
         {"permission_mode"}
+    )
+    assert _plan_state_mutations(plan_mutation) == frozenset(
+        {
+            "status",
+            "file_path",
+            "previous_permission_mode",
+            "setattr:pending_context_reset",
+        }
+    )
+    assert _attribute_references(plan_path_mirror, "plan_file_path") == frozenset(
+        {"plan_file_path"}
     )
 
 

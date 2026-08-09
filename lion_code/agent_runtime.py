@@ -50,7 +50,7 @@ from lion_code.memory_runtime import (
     ReadOnlyMessageSource,
 )
 from lion_code.observers import TerminalRenderer, UsageObserver
-from lion_code.permission_state import PermissionMode
+from lion_code.plan_runtime import PlanRuntime
 from lion_code.providers.thinking import ThinkingLevel
 from lion_code.session_identity import SessionIdentityState
 from lion_code.session_lifecycle import SessionLifecycle
@@ -253,22 +253,13 @@ class RuntimeIdentityHost(Protocol):
 class SessionStateHost(Protocol):
     """会话标识、仓库、Plan 模式与工具环境所需的宿主边界。"""
 
-    _plan_file_path: str | None
-    _pending_core_context_reset: str | None
-    _base_system_prompt: str
     _session_repository: SessionRepository
+    plan: PlanRuntime
     tool_context: Any
     tool_environment: Any
 
     @property
     def session_state(self) -> SessionIdentityState: ...
-
-    @property
-    def permission_mode(self) -> PermissionMode: ...
-
-    def _generate_plan_file_path(self) -> str: ...
-
-    def _build_plan_mode_prompt(self) -> str: ...
 
 
 class MemoryTurnHost(Protocol):
@@ -692,11 +683,11 @@ class AgentRuntimeCoordinator:
             keep_user_boundaries=2,
         )
 
-    async def apply_pending_core_context_reset(self) -> bool:
+    async def apply_plan_context_reset(self) -> bool:
         """把 Plan 批准摘要持久化后作为唯一活跃上下文继续运行。"""
 
         session = self._session
-        summary = session._pending_core_context_reset
+        summary = session.plan.pending_context_reset
         if summary is None or self._session_recorder is None:
             return False
         replaced_ids = list(await self._session_recorder.context_entry_ids())
@@ -719,7 +710,7 @@ class AgentRuntimeCoordinator:
         self._usage.last_input_token_count = 0
         self._last_context_actions = ()
         self._core_compaction_required = False
-        session._pending_core_context_reset = None
+        session.plan.complete_context_reset()
         return True
 
     def schedule_background_operation(
@@ -811,8 +802,7 @@ class AgentRuntimeCoordinator:
         try:
             await self._runtime.prompt(user_message)
             while (
-                not self._execution.cancelled
-                and await self.apply_pending_core_context_reset()
+                not self._execution.cancelled and await self.apply_plan_context_reset()
             ):
                 if self._execution.cancelled:
                     break

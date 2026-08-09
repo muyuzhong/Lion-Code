@@ -14,9 +14,17 @@ so dynamic-configuration tests can assert per-turn behavior.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from pathlib import Path
 
 from lion_code.core.messages import AssistantMessage
 from lion_code.core.provider_events import AssistantErrorEvent, AssistantMessageEvent
+
+
+@dataclass(slots=True)
+class FakePlanView:
+    is_active: bool = False
+    file_path: Path | None = None
 
 
 class FakeProvider:

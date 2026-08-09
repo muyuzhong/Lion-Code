@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from ..core.cancellation import CancellationView
 from ..permission_state import PermissionView
+from ..plan_runtime import PlanView
 from ..session_identity import SessionView
 from .types import JSONValue, ToolResult
 
@@ -50,7 +51,7 @@ class ToolContext:
     controller: AgentToolController
     registry: ToolRegistry
     permission: PermissionView
-    plan_file_path: str | None
+    plan: PlanView
     read_file_state: dict[str, float]
     confirm_fn: Callable[[str], Awaitable[bool]] | None = None
     hooks: list[Any] = field(default_factory=list)

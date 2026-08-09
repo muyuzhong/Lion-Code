@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+from core.fakes import FakePlanView
+
 from lion_code.core.cancellation import CancellationToken
 from lion_code.permission_state import (
     PermissionController,
@@ -54,7 +56,7 @@ def _runtime(
         controller=object(),
         registry=registry,
         permission=permission,
-        plan_file_path=None,
+        plan=FakePlanView(),
         read_file_state={},
         confirm_fn=confirm_fn,
         auto_permission_fn=auto_permission_fn,
@@ -107,7 +109,7 @@ class TestPermissionMiddleware(unittest.IsolatedAsyncioTestCase):
             mode="plan",
             policy=policy,
         )
-        context.plan_file_path = "plan.md"
+        context.plan.file_path = Path("plan.md")
 
         result = await runtime.execute(
             tool_call_id="call-1",

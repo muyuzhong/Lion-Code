@@ -121,7 +121,7 @@ class PermissionMiddleware:
             tool=tool,
             arguments=arguments,
             mode=context.permission.mode,
-            plan_file_path=context.plan_file_path,
+            plan_file_path=context.plan.file_path,
         )
         if hard is not None:
             return hard
@@ -131,7 +131,7 @@ class PermissionMiddleware:
                 tool=tool,
                 arguments=arguments,
                 mode=context.permission.mode,
-                plan_file_path=context.plan_file_path,
+                plan_file_path=context.plan.file_path,
             )
 
         if is_auto_fast_path(tool):
