@@ -28,7 +28,6 @@ def _make_agent(**kwargs) -> Agent:
         permission_mode=kwargs.get("permission_mode", "default"),
         max_turns=kwargs.get("max_turns"),
     )
-    agent._aborted = False
     agent._emit_notice = lambda *a, **k: None
     agent.chat = AsyncMock()
     agent._check_budget = lambda: {"exceeded": False}

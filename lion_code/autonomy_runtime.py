@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Mapping
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from .autonomy import (
@@ -36,6 +37,7 @@ from .core.messages import AssistantMessage
 from .prompt import load_claude_md
 from .tooling.internal import create_schedule_wakeup_tool
 from .tooling.middleware import is_auto_fast_path
+from .tooling.types import JSONValue
 
 
 @runtime_checkable
@@ -46,7 +48,6 @@ class AutonomyHost(Protocol):
     只约束本模块实际回调的方法签名。
     """
 
-    _aborted: bool
     max_turns: int | None
     confirm_fn: Any
     tool_registry: Any
@@ -54,6 +55,9 @@ class AutonomyHost(Protocol):
 
     @property
     def api_configured(self) -> bool: ...
+
+    @property
+    def is_aborted(self) -> bool: ...
 
     def _emit_notice(
         self, message: str, *, role: Literal["info", "error"] = "info"
@@ -124,7 +128,7 @@ class AutonomyRuntime:
         try:
             await self._host.chat(directive)
             # 先评估刚结束的一轮,再检查上限或决定下一轮,确保最终输出不会漏判。
-            while self.active_goal and not self.goal_stop and not self._host._aborted:
+            while self.active_goal and not self.goal_stop and not self._host.is_aborted:
                 verdict = await self._evaluate_goal(self.active_goal["condition"])
                 if verdict["ok"]:
                     turns = self.active_goal["iterations"] + 1
@@ -158,13 +162,13 @@ class AutonomyRuntime:
                         f"Goal stopped: reached {GOAL_MAX_ITERATIONS} iterations without meeting the condition."
                     )
                     break
-                if self.goal_stop or self._host._aborted:
+                if self.goal_stop or self._host.is_aborted:
                     break
 
                 await self._host.chat(
                     f"Hooks: Prompt hook condition was not met: {verdict['reason']}\n\nKeep working toward the goal."
                 )
-            if self.goal_stop or self._host._aborted:
+            if self.goal_stop or self._host.is_aborted:
                 self._host._emit_notice("Goal pursuit interrupted.")
         finally:
             # 无论满足、不可能、超限还是中断都清除状态,避免旧目标污染后续对话;
@@ -236,7 +240,7 @@ class AutonomyRuntime:
             "dies when this process exits). Ctrl+C to stop."
         )
         iterations = 0
-        while not self.loop_stop and not self._host._aborted:
+        while not self.loop_stop and not self._host.is_aborted:
             iterations += 1
             self._host._emit_notice(f"⟳ loop tick {iterations}")
             await self._host.chat(spec["prompt"])
@@ -275,7 +279,7 @@ class AutonomyRuntime:
         iterations = 0
         with self._host.tool_registry.temporary_tool(create_schedule_wakeup_tool()):
             try:
-                while not self.loop_stop and not self._host._aborted:
+                while not self.loop_stop and not self._host.is_aborted:
                     iterations += 1
                     self.pending_wakeup = None
                     await self._host.chat(dynamic_loop_directive(prompt))
@@ -333,7 +337,7 @@ class AutonomyRuntime:
 
         start = _time.time()
         while _time.time() - start < seconds:
-            if self.loop_stop or self._host._aborted:
+            if self.loop_stop or self._host.is_aborted:
                 return True
             await asyncio.sleep(min(0.2, seconds))
         return False
@@ -348,7 +352,11 @@ class AutonomyRuntime:
 
     # ─── Auto Mode:transcript 分类器权限门 ───────────────────
 
-    async def _classify_tool_call(self, tool_name: str, inp: dict) -> dict:
+    async def _classify_tool_call(
+        self,
+        tool_name: str,
+        inp: Mapping[str, JSONValue],
+    ) -> dict:
         """以两阶段分类器决定工具调用,返回 allow、deny 或人工 confirm。
 
         第一阶段是低成本激进门,只要规则可能适用就拦截;若放行则一次调用结束。

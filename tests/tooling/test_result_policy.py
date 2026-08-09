@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from lion_code.core.cancellation import CancellationToken
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.middleware import ResultPolicyMiddleware
 from lion_code.tooling.registry import ToolRegistry
@@ -84,7 +86,8 @@ class TestResultStore(unittest.IsolatedAsyncioTestCase):
         registry = ToolRegistry()
         registry.register(tool)
         context = ToolContext(
-            session_id="session",
+            session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+            cancellation=CancellationToken(),
             cwd=Path.cwd(),
             controller=object(),
             registry=registry,

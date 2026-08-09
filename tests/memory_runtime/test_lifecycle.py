@@ -101,21 +101,21 @@ def test_invalidate_removes_changed_overlay_and_reopens_path() -> None:
     assert coordinator.session_bytes == 5
 
 
-def test_core_abort_cancels_memory_and_harness_together() -> None:
+def test_core_abort_cancels_memory_and_shared_execution_together() -> None:
     from lion_code.agent_runtime import AgentRuntimeCoordinator
+    from lion_code.execution_control import ExecutionControl
 
     identity = Mock()
     identity._memory_coordinator = Mock()
-    identity._aborted = False
     identity._last_stop_reason = None
     identity._terminal_output = False
     memory = Mock()
     memory._memory_coordinator = identity._memory_coordinator
-    runtime = Mock()
+    execution = ExecutionControl()
     coordinator = AgentRuntimeCoordinator.__new__(AgentRuntimeCoordinator)
     coordinator._identity = identity
     coordinator._memory = memory
-    coordinator._runtime = runtime
+    coordinator._execution = execution
     coordinator._core_compaction_task = None
     coordinator._terminal_renderer = None
     coordinator._terminal_renderer_unsubscribe = None
@@ -124,4 +124,4 @@ def test_core_abort_cancels_memory_and_harness_together() -> None:
     coordinator.abort()
 
     identity._memory_coordinator.cancel_pending.assert_called_once_with()
-    runtime.cancel.assert_called_once_with()
+    assert execution.cancelled

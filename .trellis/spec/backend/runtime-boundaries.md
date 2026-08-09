@@ -11,6 +11,35 @@ or process-global output bridge is an architecture regression.
 ## 2. Signatures
 
 ```python
+class CancellationView(Protocol):
+    @property
+    def cancelled(self) -> bool: ...
+    def is_cancelled(self) -> bool: ...
+
+class CancellationToken:
+    @property
+    def cancelled(self) -> bool: ...
+    def is_cancelled(self) -> bool: ...
+    def cancel(self) -> None: ...
+    def reset(self) -> None: ...
+
+class ExecutionControl:
+    @property
+    def cancelled(self) -> bool: ...
+    @property
+    def cancellation(self) -> CancellationView: ...
+    def begin(self) -> None: ...
+    def cancel(self) -> None: ...
+
+class SessionView(Protocol):
+    @property
+    def id(self) -> str: ...
+    @property
+    def started_at(self) -> str: ...
+
+class SessionIdentityState:
+    def reset(self, id: str, started_at: str) -> None: ...
+
 def Agent.configure_api(
     *,
     model: str | None = None,
@@ -64,6 +93,31 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
 
 ## 3. Contracts
 
+### State Ownership
+
+1. Every mutable runtime state has exactly one named Owner; consumers receive a
+   read-only View and must not retain a writable mirror.
+2. State changes cross layer boundaries as commands on that Owner, never as direct
+   field assignments from observers or frontends.
+3. One Agent composition passes the same state object through Core, Provider,
+   ToolRuntime, middleware, Memory, and application adapters; callbacks and copied
+   primitive fields are not state synchronization mechanisms.
+4. Reset is a lifecycle transition performed before the next operation starts; it
+   must not be hidden in a downstream consumer that can erase an already-issued
+   command.
+5. A state move is complete only when old fields, protocols, constructors, and
+   writers are removed and architecture tests enforce the new single-owner boundary.
+
+For the active Session identity, `SessionIdentityState` owns `id` and `started_at`,
+while `SessionLifecycle` is the only post-construction writer for new/restore
+transitions. `Agent.session_id`, `Agent.session_start_time`, `ToolContext.session`,
+Recorder construction, and application session metadata are read-only projections.
+For cancellation, `ExecutionControl` owns the one Core `CancellationToken` and
+`AgentRuntimeCoordinator` owns begin/cancel orchestration, including Memory prefetch,
+Core stream, compaction, explicit abort, and timeout side effects. Standalone
+`AgentHarness` owns its local token only when no external cancellation view is
+supplied.
+
 ### Runtime and Provider
 
 - Every `Agent` composes one `AgentRuntimeCoordinator`, which owns exactly one
@@ -74,7 +128,7 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
   protocol-private histories or SDK clients.
 - `AgentRuntimeCoordinator` owns Core assembly, observer subscription order,
   `SessionRecorder`, context projection/compaction, background cleanup, output
-  capture, and chat/run orchestration through four narrow host ports
+  capture, the supplied `ExecutionControl`, and chat/run orchestration through four narrow host ports
   (`UsageStateHost`, `RuntimeIdentityHost`, `SessionStateHost`,
   `MemoryTurnHost`). Clear/restore/compact/close orchestration is delegated to
   `SessionLifecycle` (in `session_lifecycle.py`), which calls back into the
@@ -93,6 +147,14 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
   compactor, recorder and background-operation compatibility views while retaining
   configuration fields and Memory composition. The lifecycle module must not import
   `Agent` or create another Provider, message history, or session writer.
+- `Agent.is_aborted` is a read-only facade over the coordinator's
+  `ExecutionControl`. A new chat calls `begin()` before setup; explicit abort and
+  timeout call the same coordinator cancellation path, while timeout retains its
+  distinct final stop reason.
+- Core Provider and Tool contracts consume `CancellationView`; one concrete
+  `CancellationToken` reaches the Provider stream and Tool adapter. `ToolContext`
+  stores `session: SessionView` and `cancellation: CancellationView`, never
+  `session_id`, `cancellation_fn`, or a synthesized callback mirror.
 - `Agent._create_provider(**kwargs)` is the required host factory boundary. It reads
   `lion_code.agent.create_provider` at call time, so existing patches of that name
   affect initial construction, Provider swaps, and Thinking rebuilds. Do not import
@@ -200,6 +262,7 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
 | Lifecycle factory uses a patched `lion_code.agent.create_provider` | Use the patched factory for construction, API swap, and Thinking rebuild |
 | Old Provider after a successful swap | Close only after replacement; never close an active stream |
 | New top-level session | Create and append one JSONL chain |
+| `/clear` or restore changes the active Session identity | `SessionLifecycle` resets the one `SessionIdentityState`; every `SessionView` observes it without a copied-field sync |
 | Existing valid JSONL | Replay it and continue appending to the same file |
 | Legacy JSON without JSONL | Read, migrate to same-ID JSONL, and preserve source bytes/name/mtime |
 | Invalid legacy JSON | Raise `LegacySessionError` for direct load; skip it while listing |
@@ -213,6 +276,9 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
 | `/clear` or JSONL restore | Keep/reload current project Session Memory; do not merge it into transcript |
 | Tool loop after Auto Memory recall settles | Reuse the turn-start overlay snapshot until the next user turn |
 | `/dream` candidate input | Include only filtered durable evidence; never grant writes outside Auto Memory |
+| Explicit abort before Provider or Tool work starts | The shared token remains cancelled and the operation terminates as `aborted` |
+| Timeout during a run | Use the shared cancellation command but report `timeout`, not `aborted` |
+| New chat after an aborted run | Reset cancellation at the operation boundary before setup and complete normally |
 
 ## 5. Good / Base / Bad Cases
 
@@ -239,6 +305,16 @@ def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
   record of only user, assistant, and tool messages.
 - Bad: appending a Session Memory overlay into harness messages makes compaction and
   resume treat injected project state as user conversation.
+- Good: `SessionLifecycle` calls `session_state.reset(...)` once and Agent,
+  ToolContext, Recorder, and application views immediately observe the new identity.
+- Base: `Agent.session_id` and `Agent.is_aborted` remain public read-only facade
+  properties while their mutable state lives in the owning runtime objects.
+- Good: one `CancellationToken` is passed through Harness, Provider, Tool adapter,
+  ToolRuntime, and middleware; `ExecutionControl` owns begin/cancel commands.
+- Bad: copying `session_id` into ToolContext or wrapping `_aborted` in a callback
+  recreates mirrored state and makes lifecycle transitions require manual sync.
+- Bad: resetting cancellation inside an async generator can erase a cancel command
+  issued after generator construction but before its first iteration.
 
 ## 6. Executable Enforcement
 
@@ -280,6 +356,9 @@ also rejects patterns an import graph cannot express:
 - Memory runtime code calling Harness mutation APIs or owning an
   AgentHarness. Overlay code may read a canonical snapshot and return a
   temporary projection only.
+- `Agent._aborted`, `ToolContext.session_id`, `ToolContext.cancellation_fn`, duplicate
+  Provider/Tool cancellation token protocols, or Session identity reset calls outside
+  `SessionLifecycle`.
 
 When a legitimate architecture move requires a new exception, change the
 runtime code, this contract, the AST allowlist, and the focused test in one
@@ -301,6 +380,13 @@ exception, or silently broaden an allowlist to make a regression pass.
 - `tests/runtime/test_agent_runtime.py`: `agent_runtime` imports without importing
   `lion_code.agent`, and a constructed `Agent` exposes the coordinator's one Core
   runtime rather than a duplicate history.
+- `tests/core/test_cancellation.py`, `tests/test_agent_run.py`, and
+  `tests/tooling/test_runtime.py`: cancellation before first iteration, shared
+  Provider/Tool signal propagation, explicit-abort versus timeout outcomes, and
+  reset before a later chat.
+- `tests/integration/test_agent_core_runtime.py`: clear/restore updates the single
+  Session identity, ToolContext observes the live view, and a cancelled run can be
+  followed by a successful turn.
 - `tests/tui/test_tui_app.py`: two streaming turns, tool-row identity, one notice per
   action, no normal-delta full redraw, and shared Session Memory command dispatch.
 - tests/architecture/test_runtime_boundaries.py: import ownership, Provider private
@@ -326,6 +412,8 @@ exception, or silently broaden an allowlist to make a regression pass.
 ```python
 self._openai_messages = []
 self._anthropic_messages = []
+self.tool_context.session_id = self.session_id
+self.tool_context.cancellation_fn = lambda: self._aborted
 ui.set_sink(tui_sink)
 legacy_path.replace(jsonl_path)
 # agent_lifecycle.py: from .providers.factory import create_provider
@@ -335,6 +423,8 @@ legacy_path.replace(jsonl_path)
 
 ```python
 history = agent.core_runtime.messages
+session_id = agent.tool_context.session.id
+cancelled = agent.tool_context.cancellation.cancelled
 session = LionCodingSession(agent, terminal_output=False)
 session.set_notice_fn(app_notice)
 storage = repository.storage_for(session_id)

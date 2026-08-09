@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from lion_code.core.cancellation import CancellationToken
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.internal import (
     create_agent_tool,
@@ -46,7 +48,8 @@ def _runtime(tool):
     registry.register(tool, activate=True)
     controller = _Controller()
     context = ToolContext(
-        session_id="session",
+        session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+        cancellation=CancellationToken(),
         cwd=Path.cwd(),
         controller=controller,
         registry=registry,

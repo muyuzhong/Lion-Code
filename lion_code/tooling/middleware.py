@@ -14,14 +14,14 @@ from .permission import PermissionDecision, PermissionPolicy
 from .result_store import ResultStore
 from .types import JSONValue, LionTool, ToolResult
 
-
 NextCall = Callable[[], Awaitable[ToolResult]]
 
 
 class ToolMiddleware(Protocol):
     """统一 Middleware 契约；post 阶段按声明顺序处理执行结果。"""
 
-    phase: Literal["pre", "post"]
+    @property
+    def phase(self) -> Literal["pre", "post"]: ...
 
     async def handle(
         self,
@@ -37,8 +37,16 @@ class ToolMiddleware(Protocol):
 class CancellationMiddleware:
     phase: Literal["pre"] = "pre"
 
-    async def handle(self, *, context, call_next, **_):
-        if context.cancellation_fn and context.cancellation_fn():
+    async def handle(
+        self,
+        *,
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
+        if context.cancellation.cancelled:
             return ToolResult(content="Tool call cancelled.", is_error=True)
         return await call_next()
 
@@ -49,12 +57,12 @@ class PreToolHookMiddleware:
     async def handle(
         self,
         *,
-        tool,
-        context,
-        arguments,
-        call_next,
-        **_,
-    ):
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
         if not context.hooks:
             return await call_next()
 
@@ -136,12 +144,12 @@ class PermissionMiddleware:
     async def handle(
         self,
         *,
-        tool,
-        context,
-        arguments,
-        call_next,
-        **_,
-    ):
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
         decision = await self._decision(tool, context, arguments)
         if decision.action == "deny":
             return ToolResult(
@@ -187,12 +195,12 @@ class ReadFreshnessMiddleware:
     async def handle(
         self,
         *,
-        tool,
-        context,
-        arguments,
-        call_next,
-        **_,
-    ):
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
         path = _resolve_file_path(context, arguments.get("file_path"))
         capabilities = tool.capabilities
 
@@ -240,7 +248,15 @@ class ResultPolicyMiddleware:
     def __init__(self, store: ResultStore):
         self.store = store
 
-    async def handle(self, *, tool, call_next, **_):
+    async def handle(
+        self,
+        *,
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
         return self.store.process(tool, await call_next())
 
 
@@ -250,12 +266,12 @@ class AuditMiddleware:
     async def handle(
         self,
         *,
-        tool,
-        context,
-        arguments,
-        call_next,
-        **_,
-    ):
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
         result = await call_next()
         if context.audit_fn:
             audit_result = context.audit_fn(tool, arguments, result)

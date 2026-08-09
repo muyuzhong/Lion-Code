@@ -37,7 +37,15 @@ REMOVED_SKILL_COMMAND_SYMBOLS = frozenset(
     }
 )
 MCP_LIFECYCLE_CLASS_NAMES = frozenset({"McpConnection", "McpManager"})
-PROVIDER_SHIM_EXPORTS = ("CancellationToken", "ModelProvider")
+PROVIDER_SHIM_EXPORTS = ("ModelProvider",)
+REMOVED_RUNTIME_SYMBOLS = frozenset(
+    {
+        "SimpleCancellationToken",
+        "ToolCancellationToken",
+        "_aborted",
+        "cancellation_fn",
+    }
+)
 
 # Dynamic import calls that bypass static import analysis (import-linter / AST).
 DYNAMIC_IMPORT_CALLS = frozenset({"import_module", "__import__"})
@@ -296,6 +304,55 @@ def _defined_symbols(tree: ast.Module, names: frozenset[str]) -> frozenset[str]:
             if node.name in names:
                 symbols.add(node.name)
     return frozenset(symbols)
+
+
+def _referenced_symbols(tree: ast.Module, names: frozenset[str]) -> frozenset[str]:
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in names:
+            found.add(node.id)
+        elif isinstance(node, ast.Attribute) and node.attr in names:
+            found.add(node.attr)
+        elif isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef)):
+            if node.name in names:
+                found.add(node.name)
+        elif isinstance(node, ast.arg) and node.arg in names:
+            found.add(node.arg)
+    return frozenset(found)
+
+
+def _class_annotated_fields(tree: ast.Module, class_name: str) -> frozenset[str]:
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef) or node.name != class_name:
+            continue
+        return frozenset(
+            item.target.id
+            for item in node.body
+            if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+        )
+    return frozenset()
+
+
+def _named_constructor_count(tree: ast.Module, name: str) -> int:
+    return sum(
+        isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id == name)
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == name)
+        )
+        for node in ast.walk(tree)
+    )
+
+
+def _session_identity_reset_count(tree: ast.Module) -> int:
+    return sum(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "reset"
+        and isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr in {"session_state", "_session_state"}
+        for node in ast.walk(tree)
+    )
 
 
 def _contains_string(tree: ast.AST, value: str) -> bool:
@@ -695,6 +752,58 @@ def test_session_recorder_construction_sites_are_allowlisted() -> None:
         "SessionRecorder must be constructed through the named ownership sites: "
         f"{attribute_calls}"
     )
+
+
+def test_session_and_cancellation_state_have_single_owners() -> None:
+    removed = {
+        _source_key(path): sorted(
+            _referenced_symbols(_tree(path), REMOVED_RUNTIME_SYMBOLS)
+        )
+        for path in _source_files()
+        if _referenced_symbols(_tree(path), REMOVED_RUNTIME_SYMBOLS)
+    }
+    assert not removed, f"Removed runtime mirrors must not return: {removed}"
+
+    context_fields = _class_annotated_fields(
+        _tree(SOURCE_ROOT / "tooling" / "context.py"),
+        "ToolContext",
+    )
+    assert {"session", "cancellation"} <= context_fields
+    assert not {"session_id", "cancellation_fn"} & context_fields
+
+    agent_fields = _self_fields(_tree(SOURCE_ROOT / "agent.py"))
+    assert not {"session_id", "session_start_time", "_aborted"} & agent_fields
+
+    identity_resets = {
+        _source_key(path): _session_identity_reset_count(_tree(path))
+        for path in _source_files()
+        if _session_identity_reset_count(_tree(path))
+    }
+    assert identity_resets == {"session_lifecycle.py": 2}
+
+    identity_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "SessionIdentityState")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "SessionIdentityState")
+    }
+    assert identity_constructors == {"agent.py": 1}
+
+    execution_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "ExecutionControl")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "ExecutionControl")
+    }
+    assert execution_constructors == {"agent.py": 1}
+
+    token_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "CancellationToken")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "CancellationToken")
+    }
+    assert token_constructors == {
+        "core/harness.py": 1,
+        "execution_control.py": 1,
+    }
 
 
 def test_jsonl_writer_primitives_do_not_escape_persistence_boundary() -> None:

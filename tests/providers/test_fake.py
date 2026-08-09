@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from lion_code.core.harness import SimpleCancellationToken
+from lion_code.core.cancellation import CancellationToken
 from lion_code.core.messages import AssistantMessage
 from lion_code.providers import FakeProvider
 from lion_code.providers.events import AssistantDoneEvent, TextDeltaEvent
@@ -59,7 +59,7 @@ class TestFakeProvider(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, [])
 
     async def test_cancelled_signal_stops_replay(self) -> None:
-        signal = SimpleCancellationToken()
+        signal = CancellationToken()
         signal.cancel()
         provider = FakeProvider([[_delta("x"), _done()]])
         events = [

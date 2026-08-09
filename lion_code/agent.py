@@ -28,6 +28,7 @@ from .context import (
 )
 from .core.messages import AgentMessage, AssistantMessage, TextContent, UserMessage
 from .core.provider import ModelProvider
+from .execution_control import ExecutionControl
 from .hooks import load_pre_tool_use_hooks
 from .learning_runtime import (
     LEARN_META_SKILL_PROMPT,  # noqa: F401
@@ -51,6 +52,7 @@ from .providers.oneshot import complete_text
 from .providers.thinking import (
     ThinkingLevel,
 )
+from .session_identity import SessionIdentityState
 from .session_memory import (
     SessionMemory,
     SessionMemoryRepository,
@@ -157,9 +159,12 @@ class Agent:
         self.max_turns = max_turns
         self.confirm_fn = confirm_fn
         self.effective_window = effective_window_tokens(fallback_model_limits(model))
-        self.session_id = uuid.uuid4().hex[:8]
-        self.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._session_state = SessionIdentityState(
+            uuid.uuid4().hex[:8],
+            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
         self._session_repository = session_repository or SessionRepository()
+        execution = ExecutionControl()
 
         self.total_input_tokens = 0
         self.total_output_tokens = 0
@@ -174,7 +179,6 @@ class Agent:
         self._learning = LearningRuntime(self)
 
         # 当前异步任务用于把 Ctrl+C 传播到正在等待的模型或工具调用。
-        self._aborted = False
         self._current_task: asyncio.Task | None = None
         # 最近一次 chat/run 的终止原因，供 run() 结构化返回；chat 自身不读取。
         self._last_stop_reason: str | None = None
@@ -212,7 +216,8 @@ class Agent:
         else:
             self.tool_registry = tool_registry
         self.tool_context = ToolContext(
-            session_id=self.session_id,
+            session=self._session_state,
+            cancellation=execution.cancellation,
             cwd=Path.cwd(),
             controller=self,
             registry=self.tool_registry,
@@ -224,7 +229,6 @@ class Agent:
             confirm_hook_trust=self._confirm_hook_trust,
             auto_permission_fn=self._classify_tool_call,
             confirmed_paths=self._confirmed_paths,
-            cancellation_fn=lambda: self._aborted,
         )
         self._session_memory_coord = SessionMemoryCoordinator(
             self,
@@ -287,6 +291,7 @@ class Agent:
             identity=self,
             session=self,
             memory=self,
+            execution=execution,
             provider=provider,
             model=self.model,
             tool_runtime=self.tool_runtime,
@@ -375,10 +380,22 @@ class Agent:
         return self._core_runtime.harness.is_running
 
     @property
+    def session_state(self) -> SessionIdentityState:
+        return self._session_state
+
+    @property
+    def session_id(self) -> str:
+        return self._session_state.id
+
+    @property
+    def session_start_time(self) -> str:
+        return self._session_state.started_at
+
+    @property
     def is_aborted(self) -> bool:
         """最近一次运行是否已收到取消请求。"""
 
-        return self._aborted
+        return self._runtime_coordinator.execution.cancelled
 
     @property
     def core_runtime(self) -> LionAgentRuntime:
@@ -929,7 +946,11 @@ class Agent:
     # auto 模式用分类器替代人工确认：deny 仍是硬边界，只读工具走快路径，
     # 其余动作由 LLM 根据不含推理的 transcript 投影判断。
 
-    async def _classify_tool_call(self, tool_name: str, inp: dict) -> dict:
+    async def _classify_tool_call(
+        self,
+        tool_name: str,
+        inp: Mapping[str, JSONValue],
+    ) -> dict:
         """以两阶段分类器决定工具调用,返回 allow/deny/confirm。"""
         return await self._autonomy._classify_tool_call(tool_name, inp)
 

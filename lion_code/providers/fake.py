@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterable
 
+from lion_code.core.cancellation import CancellationView
 from lion_code.core.messages import AgentMessage
 from lion_code.core.tools import AgentTool
 
 from .events import AssistantMessageEvent
-from .provider import CancellationToken
 
 
 class FakeProvider:
@@ -29,7 +29,7 @@ class FakeProvider:
         system: str,
         messages: list[AgentMessage],
         tools: list[AgentTool],
-        signal: CancellationToken | None = None,
+        signal: CancellationView | None = None,
     ) -> AsyncIterator[AssistantMessageEvent]:
         self.calls.append((model, system, list(messages), list(tools)))
         stream = self._streams.pop(0) if self._streams else []

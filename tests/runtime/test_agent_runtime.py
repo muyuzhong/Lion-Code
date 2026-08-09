@@ -17,8 +17,10 @@ from core.fakes import FakeProvider
 
 from lion_code.agent_runtime import AgentRuntimeCoordinator, LionAgentRuntime
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
+from lion_code.core.cancellation import CancellationToken
 from lion_code.core.provider_events import AssistantDoneEvent
 from lion_code.observers import TerminalRenderer, UsageObserver
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
@@ -31,7 +33,8 @@ class _Controller:
 
 def _context(registry: ToolRegistry) -> ToolContext:
     return ToolContext(
-        session_id="session",
+        session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+        cancellation=CancellationToken(),
         cwd=Path.cwd(),
         controller=_Controller(),
         registry=registry,
@@ -130,6 +133,15 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
             )
         self.assertIsInstance(agent._runtime_coordinator, AgentRuntimeCoordinator)
         self.assertIs(agent.core_runtime, agent._runtime_coordinator.core_runtime)
+        self.assertIs(agent.tool_context.session, agent.session_state)
+        self.assertIs(
+            agent.tool_context.cancellation,
+            agent._runtime_coordinator.execution.cancellation,
+        )
+        self.assertIs(
+            agent.core_runtime.harness._cancellation,
+            agent.tool_context.cancellation,
+        )
         await agent.close()
 
     async def test_closed_loop_through_tool_runtime(self) -> None:

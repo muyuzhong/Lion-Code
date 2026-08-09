@@ -279,7 +279,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(fake.call_count, 0)
         self.assertEqual(agent._last_stop_reason, "aborted")
-        self.assertTrue(agent._aborted)
+        self.assertTrue(agent.is_aborted)
         self.assertEqual(agent._core_runtime.messages, ())
 
     async def test_core_run_reports_provider_error(self) -> None:
@@ -528,7 +528,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         # 第一轮工具已执行，第二轮被取消，最终消息为 aborted。
         self.assertEqual(agent._core_runtime.messages[-1].stop_reason, "aborted")
-        self.assertTrue(agent._aborted)
+        self.assertTrue(agent.is_aborted)
         self.assertEqual(agent._last_stop_reason, "aborted")
 
         # 再次 chat：不遗留不完整工具调用，能正常收敛到最终文本。
@@ -545,10 +545,13 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         session_path = self._session_repository.storage_for(session_id).path
 
         second, fake = self._make_agent([_stop_event("second answer")], registry)
+        session_view = second.tool_context.session
         self.assertTrue(await second.restore_core_session(session_id))
         await second.chat("second question")
 
         self.assertEqual(second.session_id, session_id)
+        self.assertIs(session_view, second.session_state)
+        self.assertEqual(session_view.id, session_id)
         self.assertEqual(
             list(self._session_repository.session_dir.glob("*.jsonl")),
             [session_path],
@@ -569,6 +572,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         agent, _ = self._make_agent([_stop_event()], registry)
         await agent.chat("hello")
         previous_session_id = agent.session_id
+        session_view = agent.tool_context.session
         previous_path = self._session_repository.storage_for(previous_session_id).path
         agent._core_runtime.harness.follow_up("queued")
         agent.current_turns = 3
@@ -576,6 +580,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         await agent.clear_history()
 
         self.assertNotEqual(agent.session_id, previous_session_id)
+        self.assertIs(session_view, agent.session_state)
+        self.assertEqual(session_view.id, agent.session_id)
         self.assertTrue(previous_path.exists())
         self.assertTrue(
             self._session_repository.storage_for(agent.session_id).path.exists()

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import unittest
 import inspect
+import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from lion_code.agent import Agent
+from lion_code.core.cancellation import CancellationToken
 from lion_code.mcp_client import DiscoveredMcpTool, McpManager
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.environment import ToolEnvironment
 from lion_code.tooling.mcp import create_mcp_tool
@@ -35,7 +37,8 @@ def _definition() -> DiscoveredMcpTool:
 
 def _context(registry, *, confirm_fn=None):
     return ToolContext(
-        session_id="session",
+        session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+        cancellation=CancellationToken(),
         cwd=Path.cwd(),
         controller=object(),
         registry=registry,

@@ -4,7 +4,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from lion_code.core.cancellation import CancellationToken
 from lion_code.hooks import HookChainResult, HookOutcome, HookResult
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.middleware import PermissionMiddleware, PreToolHookMiddleware
 from lion_code.tooling.registry import ToolRegistry
@@ -35,7 +37,8 @@ class TestHookMiddleware(unittest.IsolatedAsyncioTestCase):
         registry = ToolRegistry()
         registry.register(tool)
         context = ToolContext(
-            session_id="session",
+            session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+            cancellation=CancellationToken(),
             cwd=Path.cwd(),
             controller=object(),
             registry=registry,

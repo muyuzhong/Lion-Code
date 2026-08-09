@@ -49,10 +49,11 @@ Use concise strings. completed, pending, decisions, and blockers must be arrays 
 class SessionMemoryHost(Protocol):
     """协调器使用的 Agent 窄协议，不持有 Provider 或 TUI。"""
 
-    _aborted: bool
-
     @property
     def _core_runtime(self) -> ReadOnlyMessageSource: ...
+
+    @property
+    def is_aborted(self) -> bool: ...
 
     _session_repository: Any
     is_sub_agent: bool
@@ -363,7 +364,7 @@ class SessionMemoryCoordinator:
             self._session_memory,
             extract_tool_evidence(messages),
         )
-        if not self._host._aborted:
+        if not self._host.is_aborted:
             try:
                 extractor = semantic_extractor or self._extract_session_memory_semantics
                 patch = await extractor(

@@ -113,7 +113,7 @@ async def run_repl(agent: Agent) -> None:
         agent.stop_goal()
         # `is_processing` 才表示主 Agent 是否有活动任务；`_output_buffer` 只服务于
         # 子 Agent，不能用它判断主 Agent 是否可中断。
-        if agent._aborted is False and agent.is_processing:
+        if not agent.is_aborted and agent.is_processing:
             agent.abort()
             print("\n  (interrupted)")
             sigint_count = 0

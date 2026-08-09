@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from lion_code.core.cancellation import CancellationToken
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
@@ -15,7 +17,8 @@ class _Controller:
 
 def _context(registry):
     return ToolContext(
-        session_id="session",
+        session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+        cancellation=CancellationToken(),
         cwd=Path.cwd(),
         controller=_Controller(),
         registry=registry,
@@ -36,6 +39,46 @@ def _tool(name, execute_fn):
 
 
 class TestToolRuntime(unittest.IsolatedAsyncioTestCase):
+    async def test_context_reads_session_identity_dynamically(self):
+        registry = ToolRegistry()
+        session = SessionIdentityState("first", "2026-08-09T00:00:00Z")
+        context = ToolContext(
+            session=session,
+            cancellation=CancellationToken(),
+            cwd=Path.cwd(),
+            controller=_Controller(),
+            registry=registry,
+            permission_mode="default",
+            plan_file_path=None,
+            read_file_state={},
+        )
+
+        session.reset("second", "2026-08-09T01:00:00Z")
+
+        self.assertEqual(context.session.id, "second")
+        self.assertEqual(context.session.started_at, "2026-08-09T01:00:00Z")
+
+    async def test_matching_cancellation_view_reuses_original_context(self):
+        seen_contexts = []
+
+        async def execute(context, _tool_call_id, _arguments, _on_update):
+            seen_contexts.append(context)
+            return ToolResult(content="ok")
+
+        registry = ToolRegistry()
+        registry.register(_tool("capture", execute))
+        context = _context(registry)
+        runtime = ToolRuntime(registry, context)
+
+        await runtime.execute(
+            tool_call_id="call-1",
+            name="capture",
+            arguments={},
+            cancellation=context.cancellation,
+        )
+
+        self.assertEqual(seen_contexts, [context])
+
     async def test_executes_registered_tool(self):
         async def execute(_context, tool_call_id, arguments, _on_update):
             return ToolResult(content=f"{tool_call_id}:{arguments['value']}")

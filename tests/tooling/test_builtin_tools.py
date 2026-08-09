@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from lion_code.core.cancellation import CancellationToken
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.builtin import BUILTIN_TOOL_NAMES, create_builtin_tools
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
@@ -32,7 +34,8 @@ class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
             path.write_text("第一行\nsecond", encoding="utf-8")
 
             context = ToolContext(
-                session_id="session",
+                session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+                cancellation=CancellationToken(),
                 cwd=Path(directory),
                 controller=object(),
                 registry=registry,

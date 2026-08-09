@@ -68,6 +68,23 @@ class _HangingProvider(FakeProvider):
             yield None
 
 
+class _CancellationAwareProvider(FakeProvider):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.entered = asyncio.Event()
+
+    async def _gen(self, signal):
+        if signal is None:
+            raise AssertionError("运行时必须把取消状态传给 Provider")
+        self.entered.set()
+        while not signal.is_cancelled():
+            await asyncio.sleep(0)
+        yield AssistantErrorEvent(
+            reason="aborted",
+            error=AssistantMessage(model="fake", stop_reason="aborted"),
+        )
+
+
 class TestAgentRun(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self._temp_dir = tempfile.TemporaryDirectory()
@@ -166,6 +183,20 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.stop_reason, "timeout")
         self.assertIsNotNone(result.error)
+        self.assertTrue(agent.is_aborted)
+
+    async def test_explicit_abort_keeps_aborted_stop_reason(self) -> None:
+        provider = _CancellationAwareProvider()
+        agent = self._agent(provider)
+
+        task = asyncio.create_task(agent.run("hi"))
+        await provider.entered.wait()
+        agent.abort()
+        result = await asyncio.wait_for(task, timeout=1)
+        await agent.close()
+
+        self.assertEqual(result.stop_reason, "aborted")
+        self.assertTrue(agent.is_aborted)
 
     async def test_timeout_covers_initial_mcp_discovery(self) -> None:
         provider = FakeProvider([_stop_event()])
@@ -188,6 +219,7 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
         await agent.close()
 
         self.assertEqual(result.stop_reason, "timeout")
+        self.assertTrue(agent.is_aborted)
         self.assertLess(result.wall_time_seconds, 0.2)
 
 

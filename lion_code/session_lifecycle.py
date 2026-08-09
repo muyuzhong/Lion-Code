@@ -64,9 +64,10 @@ class SessionLifecycle:
         memory._reload_project_memory()
         memory._reload_session_memory()
         memory._last_memory_injection = MemoryInjectionReport()
-        session.session_id = uuid.uuid4().hex[:8]
-        session.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        session.tool_context.session_id = session.session_id
+        session.session_state.reset(
+            uuid.uuid4().hex[:8],
+            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
         session._pending_core_context_reset = None
         coord._core_compaction_required = False
         coord._last_context_actions = ()
@@ -99,8 +100,7 @@ class SessionLifecycle:
         memory._reload_project_memory()
         memory._reload_session_memory()
         memory._last_memory_injection = MemoryInjectionReport()
-        session.session_id = session_id
-        session.tool_context.session_id = session_id
+        started_at = session.session_state.started_at
         session._pending_core_context_reset = None
         coord._core_compaction_required = False
         coord._last_context_actions = ()
@@ -118,10 +118,11 @@ class SessionLifecycle:
             if restored_level != identity._thinking_level:
                 identity._apply_core_thinking_level(restored_level)
         if state.session_info is not None:
-            session.session_start_time = time.strftime(
+            started_at = time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ",
                 time.gmtime(state.session_info.created_at),
             )
+        session.session_state.reset(session_id, started_at)
         coord.reset_core_observers()
         await coord.ensure_core_session_ready()
         coord.reset_session_counters()

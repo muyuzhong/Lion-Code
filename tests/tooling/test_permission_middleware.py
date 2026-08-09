@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+from lion_code.core.cancellation import CancellationToken
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.middleware import PermissionMiddleware
 from lion_code.tooling.permission import PermissionPolicy, reset_permission_cache
@@ -33,7 +35,8 @@ def _runtime(tool, *, mode, policy, confirm_fn=None):
     registry = ToolRegistry()
     registry.register(tool)
     context = ToolContext(
-        session_id="session",
+        session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+        cancellation=CancellationToken(),
         cwd=policy.cwd,
         controller=object(),
         registry=registry,
