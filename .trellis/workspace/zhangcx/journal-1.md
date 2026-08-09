@@ -1008,3 +1008,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 29: 完成 PlanRuntime 状态所有权迁移
+
+**Date**: 2026-08-09
+**Task**: 完成 PlanRuntime 状态所有权迁移
+**Branch**: `master`
+
+### Summary
+
+建立 PlanState、PlanView 与唯一 PlanRuntime，删除 Agent/ToolContext Plan 镜像并补齐事务原子性与架构门禁；全量 623 passed。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4010464` | (see git log) |
+
+### Status
+
+[OK] **Completed**
