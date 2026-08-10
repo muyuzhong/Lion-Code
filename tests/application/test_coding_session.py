@@ -157,14 +157,19 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             await agent.chat("first")
 
             recorder = agent._session_recorder
-            usage = agent._usage_observer
+            usage = agent._usage
+            usage_observer = agent._runtime_coordinator._usage_observer
             self.assertIsNotNone(recorder)
             self.assertTrue(recorder.initialized)
-            self.assertEqual(usage.response_count, 1)
+            self.assertEqual(usage.snapshot().responses, 1)
 
             session = LionCodingSession(agent)
             self.assertIs(agent._session_recorder, recorder)
-            self.assertIs(agent._usage_observer, usage)
+            self.assertIs(agent._usage, usage)
+            self.assertIs(
+                agent._runtime_coordinator._usage_observer,
+                usage_observer,
+            )
             self.assertIsNone(agent._terminal_renderer)
             renderer_factory.assert_called_once_with()
 
@@ -173,7 +178,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         entries = await self._session_repository.storage_for(agent.session_id).read_all()
         self.assertEqual(sum(entry.type == "session_info" for entry in entries), 1)
         self.assertEqual(sum(entry.type == "message" for entry in entries), 4)
-        self.assertEqual(usage.response_count, 2)
+        self.assertEqual(usage.snapshot().responses, 2)
         await session.aclose()
 
     async def test_unconfigured_agent_reports_error_through_session_notice(self) -> None:

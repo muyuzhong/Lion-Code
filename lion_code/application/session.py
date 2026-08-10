@@ -43,7 +43,8 @@ from .skills import Skill
 
 if TYPE_CHECKING:
     from lion_code.agent import Agent
-
+    from lion_code.permission_state import PermissionMode
+    from lion_code.usage import UsageSnapshot
 type StreamingBehavior = Literal["steer", "follow_up"]
 
 _CONTEXT_OVERFLOW_MARKERS = (
@@ -67,7 +68,6 @@ def _is_context_overflow_error(message: AssistantMessage | None) -> bool:
         return False
     normalized = (message.error_message or "").lower()
     return any(marker in normalized for marker in _CONTEXT_OVERFLOW_MARKERS)
-
 
 
 
@@ -97,7 +97,7 @@ class LionCodingSession:
         return "openai-compatible" if self._agent.use_openai else "anthropic"
 
     @property
-    def permission_mode(self) -> str:
+    def permission_mode(self) -> PermissionMode:
         return self._agent.permission_mode
 
     @property
@@ -207,8 +207,8 @@ class LionCodingSession:
     async def compact(self) -> None:
         await self._agent.compact()
 
-    def token_usage(self) -> dict:
-        """累计用量与计费快照(input/output/cache/cost 字段见 Agent)。"""
+    def token_usage(self) -> UsageSnapshot:
+        """返回当前 Agent 的冻结 UsageSnapshot。"""
         return self._agent.get_token_usage()
 
     # ─── Provider / 模型配置 ─────────────────────────────────

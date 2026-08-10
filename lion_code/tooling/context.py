@@ -7,6 +7,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from ..core.cancellation import CancellationView
+from ..permission_state import PermissionView
+from ..plan_runtime import PlanView
+from ..session_identity import SessionView
 from .types import JSONValue, ToolResult
 
 if TYPE_CHECKING:
@@ -41,12 +45,13 @@ class AgentToolController(Protocol):
 class ToolContext:
     """单个 Agent 的工具执行状态；Registry 激活状态不会跨实例共享。"""
 
-    session_id: str
+    session: SessionView
+    cancellation: CancellationView
     cwd: Path
     controller: AgentToolController
-    registry: "ToolRegistry"
-    permission_mode: str
-    plan_file_path: str | None
+    registry: ToolRegistry
+    permission: PermissionView
+    plan: PlanView
     read_file_state: dict[str, float]
     confirm_fn: Callable[[str], Awaitable[bool]] | None = None
     hooks: list[Any] = field(default_factory=list)
@@ -55,9 +60,7 @@ class ToolContext:
         [str, Mapping[str, JSONValue]],
         Awaitable[dict],
     ] | None = None
-    confirmed_paths: set[str] = field(default_factory=set)
-    cancellation_fn: Callable[[], bool] | None = None
     audit_fn: Callable[
-        ["LionTool", Mapping[str, JSONValue], ToolResult],
+        [LionTool, Mapping[str, JSONValue], ToolResult],
         Awaitable[None] | None,
     ] | None = None

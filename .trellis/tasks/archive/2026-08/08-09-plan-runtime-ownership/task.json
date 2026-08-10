@@ -1,0 +1,33 @@
+{
+  "id": "plan-runtime-ownership",
+  "name": "plan-runtime-ownership",
+  "title": "PlanRuntime 所有权",
+  "description": "将 Plan 状态与切换事务迁入 PlanRuntime/PlanState，并通过 PermissionController 修改权限。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "backend",
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-09",
+  "completedAt": "2026-08-09",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-09-state-ownership-migration",
+  "relatedFiles": [
+    "lion_code/agent.py",
+    "lion_code/plan_runtime.py",
+    "lion_code/agent_runtime.py",
+    "lion_code/session_lifecycle.py",
+    "lion_code/tooling/context.py",
+    "tests/architecture/test_runtime_boundaries.py"
+  ],
+  "notes": "",
+  "meta": {}
+}

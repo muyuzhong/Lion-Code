@@ -12,6 +12,7 @@ from .agent import Agent
 from .application.session import LionCodingSession
 from .config import load_api_config
 from .memory import list_memories
+from .permission_state import PermissionMode
 from .skills import (
     discover_skills,
     execute_skill,
@@ -51,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _resolve_permission_mode(args: argparse.Namespace) -> str:
+def _resolve_permission_mode(args: argparse.Namespace) -> PermissionMode:
     if args.yolo:
         return "bypassPermissions"
     if args.plan:
@@ -113,7 +114,7 @@ async def run_repl(agent: Agent) -> None:
         agent.stop_goal()
         # `is_processing` 才表示主 Agent 是否有活动任务；`_output_buffer` 只服务于
         # 子 Agent，不能用它判断主 Agent 是否可中断。
-        if agent._aborted is False and agent.is_processing:
+        if not agent.is_aborted and agent.is_processing:
             agent.abort()
             print("\n  (interrupted)")
             sigint_count = 0

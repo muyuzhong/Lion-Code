@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Check single-writer/read-view/command mutation rules, host boundaries, import contracts, and architecture enforcement."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check focused/full validation, comments, tests, dependency changes, and truthful spec updates."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit all consumers and mutation paths across Agent, Plan, ToolRuntime, middleware, subagents, and frontends."}
+{"file":".trellis/tasks/08-09-permission-ownership/research/current-permission-ownership.md","reason":"Compare the result against the complete current-state inventory and identified regression gaps."}

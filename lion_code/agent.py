@@ -28,6 +28,7 @@ from .context import (
 )
 from .core.messages import AgentMessage, AssistantMessage, TextContent, UserMessage
 from .core.provider import ModelProvider
+from .execution_control import ExecutionControl
 from .hooks import load_pre_tool_use_hooks
 from .learning_runtime import (
     LEARN_META_SKILL_PROMPT,  # noqa: F401
@@ -40,6 +41,12 @@ from .memory_runtime import (
     MemoryOverlay,
 )
 from .observers import TerminalRenderer
+from .permission_state import (
+    PermissionController,
+    PermissionMode,
+    PermissionState,
+)
+from .plan_runtime import PlanRuntime, PlanState
 from .project_identity import ProjectIdentity, resolve_project_identity
 from .prompt import (
     build_dynamic_system_context,
@@ -51,6 +58,7 @@ from .providers.oneshot import complete_text
 from .providers.thinking import (
     ThinkingLevel,
 )
+from .session_identity import SessionIdentityState
 from .session_memory import (
     SessionMemory,
     SessionMemoryRepository,
@@ -88,6 +96,7 @@ from .ui import (
     print_sub_agent_end,
     print_sub_agent_start,
 )
+from .usage import BudgetPolicy, UsageLedger, UsageSnapshot
 
 # ─── Thinking 能力检测 ──────────────────────────────────────
 
@@ -115,7 +124,7 @@ class Agent:
     def __init__(
         self,
         *,
-        permission_mode: str = "default",
+        permission_mode: PermissionMode = "default",
         model: str = "claude-opus-4-6",
         api_base: str | None = None,
         anthropic_base_url: str | None = None,
@@ -137,7 +146,9 @@ class Agent:
         terminal_output: bool = True,
         mcp_enabled: bool = True,
     ):
-        self.permission_mode = permission_mode
+        self._permission_controller = PermissionController(
+            PermissionState(mode=permission_mode)
+        )
         self.thinking = thinking
         self.model = model
         self.use_openai = bool(api_base)
@@ -153,40 +164,32 @@ class Agent:
         self._api_base = api_base
         self._anthropic_base_url = anthropic_base_url
         self._pre_tool_use_hooks = load_pre_tool_use_hooks()
-        self.max_cost_usd = max_cost_usd
-        self.max_turns = max_turns
         self.confirm_fn = confirm_fn
         self.effective_window = effective_window_tokens(fallback_model_limits(model))
-        self.session_id = uuid.uuid4().hex[:8]
-        self.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._session_state = SessionIdentityState(
+            uuid.uuid4().hex[:8],
+            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
         self._session_repository = session_repository or SessionRepository()
-
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_cache_read_tokens = 0  # Prompt cache 命中按约 0.1 倍计费。
-        self.total_cache_creation_tokens = 0  # Prompt cache 写入按约 1.25 倍计费。
-        self.last_input_token_count = 0
-        self.current_turns = 0
-        self.last_api_call_time = 0.0
+        execution = ExecutionControl()
+        self._usage = UsageLedger()
+        self._budget = BudgetPolicy(
+            max_cost_usd=max_cost_usd,
+            max_turns=max_turns,
+        )
 
         # /goal、/loop 与 Auto Mode 的状态和协调循环由 AutonomyRuntime 拥有。
-        self._autonomy = AutonomyRuntime(self)
+        self._autonomy = AutonomyRuntime(
+            self,
+            usage=self._usage,
+            budget=self._budget,
+        )
         self._learning = LearningRuntime(self)
 
         # 当前异步任务用于把 Ctrl+C 传播到正在等待的模型或工具调用。
-        self._aborted = False
         self._current_task: asyncio.Task | None = None
         # 最近一次 chat/run 的终止原因，供 run() 结构化返回；chat 自身不读取。
         self._last_stop_reason: str | None = None
-
-        # 仅缓存用户已确认的具体路径，不缓存宽泛的确认原因。
-        self._confirmed_paths: set[str] = set()
-
-        # Plan 模式需保存进入前的权限模式，退出时恢复。
-        self._pre_plan_mode: str | None = None
-        self._plan_file_path: str | None = None
-        self._plan_approval_fn: Callable[[str], Awaitable[dict]] | None = None
-        self._pending_core_context_reset: str | None = None
 
         # 根据用户开关和模型能力解析实际 Thinking 模式。
         self._thinking_mode = self._resolve_thinking_mode()
@@ -211,20 +214,42 @@ class Agent:
                     self.tool_registry.register(tool)
         else:
             self.tool_registry = tool_registry
+
+        # 系统提示词按前缀缓存拆成静态核心和动态尾部。项目指令改由 Provider
+        # Overlay 注入，既不破坏缓存边界，也不污染 canonical Session history。
+        if custom_system_prompt:
+            self._static_system_prompt = custom_system_prompt
+            self._dynamic_system_context = ""
+        else:
+            self._static_system_prompt = build_static_system_prompt()
+            self._dynamic_system_context = build_dynamic_system_context(
+                self.tool_registry.deferred_tool_names()
+            )
+        self._base_system_prompt = (
+            self._static_system_prompt + "\n\n" + self._dynamic_system_context
+            if self._dynamic_system_context
+            else self._static_system_prompt
+        )
+        self._system_prompt = self._base_system_prompt
+        self.plan = PlanRuntime(
+            self,
+            self._permission_controller,
+            PlanState(),
+        )
+        self.plan.initialize()
         self.tool_context = ToolContext(
-            session_id=self.session_id,
+            session=self._session_state,
+            cancellation=execution.cancellation,
             cwd=Path.cwd(),
             controller=self,
             registry=self.tool_registry,
-            permission_mode=self.permission_mode,
-            plan_file_path=self._plan_file_path,
+            permission=self._permission_controller,
+            plan=self.plan,
             read_file_state=self._read_file_state,
             confirm_fn=self._confirm_dangerous,
             hooks=self._pre_tool_use_hooks,
             confirm_hook_trust=self._confirm_hook_trust,
             auto_permission_fn=self._classify_tool_call,
-            confirmed_paths=self._confirmed_paths,
-            cancellation_fn=lambda: self._aborted,
         )
         self._session_memory_coord = SessionMemoryCoordinator(
             self,
@@ -239,7 +264,10 @@ class Agent:
             [
                 CancellationMiddleware(),
                 PreToolHookMiddleware(),
-                PermissionMiddleware(self._permission_policy),
+                PermissionMiddleware(
+                    self._permission_policy,
+                    self._permission_controller,
+                ),
                 ReadFreshnessMiddleware(),
                 ResultPolicyMiddleware(self._result_store),
                 AuditMiddleware(),
@@ -257,36 +285,15 @@ class Agent:
         self._mcp_initialized = False
         self._subagent_factory = SubagentFactory(self)
 
-        # 系统提示词按前缀缓存拆成静态核心和动态尾部。项目指令改由 Provider
-        # Overlay 注入，既不破坏缓存边界，也不污染 canonical Session history。
-        if custom_system_prompt:
-            self._static_system_prompt = custom_system_prompt
-            self._dynamic_system_context = ""
-        else:
-            self._static_system_prompt = build_static_system_prompt()
-            self._dynamic_system_context = build_dynamic_system_context(
-                self.tool_registry.deferred_tool_names()
-            )
-        self._base_system_prompt = (
-            self._static_system_prompt + "\n\n" + self._dynamic_system_context
-            if self._dynamic_system_context
-            else self._static_system_prompt
-        )
-        if self.permission_mode == "plan":
-            self._plan_file_path = self._generate_plan_file_path()
-            self._system_prompt = (
-                self._base_system_prompt + self._build_plan_mode_prompt()
-            )
-        else:
-            self._system_prompt = self._base_system_prompt
-
         self._lifecycle = AgentLifecycle(self)
         provider = self._lifecycle.build_core_provider(self._thinking_level)
         self._runtime_coordinator = AgentRuntimeCoordinator(
-            usage=self,
+            usage=self._usage,
+            budget=self._budget,
             identity=self,
             session=self,
             memory=self,
+            execution=execution,
             provider=provider,
             model=self.model,
             tool_runtime=self.tool_runtime,
@@ -354,14 +361,6 @@ class Agent:
         self._runtime_coordinator.core_compaction_required = value
 
     @property
-    def _usage_observer(self):
-        return self._runtime_coordinator.usage_observer
-
-    @_usage_observer.setter
-    def _usage_observer(self, value: Any) -> None:
-        self._runtime_coordinator.usage_observer = value
-
-    @property
     def _terminal_renderer(self) -> TerminalRenderer | None:
         return self._runtime_coordinator.terminal_renderer
 
@@ -375,10 +374,28 @@ class Agent:
         return self._core_runtime.harness.is_running
 
     @property
+    def session_state(self) -> SessionIdentityState:
+        return self._session_state
+
+    @property
+    def session_id(self) -> str:
+        return self._session_state.id
+
+    @property
+    def session_start_time(self) -> str:
+        return self._session_state.started_at
+
+    @property
+    def permission_mode(self) -> PermissionMode:
+        """返回当前权限模式的只读视图。"""
+
+        return self._permission_controller.mode
+
+    @property
     def is_aborted(self) -> bool:
         """最近一次运行是否已收到取消请求。"""
 
-        return self._aborted
+        return self._runtime_coordinator.execution.cancelled
 
     @property
     def core_runtime(self) -> LionAgentRuntime:
@@ -531,9 +548,6 @@ class Agent:
 
     # ─── Core Runtime ────────────────────────────────────────
 
-    def _sync_core_usage(self) -> None:
-        self._runtime_coordinator.sync_core_usage()
-
     async def _ensure_core_session_ready(self) -> None:
         await self._runtime_coordinator.ensure_core_session_ready()
 
@@ -586,34 +600,15 @@ class Agent:
         self.confirm_fn = fn
 
     def set_plan_approval_fn(self, fn: Callable[[str], Awaitable[dict]] | None) -> None:
-        self._plan_approval_fn = fn
+        self.plan.set_approval_fn(fn)
 
     # ─── Plan 模式切换 ───────────────────────────────────────
 
     def toggle_plan_mode(self) -> str:
-        if self.permission_mode == "plan":
-            self.permission_mode = self._pre_plan_mode or "default"
-            self._pre_plan_mode = None
-            self._plan_file_path = None
-            self._system_prompt = self._base_system_prompt
-            self.tool_context.permission_mode = self.permission_mode
-            self.tool_context.plan_file_path = self._plan_file_path
-            self._emit_notice(f"Exited plan mode → {self.permission_mode} mode")
-            return self.permission_mode
-        else:
-            self._pre_plan_mode = self.permission_mode
-            self.permission_mode = "plan"
-            self._plan_file_path = self._generate_plan_file_path()
-            self._system_prompt = (
-                self._base_system_prompt + self._build_plan_mode_prompt()
-            )
-            self.tool_context.permission_mode = self.permission_mode
-            self.tool_context.plan_file_path = self._plan_file_path
-            self._emit_notice(f"Entered plan mode. Plan file: {self._plan_file_path}")
-            return "plan"
+        return self.plan.toggle()
 
-    def get_token_usage(self) -> dict:
-        return {"input": self.total_input_tokens, "output": self.total_output_tokens}
+    def get_token_usage(self) -> UsageSnapshot:
+        return self._usage.snapshot()
 
     # ─── 运行时模型/凭证配置（TUI /model 的后端）──────────────
 
@@ -740,53 +735,24 @@ class Agent:
         await self._runtime_coordinator.clear_history()
 
     def show_cost(self) -> None:
-        total = self._get_current_cost_usd()
-        budget_info = f" / ${self.max_cost_usd} budget" if self.max_cost_usd else ""
+        usage = self._usage.snapshot()
+        max_cost = self._budget.max_cost_usd
+        max_turns = self._budget.max_turns
+        budget_info = f" / ${max_cost} budget" if max_cost else ""
         turn_info = (
-            f" | Turns: {self.current_turns}/{self.max_turns}" if self.max_turns else ""
+            f" | Turns: {usage.turns}/{max_turns}" if max_turns else ""
         )
-        cached = self.total_cache_read_tokens
-        billed_input = (
-            self.total_input_tokens + self.total_cache_creation_tokens + cached
-        )
+        cached = usage.cache_read_tokens
+        billed_input = usage.input_tokens + usage.cache_write_tokens + cached
         hit_rate = round((cached / billed_input) * 100) if billed_input > 0 else 0
         cache_info = (
-            f"\n  Cache: {cached} read / {self.total_cache_creation_tokens} write ({hit_rate}% of input from cache)"
-            if (cached or self.total_cache_creation_tokens)
+            f"\n  Cache: {cached} read / {usage.cache_write_tokens} write ({hit_rate}% of input from cache)"
+            if (cached or usage.cache_write_tokens)
             else ""
         )
         self._emit_notice(
-            f"Tokens: {self.total_input_tokens} in / {self.total_output_tokens} out{cache_info}\n  Estimated cost: ${total:.4f}{budget_info}{turn_info}"
+            f"Tokens: {usage.input_tokens} in / {usage.output_tokens} out{cache_info}\n  Estimated cost: ${usage.cost_usd:.4f}{budget_info}{turn_info}"
         )
-
-    def _get_current_cost_usd(self) -> float:
-        # 统一按基础输入 $3/Mtok、缓存读取 0.1 倍、缓存写入 1.25 倍估算；
-        # 这是预算控制使用的近似值，不代表所有兼容供应商的实际账单。
-        M = 1_000_000
-        return (
-            (self.total_input_tokens / M) * 3
-            + (self.total_cache_read_tokens / M) * 0.3
-            + (self.total_cache_creation_tokens / M) * 3.75
-            + (self.total_output_tokens / M) * 15
-        )
-
-    def _check_budget(self) -> dict:
-        if (
-            self.max_cost_usd is not None
-            and self._get_current_cost_usd() >= self.max_cost_usd
-        ):
-            return {
-                "exceeded": True,
-                "kind": "max_cost",
-                "reason": f"Cost limit reached (${self._get_current_cost_usd():.4f} >= ${self.max_cost_usd})",
-            }
-        if self.max_turns is not None and self.current_turns >= self.max_turns:
-            return {
-                "exceeded": True,
-                "kind": "max_turns",
-                "reason": f"Turn limit reached ({self.current_turns} >= {self.max_turns})",
-            }
-        return {"exceeded": False}
 
     async def compact(self) -> None:
         await self._runtime_coordinator.compact()
@@ -804,7 +770,7 @@ class Agent:
         self._base_system_prompt = (
             self._static_system_prompt + "\n\n" + self._dynamic_system_context
         )
-        self._system_prompt = self._base_system_prompt
+        self.plan.refresh_prompt()
 
     def _refresh_memory_context_after_dream(self, filenames: list[str]) -> None:
         """丢弃旧预取，并让本会话后续请求看到 Dream 后的索引和文件内容。"""
@@ -929,7 +895,11 @@ class Agent:
     # auto 模式用分类器替代人工确认：deny 仍是硬边界，只读工具走快路径，
     # 其余动作由 LLM 根据不含推理的 transcript 投影判断。
 
-    async def _classify_tool_call(self, tool_name: str, inp: dict) -> dict:
+    async def _classify_tool_call(
+        self,
+        tool_name: str,
+        inp: Mapping[str, JSONValue],
+    ) -> dict:
         """以两阶段分类器决定工具调用,返回 allow/deny/confirm。"""
         return await self._autonomy._classify_tool_call(tool_name, inp)
 
@@ -954,7 +924,7 @@ class Agent:
             "terminal_output": self._terminal_output,
         }
 
-    def _child_permission_mode(self) -> str:
+    def _child_permission_mode(self) -> PermissionMode:
         """确定子 Agent 继承的权限模式。
 
         plan 与 auto 必须向下传递；否则默认 bypassPermissions 会让主模型借子 Agent
@@ -1084,8 +1054,6 @@ class Agent:
         inp: dict,
         tool_call_id: str = "",
     ) -> str:
-        self.tool_context.permission_mode = self.permission_mode
-        self.tool_context.plan_file_path = self._plan_file_path
         result = await self.tool_runtime.execute(
             tool_call_id=tool_call_id,
             name=name,
@@ -1109,15 +1077,13 @@ class Agent:
 
     async def enter_plan_mode_tool(self) -> ToolResult:
         """进入 Plan 模式并返回结构化工具结果。"""
-        return ToolResult(content=await self._execute_plan_mode_tool("enter_plan_mode"))
+        outcome = self.plan.enter()
+        return ToolResult(content=outcome.content, terminate=outcome.terminate)
 
     async def exit_plan_mode_tool(self) -> ToolResult:
         """退出 Plan 模式并返回结构化工具结果。"""
-        content = await self._execute_plan_mode_tool("exit_plan_mode")
-        return ToolResult(
-            content=content,
-            terminate=self._pending_core_context_reset is not None,
-        )
+        outcome = await self.plan.exit()
+        return ToolResult(content=outcome.content, terminate=outcome.terminate)
 
     async def schedule_wakeup_tool(
         self,
@@ -1147,8 +1113,10 @@ class Agent:
                 sub_result = await sub_agent.run_once(
                     inp.get("args") or "Execute this skill task."
                 )
-                self.total_input_tokens += sub_result["tokens"]["input"]
-                self.total_output_tokens += sub_result["tokens"]["output"]
+                self._usage.record_child_usage(
+                    sub_result["tokens"]["input"],
+                    sub_result["tokens"]["output"],
+                )
                 self._emit_subagent_status(
                     "skill-fork", inp.get("skill_name", ""), started=False
                 )
@@ -1163,124 +1131,6 @@ class Agent:
 
         return f'[Skill "{inp.get("skill_name", "")}" activated]\n\n{result["prompt"]}'
 
-    # ─── Plan 模式辅助 ───────────────────────────────────────
-
-    def _generate_plan_file_path(self) -> str:
-        d = Path.home() / ".claude" / "plans"
-        d.mkdir(parents=True, exist_ok=True)
-        return str(d / f"plan-{self.session_id}.md")
-
-    def _build_plan_mode_prompt(self) -> str:
-        return f"""
-
-# Plan Mode Active
-
-Plan mode is active. You MUST NOT make any edits (except the plan file below), run non-readonly tools, or make any changes to the system.
-
-## Plan File: {self._plan_file_path}
-Write your plan incrementally to this file using write_file or edit_file. This is the ONLY file you are allowed to edit.
-
-## Workflow
-1. **Explore**: Read code to understand the task. Use read_file, list_files, grep_search.
-2. **Design**: Design your implementation approach. Use the agent tool with type="plan" if the task is complex.
-3. **Write Plan**: Write a structured plan to the plan file including:
-   - **Context**: Why this change is needed
-   - **Steps**: Implementation steps with critical file paths
-   - **Verification**: How to test the changes
-4. **Exit**: Call exit_plan_mode when your plan is ready for user review.
-
-IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask the user to approve — exit_plan_mode handles that."""
-
-    async def _execute_plan_mode_tool(self, name: str) -> str:
-        if name == "enter_plan_mode":
-            if self.permission_mode == "plan":
-                return "Already in plan mode."
-            self._pre_plan_mode = self.permission_mode
-            self.permission_mode = "plan"
-            self._plan_file_path = self._generate_plan_file_path()
-            self._system_prompt = (
-                self._base_system_prompt + self._build_plan_mode_prompt()
-            )
-            self.tool_context.permission_mode = self.permission_mode
-            self.tool_context.plan_file_path = self._plan_file_path
-            self._emit_notice(
-                "Entered plan mode (read-only). Plan file: " + self._plan_file_path
-            )
-            return f"Entered plan mode. You are now in read-only mode.\n\nYour plan file: {self._plan_file_path}\nWrite your plan to this file. This is the only file you can edit.\n\nWhen your plan is complete, call exit_plan_mode."
-
-        if name == "exit_plan_mode":
-            if self.permission_mode != "plan":
-                return "Not in plan mode."
-            plan_content = "(No plan file found)"
-            if self._plan_file_path and Path(self._plan_file_path).exists():
-                plan_content = Path(self._plan_file_path).read_text()
-
-            # 主 Agent 有审批回调时进入交互式选择流程。
-            if self._plan_approval_fn:
-                result = await self._plan_approval_fn(plan_content)
-                choice = result.get("choice", "manual-execute")
-
-                if choice == "keep-planning":
-                    feedback = result.get("feedback") or "Please revise the plan."
-                    return (
-                        f"User rejected the plan and wants to keep planning.\n\n"
-                        f"User feedback: {feedback}\n\n"
-                        f"Please revise your plan based on this feedback. When done, call exit_plan_mode again."
-                    )
-
-                # 根据用户选择确定退出 Plan 后的权限模式。
-                if choice == "clear-and-execute":
-                    target_mode = "acceptEdits"
-                elif choice == "execute":
-                    target_mode = "acceptEdits"
-                else:  # 手动审批编辑时恢复进入 Plan 前的模式。
-                    target_mode = self._pre_plan_mode or "default"
-
-                # 先完整退出 Plan，再把批准后的计划交回模型执行。
-                self.permission_mode = target_mode
-                self._pre_plan_mode = None
-                saved_plan_path = self._plan_file_path
-                self._plan_file_path = None
-                self._system_prompt = self._base_system_prompt
-                self.tool_context.permission_mode = self.permission_mode
-                self.tool_context.plan_file_path = self._plan_file_path
-
-                if choice == "clear-and-execute":
-                    self._pending_core_context_reset = (
-                        f"Approved plan:\n{plan_content}\n\n"
-                        "Proceed with implementation."
-                    )
-                    self._emit_notice(
-                        f"Plan approved. Context cleared, executing in {target_mode} mode."
-                    )
-                    return (
-                        f"User approved the plan. Context was cleared. Permission mode: {target_mode}\n\n"
-                        f"Plan file: {saved_plan_path}\n\n"
-                        f"## Approved Plan:\n{plan_content}\n\n"
-                        f"Proceed with implementation."
-                    )
-
-                self._emit_notice(f"Plan approved. Executing in {target_mode} mode.")
-                return (
-                    f"User approved the plan. Permission mode: {target_mode}\n\n"
-                    f"## Approved Plan:\n{plan_content}\n\n"
-                    f"Proceed with implementation."
-                )
-
-            # 子 Agent 等无审批回调场景直接恢复原权限模式，不伪造用户批准。
-            self.permission_mode = self._pre_plan_mode or "default"
-            self._pre_plan_mode = None
-            self._plan_file_path = None
-            self._system_prompt = self._base_system_prompt
-            self.tool_context.permission_mode = self.permission_mode
-            self.tool_context.plan_file_path = self._plan_file_path
-            self._emit_notice(
-                "Exited plan mode. Restored to " + self.permission_mode + " mode."
-            )
-            return f"Exited plan mode. Permission mode restored to: {self.permission_mode}\n\n## Your Plan:\n{plan_content}"
-
-        return f"Unknown plan mode tool: {name}"
-
     async def _execute_agent_tool(self, inp: dict) -> str:
         agent_type = inp.get("type", "general")
         description = inp.get("description", "sub-agent task")
@@ -1292,8 +1142,10 @@ IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask 
 
         try:
             result = await sub_agent.run_once(prompt)
-            self.total_input_tokens += result["tokens"]["input"]
-            self.total_output_tokens += result["tokens"]["output"]
+            self._usage.record_child_usage(
+                result["tokens"]["input"],
+                result["tokens"]["output"],
+            )
             self._emit_subagent_status(agent_type, description, started=False)
             return result["text"] or "(Sub-agent produced no output)"
         except Exception as e:

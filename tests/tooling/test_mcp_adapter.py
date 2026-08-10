@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-import unittest
 import inspect
+import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from core.fakes import FakePlanView
+
 from lion_code.agent import Agent
+from lion_code.core.cancellation import CancellationToken
 from lion_code.mcp_client import DiscoveredMcpTool, McpManager
+from lion_code.permission_state import PermissionController, PermissionState
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.environment import ToolEnvironment
 from lion_code.tooling.mcp import create_mcp_tool
@@ -33,14 +38,15 @@ def _definition() -> DiscoveredMcpTool:
     )
 
 
-def _context(registry, *, confirm_fn=None):
+def _context(registry, *, confirm_fn=None, permission=None):
     return ToolContext(
-        session_id="session",
+        session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+        cancellation=CancellationToken(),
         cwd=Path.cwd(),
         controller=object(),
         registry=registry,
-        permission_mode="default",
-        plan_file_path=None,
+        permission=permission or PermissionController(PermissionState("default")),
+        plan=FakePlanView(),
         read_file_state={},
         confirm_fn=confirm_fn,
     )
@@ -87,10 +93,11 @@ class TestMcpAdapter(unittest.IsolatedAsyncioTestCase):
         tool = create_mcp_tool(manager, _definition())
         registry = ToolRegistry()
         registry.register(tool)
+        permission = PermissionController(PermissionState("default"))
         runtime = ToolRuntime(
             registry,
-            _context(registry),
-            [PermissionMiddleware(PermissionPolicy())],
+            _context(registry, permission=permission),
+            [PermissionMiddleware(PermissionPolicy(), permission)],
         )
 
         result = await runtime.execute(

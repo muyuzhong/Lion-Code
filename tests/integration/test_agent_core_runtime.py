@@ -27,6 +27,7 @@ from lion_code.session_memory import SessionMemoryRepository
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
+from lion_code.usage import UsageSnapshot
 
 
 class _LimitsFakeProvider(FakeProvider):
@@ -279,7 +280,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(fake.call_count, 0)
         self.assertEqual(agent._last_stop_reason, "aborted")
-        self.assertTrue(agent._aborted)
+        self.assertTrue(agent.is_aborted)
         self.assertEqual(agent._core_runtime.messages, ())
 
     async def test_core_run_reports_provider_error(self) -> None:
@@ -335,7 +336,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         await agent.chat("second")
 
         self.assertEqual(fake.call_count, 3)
-        self.assertEqual(agent.current_turns, 2)
+        self.assertEqual(agent.get_token_usage().turns, 2)
         self.assertEqual(agent._last_stop_reason, "max_turns")
         self.assertTrue(agent._core_runtime.messages[-1].is_error)
         self.assertIn("Turn limit reached", agent._core_runtime.messages[-1].text)
@@ -458,7 +459,10 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertIn("first question", raw_message_texts)
         self.assertIn("first answer", raw_message_texts)
         self.assertEqual(agent._core_runtime.messages, state.messages)
-        self.assertEqual(agent.last_input_token_count, 0)
+        usage = agent.get_token_usage()
+        self.assertEqual(usage.last_prompt_tokens, 0)
+        self.assertEqual(usage.input_tokens, 160_000)
+        self.assertEqual(usage.responses, 3)
         self.assertFalse(agent._core_compaction_required)
 
         restored, _ = self._make_agent([], registry)
@@ -528,7 +532,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         # 第一轮工具已执行，第二轮被取消，最终消息为 aborted。
         self.assertEqual(agent._core_runtime.messages[-1].stop_reason, "aborted")
-        self.assertTrue(agent._aborted)
+        self.assertTrue(agent.is_aborted)
         self.assertEqual(agent._last_stop_reason, "aborted")
 
         # 再次 chat：不遗留不完整工具调用，能正常收敛到最终文本。
@@ -545,10 +549,16 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         session_path = self._session_repository.storage_for(session_id).path
 
         second, fake = self._make_agent([_stop_event("second answer")], registry)
+        session_view = second.tool_context.session
+        second._usage.record_child_usage(9, 8)
+        second._usage.record_turn()
         self.assertTrue(await second.restore_core_session(session_id))
+        self.assertEqual(second.get_token_usage(), UsageSnapshot())
         await second.chat("second question")
 
         self.assertEqual(second.session_id, session_id)
+        self.assertIs(session_view, second.session_state)
+        self.assertEqual(session_view.id, session_id)
         self.assertEqual(
             list(self._session_repository.session_dir.glob("*.jsonl")),
             [session_path],
@@ -569,20 +579,29 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         agent, _ = self._make_agent([_stop_event()], registry)
         await agent.chat("hello")
         previous_session_id = agent.session_id
+        session_view = agent.tool_context.session
+        usage = agent._usage
+        usage_observer = agent._runtime_coordinator._usage_observer
         previous_path = self._session_repository.storage_for(previous_session_id).path
         agent._core_runtime.harness.follow_up("queued")
-        agent.current_turns = 3
+        for _ in range(3):
+            agent._usage.record_turn()
 
         await agent.clear_history()
 
         self.assertNotEqual(agent.session_id, previous_session_id)
+        self.assertIs(session_view, agent.session_state)
+        self.assertEqual(session_view.id, agent.session_id)
         self.assertTrue(previous_path.exists())
         self.assertTrue(
             self._session_repository.storage_for(agent.session_id).path.exists()
         )
         self.assertEqual(agent._core_runtime.messages, ())
         self.assertEqual(agent._core_runtime.harness.pending_message_count, 0)
-        self.assertEqual(agent.current_turns, 0)
+        self.assertEqual(agent.get_token_usage(), UsageSnapshot())
+        self.assertIs(agent._usage, usage)
+        self.assertIsNot(agent._runtime_coordinator._usage_observer, usage_observer)
+        self.assertIs(agent._runtime_coordinator._usage_observer._ledger, usage)
 
     async def test_model_and_thinking_changes_are_restored(self) -> None:
         registry = ToolRegistry()
@@ -726,12 +745,24 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                             )
                         ],
                         stop_reason="toolUse",
+                        usage=Usage(input=11, output=2, total_tokens=13),
                     ),
                 ),
-                _stop_event("implemented"),
+                _stop_event(
+                    "implemented",
+                    Usage(input=7, output=3, total_tokens=10),
+                ),
             ]
         )
-        with patch("lion_code.agent.create_provider", return_value=fake):
+        plan_path = Path(self._temp_dir.name) / "approved-plan.md"
+        plan_path.write_text("1. change code\n2. run tests", encoding="utf-8")
+        with (
+            patch("lion_code.agent.create_provider", return_value=fake),
+            patch(
+                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                return_value=plan_path,
+            ),
+        ):
             agent = Agent(
                 permission_mode="plan",
                 api_base="https://example.test/v1",
@@ -742,11 +773,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 terminal_output=False,
             )
         agent._mcp_initialized = True
+        permission = agent.tool_context.permission
         agent.tool_registry.activate("exit_plan_mode")
-        plan_path = Path(self._temp_dir.name) / "approved-plan.md"
-        plan_path.write_text("1. change code\n2. run tests", encoding="utf-8")
-        agent._plan_file_path = str(plan_path)
-        agent.tool_context.plan_file_path = str(plan_path)
 
         async def approve(_plan: str) -> dict:
             return {"choice": "clear-and-execute"}
@@ -762,7 +790,13 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             ["user", "assistant"],
         )
         self.assertEqual(agent._core_runtime.messages[-1].text, "implemented")
-        self.assertEqual(agent.tool_context.permission_mode, "acceptEdits")
+        self.assertIs(agent.tool_context.permission, permission)
+        self.assertEqual(permission.mode, "acceptEdits")
+        self.assertEqual(agent.permission_mode, "acceptEdits")
+        usage = agent.get_token_usage()
+        self.assertEqual((usage.input_tokens, usage.output_tokens), (18, 5))
+        self.assertEqual(usage.responses, 2)
+        self.assertEqual(usage.last_prompt_tokens, 10)
 
         state = await self._session_repository.load(agent.session_id)
         self.assertEqual(
@@ -772,6 +806,48 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(state.compaction_entries), 1)
         self.assertEqual(len(state.compaction_entries[0].replaces_entry_ids), 3)
         self.assertGreater(len(state.entries), len(state.messages))
+
+    async def test_plan_context_reset_failure_keeps_pending_command(self) -> None:
+        fake = FakeProvider([])
+        plan_path = Path(self._temp_dir.name) / "failing-reset-plan.md"
+        plan_path.write_text("keep this plan", encoding="utf-8")
+        with (
+            patch("lion_code.agent.create_provider", return_value=fake),
+            patch(
+                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                return_value=plan_path,
+            ),
+        ):
+            agent = Agent(
+                permission_mode="plan",
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+                session_memory_repository=self._session_memory_repository,
+                terminal_output=False,
+            )
+
+        async def approve(_plan: str) -> dict:
+            return {"choice": "clear-and-execute"}
+
+        agent.set_plan_approval_fn(approve)
+        outcome = await agent.exit_plan_mode_tool()
+        self.assertTrue(outcome.terminate)
+        pending = agent.plan.pending_context_reset
+        self.assertIsNotNone(pending)
+        await agent._ensure_core_session_ready()
+
+        with patch.object(
+            agent._core_runtime,
+            "reset_active_context",
+            AsyncMock(side_effect=RuntimeError("reset failed")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "reset failed"):
+                await agent._runtime_coordinator.apply_plan_context_reset()
+
+        self.assertEqual(agent.plan.pending_context_reset, pending)
+        await agent.close()
 
     async def test_configure_api_replaces_provider_in_existing_runtime(self) -> None:
         """换 key/base 原位替换 Provider，并保留 Harness 与 canonical history。"""
@@ -873,7 +949,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         await agent.chat("second")
 
-        self.assertEqual(agent.total_input_tokens, 2_000)
+        self.assertEqual(agent.get_token_usage().input_tokens, 2_000)
         self.assertEqual(agent._last_stop_reason, "max_cost")
         self.assertEqual(new_fake.call_count, 1)
         self.assertTrue(agent._core_runtime.messages[-1].is_error)

@@ -4,6 +4,11 @@ import json
 import unittest
 from pathlib import Path
 
+from core.fakes import FakePlanView
+
+from lion_code.core.cancellation import CancellationToken
+from lion_code.permission_state import PermissionController, PermissionState
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.internal import (
     create_enter_plan_mode_tool,
@@ -24,12 +29,13 @@ class TestToolSearch(unittest.IsolatedAsyncioTestCase):
         ):
             registry.register(tool)
         context = ToolContext(
-            session_id="session",
+            session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+            cancellation=CancellationToken(),
             cwd=Path.cwd(),
             controller=object(),
             registry=registry,
-            permission_mode="default",
-            plan_file_path=None,
+            permission=PermissionController(PermissionState("default")),
+            plan=FakePlanView(),
             read_file_state={},
         )
         return registry, ToolRuntime(registry, context)

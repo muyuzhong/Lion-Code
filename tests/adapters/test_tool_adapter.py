@@ -6,8 +6,12 @@ import asyncio
 import unittest
 from pathlib import Path
 
+from core.fakes import FakePlanView
+
 from lion_code.adapters import adapt_active_tools, adapt_lion_tool, to_core_result
-from lion_code.core import SimpleCancellationToken
+from lion_code.core import CancellationToken
+from lion_code.permission_state import PermissionController, PermissionState
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.middleware import CancellationMiddleware
 from lion_code.tooling.registry import ToolRegistry
@@ -21,12 +25,13 @@ class _Controller:
 
 def _context(registry: ToolRegistry) -> ToolContext:
     return ToolContext(
-        session_id="session",
+        session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+        cancellation=CancellationToken(),
         cwd=Path.cwd(),
         controller=_Controller(),
         registry=registry,
-        permission_mode="default",
-        plan_file_path=None,
+        permission=PermissionController(PermissionState("default")),
+        plan=FakePlanView(),
         read_file_state={},
     )
 
@@ -175,7 +180,7 @@ class TestMiddlewareExecution(unittest.IsolatedAsyncioTestCase):
             [DelayMiddleware(), CancellationMiddleware()],
         )
         core_tool = adapt_lion_tool(lion_tool, runtime)
-        signal = SimpleCancellationToken()
+        signal = CancellationToken()
 
         task = asyncio.create_task(core_tool.execute("call-1", {}, signal))
         await entered.wait()

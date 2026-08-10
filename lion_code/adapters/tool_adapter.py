@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import cast
 
-from lion_code.core.messages import TextContent
+from lion_code.core.cancellation import CancellationView
+from lion_code.core.messages import ImageContent, TextContent
 from lion_code.core.tools import (
     AgentTool,
     AgentToolResult,
-    ToolCancellationToken,
+    ToolExecutionMode,
+)
+from lion_code.core.tools import (
     ToolUpdateCallback as CoreToolUpdateCallback,
 )
 from lion_code.core.types import JSONValue as CoreJSONValue
 from lion_code.tooling import LionTool, ToolRuntime
 from lion_code.tooling.types import (
-    JSONValue as LionJSONValue,
     ToolResult as LionToolResult,
 )
 
@@ -23,7 +24,9 @@ from lion_code.tooling.types import (
 def to_core_result(result: LionToolResult) -> AgentToolResult:
     """Convert a Lion ``ToolResult`` without losing policy/runtime metadata."""
 
-    content = [TextContent(text=result.content)] if result.content else []
+    content: list[TextContent | ImageContent] = (
+        [TextContent(text=result.content)] if result.content else []
+    )
     return AgentToolResult(
         content=content,
         details=result.details,
@@ -46,7 +49,7 @@ def adapt_lion_tool(tool: LionTool, runtime: ToolRuntime) -> AgentTool:
     async def execute(
         tool_call_id: str,
         arguments: Mapping[str, CoreJSONValue],
-        signal: ToolCancellationToken | None = None,
+        signal: CancellationView | None = None,
         on_update: CoreToolUpdateCallback | None = None,
     ) -> AgentToolResult:
         # Check Core cancellation before entering Lion's middleware chain. The
@@ -62,14 +65,12 @@ def adapt_lion_tool(tool: LionTool, runtime: ToolRuntime) -> AgentTool:
             if on_update is not None:
                 on_update(to_core_result(update))
 
-        lion_arguments = cast(Mapping[str, LionJSONValue], arguments)
-
         result = await runtime.execute(
             tool_call_id=tool_call_id,
             name=tool.name,
-            arguments=lion_arguments,
+            arguments=arguments,
             on_update=forward_update,
-            cancellation_fn=signal.is_cancelled if signal is not None else None,
+            cancellation=signal,
         )
 
         return to_core_result(result)
@@ -77,13 +78,15 @@ def adapt_lion_tool(tool: LionTool, runtime: ToolRuntime) -> AgentTool:
     # Do not trust ``tool.execution_mode`` alone. A tool may declare ``parallel``
     # but still be ineligible unless it is also read-only and concurrency-safe.
     # Lion encodes that rule in ``ToolRuntime.can_run_parallel``.
-    execution_mode = "parallel" if runtime.can_run_parallel(tool.name) else "sequential"
+    execution_mode: ToolExecutionMode = (
+        "parallel" if runtime.can_run_parallel(tool.name) else "sequential"
+    )
 
     return AgentTool(
         name=tool.name,
         label=tool.label,
         description=tool.description,
-        parameters=cast(Mapping[str, CoreJSONValue], tool.parameters),
+        parameters=tool.parameters,
         execute_fn=execute,
         prompt_snippet=tool.prompt_snippet,
         prompt_guidelines=tool.prompt_guidelines,

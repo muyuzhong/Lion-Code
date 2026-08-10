@@ -1,0 +1,33 @@
+{
+  "id": "usage-ownership",
+  "name": "usage-ownership",
+  "title": "Usage 所有权",
+  "description": "以 UsageLedger 和 UsageSnapshot 消除 Agent 与 UsageObserver 的镜像计数。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "backend",
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-09",
+  "completedAt": "2026-08-09",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-09-state-ownership-migration",
+  "relatedFiles": [
+    "lion_code/usage.py",
+    "lion_code/observers/usage.py",
+    "lion_code/agent.py",
+    "lion_code/agent_runtime.py",
+    "lion_code/autonomy_runtime.py",
+    "tests/architecture/test_runtime_boundaries.py"
+  ],
+  "notes": "",
+  "meta": {}
+}

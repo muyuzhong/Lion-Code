@@ -20,6 +20,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Error Handling](./error-handling.md) | Error types, handling strategies | Active |
 | [TUI Interaction](./tui-interaction.md) | Input, completion, streaming, and frontend ownership contracts | Active |
 | [Runtime Boundaries](./runtime-boundaries.md) | Core/Provider, session persistence, and frontend ownership contracts | Active |
+| [Usage Ownership](./usage-ownership.md) | Usage single-writer, budget, lifecycle, and projection contracts | Active |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, testing, and review checks | Active |
 | [Logging Guidelines](./logging-guidelines.md) | Event-based observability and terminal presentation | Active |
 | [Agent E2E Evaluation](./agent-e2e-evaluation.md) | Versioned evaluation contracts, isolation, and offline-only behavior | Active |

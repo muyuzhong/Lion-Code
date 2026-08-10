@@ -36,11 +36,13 @@ from lion_code.core import (
     AgentMessage,
     EventListener,
 )
+from lion_code.core.cancellation import CancellationView
 from lion_code.core.events import AgentEvent, MessageEndEvent, MessageUpdateEvent
 from lion_code.core.loop import BeforeToolCalls, PrepareContext
 from lion_code.core.messages import AssistantMessage, UserMessage
 from lion_code.core.provider import ModelProvider
 from lion_code.core.provider_events import TextDeltaEvent
+from lion_code.execution_control import ExecutionControl
 from lion_code.memory_runtime import (
     MemoryContextInjector,
     MemoryInjectionReport,
@@ -48,10 +50,13 @@ from lion_code.memory_runtime import (
     ReadOnlyMessageSource,
 )
 from lion_code.observers import TerminalRenderer, UsageObserver
+from lion_code.plan_runtime import PlanRuntime
 from lion_code.providers.thinking import ThinkingLevel
+from lion_code.session_identity import SessionIdentityState
 from lion_code.session_lifecycle import SessionLifecycle
 from lion_code.session_runtime import SessionRecorder, SessionRepository
 from lion_code.tooling import ToolRuntime
+from lion_code.usage import BudgetPolicy, UsageLedger
 
 StopReason = Literal[
     "completed",
@@ -107,6 +112,7 @@ class LionAgentRuntime(ReadOnlyMessageSource):
         model: str,
         get_system: Callable[[], str],
         tool_runtime: ToolRuntime,
+        cancellation: CancellationView | None = None,
         prepare_context: PrepareContext | None = None,
         max_turns: int | None = None,
         before_tool_calls: BeforeToolCalls | None = None,
@@ -128,7 +134,8 @@ class LionAgentRuntime(ReadOnlyMessageSource):
                 # 权限和结果策略由 ToolRuntime 中间件负责，不在运行时层注入。
                 before_tool_call=None,
                 after_tool_call=None,
-            )
+            ),
+            cancellation=cancellation,
         )
 
     def subscribe(self, listener: EventListener) -> Callable[[], None]:
@@ -197,23 +204,6 @@ class LionAgentRuntime(ReadOnlyMessageSource):
 # ─── 窄端口：按 coordinator 实际访问模式分组 ──────────────────
 
 
-class UsageStateHost(Protocol):
-    """Token 计数与预算检查所需的宿主边界。"""
-
-    effective_window: int
-    total_input_tokens: int
-    total_output_tokens: int
-    total_cache_read_tokens: int
-    total_cache_creation_tokens: int
-    last_input_token_count: int
-    current_turns: int
-    last_api_call_time: float
-
-    def _check_budget(self) -> dict[str, Any]: ...
-
-    def _get_current_cost_usd(self) -> float: ...
-
-
 class RuntimeIdentityHost(Protocol):
     """模型标识、终端渲染与中止/通知所需的宿主边界。"""
 
@@ -222,11 +212,14 @@ class RuntimeIdentityHost(Protocol):
     _thinking_level: ThinkingLevel
     _terminal_output: bool
     _system_prompt: str
-    _aborted: bool
     _last_stop_reason: str | None
+    effective_window: int
 
     @property
     def api_configured(self) -> bool: ...
+
+    @property
+    def is_aborted(self) -> bool: ...
 
     def _create_terminal_renderer(self) -> TerminalRenderer: ...
 
@@ -245,19 +238,13 @@ class RuntimeIdentityHost(Protocol):
 class SessionStateHost(Protocol):
     """会话标识、仓库、Plan 模式与工具环境所需的宿主边界。"""
 
-    session_id: str
-    session_start_time: str
-    permission_mode: str
-    _plan_file_path: str | None
-    _pending_core_context_reset: str | None
-    _base_system_prompt: str
     _session_repository: SessionRepository
+    plan: PlanRuntime
     tool_context: Any
     tool_environment: Any
 
-    def _generate_plan_file_path(self) -> str: ...
-
-    def _build_plan_mode_prompt(self) -> str: ...
+    @property
+    def session_state(self) -> SessionIdentityState: ...
 
 
 class MemoryTurnHost(Protocol):
@@ -285,43 +272,10 @@ class MemoryTurnHost(Protocol):
     def _reload_session_memory(self) -> None: ...
 
 
-def sync_usage_from_observer(
-    host: UsageStateHost,
-    observer: UsageObserver | None,
-    *,
-    last_synced_response_count: int,
-) -> int:
-    """把 UsageObserver 的累计统计投影到宿主，并返回最新响应序号。"""
-
-    if observer is None:
-        return last_synced_response_count
-    totals = observer.totals
-    host.total_input_tokens = totals.input_tokens
-    host.total_output_tokens = totals.output_tokens
-    host.total_cache_read_tokens = totals.cache_read_tokens
-    host.total_cache_creation_tokens = totals.cache_write_tokens
-    last = observer.last_usage
-    response_count = observer.response_count
-    if response_count == last_synced_response_count:
-        return last_synced_response_count
-    if last is None:
-        host.last_input_token_count = 0
-    elif last.total_tokens:
-        host.last_input_token_count = last.total_tokens
-    else:
-        host.last_input_token_count = (
-            last.input + last.cache_read + last.cache_write + last.output
-        )
-    if observer.last_response_at is not None:
-        host.last_api_call_time = observer.last_response_at
-    return response_count
-
-
 class AgentRuntimeCoordinator:
     """拥有一个 Agent 的 Core 生命周期，但不反向依赖 Agent 实现。
 
-    通过四个窄端口访问宿主能力，不再依赖单个宽协议：
-    - ``usage`` -- token 计数与预算检查
+    通过三个窄端口访问宿主能力，并直接接收 Usage Owner 与预算规则：
     - ``identity`` -- 模型标识、终端渲染、中止/通知与 MCP 初始化
     - ``session`` -- 会话标识、仓库、Plan 模式与工具环境
     - ``memory`` -- Memory 注入、Overlay 与轮次快照
@@ -330,10 +284,12 @@ class AgentRuntimeCoordinator:
     def __init__(
         self,
         *,
-        usage: UsageStateHost,
+        usage: UsageLedger,
+        budget: BudgetPolicy,
         identity: RuntimeIdentityHost,
         session: SessionStateHost,
         memory: MemoryTurnHost,
+        execution: ExecutionControl,
         provider: ModelProvider,
         model: str,
         tool_runtime: ToolRuntime,
@@ -342,9 +298,11 @@ class AgentRuntimeCoordinator:
         model_limits_resolver: ModelLimitsResolver,
     ) -> None:
         self._usage = usage
+        self._budget = budget
         self._identity = identity
         self._session = session
         self._memory = memory
+        self._execution = execution
         self._context_manager = context_manager
         self._context_compactor = context_compactor
         self._model_limits_resolver = model_limits_resolver
@@ -356,7 +314,6 @@ class AgentRuntimeCoordinator:
         self._background_errors: list[BaseException] = []
         self._output_buffer: list[str] | None = None
         self._captured_assistant_text: str | None = None
-        self._last_synced_core_response_count = 0
         self._terminal_renderer: TerminalRenderer | None = None
         self._terminal_renderer_unsubscribe: Callable[[], None] | None = None
         self._usage_observer: UsageObserver | None = None
@@ -367,7 +324,9 @@ class AgentRuntimeCoordinator:
             model=model,
             get_system=lambda: self._identity._system_prompt,
             tool_runtime=tool_runtime,
+            cancellation=execution.cancellation,
             prepare_context=self.prepare_core_context,
+            max_turns=budget.max_turns,
             before_tool_calls=self.before_core_tool_calls,
         )
         if self._context_compactor is None:
@@ -387,6 +346,10 @@ class AgentRuntimeCoordinator:
     @core_runtime.setter
     def core_runtime(self, value: LionAgentRuntime) -> None:
         self._runtime = value
+
+    @property
+    def execution(self) -> ExecutionControl:
+        return self._execution
 
     @property
     def session_recorder(self) -> SessionRecorder | None:
@@ -425,14 +388,6 @@ class AgentRuntimeCoordinator:
         self._core_compaction_required = value
 
     @property
-    def usage_observer(self) -> UsageObserver | None:
-        return self._usage_observer
-
-    @usage_observer.setter
-    def usage_observer(self, value: UsageObserver | None) -> None:
-        self._usage_observer = value
-
-    @property
     def terminal_renderer(self) -> TerminalRenderer | None:
         return self._terminal_renderer
 
@@ -446,7 +401,6 @@ class AgentRuntimeCoordinator:
     ) -> list[AgentMessage]:
         """只生成 Provider 投影，不改写 canonical history 或 JSONL。"""
 
-        self.sync_core_usage()
         state = self.context_runtime_state()
         prepared = self._context_manager.prepare(messages, state)
         projected, memory_report = self._memory._memory_injector.inject(
@@ -473,13 +427,6 @@ class AgentRuntimeCoordinator:
         ):
             self._captured_assistant_text = event.message.text
 
-    def sync_core_usage(self) -> None:
-        self._last_synced_core_response_count = sync_usage_from_observer(
-            self._usage,
-            self._usage_observer,
-            last_synced_response_count=self._last_synced_core_response_count,
-        )
-
     def last_core_assistant(self) -> AssistantMessage | None:
         return next(
             (
@@ -497,8 +444,8 @@ class AgentRuntimeCoordinator:
         if assistant is None:
             return
         identity = self._identity
-        if identity._aborted or assistant.stop_reason == "aborted":
-            identity._aborted = True
+        if self._execution.cancelled or assistant.stop_reason == "aborted":
+            self._execution.cancel()
             identity._last_stop_reason = "aborted"
         elif assistant.stop_reason == "error":
             identity._last_stop_reason = "model_error"
@@ -506,36 +453,22 @@ class AgentRuntimeCoordinator:
             identity._last_stop_reason = "completed"
 
     def before_core_tool_calls(self, _assistant: AssistantMessage) -> str | None:
-        """在工具调用前同步用量、递增轮次并检查既有预算。"""
+        """在工具调用前记录 turn，并用同一 BudgetPolicy 检查累计用量。"""
 
-        self.sync_core_usage()
-        self._usage.current_turns += 1
-        budget = self._usage._check_budget()
-        if not budget["exceeded"]:
+        self._usage.record_turn()
+        decision = self._budget.check(self._usage.snapshot())
+        if not decision.exceeded:
             return None
-        self._identity._last_stop_reason = budget["kind"]
+        self._identity._last_stop_reason = decision.kind
         try:
-            self._identity._emit_notice(f"Budget exceeded: {budget['reason']}")
+            self._identity._emit_notice(f"Budget exceeded: {decision.reason}")
         except UnicodeError:
             pass
-        return budget["reason"]
+        return decision.reason
 
-    def reset_session_counters(self) -> None:
-        usage = self._usage
-        identity = self._identity
-        usage.total_input_tokens = 0
-        usage.total_output_tokens = 0
-        usage.total_cache_read_tokens = 0
-        usage.total_cache_creation_tokens = 0
-        usage.last_input_token_count = 0
-        usage.current_turns = 0
-        usage.last_api_call_time = 0.0
-        self._last_synced_core_response_count = (
-            self._usage_observer.response_count
-            if self._usage_observer is not None
-            else 0
-        )
-        identity._last_stop_reason = None
+    def reset_session_usage(self) -> None:
+        self._usage.reset()
+        self._identity._last_stop_reason = None
 
     def reset_core_observers(self) -> None:
         """按 Usage -> Session -> Renderer -> capture 的稳定顺序重建观察器。"""
@@ -549,17 +482,18 @@ class AgentRuntimeCoordinator:
         self._terminal_renderer = (
             identity._create_terminal_renderer() if identity._terminal_output else None
         )
-        self._usage_observer = UsageObserver()
-        self._last_synced_core_response_count = 0
+        self._usage_observer = UsageObserver(self._usage)
         if identity.is_sub_agent:
             self._session_recorder = None
         else:
             self._session_recorder = SessionRecorder(
-                session_id=session.session_id,
+                session_id=session.session_state.id,
                 model=identity.model,
                 thinking_level=identity._thinking_level,
                 cwd=session.tool_context.cwd,
-                storage=session._session_repository.storage_for(session.session_id),
+                storage=session._session_repository.storage_for(
+                    session.session_state.id
+                ),
             )
         self._observer_unsubscribers.append(
             self._runtime.subscribe(self._usage_observer.handle)
@@ -591,15 +525,15 @@ class AgentRuntimeCoordinator:
             self._runtime.provider,
             self._identity.model,
         )
-        self._usage.effective_window = effective_window_tokens(limits)
+        self._identity.effective_window = effective_window_tokens(limits)
         self._resolved_model_limits_for = key
 
     def context_runtime_state(self) -> ContextRuntimeState:
-        usage = self._usage
+        usage = self._usage.snapshot()
         return ContextRuntimeState(
-            effective_window_tokens=usage.effective_window,
-            last_prompt_tokens=usage.last_input_token_count,
-            last_model_call_at=usage.last_api_call_time or None,
+            effective_window_tokens=self._identity.effective_window,
+            last_prompt_tokens=usage.last_prompt_tokens,
+            last_model_call_at=usage.last_response_at,
             now=time.time(),
         )
 
@@ -613,7 +547,6 @@ class AgentRuntimeCoordinator:
 
         if self._session_recorder is None or self._context_compactor is None:
             return False
-        self.sync_core_usage()
         if not force and not self._context_manager.should_compact(
             self.context_runtime_state()
         ):
@@ -638,7 +571,7 @@ class AgentRuntimeCoordinator:
         if not replaced_ids:
             return False
 
-        if self._identity._aborted:
+        if self._execution.cancelled:
             raise asyncio.CancelledError
         task = asyncio.create_task(self._context_compactor.summarize(summary_messages))
         self._core_compaction_task = task
@@ -647,17 +580,19 @@ class AgentRuntimeCoordinator:
         finally:
             if self._core_compaction_task is task:
                 self._core_compaction_task = None
-        if self._identity._aborted:
+        if self._execution.cancelled:
             raise asyncio.CancelledError
         await self._session_recorder.record_compaction(
             summary=summary,
             replaces_entry_ids=replaced_ids,
         )
-        state = await self._session._session_repository.load(self._session.session_id)
+        state = await self._session._session_repository.load(
+            self._session.session_state.id
+        )
         if state is None:
             raise RuntimeError("Session disappeared after compaction")
         await self._runtime.replace_active_context(state.messages)
-        self._usage.last_input_token_count = 0
+        self._usage.reset_context_tracking()
         self._last_context_actions = ()
         self._core_compaction_required = False
         return True
@@ -670,11 +605,11 @@ class AgentRuntimeCoordinator:
             keep_user_boundaries=2,
         )
 
-    async def apply_pending_core_context_reset(self) -> bool:
+    async def apply_plan_context_reset(self) -> bool:
         """把 Plan 批准摘要持久化后作为唯一活跃上下文继续运行。"""
 
         session = self._session
-        summary = session._pending_core_context_reset
+        summary = session.plan.pending_context_reset
         if summary is None or self._session_recorder is None:
             return False
         replaced_ids = list(await self._session_recorder.context_entry_ids())
@@ -682,7 +617,7 @@ class AgentRuntimeCoordinator:
             summary=summary,
             replaces_entry_ids=replaced_ids,
         )
-        state = await session._session_repository.load(session.session_id)
+        state = await session._session_repository.load(session.session_state.id)
         if state is None or len(state.messages) != 1:
             raise RuntimeError(
                 "Compaction replay did not produce one active context message"
@@ -693,11 +628,10 @@ class AgentRuntimeCoordinator:
                 "Compaction replay did not produce one active context message"
             )
         await self._runtime.reset_active_context(active_message.text)
-        self.sync_core_usage()
-        self._usage.last_input_token_count = 0
+        self._usage.reset_context_tracking()
         self._last_context_actions = ()
         self._core_compaction_required = False
-        session._pending_core_context_reset = None
+        session.plan.complete_context_reset()
         return True
 
     def schedule_background_operation(
@@ -757,11 +691,9 @@ class AgentRuntimeCoordinator:
     def abort(self) -> None:
         """同时取消 Memory 预取、Core 流和可能在运行的压缩任务。"""
 
-        identity = self._identity
-        identity._aborted = True
-        identity._last_stop_reason = "aborted"
+        self._execution.cancel()
+        self._identity._last_stop_reason = "aborted"
         self._memory._memory_coordinator.cancel_pending()
-        self._runtime.cancel()
         if self._core_compaction_task is not None:
             self._core_compaction_task.cancel()
 
@@ -770,9 +702,9 @@ class AgentRuntimeCoordinator:
 
         identity = self._identity
         memory = self._memory
-        await identity._ensure_mcp_tools()
-        identity._aborted = False
+        self._execution.begin()
         identity._last_stop_reason = None
+        await identity._ensure_mcp_tools()
         if not identity.api_configured:
             identity._emit_notice(
                 "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
@@ -781,22 +713,21 @@ class AgentRuntimeCoordinator:
             )
             return
         await self.ensure_core_session_ready()
-        if identity._aborted:
+        if self._execution.cancelled:
             return
         await self.compact_core_context_if_needed()
-        if identity._aborted:
+        if self._execution.cancelled:
             return
         turn_start_index = len(self._runtime.messages)
         memory._prepare_turn_memory_snapshot(user_message)
         try:
             await self._runtime.prompt(user_message)
             while (
-                not identity._aborted and await self.apply_pending_core_context_reset()
+                not self._execution.cancelled and await self.apply_plan_context_reset()
             ):
-                if identity._aborted:
+                if self._execution.cancelled:
                     break
                 await self._runtime.continue_()
-            self.sync_core_usage()
             self.sync_core_outcome()
             self._core_compaction_required = self._context_manager.should_compact(
                 self.context_runtime_state()
@@ -816,8 +747,7 @@ class AgentRuntimeCoordinator:
 
         self._output_buffer = []
         self._captured_assistant_text = None
-        previous_input = self._usage.total_input_tokens
-        previous_output = self._usage.total_output_tokens
+        before = self._usage.snapshot()
         try:
             await self.chat(prompt)
             text = "".join(self._output_buffer)
@@ -826,11 +756,12 @@ class AgentRuntimeCoordinator:
         finally:
             self._output_buffer = None
             self._captured_assistant_text = None
+        after = self._usage.snapshot()
         return {
             "text": text,
             "tokens": {
-                "input": self._usage.total_input_tokens - previous_input,
-                "output": self._usage.total_output_tokens - previous_output,
+                "input": after.input_tokens - before.input_tokens,
+                "output": after.output_tokens - before.output_tokens,
             },
         }
 
@@ -842,14 +773,9 @@ class AgentRuntimeCoordinator:
     ) -> AgentRunResult:
         """执行一次并把取消、超时和 Provider 异常投影为结构化结果。"""
 
-        usage = self._usage
         identity = self._identity
         session = self._session
-        pre_input = usage.total_input_tokens
-        pre_output = usage.total_output_tokens
-        pre_cache = usage.total_cache_read_tokens
-        pre_turns = usage.current_turns
-        pre_cost = usage._get_current_cost_usd()
+        before = self._usage.snapshot()
         start = time.monotonic()
         self._output_buffer = []
         self._captured_assistant_text = None
@@ -862,7 +788,7 @@ class AgentRuntimeCoordinator:
             def on_timeout() -> None:
                 nonlocal timed_out
                 timed_out = True
-                identity._aborted = True
+                self.abort()
                 if run_task is not None and not run_task.done():
                     run_task.cancel()
 
@@ -881,6 +807,7 @@ class AgentRuntimeCoordinator:
                     else "Provider error"
                 )
         except asyncio.CancelledError:
+            self.abort()
             stop_reason = "aborted"
         except Exception as exc:
             stop_reason = "model_error"
@@ -897,16 +824,17 @@ class AgentRuntimeCoordinator:
         if timed_out:
             stop_reason = "timeout"
             error = error or f"timeout after {timeout}s"
+        after = self._usage.snapshot()
         return AgentRunResult(
-            session_id=session.session_id,
+            session_id=session.session_state.id,
             final_text=final_text,
             stop_reason=stop_reason,
-            turns=usage.current_turns - pre_turns,
+            turns=after.turns - before.turns,
             wall_time_seconds=time.monotonic() - start,
-            input_tokens=usage.total_input_tokens - pre_input,
-            output_tokens=usage.total_output_tokens - pre_output,
-            cache_read_tokens=usage.total_cache_read_tokens - pre_cache,
-            cost_usd=usage._get_current_cost_usd() - pre_cost,
+            input_tokens=after.input_tokens - before.input_tokens,
+            output_tokens=after.output_tokens - before.output_tokens,
+            cache_read_tokens=after.cache_read_tokens - before.cache_read_tokens,
+            cost_usd=after.cost_usd - before.cost_usd,
             error=error,
         )
 

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from asyncio import sleep
 
+from lion_code.core.cancellation import CancellationView
 from lion_code.core.types import JSONValue
+
 from ._provider_events import ProviderRetryEvent
-from .provider import CancellationToken
 
 RETRY_POLL_SECONDS = 0.05
 RETRY_BASE_DELAY_SECONDS = 0.25
@@ -46,7 +47,7 @@ def provider_retry_event(
 async def wait_for_retry(
     delay_seconds: float,
     *,
-    signal: CancellationToken | None,
+    signal: CancellationView | None,
 ) -> bool:
     """Sleep before a retry while allowing cancellation to interrupt backoff."""
     if delay_seconds <= 0:

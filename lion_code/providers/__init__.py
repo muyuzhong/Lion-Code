@@ -23,10 +23,7 @@ from .model_limits import (
     RuntimeModelLimits,
 )
 from .openai_compatible import OpenAICompatibleProvider
-from .provider import (
-    CancellationToken,
-    ModelProvider,
-)
+from .provider import ModelProvider
 
 __all__ = [
     "AnthropicConfig",
@@ -35,7 +32,6 @@ __all__ = [
     "AssistantErrorEvent",
     "AssistantMessageEvent",
     "AssistantStartEvent",
-    "CancellationToken",
     "FakeProvider",
     "ModelLimitsProvider",
     "ModelProvider",

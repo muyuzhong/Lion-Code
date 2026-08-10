@@ -20,11 +20,14 @@ from lion_code.core import (
     UserMessage,
 )
 from lion_code.frontmatter import format_frontmatter, parse_frontmatter
+from lion_code.permission_state import PermissionController, PermissionState
+from lion_code.plan_runtime import PlanRuntime, PlanState
 from lion_code.project_identity import ProjectIdentity
 from lion_code.session_memory import SessionMemory
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.builtin import create_builtin_tools
 from lion_code.tooling.registry import ToolRegistry
+from lion_code.usage import UsageLedger
 
 
 def _write_memory(path: Path, name: str, memory_type: str, body: str) -> None:
@@ -366,9 +369,10 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
                 sessions=[{"id": "s1", "messages": []}],
                 memory_snapshot={},
             )
+            usage = UsageLedger()
+            usage.record_child_usage(10, 20)
             parent = SimpleNamespace(
-                total_input_tokens=10,
-                total_output_tokens=20,
+                _usage=usage,
                 _session_repository=Mock(),
             )
             child = SimpleNamespace(
@@ -396,8 +400,8 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
         build_context.assert_awaited_once_with(parent._session_repository)
         child.run_once.assert_awaited_once()
         child.close.assert_awaited_once()
-        self.assertEqual(parent.total_input_tokens, 13)
-        self.assertEqual(parent.total_output_tokens, 24)
+        self.assertEqual(parent._usage.snapshot().input_tokens, 13)
+        self.assertEqual(parent._usage.snapshot().output_tokens, 24)
         apply.assert_called_once()
 
 
@@ -412,6 +416,13 @@ class TestAgentDreamRefresh(unittest.TestCase):
             _static_system_prompt="static",
             _base_system_prompt="old base",
             _system_prompt="old system",
+            session_id="session",
+            _emit_notice=Mock(),
+        )
+        host.plan = PlanRuntime(
+            host,
+            PermissionController(PermissionState("default")),
+            PlanState(),
         )
         host._refresh_dynamic_system_context = Agent._refresh_dynamic_system_context.__get__(host)
         coord = SessionMemoryCoordinator.__new__(SessionMemoryCoordinator)

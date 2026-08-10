@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 26
-- **Last Active**: 2026-08-04
+- **Total Sessions**: 31
+- **Last Active**: 2026-08-10
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~968 | Active |
+| `journal-1.md` | ~1073 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,11 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 31 | 2026-08-10 | 完成 PR 23 CI 基线修复 | `b25ea2c` | `muyuzhong/state-ownership-migration` |
+| 30 | 2026-08-09 | 完成 State Ownership 分阶段迁移 | `66a7a04` | `master` |
+| 29 | 2026-08-09 | 完成 PlanRuntime 状态所有权迁移 | `4010464` | `master` |
+| 28 | 2026-08-09 | 完成 Permission 状态所有权迁移 | `f8405f0` | `master` |
+| 27 | 2026-08-09 | 完成 Session 与 Cancellation 状态所有权迁移 | `2b77174` | `master` |
 | 26 | 2026-08-04 | 完成 Agent 运行时拆分路线验收 | `921f5b7` | `muyuzhong/phase3-subagent-factory` |
 | 25 | 2026-08-04 | 收敛 Agent Runtime 协调 | `37385e3` | `muyuzhong/phase3-subagent-factory` |
 | 24 | 2026-08-04 | 完成 S5 Agent 生命周期提取 | `9874f28` | `muyuzhong/phase3-subagent-factory` |

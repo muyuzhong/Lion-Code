@@ -14,9 +14,17 @@ so dynamic-configuration tests can assert per-turn behavior.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from pathlib import Path
 
 from lion_code.core.messages import AssistantMessage
 from lion_code.core.provider_events import AssistantErrorEvent, AssistantMessageEvent
+
+
+@dataclass(slots=True)
+class FakePlanView:
+    is_active: bool = False
+    file_path: Path | None = None
 
 
 class FakeProvider:
@@ -27,6 +35,7 @@ class FakeProvider:
         self.received_systems: list[str] = []
         self.received_messages: list[list] = []
         self.received_tools: list[list[str]] = []
+        self.received_signals: list[object | None] = []
         self.closed = False
 
     async def aclose(self) -> None:
@@ -39,6 +48,7 @@ class FakeProvider:
         self.received_systems.append(system)
         self.received_messages.append(list(messages))
         self.received_tools.append([tool.name for tool in tools])
+        self.received_signals.append(signal)
         return self._gen(signal)
 
     async def _gen(self, signal):

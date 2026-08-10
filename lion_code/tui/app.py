@@ -1198,7 +1198,7 @@ class LionTuiApp(App):
         elif result.cost_requested:
             usage = self.session.token_usage()
             self._notice(
-                f"tokens: {usage.get('input', 0)} in / {usage.get('output', 0)} out"
+                f"tokens: {usage.input_tokens} in / {usage.output_tokens} out"
             )
         elif result.compact_summary is not None:
             self.run_worker(self._compact(), exclusive=True, group="chat")
@@ -1406,8 +1406,8 @@ class LionTuiApp(App):
         if running:
             parts.append("⠋ Thinking…")
         usage = self.session.token_usage()
-        if usage.get("input") or usage.get("output"):
-            parts.append(f"{usage['input']} in / {usage['output']} out")
+        if usage.input_tokens or usage.output_tokens:
+            parts.append(f"{usage.input_tokens} in / {usage.output_tokens} out")
         self.query_one("#status", Static).update("   ".join(parts))
         self._sync_prompt_footer()
 

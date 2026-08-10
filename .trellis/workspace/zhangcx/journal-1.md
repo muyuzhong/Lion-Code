@@ -966,3 +966,108 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 27: 完成 Session 与 Cancellation 状态所有权迁移
+
+**Date**: 2026-08-09
+**Task**: 完成 Session 与 Cancellation 状态所有权迁移
+**Branch**: `master`
+
+### Summary
+
+建立 SessionIdentityState、ExecutionControl 与共享 CancellationToken，删除 Agent 和 ToolContext 镜像状态，补齐架构契约及回归测试；全量 602 passed。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2b77174` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 28: 完成 Permission 状态所有权迁移
+
+**Date**: 2026-08-09
+**Task**: 完成 Permission 状态所有权迁移
+**Branch**: `master`
+
+### Summary
+
+建立 PermissionState、PermissionController 与只读 PermissionView，删除 Agent/ToolContext 权限镜像并补齐架构门禁；全量 609 passed。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f8405f0` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 29: 完成 PlanRuntime 状态所有权迁移
+
+**Date**: 2026-08-09
+**Task**: 完成 PlanRuntime 状态所有权迁移
+**Branch**: `master`
+
+### Summary
+
+建立 PlanState、PlanView 与唯一 PlanRuntime，删除 Agent/ToolContext Plan 镜像并补齐事务原子性与架构门禁；全量 623 passed。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4010464` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 30: 完成 State Ownership 分阶段迁移
+
+**Date**: 2026-08-09
+**Task**: 完成 State Ownership 分阶段迁移
+**Branch**: `master`
+
+### Summary
+
+完成 Session/Cancellation、Permission、PlanRuntime、Usage 四个独立状态所有权切片；最终全量 629 passed、6 skipped、20 subtests，架构与静态门禁通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `66a7a04` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 31: 完成 PR 23 CI 基线修复
+
+**Date**: 2026-08-10
+**Task**: 完成 PR 23 CI 基线修复
+**Branch**: `muyuzhong/state-ownership-migration`
+
+### Summary
+
+更新五条因状态所有权迁移产生行号漂移的 Radon/Vulture 既有指纹；本地门禁与 GitHub Actions run 31324469250 全部通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b25ea2c` | (see git log) |
+
+### Status
+
+[OK] **Completed**

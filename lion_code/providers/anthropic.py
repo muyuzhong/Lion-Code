@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from lion_code.core.cancellation import CancellationView
 from lion_code.core.messages import (
     AgentMessage,
     AssistantMessage,
@@ -21,6 +22,7 @@ from lion_code.core.messages import (
 )
 from lion_code.core.tools import AgentTool, ToolCall
 from lion_code.core.types import JSONValue
+
 from ._provider_events import (
     ProviderErrorEvent,
     ProviderEvent,
@@ -34,7 +36,6 @@ from .config import AnthropicConfig
 from .events import AssistantMessageEvent
 from .http import create_async_client
 from .http_errors import provider_http_error_message
-from .provider import CancellationToken
 from .retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from .stream import canonicalize_provider_stream
 
@@ -68,7 +69,7 @@ class AnthropicProvider:
         system: str,
         messages: list[AgentMessage],
         tools: list[AgentTool],
-        signal: CancellationToken | None = None,
+        signal: CancellationView | None = None,
     ) -> AsyncIterator[AssistantMessageEvent]:
         """Stream one response as Pi-compatible assistant message events."""
         raw = self._stream_provider_events(
@@ -89,7 +90,7 @@ class AnthropicProvider:
         system: str,
         messages: list[AgentMessage],
         tools: list[AgentTool],
-        signal: CancellationToken | None = None,
+        signal: CancellationView | None = None,
     ) -> AsyncIterator[ProviderEvent]:
         """Stream one Anthropic response as provider-neutral events."""
 

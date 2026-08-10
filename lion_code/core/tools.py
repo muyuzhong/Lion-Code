@@ -8,14 +8,9 @@ from typing import Literal, Protocol
 
 from pydantic import Field, model_validator
 
+from lion_code.core.cancellation import CancellationView
 from lion_code.core.messages import ImageContent, TextContent, ToolCall, WireModel
 from lion_code.core.types import JSONValue
-
-
-class ToolCancellationToken(Protocol):
-    def is_cancelled(self) -> bool:
-        """Return whether tool execution should stop."""
-        ...
 
 
 class AgentToolResult(WireModel):
@@ -67,7 +62,7 @@ class ToolExecutor(Protocol):
         self,
         tool_call_id: str,
         arguments: Mapping[str, JSONValue],
-        signal: ToolCancellationToken | None = None,
+        signal: CancellationView | None = None,
         on_update: ToolUpdateCallback | None = None,
     ) -> Awaitable[AgentToolResult]:
         """Execute one validated tool call."""
@@ -103,7 +98,7 @@ class AgentTool:
         self,
         tool_call_id: str,
         arguments: Mapping[str, JSONValue],
-        signal: ToolCancellationToken | None = None,
+        signal: CancellationView | None = None,
         on_update: ToolUpdateCallback | None = None,
     ) -> AgentToolResult:
         """Execute a tool with Pi-compatible call-id and progress semantics."""
@@ -115,9 +110,8 @@ __all__ = [
     "AgentToolResult",
     "ToolCall",
     "ToolCallRenderer",
-    "ToolCancellationToken",
     "ToolExecutionMode",
-    "ToolResultRenderer",
     "ToolExecutor",
+    "ToolResultRenderer",
     "ToolUpdateCallback",
 ]

@@ -22,6 +22,7 @@ from .memory_runtime import (
     ProviderTextQueryService,
     ReadOnlyMessageSource,
 )
+from .permission_state import PermissionMode
 from .project_identity import ProjectIdentity
 from .session_memory import (
     SessionMemory,
@@ -49,20 +50,21 @@ Use concise strings. completed, pending, decisions, and blockers must be arrays 
 class SessionMemoryHost(Protocol):
     """协调器使用的 Agent 窄协议，不持有 Provider 或 TUI。"""
 
-    _aborted: bool
-
     @property
     def _core_runtime(self) -> ReadOnlyMessageSource: ...
+
+    @property
+    def is_aborted(self) -> bool: ...
 
     _session_repository: Any
     is_sub_agent: bool
     model: str
-    permission_mode: str
     tool_environment: Any
     tool_registry: Any
-    total_input_tokens: int
-    total_output_tokens: int
     tool_context: Any
+
+    @property
+    def permission_mode(self) -> PermissionMode: ...
 
     def _child_api_kwargs(self) -> dict[str, Any]: ...
 
@@ -363,7 +365,7 @@ class SessionMemoryCoordinator:
             self._session_memory,
             extract_tool_evidence(messages),
         )
-        if not self._host._aborted:
+        if not self._host.is_aborted:
             try:
                 extractor = semantic_extractor or self._extract_session_memory_semantics
                 patch = await extractor(

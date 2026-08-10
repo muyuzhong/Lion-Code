@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Defines the current State Ownership contract, Core/runtime host boundaries, import rules, architecture enforcement, and validation matrix."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines source conventions, focused/full testing, spec synchronization, and review requirements."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Permission mode and confirmation state cross Agent, Plan, ToolRuntime, middleware, subagents, and frontends; use the guide to prevent partial propagation."}
+{"file":".trellis/tasks/08-09-permission-ownership/research/current-permission-ownership.md","reason":"Records every current mirror/write path, preserved semantics, tests, naming issue, and coverage gaps."}

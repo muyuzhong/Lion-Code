@@ -1,0 +1,33 @@
+{
+  "id": "permission-ownership",
+  "name": "permission-ownership",
+  "title": "Permission 所有权",
+  "description": "以 PermissionState、PermissionView 和 PermissionController 消除 Agent 与 ToolContext 的权限镜像状态。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "backend",
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-09",
+  "completedAt": "2026-08-09",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-09-state-ownership-migration",
+  "relatedFiles": [
+    "lion_code/agent.py",
+    "lion_code/permission_state.py",
+    "lion_code/tooling/context.py",
+    "lion_code/tooling/middleware.py",
+    "lion_code/tooling/permission.py",
+    "tests/architecture/test_runtime_boundaries.py"
+  ],
+  "notes": "",
+  "meta": {}
+}

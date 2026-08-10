@@ -22,16 +22,15 @@ except Exception:
 
 
 def _make_agent(**kwargs) -> Agent:
-    """构造真实 Agent(经 __init__),再 stub 掉模型/通知/预算/睡眠。"""
+    """构造真实 Agent(经 __init__),再 stub 掉模型与通知。"""
     agent = Agent(
         api_key="test-key",
         permission_mode=kwargs.get("permission_mode", "default"),
+        max_cost_usd=kwargs.get("max_cost_usd"),
         max_turns=kwargs.get("max_turns"),
     )
-    agent._aborted = False
     agent._emit_notice = lambda *a, **k: None
     agent.chat = AsyncMock()
-    agent._check_budget = lambda: {"exceeded": False}
     return agent
 
 
@@ -80,11 +79,10 @@ class TestGoalPursuit(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(agent.active_goal)
 
     async def test_goal_budget_exceeded_stops(self) -> None:
-        agent = _make_agent()
+        agent = _make_agent(max_cost_usd=0.0)
         agent._run_evaluator_query = AsyncMock(
             return_value='{"ok": false, "reason": "not yet"}'
         )
-        agent._check_budget = lambda: {"exceeded": True, "reason": "cost limit"}
         directive = agent.set_goal("build passes")
         await agent.pursue_goal(directive)
 

@@ -8,6 +8,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from inspect import isawaitable
 
+from lion_code.core.cancellation import CancellationView
 from lion_code.core.events import (
     AgentEndEvent,
     AgentEvent,
@@ -28,7 +29,7 @@ from lion_code.core.messages import (
     ToolCall,
     ToolResultMessage,
 )
-from lion_code.core.provider import CancellationToken, ModelProvider
+from lion_code.core.provider import ModelProvider
 from lion_code.core.provider_events import (
     AssistantDoneEvent,
     AssistantErrorEvent,
@@ -72,7 +73,7 @@ async def run_agent_loop(
     prepare_context: PrepareContext | None = None,
     prompts: Sequence[AgentMessage] = (),
     max_turns: int | None = None,
-    signal: CancellationToken | None = None,
+    signal: CancellationView | None = None,
     get_steering_messages: Callable[[], Sequence[AgentMessage]] | None = None,
     get_follow_up_messages: Callable[[], Sequence[AgentMessage]] | None = None,
     before_tool_calls: BeforeToolCalls | None = None,
@@ -284,7 +285,7 @@ def _tool_call_batches(
 async def _run_parallel_tool_batch(
     calls: Sequence[ToolCall],
     tools: Mapping[str, AgentTool],
-    signal: CancellationToken | None,
+    signal: CancellationView | None,
     before_tool_call: BeforeToolCall | None,
     after_tool_call: AfterToolCall | None,
 ) -> AsyncIterator[AgentEvent]:
@@ -363,7 +364,7 @@ async def _assistant_events(
     system: str,
     messages: list[AgentMessage],
     tools: list[AgentTool],
-    signal: CancellationToken | None,
+    signal: CancellationView | None,
 ) -> AsyncIterator[AgentEvent]:
     source: AsyncIterator[AssistantMessageEvent] = provider.stream_response(
         model=model,
@@ -397,7 +398,7 @@ async def _assistant_events(
 async def _execute_tool_call(
     call: ToolCall,
     tools: Mapping[str, AgentTool],
-    signal: CancellationToken | None,
+    signal: CancellationView | None,
     before_tool_call: BeforeToolCall | None,
     after_tool_call: AfterToolCall | None,
     *,
@@ -489,7 +490,7 @@ def _prepare_tool_call(tool: AgentTool, call: ToolCall) -> ToolCall:
 async def _run_tool(
     tool: AgentTool,
     call: ToolCall,
-    signal: CancellationToken | None,
+    signal: CancellationView | None,
 ) -> AsyncIterator[AgentToolResult | _ToolRunOutcome]:
     updates: asyncio.Queue[AgentToolResult] = asyncio.Queue()
     accepting = True

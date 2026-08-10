@@ -1,7 +1,7 @@
 """会话生命周期协调：clear/restore/compact/close。
 
 从 ``AgentRuntimeCoordinator`` 拆出，收敛 JSONL 会话的创建、恢复、压缩与关闭。
-不复制 coordinator 的 ``reset_core_observers`` / ``reset_session_counters``
+不复制 coordinator 的 ``reset_core_observers`` / ``reset_session_usage``
 逻辑，而是通过持有 coordinator 引用调用。
 """
 
@@ -22,7 +22,6 @@ if TYPE_CHECKING:
         MemoryTurnHost,
         RuntimeIdentityHost,
         SessionStateHost,
-        UsageStateHost,
     )
 
 
@@ -31,10 +30,6 @@ class SessionLifecycle:
 
     def __init__(self, coordinator: AgentRuntimeCoordinator) -> None:
         self._coord = coordinator
-
-    @property
-    def _usage(self) -> UsageStateHost:
-        return self._coord._usage
 
     @property
     def _identity(self) -> RuntimeIdentityHost:
@@ -64,23 +59,18 @@ class SessionLifecycle:
         memory._reload_project_memory()
         memory._reload_session_memory()
         memory._last_memory_injection = MemoryInjectionReport()
-        session.session_id = uuid.uuid4().hex[:8]
-        session.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        session.tool_context.session_id = session.session_id
-        session._pending_core_context_reset = None
+        session.session_state.reset(
+            uuid.uuid4().hex[:8],
+            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
+        session.plan.reset_for_new_session()
         coord._core_compaction_required = False
         coord._last_context_actions = ()
-        if session.permission_mode == "plan":
-            session._plan_file_path = session._generate_plan_file_path()
-            identity._system_prompt = (
-                session._base_system_prompt + session._build_plan_mode_prompt()
-            )
         coord._runtime.harness.clear_queues()
         coord._runtime.harness.replace_messages([])
         coord.reset_core_observers()
         await coord.ensure_core_session_ready()
-        session.tool_context.plan_file_path = session._plan_file_path
-        coord.reset_session_counters()
+        coord.reset_session_usage()
         memory._turn_memory_overlays = memory._build_turn_memory_overlays()
         identity._emit_notice("Conversation cleared.")
 
@@ -99,16 +89,15 @@ class SessionLifecycle:
         memory._reload_project_memory()
         memory._reload_session_memory()
         memory._last_memory_injection = MemoryInjectionReport()
-        session.session_id = session_id
-        session.tool_context.session_id = session_id
-        session._pending_core_context_reset = None
+        started_at = session.session_state.started_at
+        session.plan.reset_after_restore()
         coord._core_compaction_required = False
         coord._last_context_actions = ()
         coord._runtime.harness.clear_queues()
         coord._runtime.harness.replace_messages(state.messages)
         if state.model is not None:
             identity.model = state.model
-            self._usage.effective_window = effective_window_tokens(
+            identity.effective_window = effective_window_tokens(
                 fallback_model_limits(identity.model)
             )
             coord._resolved_model_limits_for = None
@@ -118,13 +107,14 @@ class SessionLifecycle:
             if restored_level != identity._thinking_level:
                 identity._apply_core_thinking_level(restored_level)
         if state.session_info is not None:
-            session.session_start_time = time.strftime(
+            started_at = time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ",
                 time.gmtime(state.session_info.created_at),
             )
+        session.session_state.reset(session_id, started_at)
         coord.reset_core_observers()
         await coord.ensure_core_session_ready()
-        coord.reset_session_counters()
+        coord.reset_session_usage()
         memory._turn_memory_overlays = memory._build_turn_memory_overlays()
         identity._emit_notice(f"Session restored ({len(state.messages)} messages).")
         return True

@@ -5,15 +5,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Protocol
 
+from lion_code.core.cancellation import CancellationView
 from lion_code.core.messages import AgentMessage
 from lion_code.core.provider_events import AssistantMessageEvent
 from lion_code.core.tools import AgentTool
-
-
-class CancellationToken(Protocol):
-    def is_cancelled(self) -> bool:
-        """Return whether the current stream should stop."""
-        ...
 
 
 class ModelProvider(Protocol):
@@ -26,7 +21,7 @@ class ModelProvider(Protocol):
         system: str,
         messages: list[AgentMessage],
         tools: list[AgentTool],
-        signal: CancellationToken | None = None,
+        signal: CancellationView | None = None,
     ) -> AsyncIterator[AssistantMessageEvent]:
         """Stream one model response as assistant message events."""
         ...

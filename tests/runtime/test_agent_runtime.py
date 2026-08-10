@@ -13,16 +13,20 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from core.fakes import FakeProvider
+from core.fakes import FakePlanView, FakeProvider
 
 from lion_code.agent_runtime import AgentRuntimeCoordinator, LionAgentRuntime
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
+from lion_code.core.cancellation import CancellationToken
 from lion_code.core.provider_events import AssistantDoneEvent
 from lion_code.observers import TerminalRenderer, UsageObserver
+from lion_code.permission_state import PermissionController, PermissionState
+from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
+from lion_code.usage import UsageLedger
 
 
 class _Controller:
@@ -31,12 +35,13 @@ class _Controller:
 
 def _context(registry: ToolRegistry) -> ToolContext:
     return ToolContext(
-        session_id="session",
+        session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+        cancellation=CancellationToken(),
         cwd=Path.cwd(),
         controller=_Controller(),
         registry=registry,
-        permission_mode="default",
-        plan_file_path=None,
+        permission=PermissionController(PermissionState("default")),
+        plan=FakePlanView(),
         read_file_state={},
     )
 
@@ -130,6 +135,15 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
             )
         self.assertIsInstance(agent._runtime_coordinator, AgentRuntimeCoordinator)
         self.assertIs(agent.core_runtime, agent._runtime_coordinator.core_runtime)
+        self.assertIs(agent.tool_context.session, agent.session_state)
+        self.assertIs(
+            agent.tool_context.cancellation,
+            agent._runtime_coordinator.execution.cancellation,
+        )
+        self.assertIs(
+            agent.core_runtime.harness._cancellation,
+            agent.tool_context.cancellation,
+        )
         await agent.close()
 
     async def test_closed_loop_through_tool_runtime(self) -> None:
@@ -244,7 +258,8 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
         )
 
         renderer = TerminalRenderer()
-        usage = UsageObserver()
+        ledger = UsageLedger()
+        usage = UsageObserver(ledger)
         with (
             patch("lion_code.observers.terminal.start_spinner"),
             patch("lion_code.observers.terminal.stop_spinner"),
@@ -257,9 +272,10 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
             runtime.subscribe(usage.handle)
             await runtime.prompt("hello")
 
-            # UsageObserver 累计了最终助手消息的用量。
-            self.assertEqual(usage.totals.input_tokens, 10)
-            self.assertEqual(usage.totals.output_tokens, 5)
+            # UsageObserver 把最终助手消息转发到了唯一 Ledger。
+            snapshot = ledger.snapshot()
+            self.assertEqual(snapshot.input_tokens, 10)
+            self.assertEqual(snapshot.output_tokens, 5)
             # TerminalRenderer 仍委托终端函数渲染工具与结束分隔线。
             tool_call.assert_called_once()
             tool_result.assert_called_once()

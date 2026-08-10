@@ -68,6 +68,23 @@ class _HangingProvider(FakeProvider):
             yield None
 
 
+class _CancellationAwareProvider(FakeProvider):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.entered = asyncio.Event()
+
+    async def _gen(self, signal):
+        if signal is None:
+            raise AssertionError("运行时必须把取消状态传给 Provider")
+        self.entered.set()
+        while not signal.is_cancelled():
+            await asyncio.sleep(0)
+        yield AssistantErrorEvent(
+            reason="aborted",
+            error=AssistantMessage(model="fake", stop_reason="aborted"),
+        )
+
+
 class TestAgentRun(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self._temp_dir = tempfile.TemporaryDirectory()
@@ -107,6 +124,47 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.session_id)
         self.assertGreaterEqual(result.wall_time_seconds, 0.0)
         self.assertGreaterEqual(result.cost_usd, 0.0)
+
+    async def test_run_returns_only_the_current_invocation_usage_delta(self) -> None:
+        provider = FakeProvider(
+            [
+                _stop_event(usage=Usage(input=12, output=7, cache_read=4)),
+                _stop_event(usage=Usage(input=5, output=2, cache_read=3)),
+            ]
+        )
+        agent = self._agent(provider)
+
+        first = await agent.run("first")
+        second = await agent.run("second")
+        await agent.close()
+
+        self.assertEqual(
+            (first.input_tokens, first.output_tokens, first.cache_read_tokens),
+            (12, 7, 4),
+        )
+        self.assertEqual(
+            (second.input_tokens, second.output_tokens, second.cache_read_tokens),
+            (5, 2, 3),
+        )
+        self.assertAlmostEqual(second.cost_usd, 45.9 / 1_000_000)
+
+    async def test_run_once_returns_only_the_current_invocation_usage_delta(
+        self,
+    ) -> None:
+        provider = FakeProvider(
+            [
+                _stop_event(usage=Usage(input=12, output=7)),
+                _stop_event(usage=Usage(input=5, output=2)),
+            ]
+        )
+        agent = self._agent(provider)
+
+        first = await agent.run_once("first")
+        second = await agent.run_once("second")
+        await agent.close()
+
+        self.assertEqual(first["tokens"], {"input": 12, "output": 7})
+        self.assertEqual(second["tokens"], {"input": 5, "output": 2})
 
     async def test_max_turns_records_canonical_tool_result(self) -> None:
         agent = self._agent(FakeProvider([_tool_use_event()]), max_turns=1)
@@ -166,6 +224,20 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.stop_reason, "timeout")
         self.assertIsNotNone(result.error)
+        self.assertTrue(agent.is_aborted)
+
+    async def test_explicit_abort_keeps_aborted_stop_reason(self) -> None:
+        provider = _CancellationAwareProvider()
+        agent = self._agent(provider)
+
+        task = asyncio.create_task(agent.run("hi"))
+        await provider.entered.wait()
+        agent.abort()
+        result = await asyncio.wait_for(task, timeout=1)
+        await agent.close()
+
+        self.assertEqual(result.stop_reason, "aborted")
+        self.assertTrue(agent.is_aborted)
 
     async def test_timeout_covers_initial_mcp_discovery(self) -> None:
         provider = FakeProvider([_stop_event()])
@@ -188,6 +260,7 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
         await agent.close()
 
         self.assertEqual(result.stop_reason, "timeout")
+        self.assertTrue(agent.is_aborted)
         self.assertLess(result.wall_time_seconds, 0.2)
 
 

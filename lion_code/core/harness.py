@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from inspect import isawaitable
 from typing import Literal
 
+from lion_code.core.cancellation import CancellationToken, CancellationView
 from lion_code.core.events import (
     AgentEvent,
     AgentStartEvent,
@@ -64,17 +65,6 @@ class AgentHarnessConfig:
     after_tool_call: AfterToolCall | None = None
 
 
-class SimpleCancellationToken:
-    def __init__(self) -> None:
-        self._cancelled = False
-
-    def cancel(self) -> None:
-        self._cancelled = True
-
-    def is_cancelled(self) -> bool:
-        return self._cancelled
-
-
 class AgentHarness:
     """Reusable stateful agent brain independent of coding/UI policy."""
 
@@ -83,11 +73,17 @@ class AgentHarness:
         config: AgentHarnessConfig,
         *,
         messages: Sequence[AgentMessage] = (),
+        cancellation: CancellationView | None = None,
     ) -> None:
         self._config = config
         self._messages = list(messages)
         self._listeners: list[EventListener] = []
-        self._current_signal: SimpleCancellationToken | None = None
+        if cancellation is None:
+            self._owned_cancellation: CancellationToken | None = CancellationToken()
+            self._cancellation: CancellationView = self._owned_cancellation
+        else:
+            self._owned_cancellation = None
+            self._cancellation = cancellation
         self._running = False
         self._steering_queue: deque[AgentMessage] = deque()
         self._follow_up_queue: deque[AgentMessage] = deque()
@@ -131,8 +127,8 @@ class AgentHarness:
         return unsubscribe
 
     def cancel(self) -> None:
-        if self._current_signal is not None:
-            self._current_signal.cancel()
+        if self._owned_cancellation is not None:
+            self._owned_cancellation.cancel()
 
     def steer(self, content: str) -> QueuedMessages:
         return self.steer_message(UserMessage(content=content))
@@ -162,6 +158,8 @@ class AgentHarness:
 
     def prompt_message(self, message: AgentMessage) -> AsyncIterator[AgentEvent]:
         self._ensure_not_running()
+        if self._owned_cancellation is not None:
+            self._owned_cancellation.reset()
         self._running = True
         return self._run(prompts=(message,))
 
@@ -170,6 +168,8 @@ class AgentHarness:
 
     def continue_(self) -> AsyncIterator[AgentEvent]:
         self._ensure_not_running()
+        if self._owned_cancellation is not None:
+            self._owned_cancellation.reset()
         self._running = True
         return self._run()
 
@@ -178,8 +178,7 @@ class AgentHarness:
         *,
         prompts: Sequence[AgentMessage] = (),
     ) -> AsyncIterator[AgentEvent]:
-        signal = SimpleCancellationToken()
-        self._current_signal = signal
+        signal = self._cancellation
         try:
             repaired_before_run = self._append_interrupted_tool_results()
             async for event in run_agent_loop(
@@ -215,8 +214,6 @@ class AgentHarness:
             repaired: tuple[ToolResultMessage, ...] = ()
             if signal.is_cancelled():
                 repaired = self._append_interrupted_tool_results()
-            if self._current_signal is signal:
-                self._current_signal = None
             self._running = False
             # finally 中无法再向已结束的生成器 yield，但订阅者仍必须看到修复消息。
             for message in repaired:

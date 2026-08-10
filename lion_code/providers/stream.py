@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from lion_code.core.cancellation import CancellationView
 from lion_code.core.messages import (
     AssistantMessage,
     AssistantMessageDiagnostic,
@@ -11,7 +12,7 @@ from lion_code.core.messages import (
     ThinkingContent,
     Usage,
 )
-from lion_code.core.provider import CancellationToken
+
 from ._provider_events import (
     ProviderErrorEvent,
     ProviderEvent,
@@ -92,7 +93,7 @@ async def canonicalize_provider_stream(
     api: str,
     provider: str,
     model: str,
-    signal: CancellationToken | None = None,
+    signal: CancellationView | None = None,
 ) -> AsyncIterator[AssistantMessageEvent]:
     """Canonicalize one old internal parser stream.
 

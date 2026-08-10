@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from ..hooks import HookOutcome, run_pre_tool_use_hooks
+from ..permission_state import PermissionConfirmationSink
 from .context import ToolContext
 from .permission import PermissionDecision, PermissionPolicy
 from .result_store import ResultStore
 from .types import JSONValue, LionTool, ToolResult
-
 
 NextCall = Callable[[], Awaitable[ToolResult]]
 
@@ -21,7 +21,8 @@ NextCall = Callable[[], Awaitable[ToolResult]]
 class ToolMiddleware(Protocol):
     """统一 Middleware 契约；post 阶段按声明顺序处理执行结果。"""
 
-    phase: Literal["pre", "post"]
+    @property
+    def phase(self) -> Literal["pre", "post"]: ...
 
     async def handle(
         self,
@@ -37,8 +38,16 @@ class ToolMiddleware(Protocol):
 class CancellationMiddleware:
     phase: Literal["pre"] = "pre"
 
-    async def handle(self, *, context, call_next, **_):
-        if context.cancellation_fn and context.cancellation_fn():
+    async def handle(
+        self,
+        *,
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
+        if context.cancellation.cancelled:
             return ToolResult(content="Tool call cancelled.", is_error=True)
         return await call_next()
 
@@ -49,12 +58,12 @@ class PreToolHookMiddleware:
     async def handle(
         self,
         *,
-        tool,
-        context,
-        arguments,
-        call_next,
-        **_,
-    ):
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
         if not context.hooks:
             return await call_next()
 
@@ -94,8 +103,13 @@ class PreToolHookMiddleware:
 class PermissionMiddleware:
     phase: Literal["pre"] = "pre"
 
-    def __init__(self, policy: PermissionPolicy):
+    def __init__(
+        self,
+        policy: PermissionPolicy,
+        confirmations: PermissionConfirmationSink,
+    ) -> None:
         self.policy = policy
+        self.confirmations = confirmations
 
     async def _decision(
         self,
@@ -106,18 +120,18 @@ class PermissionMiddleware:
         hard = self.policy.check_hard_boundaries(
             tool=tool,
             arguments=arguments,
-            mode=context.permission_mode,
-            plan_file_path=context.plan_file_path,
+            mode=context.permission.mode,
+            plan_file_path=context.plan.file_path,
         )
         if hard is not None:
             return hard
 
-        if context.permission_mode != "auto":
+        if context.permission.mode != "auto":
             return self.policy.check(
                 tool=tool,
                 arguments=arguments,
-                mode=context.permission_mode,
-                plan_file_path=context.plan_file_path,
+                mode=context.permission.mode,
+                plan_file_path=context.plan.file_path,
             )
 
         if is_auto_fast_path(tool):
@@ -136,12 +150,12 @@ class PermissionMiddleware:
     async def handle(
         self,
         *,
-        tool,
-        context,
-        arguments,
-        call_next,
-        **_,
-    ):
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
         decision = await self._decision(tool, context, arguments)
         if decision.action == "deny":
             return ToolResult(
@@ -155,8 +169,8 @@ class PermissionMiddleware:
                     content="Confirmation unavailable.",
                     is_error=True,
                 )
-            cacheable = context.permission_mode != "auto"
-            if not cacheable or decision.message not in context.confirmed_paths:
+            cacheable = context.permission.mode != "auto"
+            if not cacheable or not context.permission.is_confirmed(decision.message):
                 approved = await context.confirm_fn(decision.message)
                 if not approved:
                     return ToolResult(
@@ -164,7 +178,7 @@ class PermissionMiddleware:
                         is_error=True,
                     )
                 if cacheable:
-                    context.confirmed_paths.add(decision.message)
+                    self.confirmations.confirm(decision.message)
 
         return await call_next()
 
@@ -187,12 +201,12 @@ class ReadFreshnessMiddleware:
     async def handle(
         self,
         *,
-        tool,
-        context,
-        arguments,
-        call_next,
-        **_,
-    ):
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
         path = _resolve_file_path(context, arguments.get("file_path"))
         capabilities = tool.capabilities
 
@@ -240,7 +254,15 @@ class ResultPolicyMiddleware:
     def __init__(self, store: ResultStore):
         self.store = store
 
-    async def handle(self, *, tool, call_next, **_):
+    async def handle(
+        self,
+        *,
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
         return self.store.process(tool, await call_next())
 
 
@@ -250,12 +272,12 @@ class AuditMiddleware:
     async def handle(
         self,
         *,
-        tool,
-        context,
-        arguments,
-        call_next,
-        **_,
-    ):
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
         result = await call_next()
         if context.audit_fn:
             audit_result = context.audit_fn(tool, arguments, result)

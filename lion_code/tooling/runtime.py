@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 
+from ..core.cancellation import CancellationView
 from .context import ToolContext
 from .middleware import ToolMiddleware, can_run_parallel
 from .registry import ToolRegistry
 from .types import JSONValue, ToolResult, ToolUpdateCallback
+
+
+@dataclass(frozen=True, slots=True)
+class _CombinedCancellationView:
+    first: CancellationView
+    second: CancellationView
+
+    @property
+    def cancelled(self) -> bool:
+        return self.first.cancelled or self.second.cancelled
+
+    def is_cancelled(self) -> bool:
+        return self.cancelled
 
 
 class ToolRuntime:
@@ -31,7 +45,7 @@ class ToolRuntime:
         name: str,
         arguments: Mapping[str, JSONValue],
         on_update: ToolUpdateCallback | None = None,
-        cancellation_fn: Callable[[], bool] | None = None,
+        cancellation: CancellationView | None = None,
     ) -> ToolResult:
         try:
             tool = self.registry.resolve(name)
@@ -40,7 +54,7 @@ class ToolRuntime:
 
         pre = [item for item in self.middleware if item.phase == "pre"]
         post = [item for item in self.middleware if item.phase == "post"]
-        context = self._execution_context(cancellation_fn)
+        context = self._execution_context(cancellation)
 
         async def invoke(index: int) -> ToolResult:
             if index == len(pre):
@@ -81,16 +95,17 @@ class ToolRuntime:
 
     def _execution_context(
         self,
-        cancellation_fn: Callable[[], bool] | None,
+        cancellation: CancellationView | None,
     ) -> ToolContext:
-        if cancellation_fn is None:
+        if cancellation is None or cancellation is self.context.cancellation:
             return self.context
-        existing = self.context.cancellation_fn
-        if existing is None:
-            combined = cancellation_fn
-        else:
-            combined = lambda: existing() or cancellation_fn()
-        return replace(self.context, cancellation_fn=combined)
+        return replace(
+            self.context,
+            cancellation=_CombinedCancellationView(
+                self.context.cancellation,
+                cancellation,
+            ),
+        )
 
     def can_run_parallel(self, name: str) -> bool:
         """按 Registry 中的 Capability 判断工具是否可并行。"""

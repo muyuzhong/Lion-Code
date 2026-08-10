@@ -2,6 +2,7 @@
 
 # ruff: noqa: F401 - this module intentionally defines the public facade
 
+from lion_code.core.cancellation import CancellationToken, CancellationView
 from lion_code.core.events import (
     AgentEndEvent,
     AgentEvent,
@@ -20,7 +21,6 @@ from lion_code.core.harness import (
     AgentHarnessConfig,
     EventListener,
     QueuedMessages,
-    SimpleCancellationToken,
 )
 from lion_code.core.loop import run_agent_loop
 from lion_code.core.messages import (
@@ -58,7 +58,6 @@ from lion_code.core.session import (
 from lion_code.core.tools import (
     AgentTool,
     AgentToolResult,
-    ToolCancellationToken,
     ToolExecutionMode,
     ToolExecutor,
     ToolUpdateCallback,

@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from lion_code.agent import Agent
+from lion_code.session_memory import SessionMemoryRepository
+from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.types import ToolResult
 
 
@@ -54,6 +56,104 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("must read this file", denied)
         self.assertIn("Successfully wrote", allowed)
+
+    async def test_toggle_plan_mode_preserves_live_permission_view(self):
+        agent = self._agent(permission_mode="acceptEdits", terminal_output=False)
+        permission = agent.tool_context.permission
+        plan = agent.tool_context.plan
+
+        with patch.object(
+            agent.plan,
+            "_generate_file_path",
+            return_value=Path("plan.md"),
+        ):
+            self.assertEqual(agent.toggle_plan_mode(), "plan")
+            self.assertIs(agent.tool_context.permission, permission)
+            self.assertIs(agent.tool_context.plan, plan)
+            self.assertEqual(permission.mode, "plan")
+            self.assertEqual(plan.file_path, Path("plan.md"))
+
+            self.assertEqual(agent.toggle_plan_mode(), "acceptEdits")
+            self.assertIs(agent.tool_context.permission, permission)
+            self.assertIs(agent.tool_context.plan, plan)
+            self.assertEqual(permission.mode, "acceptEdits")
+            self.assertIsNone(plan.file_path)
+
+        await agent.close()
+
+    async def test_plan_tools_preserve_live_permission_view(self):
+        agent = self._agent(permission_mode="auto", terminal_output=False)
+        permission = agent.tool_context.permission
+
+        with patch.object(
+            agent.plan,
+            "_generate_file_path",
+            return_value=Path("plan.md"),
+        ):
+            await agent.enter_plan_mode_tool()
+            self.assertIs(agent.tool_context.permission, permission)
+            self.assertEqual(permission.mode, "plan")
+
+            await agent.exit_plan_mode_tool()
+            self.assertIs(agent.tool_context.permission, permission)
+            self.assertEqual(permission.mode, "auto")
+
+        await agent.close()
+
+    async def test_clear_in_plan_mode_preserves_live_permission_view(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session_repository = SessionRepository(root / "sessions")
+            memory_repository = SessionMemoryRepository(storage_dir=root / "memory")
+            with patch(
+                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                return_value=root / "plan.md",
+            ) as generate_path:
+                agent = self._agent(
+                    permission_mode="plan",
+                    session_repository=session_repository,
+                    session_memory_repository=memory_repository,
+                    terminal_output=False,
+                )
+                permission = agent.tool_context.permission
+                plan = agent.tool_context.plan
+
+                await agent.clear_history()
+
+            self.assertEqual(generate_path.call_count, 2)
+            self.assertIs(agent.tool_context.permission, permission)
+            self.assertIs(agent.tool_context.plan, plan)
+            self.assertEqual(permission.mode, "plan")
+            self.assertEqual(agent.tool_context.plan.file_path, root / "plan.md")
+            await agent.close()
+
+    async def test_restore_in_plan_mode_keeps_live_plan_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session_repository = SessionRepository(root / "sessions")
+            memory_repository = SessionMemoryRepository(storage_dir=root / "memory")
+            plan_path = root / "plan.md"
+            with patch(
+                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                return_value=plan_path,
+            ) as generate_path:
+                agent = self._agent(
+                    permission_mode="plan",
+                    session_repository=session_repository,
+                    session_memory_repository=memory_repository,
+                    terminal_output=False,
+                )
+                await agent._ensure_core_session_ready()
+                session_id = agent.session_id
+                plan = agent.tool_context.plan
+
+                self.assertTrue(await agent.restore_core_session(session_id))
+
+            self.assertEqual(generate_path.call_count, 1)
+            self.assertIs(agent.tool_context.plan, plan)
+            self.assertEqual(plan.file_path, plan_path)
+            self.assertEqual(agent.permission_mode, "plan")
+            await agent.close()
 
     def test_model_schema_comes_from_agent_registry(self):
         agent = self._agent()

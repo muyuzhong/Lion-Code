@@ -37,7 +37,84 @@ REMOVED_SKILL_COMMAND_SYMBOLS = frozenset(
     }
 )
 MCP_LIFECYCLE_CLASS_NAMES = frozenset({"McpConnection", "McpManager"})
-PROVIDER_SHIM_EXPORTS = ("CancellationToken", "ModelProvider")
+PROVIDER_SHIM_EXPORTS = ("ModelProvider",)
+REMOVED_RUNTIME_SYMBOLS = frozenset(
+    {
+        "SimpleCancellationToken",
+        "ToolCancellationToken",
+        "_aborted",
+        "_confirmed_paths",
+        "cancellation_fn",
+        "confirmed_paths",
+    }
+)
+REMOVED_USAGE_SYMBOLS = frozenset(
+    {
+        "UsageStateHost",
+        "UsageTotals",
+        "_check_budget",
+        "_get_current_cost_usd",
+        "current_turns",
+        "last_api_call_time",
+        "last_input_token_count",
+        "sync_core_usage",
+        "sync_usage_from_observer",
+        "total_cache_creation_tokens",
+        "total_cache_read_tokens",
+        "total_input_tokens",
+        "total_output_tokens",
+    }
+)
+_USAGE_LEDGER_FIELDS = frozenset(
+    {
+        "_cache_read_tokens",
+        "_cache_write_tokens",
+        "_input_tokens",
+        "_last_prompt_tokens",
+        "_last_response_at",
+        "_output_tokens",
+        "_reasoning_tokens",
+        "_reported_cost_usd",
+        "_responses",
+        "_turns",
+    }
+)
+_PERMISSION_STATE_BASE_NAMES = frozenset(
+    {"state", "_state", "permission_state", "_permission_state"}
+)
+_PLAN_STATE_BASE_NAMES = frozenset({"state", "_state", "plan_state", "_plan_state"})
+_PLAN_STATE_FIELDS = frozenset(
+    {
+        "status",
+        "file_path",
+        "previous_permission_mode",
+        "pending_context_reset",
+    }
+)
+_REMOVED_AGENT_PLAN_SYMBOLS = frozenset(
+    {
+        "_pre_plan_mode",
+        "_plan_file_path",
+        "_plan_approval_fn",
+        "_pending_core_context_reset",
+        "_generate_plan_file_path",
+        "_build_plan_mode_prompt",
+        "_execute_plan_mode_tool",
+    }
+)
+_MUTATING_SET_METHODS = frozenset(
+    {
+        "add",
+        "clear",
+        "difference_update",
+        "discard",
+        "intersection_update",
+        "pop",
+        "remove",
+        "symmetric_difference_update",
+        "update",
+    }
+)
 
 # Dynamic import calls that bypass static import analysis (import-linter / AST).
 DYNAMIC_IMPORT_CALLS = frozenset({"import_module", "__import__"})
@@ -296,6 +373,345 @@ def _defined_symbols(tree: ast.Module, names: frozenset[str]) -> frozenset[str]:
             if node.name in names:
                 symbols.add(node.name)
     return frozenset(symbols)
+
+
+def _referenced_symbols(tree: ast.Module, names: frozenset[str]) -> frozenset[str]:
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in names:
+            found.add(node.id)
+        elif isinstance(node, ast.Attribute) and node.attr in names:
+            found.add(node.attr)
+        elif isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef)):
+            if node.name in names:
+                found.add(node.name)
+        elif isinstance(node, ast.arg) and node.arg in names:
+            found.add(node.arg)
+    return frozenset(found)
+
+
+def _class_annotated_fields(tree: ast.Module, class_name: str) -> frozenset[str]:
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef) or node.name != class_name:
+            continue
+        return frozenset(
+            item.target.id
+            for item in node.body
+            if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+        )
+    return frozenset()
+
+
+def _attribute_chain_names(node: ast.AST) -> frozenset[str]:
+    names: set[str] = set()
+    current = node
+    while isinstance(current, ast.Attribute):
+        names.add(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        names.add(current.id)
+    return frozenset(names)
+
+
+def _assignment_attribute_targets(node: ast.AST) -> tuple[ast.Attribute, ...]:
+    if isinstance(node, ast.Attribute):
+        return (node,)
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return tuple(
+            attribute
+            for element in node.elts
+            for attribute in _assignment_attribute_targets(element)
+        )
+    return ()
+
+
+def _permission_state_mutations(tree: ast.Module) -> frozenset[str]:
+    """返回绕过 PermissionController 的直接状态写入形状。"""
+
+    mutations: set[str] = set()
+    for node in ast.walk(tree):
+        targets: tuple[ast.expr, ...] = ()
+        if isinstance(node, ast.Assign):
+            targets = tuple(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            targets = (node.target,)
+        elif isinstance(node, ast.AugAssign):
+            targets = (node.target,)
+        elif isinstance(node, ast.Delete):
+            targets = tuple(node.targets)
+        for target in targets:
+            for attribute in _assignment_attribute_targets(target):
+                if attribute.attr in {
+                    "permission_mode",
+                    "confirmed_values",
+                    "confirmed_paths",
+                    "_confirmed_paths",
+                }:
+                    mutations.add(attribute.attr)
+                elif (
+                    attribute.attr == "mode"
+                    and _attribute_chain_names(attribute.value)
+                    & _PERMISSION_STATE_BASE_NAMES
+                ):
+                    mutations.add("mode")
+
+        if not isinstance(node, ast.Call):
+            continue
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr in _MUTATING_SET_METHODS
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "confirmed_values"
+        ):
+            mutations.add(f"confirmed_values.{node.func.attr}")
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "setattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value in {"mode", "confirmed_values"}
+            and _attribute_chain_names(node.args[0]) & _PERMISSION_STATE_BASE_NAMES
+        ):
+            mutations.add(f"setattr:{node.args[1].value}")
+    return frozenset(mutations)
+
+
+def _plan_state_mutations(tree: ast.Module) -> frozenset[str]:
+    """返回绕过 PlanRuntime 的直接 PlanState 写入形状。"""
+
+    aliases = set(_PLAN_STATE_BASE_NAMES)
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            target: ast.expr | None = None
+            value: ast.expr | None = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                value = node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                target = node.target
+                value = node.value
+            if not isinstance(target, ast.Name) or value is None:
+                continue
+            value_names = _attribute_chain_names(value)
+            constructs_state = isinstance(value, ast.Call) and (
+                (isinstance(value.func, ast.Name) and value.func.id == "PlanState")
+                or (
+                    isinstance(value.func, ast.Attribute)
+                    and value.func.attr == "PlanState"
+                )
+            )
+            if constructs_state or value_names & aliases:
+                if target.id not in aliases:
+                    aliases.add(target.id)
+                    changed = True
+
+    mutations: set[str] = set()
+    for node in ast.walk(tree):
+        targets: tuple[ast.expr, ...] = ()
+        if isinstance(node, ast.Assign):
+            targets = tuple(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            targets = (node.target,)
+        elif isinstance(node, ast.AugAssign):
+            targets = (node.target,)
+        elif isinstance(node, ast.Delete):
+            targets = tuple(node.targets)
+        for target in targets:
+            for attribute in _assignment_attribute_targets(target):
+                if (
+                    attribute.attr in _PLAN_STATE_FIELDS
+                    and _attribute_chain_names(attribute.value) & aliases
+                ):
+                    mutations.add(attribute.attr)
+
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "setattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value in _PLAN_STATE_FIELDS
+            and _attribute_chain_names(node.args[0]) & aliases
+        ):
+            mutations.add(f"setattr:{node.args[1].value}")
+    return frozenset(mutations)
+
+
+def _attribute_references(tree: ast.Module, name: str) -> frozenset[str]:
+    """返回属性访问，避免兼容镜像借不同宿主变量名回归。"""
+
+    return frozenset(
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == name
+    )
+
+
+def _attribute_mutations(
+    tree: ast.Module,
+    names: frozenset[str],
+) -> frozenset[str]:
+    """返回指定属性的赋值、删除或动态属性写入。"""
+
+    mutation_call_aliases: dict[str, int] = {"delattr": 1, "setattr": 1}
+    delete_call_aliases = {"delattr"}
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "builtins":
+                for imported in node.names:
+                    if imported.name not in {"delattr", "setattr"}:
+                        continue
+                    local_name = imported.asname or imported.name
+                    if local_name not in mutation_call_aliases:
+                        mutation_call_aliases[local_name] = 1
+                        changed = True
+                    if (
+                        imported.name == "delattr"
+                        and local_name not in delete_call_aliases
+                    ):
+                        delete_call_aliases.add(local_name)
+                        changed = True
+                continue
+
+            target: ast.expr | None = None
+            value: ast.expr | None = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                value = node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                target = node.target
+                value = node.value
+            if not isinstance(target, ast.Name) or value is None:
+                continue
+
+            field_arg_index: int | None = None
+            if isinstance(value, ast.Name):
+                field_arg_index = mutation_call_aliases.get(value.id)
+            elif isinstance(value, ast.Attribute) and value.attr in {
+                "__delattr__",
+                "__setattr__",
+                "delattr",
+                "setattr",
+            }:
+                field_arg_index = (
+                    1
+                    if isinstance(value.value, ast.Name)
+                    and value.value.id in {"builtins", "object"}
+                    else 0
+                )
+            if (
+                field_arg_index is not None
+                and mutation_call_aliases.get(target.id) != field_arg_index
+            ):
+                mutation_call_aliases[target.id] = field_arg_index
+                changed = True
+            if (
+                (isinstance(value, ast.Name) and value.id in delete_call_aliases)
+                or (isinstance(value, ast.Attribute) and "delattr" in value.attr)
+            ) and target.id not in delete_call_aliases:
+                delete_call_aliases.add(target.id)
+                changed = True
+
+    mutations: set[str] = set()
+    for node in ast.walk(tree):
+        targets: tuple[ast.expr, ...] = ()
+        if isinstance(node, ast.Assign):
+            targets = tuple(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            targets = (node.target,)
+        elif isinstance(node, ast.AugAssign):
+            targets = (node.target,)
+        elif isinstance(node, ast.Delete):
+            targets = tuple(node.targets)
+        for target in targets:
+            for attribute in _assignment_attribute_targets(target):
+                if attribute.attr in names:
+                    mutations.add(attribute.attr)
+        if not isinstance(node, ast.Call):
+            continue
+        field_arg_index: int | None = None
+        operation = "setattr"
+        if isinstance(node.func, ast.Name):
+            field_arg_index = mutation_call_aliases.get(node.func.id)
+            if node.func.id in delete_call_aliases:
+                operation = "delattr"
+        elif isinstance(node.func, ast.Attribute) and node.func.attr in {
+            "__delattr__",
+            "__setattr__",
+            "delattr",
+            "setattr",
+        }:
+            operation = "delattr" if "delattr" in node.func.attr else "setattr"
+            field_arg_index = (
+                1
+                if isinstance(node.func.value, ast.Name)
+                and node.func.value.id in {"builtins", "object"}
+                else 0
+            )
+        if field_arg_index is None or len(node.args) <= field_arg_index:
+            continue
+        field_arg = node.args[field_arg_index]
+        if isinstance(field_arg, ast.Constant) and field_arg.value in names:
+            mutations.add(f"{operation}:{field_arg.value}")
+    return frozenset(mutations)
+
+
+def _named_constructor_count(tree: ast.Module, name: str) -> int:
+    aliases = {name}
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for imported in node.names:
+                    if imported.name != name:
+                        continue
+                    local_name = imported.asname or imported.name
+                    if local_name not in aliases:
+                        aliases.add(local_name)
+                        changed = True
+                continue
+
+            target: ast.expr | None = None
+            value: ast.expr | None = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                value = node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                target = node.target
+                value = node.value
+            if not isinstance(target, ast.Name) or value is None:
+                continue
+            is_alias = (isinstance(value, ast.Name) and value.id in aliases) or (
+                isinstance(value, ast.Attribute) and value.attr == name
+            )
+            if is_alias and target.id not in aliases:
+                aliases.add(target.id)
+                changed = True
+
+    return sum(
+        isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id in aliases)
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == name)
+        )
+        for node in ast.walk(tree)
+    )
+
+
+def _session_identity_reset_count(tree: ast.Module) -> int:
+    return sum(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "reset"
+        and isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr in {"session_state", "_session_state"}
+        for node in ast.walk(tree)
+    )
 
 
 def _contains_string(tree: ast.AST, value: str) -> bool:
@@ -697,6 +1113,275 @@ def test_session_recorder_construction_sites_are_allowlisted() -> None:
     )
 
 
+def test_session_and_cancellation_state_have_single_owners() -> None:
+    removed = {
+        _source_key(path): sorted(
+            _referenced_symbols(_tree(path), REMOVED_RUNTIME_SYMBOLS)
+        )
+        for path in _source_files()
+        if _referenced_symbols(_tree(path), REMOVED_RUNTIME_SYMBOLS)
+    }
+    assert not removed, f"Removed runtime mirrors must not return: {removed}"
+
+    context_fields = _class_annotated_fields(
+        _tree(SOURCE_ROOT / "tooling" / "context.py"),
+        "ToolContext",
+    )
+    assert {"session", "cancellation"} <= context_fields
+    assert not {"session_id", "cancellation_fn"} & context_fields
+
+    agent_fields = _self_fields(_tree(SOURCE_ROOT / "agent.py"))
+    assert not {"session_id", "session_start_time", "_aborted"} & agent_fields
+
+    identity_resets = {
+        _source_key(path): _session_identity_reset_count(_tree(path))
+        for path in _source_files()
+        if _session_identity_reset_count(_tree(path))
+    }
+    assert identity_resets == {"session_lifecycle.py": 2}
+
+    identity_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "SessionIdentityState")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "SessionIdentityState")
+    }
+    assert identity_constructors == {"agent.py": 1}
+
+    execution_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "ExecutionControl")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "ExecutionControl")
+    }
+    assert execution_constructors == {"agent.py": 1}
+
+    token_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "CancellationToken")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "CancellationToken")
+    }
+    assert token_constructors == {
+        "core/harness.py": 1,
+        "execution_control.py": 1,
+    }
+
+
+def test_usage_state_has_one_owner_and_command_only_writes() -> None:
+    removed = {
+        _source_key(path): sorted(
+            _referenced_symbols(_tree(path), REMOVED_USAGE_SYMBOLS)
+        )
+        for path in _source_files()
+        if _referenced_symbols(_tree(path), REMOVED_USAGE_SYMBOLS)
+    }
+    assert not removed, f"Removed Usage mirrors must not return: {removed}"
+
+    agent_fields = _self_fields(_tree(SOURCE_ROOT / "agent.py"))
+    assert not REMOVED_USAGE_SYMBOLS & agent_fields
+    assert "_usage_observer" not in agent_fields
+
+    ledger_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "UsageLedger")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "UsageLedger")
+    }
+    policy_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "BudgetPolicy")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "BudgetPolicy")
+    }
+    assert ledger_constructors == {"agent.py": 1}
+    assert policy_constructors == {"agent.py": 1}
+
+    observer_fields = _self_fields(_tree(SOURCE_ROOT / "observers" / "usage.py"))
+    assert observer_fields == {"_ledger"}
+
+    external_mutations = {
+        _source_key(path): sorted(
+            _attribute_mutations(_tree(path), _USAGE_LEDGER_FIELDS)
+        )
+        for path in _source_files()
+        if _source_key(path) != "usage.py"
+        and _attribute_mutations(_tree(path), _USAGE_LEDGER_FIELDS)
+    }
+    assert not external_mutations, (
+        f"UsageLedger fields must only be written in usage.py: {external_mutations}"
+    )
+
+    record_model_sites = {
+        _source_key(path): sorted(
+            _attribute_call_sites(_tree(path), "record_model_usage")
+        )
+        for path in _source_files()
+        if _attribute_call_sites(_tree(path), "record_model_usage")
+    }
+    record_child_sites = {
+        _source_key(path): sorted(
+            _attribute_call_sites(_tree(path), "record_child_usage")
+        )
+        for path in _source_files()
+        if _attribute_call_sites(_tree(path), "record_child_usage")
+    }
+    record_turn_sites = {
+        _source_key(path): sorted(_attribute_call_sites(_tree(path), "record_turn"))
+        for path in _source_files()
+        if _attribute_call_sites(_tree(path), "record_turn")
+    }
+    reset_sites = {
+        _source_key(path): sorted(_attribute_call_sites(_tree(path), "reset"))
+        for path in _source_files()
+        if _source_key(path) == "agent_runtime.py"
+        and _attribute_call_sites(_tree(path), "reset")
+    }
+    context_reset_sites = {
+        _source_key(path): sorted(
+            _attribute_call_sites(_tree(path), "reset_context_tracking")
+        )
+        for path in _source_files()
+        if _attribute_call_sites(_tree(path), "reset_context_tracking")
+    }
+    assert record_model_sites == {"observers/usage.py": ["UsageObserver.handle"]}
+    assert record_child_sites == {
+        "agent.py": ["Agent._execute_agent_tool", "Agent._execute_skill_tool"],
+        "dream.py": ["DreamCoordinator.run"],
+    }
+    assert record_turn_sites == {
+        "agent_runtime.py": ["AgentRuntimeCoordinator.before_core_tool_calls"]
+    }
+    assert reset_sites == {
+        "agent_runtime.py": ["AgentRuntimeCoordinator.reset_session_usage"]
+    }
+    assert context_reset_sites == {
+        "agent_runtime.py": [
+            "AgentRuntimeCoordinator.apply_plan_context_reset",
+            "AgentRuntimeCoordinator.compact_core_context_if_needed",
+        ]
+    }
+
+
+def test_permission_state_has_one_owner_and_live_read_ports() -> None:
+    context_tree = _tree(SOURCE_ROOT / "tooling" / "context.py")
+    context_fields = _class_annotated_fields(context_tree, "ToolContext")
+    assert "permission" in context_fields
+    assert not {"permission_mode", "confirmed_paths"} & context_fields
+    assert _type_annotation_mentions(context_tree, "PermissionView")
+
+    agent_fields = _self_fields(_tree(SOURCE_ROOT / "agent.py"))
+    assert not {"permission_mode", "_confirmed_paths"} & agent_fields
+
+    state_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "PermissionState")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "PermissionState")
+    }
+    controller_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "PermissionController")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "PermissionController")
+    }
+    assert state_constructors == {"agent.py": 1}
+    assert controller_constructors == {"agent.py": 1}
+
+    mutations = {
+        _source_key(path): sorted(_permission_state_mutations(_tree(path)))
+        for path in _source_files()
+        if _source_key(path) != "permission_state.py"
+        and _permission_state_mutations(_tree(path))
+    }
+    assert not mutations, f"PermissionState writes must use its Controller: {mutations}"
+
+    set_mode_sites = {
+        _source_key(path): sorted(_attribute_call_sites(_tree(path), "set_mode"))
+        for path in _source_files()
+        if _source_key(path) != "permission_state.py"
+        and _attribute_call_sites(_tree(path), "set_mode")
+    }
+    assert set_mode_sites == {
+        "plan_runtime.py": ["PlanRuntime._enter", "PlanRuntime._leave"]
+    }
+
+    middleware_tree = _tree(SOURCE_ROOT / "tooling" / "middleware.py")
+    assert not _contains_attr_call(middleware_tree, "set_mode")
+    assert _type_annotation_mentions(middleware_tree, "PermissionConfirmationSink")
+    assert not _type_annotation_mentions(middleware_tree, "PermissionController")
+
+
+def test_plan_state_has_one_owner_and_live_read_port() -> None:
+    context_path = SOURCE_ROOT / "tooling" / "context.py"
+    context_tree = _tree(context_path)
+    context_fields = _class_annotated_fields(context_tree, "ToolContext")
+    assert "plan" in context_fields
+    assert "plan_file_path" not in context_fields
+    assert _type_annotation_mentions(context_tree, "PlanView")
+
+    plan_tree = _tree(SOURCE_ROOT / "plan_runtime.py")
+    assert _class_annotated_fields(plan_tree, "PlanState") == _PLAN_STATE_FIELDS
+
+    agent_fields = _self_fields(_tree(SOURCE_ROOT / "agent.py"))
+    assert not _REMOVED_AGENT_PLAN_SYMBOLS & agent_fields
+    removed_symbols = {
+        _source_key(path): sorted(
+            _referenced_symbols(_tree(path), _REMOVED_AGENT_PLAN_SYMBOLS)
+        )
+        for path in _source_files()
+        if _referenced_symbols(_tree(path), _REMOVED_AGENT_PLAN_SYMBOLS)
+    }
+    assert not removed_symbols, (
+        f"Removed Plan mirrors must not return: {removed_symbols}"
+    )
+
+    path_mirrors = {
+        _source_key(path): sorted(_attribute_references(_tree(path), "plan_file_path"))
+        for path in _source_files()
+        if _attribute_references(_tree(path), "plan_file_path")
+    }
+    assert not path_mirrors, (
+        f"ToolContext Plan path mirrors must not return: {path_mirrors}"
+    )
+
+    host_tree = _tree(SOURCE_ROOT / "agent_runtime.py")
+    host_fields = _class_annotated_fields(host_tree, "SessionStateHost")
+    assert "plan" in host_fields
+    assert not _REMOVED_AGENT_PLAN_SYMBOLS & host_fields
+
+    lifecycle_tree = _tree(SOURCE_ROOT / "session_lifecycle.py")
+    lifecycle_prompt_symbols = frozenset(
+        {
+            "_base_system_prompt",
+            "_system_prompt",
+            "_build_prompt",
+            "_build_plan_mode_prompt",
+            "_generate_file_path",
+        }
+    )
+    assert not _referenced_symbols(lifecycle_tree, lifecycle_prompt_symbols)
+
+    state_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "PlanState")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "PlanState")
+    }
+    runtime_constructors = {
+        _source_key(path): _named_constructor_count(_tree(path), "PlanRuntime")
+        for path in _source_files()
+        if _named_constructor_count(_tree(path), "PlanRuntime")
+    }
+    assert state_constructors == {"agent.py": 1}
+    assert runtime_constructors == {"agent.py": 1}
+
+    mutations = {
+        _source_key(path): sorted(_plan_state_mutations(_tree(path)))
+        for path in _source_files()
+        if _source_key(path) != "plan_runtime.py" and _plan_state_mutations(_tree(path))
+    }
+    assert not mutations, f"PlanState writes must stay in PlanRuntime: {mutations}"
+
+    middleware_source = (SOURCE_ROOT / "tooling" / "middleware.py").read_text(
+        encoding="utf-8"
+    )
+    assert "context.plan_file_path" not in middleware_source
+    assert middleware_source.count("context.plan.file_path") == 2
+
+
 def test_jsonl_writer_primitives_do_not_escape_persistence_boundary() -> None:
     violations = {
         _source_key(path): sorted(_escaped_jsonl_writer_symbols(_tree(path)))
@@ -902,6 +1587,45 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     dynamic_builtin = ast.parse("def load(name):\n    return __import__(name)\n")
     jsonl_literal = ast.parse("path = 'session.jsonl'\n")
     session_dir_assign = ast.parse("SESSION_DIR = Path.home() / 'sessions'\n")
+    permission_mutation = ast.parse(
+        "def bypass(state):\n"
+        "    state.mode = 'plan'\n"
+        "    state.confirmed_values.add('value')\n"
+        "    state.confirmed_values.update({'other'})\n"
+        "    del state.confirmed_values\n"
+    )
+    permission_mirror = ast.parse(
+        "class Agent:\n    def change(self):\n        self.permission_mode = 'plan'\n"
+    )
+    plan_mutation = ast.parse(
+        "def bypass(plan_state):\n"
+        "    plan_state.status = 'active'\n"
+        "    plan_state.file_path = path\n"
+        "    renamed = plan_state\n"
+        "    renamed.previous_permission_mode = 'default'\n"
+        "    setattr(plan_state, 'pending_context_reset', 'summary')\n"
+    )
+    plan_path_mirror = ast.parse(
+        "def sync(alias):\n    alias.plan_file_path = 'plan.md'\n"
+    )
+    usage_mutation = ast.parse(
+        "def bypass(ledger):\n"
+        "    alias = ledger\n"
+        "    ledger._input_tokens = 1\n"
+        "    alias._turns += 1\n"
+        "    write = object.__setattr__\n"
+        "    write(alias, '_responses', 2)\n"
+        "    remove = delattr\n"
+        "    remove(alias, '_last_prompt_tokens')\n"
+        "    bound_write = alias.__setattr__\n"
+        "    bound_write('_output_tokens', 3)\n"
+    )
+    constructor_alias = ast.parse(
+        "from lion_code.usage import UsageLedger as Ledger\n"
+        "Owner = Ledger\n"
+        "def build():\n"
+        "    return Owner()\n"
+    )
 
     assert _private_history_fields(provider) == frozenset(
         {
@@ -940,6 +1664,41 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     assert _assignment_targets(session_dir_assign, "SESSION_DIR") == frozenset(
         {"SESSION_DIR"}
     )
+    assert _permission_state_mutations(permission_mutation) == frozenset(
+        {
+            "mode",
+            "confirmed_values",
+            "confirmed_values.add",
+            "confirmed_values.update",
+        }
+    )
+    assert _permission_state_mutations(permission_mirror) == frozenset(
+        {"permission_mode"}
+    )
+    assert _plan_state_mutations(plan_mutation) == frozenset(
+        {
+            "status",
+            "file_path",
+            "previous_permission_mode",
+            "setattr:pending_context_reset",
+        }
+    )
+    assert _attribute_references(plan_path_mirror, "plan_file_path") == frozenset(
+        {"plan_file_path"}
+    )
+    assert _attribute_mutations(
+        usage_mutation,
+        _USAGE_LEDGER_FIELDS,
+    ) == frozenset(
+        {
+            "_input_tokens",
+            "_turns",
+            "delattr:_last_prompt_tokens",
+            "setattr:_output_tokens",
+            "setattr:_responses",
+        }
+    )
+    assert _named_constructor_count(constructor_alias, "UsageLedger") == 1
 
 
 # ---------------------------------------------------------------------------
