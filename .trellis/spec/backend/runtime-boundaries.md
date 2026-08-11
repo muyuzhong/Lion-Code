@@ -181,7 +181,10 @@ For cancellation, `ExecutionControl` owns the one Core `CancellationToken` and
 `AgentRuntimeCoordinator` owns begin/cancel orchestration, including Memory prefetch,
 Core stream, compaction, explicit abort, and timeout side effects. Standalone
 `AgentHarness` owns its local token only when no external cancellation view is
-supplied.
+supplied. When a coordinator-owned `LionAgentRuntime` receives that external
+view, its `cancel()` command must route back to `ExecutionControl.cancel()`;
+calling `AgentHarness.cancel()` alone is a no-op because the Harness does not own
+the external token.
 
 For permission state, `PermissionController` owns one `PermissionState` containing
 the active `PermissionMode` and `confirmed_values`. `Agent.permission_mode` is a

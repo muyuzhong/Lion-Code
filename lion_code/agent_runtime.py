@@ -113,12 +113,14 @@ class LionAgentRuntime(ReadOnlyMessageSource):
         get_system: Callable[[], str],
         tool_runtime: ToolRuntime,
         cancellation: CancellationView | None = None,
+        cancel_callback: Callable[[], None] | None = None,
         prepare_context: PrepareContext | None = None,
         max_turns: int | None = None,
         before_tool_calls: BeforeToolCalls | None = None,
     ) -> None:
         self._provider = provider
         self._tool_runtime = tool_runtime
+        self._cancel_callback = cancel_callback
 
         self.harness = AgentHarness(
             AgentHarnessConfig(
@@ -187,6 +189,9 @@ class LionAgentRuntime(ReadOnlyMessageSource):
 
     def cancel(self) -> None:
         """请求取消当前正在进行的模型流。"""
+        if self._cancel_callback is not None:
+            self._cancel_callback()
+            return
         self.harness.cancel()
 
     async def aclose(self) -> None:
@@ -325,8 +330,8 @@ class AgentRuntimeCoordinator:
             get_system=lambda: self._identity._system_prompt,
             tool_runtime=tool_runtime,
             cancellation=execution.cancellation,
+            cancel_callback=execution.cancel,
             prepare_context=self.prepare_core_context,
-            max_turns=budget.max_turns,
             before_tool_calls=self.before_core_tool_calls,
         )
         if self._context_compactor is None:

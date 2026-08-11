@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from lion_code.capabilities import (
@@ -11,6 +13,7 @@ from lion_code.capabilities import (
     DuplicateCapabilityError,
     MissingDependencyError,
 )
+from lion_code.tooling.types import LionTool, ToolResult
 
 # ---------------------------------------------------------------------------
 # Test helpers: minimal extension-slot implementations
@@ -18,13 +21,31 @@ from lion_code.capabilities import (
 
 
 class _FakeToolSource:
-    """Minimal ToolSource that returns a list of opaque tool objects."""
+    """Minimal ToolSource that returns typed LionTool contributions."""
 
     def __init__(self, names: list[str]) -> None:
-        self._names = names
+        self._tools = tuple(
+            LionTool(
+                name=name,
+                label=name,
+                description=name,
+                parameters={"type": "object", "properties": {}},
+                execute_fn=_execute_fake_tool,
+            )
+            for name in names
+        )
 
-    def tools(self) -> list[str]:
-        return list(self._names)
+    def tools(self) -> tuple[LionTool, ...]:
+        return self._tools
+
+
+async def _execute_fake_tool(
+    _context,
+    _tool_call_id,
+    _arguments,
+    _on_update,
+) -> ToolResult:
+    return ToolResult(content="ok")
 
 
 class _FakePromptLayer:
@@ -120,6 +141,50 @@ class TestRegistration:
     def test_empty_name_rejected(self) -> None:
         with pytest.raises(ValueError, match="non-empty"):
             CapabilitySpec(name="")
+
+    def test_mutable_inputs_are_normalized_at_construction(self) -> None:
+        tool_source = _FakeToolSource(["tool"])
+        prompt_layer = _FakePromptLayer("layer")
+        turn_participant = _FakeTurnParticipant()
+        session_participant = _FakeSessionParticipant()
+        resource = _FakeResource("resource", [])
+        tool_sources = [tool_source]
+        prompt_layers = [prompt_layer]
+        turn_participants = [turn_participant]
+        session_participants = [session_participant]
+        resources = [resource]
+        requires = {"browser"}
+        inputs: dict[str, Any] = {
+            "tool_sources": tool_sources,
+            "prompt_layers": prompt_layers,
+            "turn_participants": turn_participants,
+            "session_participants": session_participants,
+            "resources": resources,
+            "requires": requires,
+        }
+
+        spec = CapabilitySpec(name="sandbox", **inputs)
+
+        assert spec.tool_sources == (tool_source,)
+        assert spec.prompt_layers == (prompt_layer,)
+        assert spec.turn_participants == (turn_participant,)
+        assert spec.session_participants == (session_participant,)
+        assert spec.resources == (resource,)
+        assert spec.requires == frozenset({"browser"})
+
+        tool_sources.clear()
+        prompt_layers.clear()
+        turn_participants.clear()
+        session_participants.clear()
+        resources.clear()
+        requires.add("checkpoint")
+
+        assert spec.tool_sources == (tool_source,)
+        assert spec.prompt_layers == (prompt_layer,)
+        assert spec.turn_participants == (turn_participant,)
+        assert spec.session_participants == (session_participant,)
+        assert spec.resources == (resource,)
+        assert spec.requires == frozenset({"browser"})
 
     def test_get_unknown_returns_none(self) -> None:
         registry = CapabilityRegistry()
@@ -284,8 +349,8 @@ class TestAggregation:
         sources = registry.tool_sources
 
         assert sources == (ts1, ts2)
-        assert sources[0].tools() == ["tool_a", "tool_b"]
-        assert sources[1].tools() == ["tool_c"]
+        assert [tool.name for tool in sources[0].tools()] == ["tool_a", "tool_b"]
+        assert [tool.name for tool in sources[1].tools()] == ["tool_c"]
 
     def test_aggregate_prompt_layers(self) -> None:
         pl1 = _FakePromptLayer("layer_1", "fragment A")
@@ -511,7 +576,7 @@ class TestIntegration:
         assert registry.resolve() == ("browser", "sandbox", "checkpoint")
 
         # Verify aggregated slots.
-        assert [s.tools() for s in registry.tool_sources] == [
+        assert [[tool.name for tool in s.tools()] for s in registry.tool_sources] == [
             ["navigate", "screenshot"],
             ["run_code"],
             ["save_state"],

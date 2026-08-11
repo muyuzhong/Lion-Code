@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"实现取消命令路由时遵守 ExecutionControl 唯一 Owner、CancellationView 只读边界和 Coordinator 组装约定。"}
+{"file":".trellis/spec/backend/usage-ownership.md","reason":"实现预算修复时遵守 Runtime 在 Core tool boundary 记录 turn、BudgetPolicy inclusive 边界和纯文本不计 turn 的约定。"}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"实现 CapabilitySpec 容器归一化和类型测试时遵守 SPI 的冻结字段、ToolSource 和 Registry 缓存契约。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"按项目测试、类型、格式、注释和最小回归测试约定执行。"}

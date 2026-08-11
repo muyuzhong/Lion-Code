@@ -87,6 +87,11 @@ class CapabilityRegistry:
    initialized before this one.  Dependency ordering is explicit; no priority
    numbers or implicit ordering.
 
+Construction must normalize every sequence contribution to a tuple and
+``requires`` to a frozenset before the spec is exposed. ``frozen=True`` only
+protects the dataclass attributes; retaining a caller-owned list or set would
+still allow mutation behind the registry's dependency-order cache.
+
 ### Dependency Resolution
 
 1. Missing dependencies raise ``MissingDependencyError`` at resolve time,
@@ -181,7 +186,8 @@ AST tests in ``tests/architecture/test_runtime_boundaries.py``:
 - ``tests/capabilities/test_capability_registry.py``: registration,
   duplicate rejection, dependency resolution (missing, circular,
   self-referencing, chained, stable ordering), aggregation of each
-  extension slot, close semantics (reverse order, error continuation,
-  first-error re-raise), and full integration lifecycle.
+  extension slot, construction-time container normalization, close semantics
+  (reverse order, error continuation, first-error re-raise), and full
+  integration lifecycle.
 - ``tests/architecture/test_runtime_boundaries.py``: capability boundary
   import, AgentHarness reference, and god-context prevention tests.

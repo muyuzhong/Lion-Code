@@ -129,5 +129,13 @@ class CapabilitySpec:
     requires: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "tool_sources", tuple(self.tool_sources))
+        object.__setattr__(self, "prompt_layers", tuple(self.prompt_layers))
+        object.__setattr__(self, "turn_participants", tuple(self.turn_participants))
+        object.__setattr__(
+            self, "session_participants", tuple(self.session_participants)
+        )
+        object.__setattr__(self, "resources", tuple(self.resources))
+        object.__setattr__(self, "requires", frozenset(self.requires))
         if not self.name:
             raise ValueError("CapabilitySpec.name must be a non-empty string")

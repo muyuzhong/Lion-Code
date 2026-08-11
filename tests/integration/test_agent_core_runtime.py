@@ -341,6 +341,40 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(agent._core_runtime.messages[-1].is_error)
         self.assertIn("Turn limit reached", agent._core_runtime.messages[-1].text)
 
+    async def test_core_budget_does_not_count_final_text_before_follow_up(self) -> None:
+        registry = ToolRegistry()
+        registry.register(_echo_lion_tool())
+        agent, fake = self._make_agent(
+            [
+                _tooluse_event("c1"),
+                _stop_event("first done"),
+                _stop_event("follow-up done"),
+            ],
+            registry,
+            max_turns=2,
+        )
+
+        queued = False
+
+        async def queue_follow_up(event) -> None:
+            nonlocal queued
+            if (
+                not queued
+                and isinstance(event, TurnEndEvent)
+                and event.message.text == "first done"
+            ):
+                agent.core_runtime.harness.follow_up("follow-up")
+                queued = True
+
+        agent.core_runtime.subscribe(queue_follow_up)
+        await agent.chat("first")
+
+        self.assertTrue(queued)
+        self.assertEqual(fake.call_count, 3)
+        self.assertEqual(agent.core_runtime.messages[-1].text, "follow-up done")
+        self.assertEqual(agent.get_token_usage().turns, 1)
+        self.assertEqual(agent._last_stop_reason, "completed")
+
     async def test_core_budget_stops_before_tool_when_cost_limit_reached(self) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
@@ -524,7 +558,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         async def cancel_after_first_turn(event) -> None:
             if not cancelled["done"] and isinstance(event, TurnEndEvent):
-                agent.abort()
+                agent.core_runtime.cancel()
                 cancelled["done"] = True
 
         agent._core_runtime.subscribe(cancel_after_first_turn)
