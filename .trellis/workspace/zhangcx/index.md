@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 31
-- **Last Active**: 2026-08-10
+- **Total Sessions**: 32
+- **Last Active**: 2026-08-11
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1073 | Active |
+| `journal-1.md` | ~1094 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 32 | 2026-08-11 | 修复运行时预算取消与 Capability 类型边界 | `557cdf8` | `muyuzhong/capability-spi-foundation` |
 | 31 | 2026-08-10 | 完成 PR 23 CI 基线修复 | `b25ea2c` | `muyuzhong/state-ownership-migration` |
 | 30 | 2026-08-09 | 完成 State Ownership 分阶段迁移 | `66a7a04` | `master` |
 | 29 | 2026-08-09 | 完成 PlanRuntime 状态所有权迁移 | `4010464` | `master` |
