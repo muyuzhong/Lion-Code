@@ -1050,3 +1050,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 31: 完成 PR 23 CI 基线修复
+
+**Date**: 2026-08-10
+**Task**: 完成 PR 23 CI 基线修复
+**Branch**: `muyuzhong/state-ownership-migration`
+
+### Summary
+
+更新五条因状态所有权迁移产生行号漂移的 Radon/Vulture 既有指纹；本地门禁与 GitHub Actions run 31324469250 全部通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b25ea2c` | (see git log) |
+
+### Status
+
+[OK] **Completed**
