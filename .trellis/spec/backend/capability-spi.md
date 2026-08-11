@@ -239,7 +239,13 @@ Three capabilities have been migrated from direct Agent wiring to the SPI:
   ``TurnParticipant`` hooks without knowing what MCP is.
 - ``AgentRuntimeCoordinator.chat()`` calls
   ``identity._before_turn_capabilities()`` instead of
-  ``identity._ensure_mcp_tools()``.
+  ``identity._ensure_mcp_tools()``, then invokes
+  ``identity._after_turn_capabilities()`` from a ``finally`` block covering
+  early exits, cancellation, and Provider/tool failures.
+- ``SessionLifecycle.close()`` invokes
+  ``identity._close_capabilities()`` so resources declared by the registry
+  participate in the Agent shutdown chain; MCP process ownership remains with
+  ``ToolEnvironment``.
 - ``tooling/internal.py``'s ``create_internal_tools()`` no longer includes
   ``create_skill_tool()`` or ``create_agent_tool()``; they are provided by
   capabilities.

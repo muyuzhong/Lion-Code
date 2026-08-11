@@ -727,6 +727,11 @@ class Agent:
         for participant in self._capability_registry.turn_participants:
             await participant.before_turn()
 
+    async def _after_turn_capabilities(self) -> None:
+        """调用所有已注册 Capability 的轮次结束钩子。"""
+        for participant in self._capability_registry.turn_participants:
+            await participant.after_turn()
+
     async def chat(self, user_message: str) -> None:
         await self._runtime_coordinator.chat(user_message)
 
@@ -1178,8 +1183,12 @@ class Agent:
     # ─── 外部资源与 Memory 预取 ──────────────────────────────
 
     async def close(self) -> None:
-        """释放 MCP 子进程等外部资源，确保进程正常退出（issue #8）。"""
+        """释放 Capability、MCP 子进程等外部资源，确保进程正常退出（issue #8）。"""
         await self._runtime_coordinator.close()
+
+    async def _close_capabilities(self) -> None:
+        """关闭 Capability 声明的资源，具体顺序由 Registry 负责。"""
+        await self._capability_registry.close_all()
 
     async def _confirm_hook_trust(self, message: str) -> bool:
         # 项目 Hook 信任独立于工具权限；--yolo 也不能替仓库代码自动取得信任。

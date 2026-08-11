@@ -239,6 +239,10 @@ class RuntimeIdentityHost(Protocol):
 
     async def _before_turn_capabilities(self) -> None: ...
 
+    async def _after_turn_capabilities(self) -> None: ...
+
+    async def _close_capabilities(self) -> None: ...
+
 
 class SessionStateHost(Protocol):
     """会话标识、仓库、Plan 模式与工具环境所需的宿主边界。"""
@@ -710,42 +714,46 @@ class AgentRuntimeCoordinator:
         self._execution.begin()
         identity._last_stop_reason = None
         await identity._before_turn_capabilities()
-        if not identity.api_configured:
-            identity._emit_notice(
-                "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
-                "或在 TUI 中用 /model 配置。",
-                role="error",
-            )
-            return
-        await self.ensure_core_session_ready()
-        if self._execution.cancelled:
-            return
-        await self.compact_core_context_if_needed()
-        if self._execution.cancelled:
-            return
-        turn_start_index = len(self._runtime.messages)
-        memory._prepare_turn_memory_snapshot(user_message)
         try:
-            await self._runtime.prompt(user_message)
-            while (
-                not self._execution.cancelled and await self.apply_plan_context_reset()
-            ):
-                if self._execution.cancelled:
-                    break
-                await self._runtime.continue_()
-            self.sync_core_outcome()
-            self._core_compaction_required = self._context_manager.should_compact(
-                self.context_runtime_state()
-            )
-        finally:
+            if not identity.api_configured:
+                identity._emit_notice(
+                    "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
+                    "或在 TUI 中用 /model 配置。",
+                    role="error",
+                )
+                return
+            await self.ensure_core_session_ready()
+            if self._execution.cancelled:
+                return
+            await self.compact_core_context_if_needed()
+            if self._execution.cancelled:
+                return
+            turn_start_index = len(self._runtime.messages)
+            memory._prepare_turn_memory_snapshot(user_message)
             try:
-                if not identity.is_sub_agent:
-                    await memory._update_session_memory_after_turn(
-                        user_message,
-                        turn_start_index,
-                    )
+                await self._runtime.prompt(user_message)
+                while (
+                    not self._execution.cancelled
+                    and await self.apply_plan_context_reset()
+                ):
+                    if self._execution.cancelled:
+                        break
+                    await self._runtime.continue_()
+                self.sync_core_outcome()
+                self._core_compaction_required = self._context_manager.should_compact(
+                    self.context_runtime_state()
+                )
             finally:
-                memory._turn_memory_overlays = memory._build_turn_memory_overlays()
+                try:
+                    if not identity.is_sub_agent:
+                        await memory._update_session_memory_after_turn(
+                            user_message,
+                            turn_start_index,
+                        )
+                finally:
+                    memory._turn_memory_overlays = memory._build_turn_memory_overlays()
+        finally:
+            await identity._after_turn_capabilities()
 
     async def run_once(self, prompt: str) -> dict[str, Any]:
         """运行一次并返回捕获的文本与本次 token 差值。"""

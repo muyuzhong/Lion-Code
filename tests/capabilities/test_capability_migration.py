@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 from lion_code.capabilities import (
     CapabilityRegistry,
+    CapabilitySpec,
     McpCapability,
     create_skill_capability,
     create_subagent_capability,
@@ -24,6 +25,26 @@ from lion_code.capabilities import (
 from lion_code.capabilities.skill import _SkillToolSource
 from lion_code.mcp_client import McpManager
 from lion_code.tooling.registry import ToolRegistry
+
+
+class _RecordingTurnParticipant:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def before_turn(self) -> None:
+        self.calls.append("before")
+
+    async def after_turn(self) -> None:
+        self.calls.append("after")
+
+
+class _FakeCapabilityResource:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    async def close(self) -> None:
+        self.close_calls += 1
+
 
 # ---------------------------------------------------------------------------
 # Tool installation via Capability ToolSource
@@ -378,6 +399,52 @@ class TestAgentCompositionWithCapabilities:
 
         # Should not raise or attempt MCP discovery.
         asyncio.run(agent._before_turn_capabilities())  # noqa: SLF001
+
+    def test_after_turn_capabilities_runs_on_early_chat_exit(self) -> None:
+        """轮次结束钩子覆盖未配置 API 时的提前返回。"""
+        from lion_code.agent import Agent
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=False,
+        )
+        agent._api_key = ""  # noqa: SLF001
+        participant = _RecordingTurnParticipant()
+        agent._capability_registry.register(  # noqa: SLF001
+            CapabilitySpec(
+                name="test-turn-lifecycle",
+                turn_participants=(participant,),
+            )
+        )
+
+        try:
+            asyncio.run(agent.chat("hello"))
+        finally:
+            asyncio.run(agent.close())
+
+        assert participant.calls == ["before", "after"]
+
+    def test_agent_close_closes_capability_resources(self) -> None:
+        """Agent.close 应通过 SessionLifecycle 回收 Capability 资源。"""
+        from lion_code.agent import Agent
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=False,
+        )
+        resource = _FakeCapabilityResource()
+        agent._capability_registry.register(  # noqa: SLF001
+            CapabilitySpec(
+                name="test-resource-lifecycle",
+                resources=(resource,),
+            )
+        )
+
+        asyncio.run(agent.close())
+
+        assert resource.close_calls == 1
 
 
 # ---------------------------------------------------------------------------
