@@ -8,22 +8,26 @@ Design principles
 - Kernel and Capability are strictly separated.
 - A Capability declares *what the Agent can do*, not *how the Agent runs*.
 - ``CapabilitySpec`` is immutable; extension slots are narrow protocols.
-- ``CapabilityRegistry`` organizes contributions—it is NOT a service locator.
+- ``CapabilityRegistry`` organizes contributions-it is NOT a service locator.
 - Capabilities must not depend on ``Agent`` or ``AgentHarness``.
 
-Future capabilities (Browser, Sandbox, Checkpoint, Scheduler, ComputerUse)
-will declare a ``CapabilitySpec`` and register it with the registry instead
-of modifying the Agent主干.
+Concrete capability implementations live in sub-modules:
+- ``mcp``: MCP tool discovery and registration (TurnParticipant)
+- ``skill``: Skill tool contribution (ToolSource)
+- ``subagent``: Sub-agent tool contribution (ToolSource)
 """
 
 from __future__ import annotations
 
+from .mcp import McpCapability
 from .registry import (
     CapabilityRegistry,
     CircularDependencyError,
     DuplicateCapabilityError,
     MissingDependencyError,
 )
+from .skill import create_skill_capability
+from .subagent import create_subagent_capability
 from .types import (
     AsyncCloseable,
     CapabilitySpec,
@@ -39,9 +43,12 @@ __all__ = [
     "CapabilitySpec",
     "CircularDependencyError",
     "DuplicateCapabilityError",
+    "McpCapability",
     "MissingDependencyError",
     "PromptLayer",
     "SessionParticipant",
     "ToolSource",
     "TurnParticipant",
+    "create_skill_capability",
+    "create_subagent_capability",
 ]

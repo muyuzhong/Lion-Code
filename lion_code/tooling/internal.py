@@ -197,11 +197,14 @@ def create_schedule_wakeup_tool() -> LionTool:
 
 
 def create_internal_tools() -> list[LionTool]:
-    """创建常驻内部工具；schedule_wakeup 由动态循环临时注册。"""
+    """创建常驻内部工具。
+
+    ``skill`` 和 ``agent`` 工具已由 Capability SPI (SkillCapability /
+    SubagentCapability) 通过 ToolSource 接入，不再由此函数提供。
+    ``schedule_wakeup`` 由动态循环临时注册。
+    """
     return [
-        create_skill_tool(),
         create_enter_plan_mode_tool(),
         create_exit_plan_mode_tool(),
-        create_agent_tool(),
         create_tool_search_tool(),
     ]

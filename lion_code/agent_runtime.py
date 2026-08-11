@@ -237,7 +237,7 @@ class RuntimeIdentityHost(Protocol):
 
     def _apply_core_thinking_level(self, level: ThinkingLevel) -> None: ...
 
-    async def _ensure_mcp_tools(self) -> None: ...
+    async def _before_turn_capabilities(self) -> None: ...
 
 
 class SessionStateHost(Protocol):
@@ -709,7 +709,7 @@ class AgentRuntimeCoordinator:
         memory = self._memory
         self._execution.begin()
         identity._last_stop_reason = None
-        await identity._ensure_mcp_tools()
+        await identity._before_turn_capabilities()
         if not identity.api_configured:
             identity._emit_notice(
                 "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"

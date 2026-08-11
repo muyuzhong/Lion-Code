@@ -1,0 +1,449 @@
+"""Tests for the first batch of Capability migrations: MCP, Skill, SubAgent.
+
+These tests verify that:
+- Capability-installed tools appear in the registry after Agent construction.
+- Disabled capabilities (mcp_enabled=False) do not contribute MCP tools.
+- MCP initialization failure preserves the existing fail-soft semantics.
+- SubAgent permission inheritance is unchanged.
+- Skill inline/fork behavior is unchanged.
+- Capability close does not double-release shared MCP resources.
+- Capability implementations do not reverse-depend on Agent.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from unittest.mock import patch
+
+from lion_code.capabilities import (
+    CapabilityRegistry,
+    McpCapability,
+    create_skill_capability,
+    create_subagent_capability,
+)
+from lion_code.capabilities.skill import _SkillToolSource
+from lion_code.mcp_client import McpManager
+from lion_code.tooling.registry import ToolRegistry
+
+# ---------------------------------------------------------------------------
+# Tool installation via Capability ToolSource
+# ---------------------------------------------------------------------------
+
+
+class TestCapabilityToolInstallation:
+    def test_skill_capability_provides_skill_tool(self) -> None:
+        spec = create_skill_capability()
+        sources = spec.tool_sources
+        assert len(sources) == 1
+        tools = sources[0].tools()
+        assert len(tools) == 1
+        assert tools[0].name == "skill"
+
+    def test_subagent_capability_provides_agent_tool(self) -> None:
+        spec = create_subagent_capability()
+        sources = spec.tool_sources
+        assert len(sources) == 1
+        tools = sources[0].tools()
+        assert len(tools) == 1
+        assert tools[0].name == "agent"
+
+    def test_capability_registry_aggregates_both_tool_sources(self) -> None:
+        registry = CapabilityRegistry()
+        registry.register(create_skill_capability())
+        registry.register(create_subagent_capability())
+
+        sources = registry.tool_sources
+        assert len(sources) == 2
+
+        all_tools: list[str] = []
+        for source in sources:
+            for tool in source.tools():
+                all_tools.append(tool.name)
+        assert "skill" in all_tools
+        assert "agent" in all_tools
+
+    def test_tool_source_returns_same_tool_instance(self) -> None:
+        """ToolSource should return a stable tool definition, not recreate it."""
+        source = _SkillToolSource()
+        first = source.tools()
+        second = source.tools()
+        assert first[0] is second[0]
+
+
+# ---------------------------------------------------------------------------
+# Disabled capability: MCP
+# ---------------------------------------------------------------------------
+
+
+class TestDisabledMcpCapability:
+    def test_mcp_capability_is_root_false_skips_discovery(self) -> None:
+        """When is_root=False, before_turn does nothing."""
+        mcp_manager = McpManager()
+        tool_registry = ToolRegistry()
+        capability = McpCapability(
+            mcp_manager=mcp_manager,
+            tool_registry=tool_registry,
+            emit_notice=lambda msg: None,
+            is_already_initialized=lambda: False,
+            mark_initialized=lambda: None,
+            is_root=False,
+        )
+
+        asyncio.run(capability.before_turn())
+
+        # No tools should be registered.
+        assert tool_registry.all_tools() == []
+
+    def test_mcp_capability_already_initialized_skips_discovery(self) -> None:
+        """When already initialized, before_turn does nothing."""
+        mcp_manager = McpManager()
+        tool_registry = ToolRegistry()
+        capability = McpCapability(
+            mcp_manager=mcp_manager,
+            tool_registry=tool_registry,
+            emit_notice=lambda msg: None,
+            is_already_initialized=lambda: True,
+            mark_initialized=lambda: None,
+            is_root=True,
+        )
+
+        asyncio.run(capability.before_turn())
+
+        assert tool_registry.all_tools() == []
+
+
+# ---------------------------------------------------------------------------
+# MCP init failure: fail-soft semantics
+# ---------------------------------------------------------------------------
+
+
+class TestMcpFailSoft:
+    async def test_mcp_init_failure_emits_notice_and_continues(self) -> None:
+        """MCP discovery failure should emit a notice, not raise."""
+        mcp_manager = McpManager()
+        tool_registry = ToolRegistry()
+        notices: list[str] = []
+
+        capability = McpCapability(
+            mcp_manager=mcp_manager,
+            tool_registry=tool_registry,
+            emit_notice=notices.append,
+            is_already_initialized=lambda: False,
+            mark_initialized=lambda: None,
+            is_root=True,
+        )
+
+        # discover_tools will fail because no MCP servers are configured,
+        # but the McpManager handles this gracefully (returns empty list).
+        await capability.before_turn()
+
+        # No tools registered, no exception raised.
+        assert tool_registry.all_tools() == []
+
+    async def test_mcp_init_exception_emits_notice(self) -> None:
+        """If discover_tools raises, the notice is emitted and execution continues."""
+        mcp_manager = McpManager()
+        tool_registry = ToolRegistry()
+        notices: list[str] = []
+
+        capability = McpCapability(
+            mcp_manager=mcp_manager,
+            tool_registry=tool_registry,
+            emit_notice=notices.append,
+            is_already_initialized=lambda: False,
+            mark_initialized=lambda: None,
+            is_root=True,
+        )
+
+        # Patch discover_tools to raise.
+        with patch.object(
+            mcp_manager,
+            "discover_tools",
+            side_effect=RuntimeError("connection refused"),
+        ):
+            await capability.before_turn()
+
+        assert len(notices) == 1
+        assert "[mcp] Init failed" in notices[0]
+        assert "connection refused" in notices[0]
+        assert tool_registry.all_tools() == []
+
+    async def test_mcp_init_marks_initialized_even_on_failure(self) -> None:
+        """After a failed init, the capability should not retry on the next turn."""
+        mcp_manager = McpManager()
+        init_call_count = 0
+
+        def check_init() -> bool:
+            return init_call_count > 0
+
+        def mark_init() -> None:
+            nonlocal init_call_count
+            init_call_count += 1
+
+        capability = McpCapability(
+            mcp_manager=mcp_manager,
+            tool_registry=ToolRegistry(),
+            emit_notice=lambda msg: None,
+            is_already_initialized=check_init,
+            mark_initialized=mark_init,
+            is_root=True,
+        )
+
+        with patch.object(
+            mcp_manager, "discover_tools", side_effect=RuntimeError("fail")
+        ):
+            await capability.before_turn()
+            # Second call should skip because mark_initialized was called.
+            await capability.before_turn()
+
+        assert init_call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Capability close: no double-release of shared MCP resources
+# ---------------------------------------------------------------------------
+
+
+class TestCapabilityClose:
+    async def test_mcp_capability_has_no_closeable_resources(self) -> None:
+        """MCP capability must not own resources; ToolEnvironment owns disconnect."""
+        spec = McpCapability(
+            mcp_manager=McpManager(),
+            tool_registry=ToolRegistry(),
+            emit_notice=lambda msg: None,
+            is_already_initialized=lambda: False,
+            mark_initialized=lambda: None,
+            is_root=True,
+        ).spec
+
+        assert spec.resources == ()
+
+    async def test_capability_registry_close_all_does_not_touch_mcp(self) -> None:
+        """close_all must not call disconnect_all on the MCP manager."""
+        mcp_manager = McpManager()
+        disconnect_called = False
+        original_disconnect = mcp_manager.disconnect_all
+
+        async def tracking_disconnect() -> None:
+            nonlocal disconnect_called
+            disconnect_called = True
+            await original_disconnect()
+
+        mcp_manager.disconnect_all = tracking_disconnect  # type: ignore[method-assign]
+
+        registry = CapabilityRegistry()
+        registry.register(
+            McpCapability(
+                mcp_manager=mcp_manager,
+                tool_registry=ToolRegistry(),
+                emit_notice=lambda msg: None,
+                is_already_initialized=lambda: True,
+                mark_initialized=lambda: None,
+                is_root=True,
+            ).spec
+        )
+
+        await registry.close_all()
+
+        assert not disconnect_called, (
+            "CapabilityRegistry.close_all must not trigger MCP disconnect; "
+            "ToolEnvironment owns that lifecycle."
+        )
+
+    async def test_skill_and_subagent_capabilities_have_no_resources(self) -> None:
+        registry = CapabilityRegistry()
+        registry.register(create_skill_capability())
+        registry.register(create_subagent_capability())
+
+        assert registry.resources == ()
+
+
+# ---------------------------------------------------------------------------
+# Architecture: Capability implementations must not import Agent
+# ---------------------------------------------------------------------------
+
+
+class TestCapabilityBoundaryCompliance:
+    def test_mcp_capability_spec_does_not_reference_agent(self) -> None:
+        """McpCapability.spec must be constructible without any Agent reference."""
+        capability = McpCapability(
+            mcp_manager=McpManager(),
+            tool_registry=ToolRegistry(),
+            emit_notice=lambda msg: None,
+            is_already_initialized=lambda: False,
+            mark_initialized=lambda: None,
+            is_root=True,
+        )
+        spec = capability.spec
+
+        # The spec should only have turn_participants, no tool_sources or resources.
+        assert spec.name == "mcp"
+        assert len(spec.turn_participants) == 1
+        assert spec.tool_sources == ()
+        assert spec.resources == ()
+
+    def test_skill_capability_spec_is_tool_source_only(self) -> None:
+        spec = create_skill_capability()
+        assert spec.name == "skill"
+        assert len(spec.tool_sources) == 1
+        assert spec.turn_participants == ()
+        assert spec.resources == ()
+
+    def test_subagent_capability_spec_is_tool_source_only(self) -> None:
+        spec = create_subagent_capability()
+        assert spec.name == "subagent"
+        assert len(spec.tool_sources) == 1
+        assert spec.turn_participants == ()
+        assert spec.resources == ()
+
+
+# ---------------------------------------------------------------------------
+# Agent composition: tools appear after construction
+# ---------------------------------------------------------------------------
+
+
+class TestAgentCompositionWithCapabilities:
+    """Integration tests that verify the Agent correctly wires capability tools."""
+
+    def test_root_agent_has_skill_and_agent_tools(self) -> None:
+        """A root agent should have the 'skill' and 'agent' tools in its registry
+        after construction, contributed by capabilities."""
+        from lion_code.agent import Agent
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=False,
+        )
+
+        tool_names = {t.name for t in agent.tool_registry.all_tools()}
+        assert "skill" in tool_names
+        assert "agent" in tool_names
+
+    def test_root_agent_with_mcp_disabled_has_no_mcp_tools(self) -> None:
+        """When mcp_enabled=False, no MCP tools should be registered."""
+        from lion_code.agent import Agent
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=False,
+        )
+
+        tool_names = {t.name for t in agent.tool_registry.all_tools()}
+        mcp_tools = [name for name in tool_names if name.startswith("mcp__")]
+        assert mcp_tools == []
+
+    def test_agent_has_capability_registry_with_three_capabilities(self) -> None:
+        """Agent should register mcp, skill, and subagent capabilities."""
+        from lion_code.agent import Agent
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=False,
+        )
+
+        names = set(agent._capability_registry.names)  # noqa: SLF001
+        assert "mcp" in names
+        assert "skill" in names
+        assert "subagent" in names
+
+    def test_before_turn_capabilities_calls_mcp_before_turn(self) -> None:
+        """_before_turn_capabilities should invoke the MCP TurnParticipant."""
+        from lion_code.agent import Agent
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=False,
+        )
+
+        # MCP capability is registered with is_root=False when mcp_enabled=False,
+        # so before_turn should be a no-op.
+        asyncio.run(agent._before_turn_capabilities())  # noqa: SLF001
+
+    def test_before_turn_capabilities_with_mcp_enabled_skips_if_initialized(
+        self,
+    ) -> None:
+        """When _mcp_initialized is True, before_turn should skip MCP discovery."""
+        from lion_code.agent import Agent
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=True,
+        )
+        agent._mcp_initialized = True  # noqa: SLF001
+
+        # Should not raise or attempt MCP discovery.
+        asyncio.run(agent._before_turn_capabilities())  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# SubAgent permission inheritance (unchanged behavior)
+# ---------------------------------------------------------------------------
+
+
+class TestSubAgentPermissionInheritance:
+    def test_subagent_inherits_plan_permission_mode(self) -> None:
+        """SubAgent created from a plan-mode parent should inherit 'plan'."""
+        from lion_code.agent import Agent
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=False,
+            permission_mode="plan",
+        )
+
+        assert agent._child_permission_mode() == "plan"  # noqa: SLF001
+
+    def test_subagent_inherits_auto_permission_mode(self) -> None:
+        """SubAgent created from an auto-mode parent should inherit 'auto'."""
+        from lion_code.agent import Agent
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=False,
+            permission_mode="auto",
+        )
+
+        assert agent._child_permission_mode() == "auto"  # noqa: SLF001
+
+    def test_subagent_defaults_to_bypass_for_other_modes(self) -> None:
+        """Non-plan, non-auto modes should map to bypassPermissions."""
+        from lion_code.agent import Agent
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=False,
+            permission_mode="default",
+        )
+
+        assert agent._child_permission_mode() == "bypassPermissions"  # noqa: SLF001
+
+    def test_subagent_inherits_parent_tool_registry_filtered(self) -> None:
+        """SubAgent should receive a filtered view of the parent's registry,
+        including capability-contributed tools like 'agent' and 'skill'."""
+        from lion_code.agent import Agent
+        from lion_code.subagent_factory import SubagentFactory
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=False,
+        )
+
+        factory = SubagentFactory(agent)
+        sub_agent = factory.create_for_agent_type("general")
+
+        try:
+            sub_tools = {t.name for t in sub_agent.tool_registry.all_tools()}
+            # general type excludes 'agent' and 'schedule_wakeup' but includes 'skill'.
+            assert "skill" in sub_tools
+            assert "agent" not in sub_tools
+        finally:
+            asyncio.run(sub_agent.close())

@@ -191,3 +191,55 @@ AST tests in ``tests/architecture/test_runtime_boundaries.py``:
   integration lifecycle.
 - ``tests/architecture/test_runtime_boundaries.py``: capability boundary
   import, AgentHarness reference, and god-context prevention tests.
+- ``tests/capabilities/test_capability_migration.py``: MCP/Skill/SubAgent
+  capability installation, disabled-capability tool absence, MCP fail-soft
+  semantics, SubAgent permission inheritance, Skill tool delegation,
+  close-does-not-double-release, and architecture boundary compliance.
+
+## 7. First-Batch Migrations (MCP, Skill, SubAgent)
+
+Three capabilities have been migrated from direct Agent wiring to the SPI:
+
+### McpCapability (``capabilities/mcp.py``)
+
+- Implements ``TurnParticipant``: discovers and registers MCP tools on the
+  first ``before_turn()``.
+- Does **not** implement ``AsyncCloseable``: MCP process lifecycle
+  (``disconnect_all``) remains owned by ``ToolEnvironment``.
+- Receives narrow dependencies: ``McpManager``, ``ToolRegistry``, notice
+  emitter, and init-flag accessors (callables, not a god-context).
+- The init flag (``agent._mcp_initialized``) is shared via callables so
+  tests and lifecycle code that check it continue to work.
+
+### SkillCapability (``capabilities/skill.py``)
+
+- Implements ``ToolSource``: provides the ``skill`` tool definition.
+- The tool delegates to ``ToolContext.controller.run_skill_tool()`` at
+  execution time; the inline/fork business logic remains in the Agent
+  controller.
+- No ``TurnParticipant`` or ``AsyncCloseable`` slots.
+
+### SubagentCapability (``capabilities/subagent.py``)
+
+- Implements ``ToolSource``: provides the ``agent`` (sub-agent) tool
+  definition.
+- ``SubagentFactory`` remains the independent domain service for child
+  construction; the capability only contributes the tool definition.
+- No ``TurnParticipant`` or ``AsyncCloseable`` slots.
+
+### Agent Composition Changes
+
+- ``Agent.__init__`` creates a ``CapabilityRegistry`` and registers all
+  three capabilities.
+- Capability-provided tools are registered into the ``ToolRegistry`` only
+  for fresh registries (root agents).  Sub-agents inherit the parent's
+  filtered registry.
+- ``Agent._ensure_mcp_tools()`` is replaced by
+  ``Agent._before_turn_capabilities()``, which iterates all
+  ``TurnParticipant`` hooks without knowing what MCP is.
+- ``AgentRuntimeCoordinator.chat()`` calls
+  ``identity._before_turn_capabilities()`` instead of
+  ``identity._ensure_mcp_tools()``.
+- ``tooling/internal.py``'s ``create_internal_tools()`` no longer includes
+  ``create_skill_tool()`` or ``create_agent_tool()``; they are provided by
+  capabilities.

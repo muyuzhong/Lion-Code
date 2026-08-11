@@ -19,6 +19,12 @@ from .agent_runtime import (
     LionAgentRuntime,
 )
 from .autonomy_runtime import AutonomyRuntime
+from .capabilities import (
+    CapabilityRegistry,
+    McpCapability,
+    create_skill_capability,
+    create_subagent_capability,
+)
 from .context import (
     ContextCompactor,
     ContextManager,
@@ -76,7 +82,6 @@ from .tooling import ToolEnvironment, ToolRegistry, ToolResult, ToolRuntime
 from .tooling.builtin import create_builtin_tools
 from .tooling.context import ToolContext
 from .tooling.internal import create_internal_tools
-from .tooling.mcp import create_mcp_tool
 from .tooling.middleware import (
     AuditMiddleware,
     CancellationMiddleware,
@@ -202,12 +207,13 @@ class Agent:
 
         if tool_registry is not None and custom_tools is not None:
             raise ValueError("tool_registry and custom_tools cannot be combined")
-        if tool_registry is None:
-            selected_tool_names = (
-                {tool["name"] for tool in custom_tools}
-                if custom_tools is not None
-                else None
-            )
+        _created_own_registry = tool_registry is None
+        selected_tool_names = (
+            {tool["name"] for tool in custom_tools}
+            if custom_tools is not None
+            else None
+        )
+        if _created_own_registry:
             self.tool_registry = ToolRegistry()
             for tool in [*create_builtin_tools(), *create_internal_tools()]:
                 if selected_tool_names is None or tool.name in selected_tool_names:
@@ -284,6 +290,33 @@ class Agent:
         self._mcp_manager = self.tool_environment.mcp_manager
         self._mcp_initialized = False
         self._subagent_factory = SubagentFactory(self)
+
+        # Capability SPI: register extension slots that contribute tools and
+        # turn lifecycle hooks.  Agent only composes; it does not know how MCP
+        # discovers tools or how Skill/SubAgent tools are defined.
+        self._capability_registry = CapabilityRegistry()
+        mcp_is_root = (
+            mcp_enabled and not is_sub_agent and self.tool_environment.owns_mcp_manager
+        )
+        self._mcp_capability = McpCapability(
+            mcp_manager=self._mcp_manager,
+            tool_registry=self.tool_registry,
+            emit_notice=lambda msg: self._emit_notice(msg),
+            is_already_initialized=lambda: self._mcp_initialized,
+            mark_initialized=lambda: setattr(self, "_mcp_initialized", True),
+            is_root=mcp_is_root,
+        )
+        self._capability_registry.register(self._mcp_capability.spec)
+        self._capability_registry.register(create_skill_capability())
+        self._capability_registry.register(create_subagent_capability())
+
+        # Register capability-provided tools only for fresh registries;
+        # sub-agents inherit tools from the parent's filtered registry.
+        if _created_own_registry:
+            for source in self._capability_registry.tool_sources:
+                for tool in source.tools():
+                    if selected_tool_names is None or tool.name in selected_tool_names:
+                        self.tool_registry.register(tool)
 
         self._lifecycle = AgentLifecycle(self)
         provider = self._lifecycle.build_core_provider(self._thinking_level)
@@ -684,25 +717,15 @@ class Agent:
 
     # ─── 主对话入口 ──────────────────────────────────────────
 
-    async def _ensure_mcp_tools(self) -> None:
-        """仅由根 Agent 首次发现 MCP；失败作为 notice，不中断 Core 对话。"""
+    async def _before_turn_capabilities(self) -> None:
+        """Invoke all registered TurnParticipant hooks before a chat starts.
 
-        if (
-            not self._mcp_enabled
-            or self._mcp_initialized
-            or self.is_sub_agent
-            or not self.tool_environment.owns_mcp_manager
-        ):
-            return
-        self._mcp_initialized = True
-        try:
-            definitions = await self._mcp_manager.discover_tools()
-            for definition in definitions:
-                self.tool_registry.register(
-                    create_mcp_tool(self._mcp_manager, definition)
-                )
-        except Exception as error:
-            self._emit_notice(f"[mcp] Init failed: {error}")
+        This replaces the former ``_ensure_mcp_tools`` with a generic
+        capability-driven entry point.  Agent does not know which
+        capabilities exist or what they do.
+        """
+        for participant in self._capability_registry.turn_participants:
+            await participant.before_turn()
 
     async def chat(self, user_message: str) -> None:
         await self._runtime_coordinator.chat(user_message)
@@ -739,9 +762,7 @@ class Agent:
         max_cost = self._budget.max_cost_usd
         max_turns = self._budget.max_turns
         budget_info = f" / ${max_cost} budget" if max_cost else ""
-        turn_info = (
-            f" | Turns: {usage.turns}/{max_turns}" if max_turns else ""
-        )
+        turn_info = f" | Turns: {usage.turns}/{max_turns}" if max_turns else ""
         cached = usage.cache_read_tokens
         billed_input = usage.input_tokens + usage.cache_write_tokens + cached
         hit_rate = round((cached / billed_input) * 100) if billed_input > 0 else 0
