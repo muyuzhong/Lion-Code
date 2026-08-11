@@ -443,7 +443,7 @@ lint-imports --no-cache
 python -m pytest -q tests/architecture/test_runtime_boundaries.py
 ~~~
 
-pyproject.toml contains these five import-linter contracts:
+pyproject.toml contains these six import-linter contracts:
 
 - core cannot depend on providers, tooling, permission/Plan/Usage state, observers,
   application, or tui, including indirect paths.
@@ -455,6 +455,9 @@ pyproject.toml contains these five import-linter contracts:
 - tui cannot directly import a runtime engine layer. It consumes
   application / core events; config, prompt, and version remain narrow
   presentation/configuration exceptions.
+- capabilities cannot depend on the Agent engine (`agent`, `agent_lifecycle`,
+  `agent_runtime`). The Capability SPI is a separate layer from the Agent
+  composition root; see [Capability SPI](./capability-spi.md).
 - Product code cannot import tests or benchmarks.
 
 tests/architecture/test_runtime_boundaries.py parses production source and
@@ -486,6 +489,10 @@ also rejects patterns an import graph cannot express:
   state, permission or prompt by hand.
 - Usage single-writer, composition, projection, and reverse-import scanners follow
   [Usage Ownership](./usage-ownership.md).
+- Capability SPI source importing `agent`, `agent_lifecycle`, or
+  `agent_runtime`; referencing `AgentHarness`; or defining
+  `CapabilityContext`, `ServiceLocator`, or `AgentCapability` god-object
+  types. See [Capability SPI](./capability-spi.md).
 
 When a legitimate architecture move requires a new exception, change the
 runtime code, this contract, the AST allowlist, and the focused test in one

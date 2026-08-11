@@ -89,7 +89,7 @@ class Boundary:
         return frozenset(f"lion_code.{r}" for r in self.forbidden_roots)
 
 
-# The five architecture contracts.  Order matches pyproject.toml.
+# The architecture contracts.  Order matches pyproject.toml.
 BOUNDARIES: tuple[Boundary, ...] = (
     Boundary(
         contract_name="Core 不依赖上层运行时包",
@@ -131,6 +131,17 @@ BOUNDARIES: tuple[Boundary, ...] = (
             }
         ),
         allow_indirect=True,
+    ),
+    Boundary(
+        contract_name="Capabilities 不依赖 Agent 引擎",
+        source_package="lion_code.capabilities",
+        forbidden=frozenset(
+            {
+                "agent",
+                "agent_lifecycle",
+                "agent_runtime",
+            }
+        ),
     ),
     Boundary(
         contract_name="生产代码不导入测试与基准",
