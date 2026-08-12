@@ -102,7 +102,7 @@ async def run_repl(agent: Agent) -> None:
                 print("  Invalid choice. Enter 1, 2, 3, or 4.")
 
     agent.set_plan_approval_fn(plan_approval_fn)
-    command_session = LionCodingSession(agent, terminal_output=True)
+    command_session = LionCodingSession(backend=agent, terminal_output=True)
 
     sigint_count = 0
 
@@ -378,7 +378,7 @@ Examples:
         from .application.session import LionCodingSession
         from .tui.app import run_tui_app
 
-        run_tui_app(LionCodingSession(agent), resume=args.resume)
+        run_tui_app(LionCodingSession(backend=agent), resume=args.resume)
         return
 
     async def run_cli() -> None:

@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "加载 backend 层的开发前检查与质量门禁入口。"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "遵守 Core、Application、TUI、runtime 的依赖方向和架构边界。"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "确认 Ports、application facade、core value object 和测试文件的归属。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "按跨层契约、数据流和单一投影 owner 检查重构。"}
+{"file": ".trellis/tasks/08-11-application-port-refactor/research/application-port-audit.md", "reason": "本任务已完成的 Application/Harness 泄漏审计和代码证据。"}

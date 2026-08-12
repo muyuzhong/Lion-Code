@@ -74,7 +74,7 @@ SessionAgentEnd(will_retry=True)
   returns a structured error through the Core tool loop.
 - `tests/runtime/test_terminal_renderer.py` verifies tool and assistant errors
   are presented as terminal errors.
-- `tests/application/test_coding_session.py` covers application event order,
+- `tests/application/test_coding_session_ports.py` covers application event order,
   overflow compaction, cancellation and the one-retry limit.
 
 ## Avoid

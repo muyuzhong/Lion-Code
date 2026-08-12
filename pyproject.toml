@@ -140,6 +140,7 @@ forbidden_modules = [
     "lion_code.application",
     "lion_code.autonomy",
     "lion_code.autonomy_runtime",
+    "lion_code.capabilities",
     "lion_code.config",
     "lion_code.context",
     "lion_code.dream",
@@ -192,6 +193,7 @@ forbidden_modules = [
     "lion_code.agent_runtime",
     "lion_code.autonomy",
     "lion_code.autonomy_runtime",
+    "lion_code.capabilities",
     "lion_code.context",
     "lion_code.dream",
     "lion_code.execution_control",
@@ -222,6 +224,18 @@ forbidden_modules = [
 ignore_imports = []
 # TUI 通过 application.session 间接使用 Agent；只阻止新增的直接引擎 import。
 allow_indirect_imports = "True"
+
+[[tool.importlinter.contracts]]
+name = "Capabilities 不依赖 Agent 引擎"
+type = "forbidden"
+source_modules = ["lion_code.capabilities"]
+forbidden_modules = [
+    "lion_code.agent",
+    "lion_code.agent_lifecycle",
+    "lion_code.agent_runtime",
+]
+ignore_imports = []
+allow_indirect_imports = "False"
 
 [[tool.importlinter.contracts]]
 name = "生产代码不导入测试与基准"

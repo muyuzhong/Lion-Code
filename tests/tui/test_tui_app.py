@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from application.test_coding_session import (
+from integration.test_application_coding_session import (
     _echo_lion_tool,
     _stop_event,
     _tooluse_event,
@@ -203,7 +203,7 @@ def app_factory():
         )
         agent._mcp_initialized = True
         agent._extract_session_memory_semantics = _no_session_memory_semantics
-        return LionTuiApp(LionCodingSession(agent))
+        return LionTuiApp(LionCodingSession(backend=agent))
 
     yield factory
     temp_dir.cleanup()
@@ -389,7 +389,7 @@ async def test_cost_and_unknown_commands(app_factory) -> None:
 @pytest.mark.asyncio
 async def test_session_memory_commands_dispatch_through_tui(app_factory) -> None:
     app = app_factory([])
-    agent = app.session._agent
+    agent = app.session._backend
     agent._session_memory = agent._session_memory_repository.save(
         SessionMemory(
             project_root=str(agent._project_identity.root),
@@ -453,7 +453,7 @@ async def test_clear_command_resets_transcript(app_factory) -> None:
     assert any(item.text == "Conversation cleared." for item in app.state.items)
     assert notices.count(("Conversation cleared.", "status")) == 1
     assert app.session.messages == ()
-    assert app.session._agent._terminal_renderer is None
+    assert app.session._backend._terminal_renderer is None
 
 
 @pytest.mark.asyncio
@@ -468,7 +468,7 @@ async def test_compact_notice_is_forwarded_once(app_factory) -> None:
             original_notice(text, role=role)
 
         async def compact() -> None:
-            app.session._agent._emit_notice("Conversation compacted.")
+            app.session._backend._emit_notice("Conversation compacted.")
 
         with (
             patch.object(app, "_notice", record_notice),

@@ -10,7 +10,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from .agent_lifecycle import AgentLifecycle
 from .agent_runtime import (
@@ -19,6 +19,12 @@ from .agent_runtime import (
     LionAgentRuntime,
 )
 from .autonomy_runtime import AutonomyRuntime
+from .capabilities import (
+    CapabilityRegistry,
+    McpCapability,
+    create_skill_capability,
+    create_subagent_capability,
+)
 from .context import (
     ContextCompactor,
     ContextManager,
@@ -26,6 +32,8 @@ from .context import (
     effective_window_tokens,
     fallback_model_limits,
 )
+from .core.conversation import QueueSnapshot
+from .core.harness import EventListener
 from .core.messages import AgentMessage, AssistantMessage, TextContent, UserMessage
 from .core.provider import ModelProvider
 from .execution_control import ExecutionControl
@@ -76,7 +84,6 @@ from .tooling import ToolEnvironment, ToolRegistry, ToolResult, ToolRuntime
 from .tooling.builtin import create_builtin_tools
 from .tooling.context import ToolContext
 from .tooling.internal import create_internal_tools
-from .tooling.mcp import create_mcp_tool
 from .tooling.middleware import (
     AuditMiddleware,
     CancellationMiddleware,
@@ -202,18 +209,19 @@ class Agent:
 
         if tool_registry is not None and custom_tools is not None:
             raise ValueError("tool_registry and custom_tools cannot be combined")
-        if tool_registry is None:
-            selected_tool_names = (
-                {tool["name"] for tool in custom_tools}
-                if custom_tools is not None
-                else None
-            )
+        _created_own_registry = tool_registry is None
+        selected_tool_names = (
+            {tool["name"] for tool in custom_tools}
+            if custom_tools is not None
+            else None
+        )
+        if _created_own_registry:
             self.tool_registry = ToolRegistry()
             for tool in [*create_builtin_tools(), *create_internal_tools()]:
                 if selected_tool_names is None or tool.name in selected_tool_names:
                     self.tool_registry.register(tool)
         else:
-            self.tool_registry = tool_registry
+            self.tool_registry = cast(ToolRegistry, tool_registry)
 
         # 系统提示词按前缀缓存拆成静态核心和动态尾部。项目指令改由 Provider
         # Overlay 注入，既不破坏缓存边界，也不污染 canonical Session history。
@@ -285,6 +293,13 @@ class Agent:
         self._mcp_initialized = False
         self._subagent_factory = SubagentFactory(self)
 
+        self._register_capabilities(
+            mcp_enabled=mcp_enabled,
+            is_sub_agent=is_sub_agent,
+            selected_tool_names=selected_tool_names,
+            created_own_registry=_created_own_registry,
+        )
+
         self._lifecycle = AgentLifecycle(self)
         provider = self._lifecycle.build_core_provider(self._thinking_level)
         self._runtime_coordinator = AgentRuntimeCoordinator(
@@ -304,6 +319,37 @@ class Agent:
         self._session_memory_coord.set_query_service(
             self._build_core_memory_query_service()
         )
+
+    def _register_capabilities(
+        self,
+        *,
+        mcp_enabled: bool,
+        is_sub_agent: bool,
+        selected_tool_names: set[str] | None,
+        created_own_registry: bool,
+    ) -> None:
+        """注册 Agent 能力并将其提供的工具接入自有注册表。"""
+        self._capability_registry = CapabilityRegistry()
+        mcp_is_root = (
+            mcp_enabled and not is_sub_agent and self.tool_environment.owns_mcp_manager
+        )
+        self._mcp_capability = McpCapability(
+            mcp_manager=self._mcp_manager,
+            tool_registry=self.tool_registry,
+            emit_notice=lambda msg: self._emit_notice(msg),
+            is_already_initialized=lambda: self._mcp_initialized,
+            mark_initialized=lambda: setattr(self, "_mcp_initialized", True),
+            is_root=mcp_is_root,
+        )
+        self._capability_registry.register(self._mcp_capability.spec)
+        self._capability_registry.register(create_skill_capability())
+        self._capability_registry.register(create_subagent_capability())
+
+        if created_own_registry:
+            for source in self._capability_registry.tool_sources:
+                for tool in source.tools():
+                    if selected_tool_names is None or tool.name in selected_tool_names:
+                        self.tool_registry.register(tool)
 
     def _resolve_thinking_mode(self) -> str:
         if not self.thinking:
@@ -546,6 +592,69 @@ class Agent:
     def abort(self) -> None:
         self._runtime_coordinator.abort()
 
+    # 应用层只通过这些语义方法访问会话，不接触 Core Runtime 的所有权细节。
+
+    @property
+    def cwd(self) -> Path:
+        return Path(self.tool_context.cwd)
+
+    @property
+    def provider_name(self) -> str:
+        return "openai-compatible" if self.use_openai else "anthropic"
+
+    @property
+    def messages(self) -> tuple[AgentMessage, ...]:
+        return self._core_runtime.messages
+
+    def subscribe(self, listener: EventListener) -> Callable[[], None]:
+        return self._core_runtime.subscribe(listener)
+
+    async def prompt(self, content: str) -> None:
+        await self.chat(content)
+
+    async def continue_(self) -> None:
+        await self._core_runtime.continue_()
+
+    def steer(self, content: str) -> QueueSnapshot:
+        return self._core_runtime.steer(content)
+
+    def follow_up(self, content: str) -> QueueSnapshot:
+        return self._core_runtime.follow_up(content)
+
+    def queue_snapshot(self) -> QueueSnapshot:
+        return self._core_runtime.queue_snapshot()
+
+    def cancel(self) -> None:
+        self.abort()
+
+    @property
+    def cancelled(self) -> bool:
+        return self.is_aborted
+
+    async def compact_for_overflow(self) -> bool:
+        return await self.compact_core_context_for_overflow()
+
+    async def aclose(self) -> None:
+        await self.close()
+
+    async def resume(self, session_id: str) -> bool:
+        return await self.restore_session_id(session_id)
+
+    async def restore_latest(self) -> bool:
+        return await self.restore_latest_session()
+
+    async def new_session(self) -> None:
+        await self.clear_history()
+
+    def token_usage(self) -> UsageSnapshot:
+        return self.get_token_usage()
+
+    def provider_config(self) -> dict[str, Any]:
+        return self.get_api_config()
+
+    def configure_provider(self, **kwargs: Any) -> None:
+        self.configure_api(**kwargs)
+
     # ─── Core Runtime ────────────────────────────────────────
 
     async def _ensure_core_session_ready(self) -> None:
@@ -684,25 +793,20 @@ class Agent:
 
     # ─── 主对话入口 ──────────────────────────────────────────
 
-    async def _ensure_mcp_tools(self) -> None:
-        """仅由根 Agent 首次发现 MCP；失败作为 notice，不中断 Core 对话。"""
+    async def _before_turn_capabilities(self) -> None:
+        """Invoke all registered TurnParticipant hooks before a chat starts.
 
-        if (
-            not self._mcp_enabled
-            or self._mcp_initialized
-            or self.is_sub_agent
-            or not self.tool_environment.owns_mcp_manager
-        ):
-            return
-        self._mcp_initialized = True
-        try:
-            definitions = await self._mcp_manager.discover_tools()
-            for definition in definitions:
-                self.tool_registry.register(
-                    create_mcp_tool(self._mcp_manager, definition)
-                )
-        except Exception as error:
-            self._emit_notice(f"[mcp] Init failed: {error}")
+        This replaces the former ``_ensure_mcp_tools`` with a generic
+        capability-driven entry point.  Agent does not know which
+        capabilities exist or what they do.
+        """
+        for participant in self._capability_registry.turn_participants:
+            await participant.before_turn()
+
+    async def _after_turn_capabilities(self) -> None:
+        """调用所有已注册 Capability 的轮次结束钩子。"""
+        for participant in self._capability_registry.turn_participants:
+            await participant.after_turn()
 
     async def chat(self, user_message: str) -> None:
         await self._runtime_coordinator.chat(user_message)
@@ -739,9 +843,7 @@ class Agent:
         max_cost = self._budget.max_cost_usd
         max_turns = self._budget.max_turns
         budget_info = f" / ${max_cost} budget" if max_cost else ""
-        turn_info = (
-            f" | Turns: {usage.turns}/{max_turns}" if max_turns else ""
-        )
+        turn_info = f" | Turns: {usage.turns}/{max_turns}" if max_turns else ""
         cached = usage.cache_read_tokens
         billed_input = usage.input_tokens + usage.cache_write_tokens + cached
         hit_rate = round((cached / billed_input) * 100) if billed_input > 0 else 0
@@ -1157,8 +1259,12 @@ class Agent:
     # ─── 外部资源与 Memory 预取 ──────────────────────────────
 
     async def close(self) -> None:
-        """释放 MCP 子进程等外部资源，确保进程正常退出（issue #8）。"""
+        """释放 Capability、MCP 子进程等外部资源，确保进程正常退出（issue #8）。"""
         await self._runtime_coordinator.close()
+
+    async def _close_capabilities(self) -> None:
+        """关闭 Capability 声明的资源，具体顺序由 Registry 负责。"""
+        await self._capability_registry.close_all()
 
     async def _confirm_hook_trust(self, message: str) -> bool:
         # 项目 Hook 信任独立于工具权限；--yolo 也不能替仓库代码自动取得信任。

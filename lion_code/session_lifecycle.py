@@ -126,7 +126,7 @@ class SessionLifecycle:
             self._identity._emit_notice("Conversation compacted.")
 
     async def close(self) -> None:
-        """按既有 finally 链回收后台、Memory、Provider 与 MCP 环境。"""
+        """按既有 finally 链回收后台、Memory、Provider、Capability 与 MCP 环境。"""
 
         coord = self._coord
         try:
@@ -138,4 +138,7 @@ class SessionLifecycle:
                 try:
                     await coord._runtime.aclose()
                 finally:
-                    await self._session.tool_environment.close()
+                    try:
+                        await self._identity._close_capabilities()
+                    finally:
+                        await self._session.tool_environment.close()

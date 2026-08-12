@@ -16,7 +16,8 @@ _CORE = BOUNDARIES[0]
 _PROVIDERS = BOUNDARIES[1]
 _APPLICATION = BOUNDARIES[2]
 _TUI = BOUNDARIES[3]
-_PRODUCTION = BOUNDARIES[4]
+_CAPABILITIES = BOUNDARIES[4]
+_PRODUCTION = BOUNDARIES[5]
 
 LEGACY_MESSAGE_SYMBOLS = frozenset({"_anthropic_messages", "_openai_messages"})
 HARNESS_MUTATION_METHODS = frozenset({"clear_queues", "follow_up", "replace_messages"})
@@ -1028,6 +1029,54 @@ def test_tui_runtime_imports_stay_within_event_boundary() -> None:
     )
 
     assert not violations, f"TUI bypassed application/core events: {violations}"
+
+
+def test_capabilities_do_not_import_agent_engine() -> None:
+    violations = _forbidden_imports(
+        _source_files("capabilities"),
+        forbidden=_CAPABILITIES.forbidden_roots,
+    )
+
+    assert not violations, (
+        f"Capability SPI must not depend on the Agent engine: {violations}"
+    )
+
+
+_CAPABILITY_ANTIPATTERN_SYMBOLS = frozenset(
+    {
+        "CapabilityContext",
+        "ServiceLocator",
+        "AgentCapability",
+    }
+)
+
+
+def test_capabilities_do_not_reference_agent_harness() -> None:
+    """Capability SPI must not reference ``AgentHarness`` in any form."""
+    violations = {
+        _source_key(path): sorted(_agent_harness_references(_tree(path)))
+        for path in _source_files("capabilities")
+        if _agent_harness_references(_tree(path))
+    }
+    assert not violations, (
+        f"Capability SPI must not reference AgentHarness: {violations}"
+    )
+
+
+def test_capabilities_do_not_define_service_locator_or_god_context() -> None:
+    """Capability SPI must not define CapabilityContext, ServiceLocator, or a
+    monolithic AgentCapability interface."""
+    violations = {
+        _source_key(path): sorted(
+            _defined_symbols(_tree(path), _CAPABILITY_ANTIPATTERN_SYMBOLS)
+        )
+        for path in _source_files("capabilities")
+        if _defined_symbols(_tree(path), _CAPABILITY_ANTIPATTERN_SYMBOLS)
+    }
+    assert not violations, (
+        f"Capability SPI must not define god-context or service-locator types: "
+        f"{violations}"
+    )
 
 
 def test_providers_do_not_store_private_message_history() -> None:

@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"检查取消路径没有第二个 token、状态镜像或跨层 Owner 违规，并覆盖运行时边界回归。"}
+{"file":".trellis/spec/backend/usage-ownership.md","reason":"检查移除通用 max_turns 后，预算仍由共享 Ledger/Policy 在工具边界执行，且 follow-up 不被错误截断。"}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"检查 CapabilitySpec 字段真正不可变、ToolSource 返回类型正确、Registry 顺序和聚合契约未回归。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查受影响测试、lint、类型、compileall、import-linter 和 diff 质量门禁。"}

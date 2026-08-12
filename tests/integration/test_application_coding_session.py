@@ -39,7 +39,7 @@ from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 
 
-def _echo_lion_tool(gate: "asyncio.Event | None" = None) -> LionTool:
+def _echo_lion_tool(gate: asyncio.Event | None = None) -> LionTool:
     """echo 工具;传入 gate 时在放行前挂起,用于制造真实的运行中状态。"""
 
     async def execute(_ctx, _id, arguments, _on_update):
@@ -133,9 +133,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
     # ─── 构造约束 ────────────────────────────────────────────
 
-    async def test_uses_required_core_runtime(self) -> None:
+    async def test_uses_injected_backend(self) -> None:
         session, agent, _fake = self._make_session([])
-        self.assertIs(session._runtime, agent.core_runtime)
+        self.assertIs(session._backend, agent)
         self.assertIsNone(agent._terminal_renderer)
 
     async def test_structured_session_only_unsubscribes_terminal_renderer(self) -> None:
@@ -175,13 +175,17 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
             [event async for event in session.prompt("second")]
 
-        entries = await self._session_repository.storage_for(agent.session_id).read_all()
+        entries = await self._session_repository.storage_for(
+            agent.session_id
+        ).read_all()
         self.assertEqual(sum(entry.type == "session_info" for entry in entries), 1)
         self.assertEqual(sum(entry.type == "message" for entry in entries), 4)
         self.assertEqual(usage.snapshot().responses, 2)
         await session.aclose()
 
-    async def test_unconfigured_agent_reports_error_through_session_notice(self) -> None:
+    async def test_unconfigured_agent_reports_error_through_session_notice(
+        self,
+    ) -> None:
         from core.fakes import FakeProvider
 
         fake = FakeProvider([])
@@ -205,7 +209,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         events = [event async for event in session.prompt("hi")]
 
         self.assertTrue(
-            any(role == "error" and "API 未配置" in message for message, role in notices)
+            any(
+                role == "error" and "API 未配置" in message for message, role in notices
+            )
         )
         self.assertIsInstance(events[-1], AgentSettledEvent)
 
@@ -245,7 +251,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.messages[2].text, "echo:hi")
         self.assertIsInstance(events[-1], AgentSettledEvent)
 
-    async def test_session_memory_commands_share_task_handoff_and_dream_intents(self) -> None:
+    async def test_session_memory_commands_share_task_handoff_and_dream_intents(
+        self,
+    ) -> None:
         session, agent, _fake = self._make_session([])
         agent._session_memory = self._session_memory_repository.save(
             SessionMemory(
@@ -283,8 +291,13 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Previous handoff", snapshot or "")
         self.assertEqual(dream, "Dream 完成")
         agent.dream.assert_awaited_once()
-        self.assertIsNone(agent.session_memory.active_task if agent.session_memory else None)
-        self.assertIn("完成 handoff", agent.session_memory.completed if agent.session_memory else ())
+        self.assertIsNone(
+            agent.session_memory.active_task if agent.session_memory else None
+        )
+        self.assertIn(
+            "完成 handoff",
+            agent.session_memory.completed if agent.session_memory else (),
+        )
         self.assertEqual(session.messages, ())
 
     # ─── 运行中入队 ──────────────────────────────────────────
@@ -368,13 +381,15 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             pass
 
     async def test_context_overflow_compacts_and_retries_once(self) -> None:
-        session, agent, fake = self._make_session([
-            _stop_event("old answer"),
-            _stop_event("recent answer"),
-            _error_event("This model's maximum context length was exceeded."),
-            _stop_event("recovery summary"),
-            _stop_event("recovered answer"),
-        ])
+        session, agent, fake = self._make_session(
+            [
+                _stop_event("old answer"),
+                _stop_event("recent answer"),
+                _error_event("This model's maximum context length was exceeded."),
+                _stop_event("recovery summary"),
+                _stop_event("recovered answer"),
+            ]
+        )
         await self._prime_overflow_history(session)
 
         events = [event async for event in session.prompt("trigger overflow")]
@@ -420,7 +435,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 "recent answer",
             ],
         )
-        self.assertTrue(projected[3].startswith("trigger overflow\n\n<relevant-memory>"))
+        self.assertTrue(
+            projected[3].startswith("trigger overflow\n\n<relevant-memory>")
+        )
         self.assertIn("<session-memory>", projected[3])
 
         entries = await self._session_repository.storage_for(
@@ -440,12 +457,14 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_context_overflow_compaction_failure_settles(self) -> None:
-        session, _agent, fake = self._make_session([
-            _stop_event("old answer"),
-            _stop_event("recent answer"),
-            _error_event("context window exceeded"),
-            _error_event("summary unavailable"),
-        ])
+        session, _agent, fake = self._make_session(
+            [
+                _stop_event("old answer"),
+                _stop_event("recent answer"),
+                _error_event("context window exceeded"),
+                _error_event("summary unavailable"),
+            ]
+        )
         await self._prime_overflow_history(session)
 
         events = [event async for event in session.prompt("trigger overflow")]
@@ -456,15 +475,19 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(compaction_end.aborted)
         self.assertFalse(compaction_end.will_retry)
         self.assertIn("summary unavailable", compaction_end.error_message or "")
-        self.assertFalse(any(isinstance(event, AutoRetryStartEvent) for event in events))
+        self.assertFalse(
+            any(isinstance(event, AutoRetryStartEvent) for event in events)
+        )
         self.assertIsInstance(events[-1], AgentSettledEvent)
         self.assertEqual(fake.call_count, 4)
 
     async def test_context_overflow_without_old_context_does_not_compact(self) -> None:
-        session, agent, fake = self._make_session([
-            _stop_event("only prior answer"),
-            _error_event("context window exceeded"),
-        ])
+        session, agent, fake = self._make_session(
+            [
+                _stop_event("only prior answer"),
+                _error_event("context window exceeded"),
+            ]
+        )
         async for _ in session.prompt("only prior prompt"):
             pass
 
@@ -475,7 +498,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(compaction_end.aborted)
         self.assertFalse(compaction_end.will_retry)
-        self.assertFalse(any(isinstance(event, AutoRetryStartEvent) for event in events))
+        self.assertFalse(
+            any(isinstance(event, AutoRetryStartEvent) for event in events)
+        )
         self.assertIsInstance(events[-1], AgentSettledEvent)
         self.assertEqual(fake.call_count, 2)
         state = await self._session_repository.load(agent.session_id)
@@ -483,11 +508,13 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(state.compaction_entries), 0)
 
     async def test_cancel_during_overflow_compaction_does_not_retry(self) -> None:
-        session, agent, fake = self._make_session([
-            _stop_event("old answer"),
-            _stop_event("recent answer"),
-            _error_event("context length exceeded"),
-        ])
+        session, agent, fake = self._make_session(
+            [
+                _stop_event("old answer"),
+                _stop_event("recent answer"),
+                _error_event("context length exceeded"),
+            ]
+        )
         await self._prime_overflow_history(session)
 
         compaction_started = asyncio.Event()
@@ -513,7 +540,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(compaction_end.aborted)
         self.assertFalse(compaction_end.will_retry)
-        self.assertFalse(any(isinstance(event, AutoRetryStartEvent) for event in events))
+        self.assertFalse(
+            any(isinstance(event, AutoRetryStartEvent) for event in events)
+        )
         self.assertIsInstance(events[-1], AgentSettledEvent)
         self.assertEqual(fake.call_count, 3)
         state = await self._session_repository.load(agent.session_id)
@@ -521,13 +550,15 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(state.compaction_entries), 0)
 
     async def test_context_overflow_retry_failure_is_terminal(self) -> None:
-        session, _agent, fake = self._make_session([
-            _stop_event("old answer"),
-            _stop_event("recent answer"),
-            _error_event("too many tokens"),
-            _stop_event("recovery summary"),
-            _error_event("context limit still exceeded"),
-        ])
+        session, _agent, fake = self._make_session(
+            [
+                _stop_event("old answer"),
+                _stop_event("recent answer"),
+                _error_event("too many tokens"),
+                _stop_event("recovery summary"),
+                _error_event("context limit still exceeded"),
+            ]
+        )
         await self._prime_overflow_history(session)
 
         events = [event async for event in session.prompt("trigger overflow")]
@@ -549,9 +580,11 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.call_count, 5)
 
     async def test_non_overflow_provider_error_does_not_retry(self) -> None:
-        session, _agent, fake = self._make_session([
-            _error_event("service unavailable"),
-        ])
+        session, _agent, fake = self._make_session(
+            [
+                _error_event("service unavailable"),
+            ]
+        )
 
         events = [event async for event in session.prompt("hello")]
 
@@ -569,9 +602,11 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.call_count, 1)
 
     async def test_generic_limit_error_does_not_trigger_overflow_recovery(self) -> None:
-        session, _agent, fake = self._make_session([
-            _error_event("Requests per minute exceeded the limit"),
-        ])
+        session, _agent, fake = self._make_session(
+            [
+                _error_event("Requests per minute exceeded the limit"),
+            ]
+        )
 
         events = [event async for event in session.prompt("hello")]
 
@@ -604,23 +639,23 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
         state = await self._session_repository.load(agent.session_id)
         self.assertIsNotNone(state)
-        self.assertEqual(
-            [m.role for m in state.messages], [m.role for m in transcript]
-        )
+        self.assertEqual([m.role for m in state.messages], [m.role for m in transcript])
         self.assertEqual(state.messages[-1].text, transcript[-1].text)
 
-    async def test_configure_provider_keeps_runtime_binding(self) -> None:
+    async def test_configure_provider_keeps_backend_binding(self) -> None:
         from core.fakes import FakeProvider
 
         session, agent, original_provider = self._make_session([_stop_event("old")])
         original_runtime = agent.core_runtime
         replacement_provider = FakeProvider([_stop_event("new")])
 
-        with patch("lion_code.agent.create_provider", return_value=replacement_provider):
+        with patch(
+            "lion_code.agent.create_provider", return_value=replacement_provider
+        ):
             session.configure_provider(api_key="new-key")
 
         self.assertIs(agent.core_runtime, original_runtime)
-        self.assertIs(session._runtime, agent.core_runtime)
+        self.assertIs(session._backend, agent)
         async for _ in session.prompt("hello"):
             pass
         self.assertEqual(original_provider.call_count, 0)

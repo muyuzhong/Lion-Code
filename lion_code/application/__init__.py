@@ -1,11 +1,8 @@
-"""Lion 应用会话层。
+"""Application-owned coding-session facade and event contracts.
 
-向前端(TUI/CLI)暴露一个稳定的会话门面 ``LionCodingSession`` 与应用级
-事件模型 ``LionSessionEvent``。本层只做组合:内部复用 LionAgentRuntime、
-ToolRuntime、SessionRecorder/Repository、ContextManager、MemoryCoordinator,
-不实现第二套 Agent Loop,也不接触供应商消息格式。
-
-依赖方向:TUI → application → agent_runtime → core;禁止反向。
+``LionCodingSession`` consumes the small protocols from ``ports``.  Agent and
+runtime implementations provide those protocols structurally; this package
+does not import their implementation details.
 """
 
 from .events import (
@@ -23,22 +20,40 @@ from .events import (
     SessionOwnEvent,
     ThinkingLevelChangedEvent,
 )
+from .ports import (
+    CodingSessionBackend,
+    ControlPort,
+    ConversationPort,
+    QueueSnapshot,
+    SessionMemoryPort,
+    SessionPort,
+    SettingsPort,
+    UsagePort,
+)
 from .session import LionCodingSession, StreamingBehavior
 
 __all__ = [
     "AgentSettledEvent",
     "AutoRetryEndEvent",
     "AutoRetryStartEvent",
+    "CodingSessionBackend",
     "CompactionEndEvent",
     "CompactionReason",
     "CompactionStartEvent",
+    "ControlPort",
+    "ConversationPort",
     "LionCodingSession",
     "LionSessionEvent",
     "ProviderChangedEvent",
+    "QueueSnapshot",
     "QueueUpdateEvent",
     "SessionAgentEndEvent",
     "SessionChangedEvent",
+    "SessionMemoryPort",
     "SessionOwnEvent",
+    "SessionPort",
+    "SettingsPort",
     "StreamingBehavior",
     "ThinkingLevelChangedEvent",
+    "UsagePort",
 ]

@@ -524,7 +524,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         async def cancel_after_first_turn(event) -> None:
             if not cancelled["done"] and isinstance(event, TurnEndEvent):
-                agent.abort()
+                agent.core_runtime.cancel()
                 cancelled["done"] = True
 
         agent._core_runtime.subscribe(cancel_after_first_turn)

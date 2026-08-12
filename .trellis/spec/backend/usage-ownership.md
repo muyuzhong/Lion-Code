@@ -119,7 +119,9 @@ snapshot and checking the Policy. Therefore the tool call at the exact turn
 limit is stopped. Pure final-text responses do not increment turns. Runtime,
 `/goal`, and `/loop` evaluate the same Ledger through the same Policy; autonomy
 may retain its documented tick ceiling for text-only loops but may not create a
-second usage budget state.
+second usage budget state. The Coordinator must not pass `BudgetPolicy.max_turns`
+to the generic Harness loop: that loop counts provider iterations, including
+final-text responses and queued follow-ups, rather than Core tool boundaries.
 
 ### Reset and observer lifecycle
 
@@ -213,7 +215,7 @@ The minimum focused matrix is:
   nonzero Ledger state.
 - `tests/integration/test_agent_core_runtime.py`: clear/restore full reset,
   compaction/Plan tracking reset, observer rebuild identity, and shared owner.
-- `tests/application/test_coding_session.py`: typed snapshot boundary and
+- `tests/integration/test_application_coding_session.py`: typed snapshot boundary and
   terminal-toggle observer identity.
 - child, Skill, Dream, goal, and loop suites: cumulative aggregation and common
   budget decisions.

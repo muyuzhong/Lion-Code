@@ -130,7 +130,12 @@ class AgentLifecycle:
 def Agent.set_terminal_output(enabled: bool) -> None: ...
 
 class LionCodingSession:
-    def __init__(self, agent: Agent, *, terminal_output: bool = False) -> None: ...
+    def __init__(
+        self,
+        backend: CodingSessionBackend,
+        *,
+        terminal_output: bool = False,
+    ) -> None: ...
     def set_notice_fn(
         self,
         fn: Callable[[str, Literal["info", "error"]], None] | None,
@@ -154,6 +159,139 @@ class SessionMemoryRepository:
     def save(self, memory: SessionMemory) -> SessionMemory: ...
 
 def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
+```
+
+## Application Port Boundary
+
+### 1. Scope / Trigger
+
+This contract applies when a structured frontend consumes a coding session or
+when Agent/runtime composition changes the application-facing conversation,
+session, or settings surface.  The application owns the port definitions in
+`lion_code/application/ports.py`; runtime code implements them structurally and
+must not import the application package.
+
+### 2. Signatures
+
+```python
+@dataclass(frozen=True, slots=True)
+class QueueSnapshot:
+    steering: tuple[str, ...] = ()
+    follow_up: tuple[str, ...] = ()
+
+class ConversationPort(Protocol):
+    @property
+    def messages(self) -> tuple[AgentMessage, ...]: ...
+    def subscribe(self, listener: EventListener) -> Callable[[], None]: ...
+    async def prompt(self, content: str) -> None: ...
+    async def continue_(self) -> None: ...
+    def steer(self, content: str) -> QueueSnapshot: ...
+    def follow_up(self, content: str) -> QueueSnapshot: ...
+    def queue_snapshot(self) -> QueueSnapshot: ...
+    def cancel(self) -> None: ...
+    @property
+    def cancelled(self) -> bool: ...
+    async def compact_for_overflow(self) -> bool: ...
+
+class SessionPort(Protocol):
+    @property
+    def session_id(self) -> str: ...
+    async def list_sessions(self) -> list[dict[str, Any]]: ...
+    async def resume(self, session_id: str) -> bool: ...
+    async def restore_latest(self) -> bool: ...
+    async def new_session(self) -> None: ...
+    async def compact(self) -> None: ...
+    async def aclose(self) -> None: ...
+
+class SettingsPort(Protocol):
+    @property
+    def cwd(self) -> Path: ...
+    @property
+    def model(self) -> str: ...
+    @property
+    def provider_name(self) -> str: ...
+    @property
+    def permission_mode(self) -> PermissionMode: ...
+    @property
+    def api_configured(self) -> bool: ...
+    def provider_config(self) -> dict[str, Any]: ...
+    def configure_provider(self, **kwargs: Any) -> None: ...
+    @property
+    def thinking_level(self) -> str: ...
+    @property
+    def available_thinking_levels(self) -> tuple[str, ...]: ...
+    def set_thinking_level(self, level: str) -> str: ...
+    def cycle_thinking_level(self) -> str: ...
+
+class CodingSessionBackend(
+    ConversationPort, SessionPort, SettingsPort, UsagePort,
+    ControlPort, SessionMemoryPort, Protocol,
+): ...
+```
+
+### 3. Contracts
+
+- `LionCodingSession` stores one `_backend` and only calls the composed
+  application ports.  It must not store an Agent, Core Runtime, or Harness.
+- `messages` remains the canonical Core transcript projection.  The port does
+  not expose Harness queue containers or `AgentMessage` queue objects.
+- `QueueSnapshot` is a protocol-neutral Core value object and contains text
+  tuples only.  `Agent` and `LionAgentRuntime` translate their internal queue
+  state into it at the facade boundary.
+- The application owns event bridging, `AgentSettledEvent` timing, and the
+  one-at-most-one context-overflow compaction/retry policy.  Runtime owns the
+  primitive prompt, continuation, cancellation, and compaction operations.
+- Session and settings changes are commands on their respective backend owner;
+  application code does not rebind a cached runtime after provider changes.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|---|---|
+| Backend queue snapshot | Return immutable `tuple[str, ...]` fields |
+| Prompt while idle | Subscribe, drain events, then emit one settled event |
+| Prompt while running without behavior | Raise `RuntimeError` |
+| Prompt while running with `steer`/`follow_up` | Queue through the port and emit one `QueueUpdateEvent` |
+| Overflow terminal assistant error | Compact once, retry once through `continue_()`, never loop |
+| Abort before retry continuation | Emit failed retry and skip `continue_()` |
+| Backend run exception | Drain/unsubscribe and propagate; do not emit settled |
+| Provider configuration while running | Raise `RuntimeError` before calling the backend |
+
+### 5. Good / Base / Bad Cases
+
+- Good: `LionCodingSession(FakeCodingSessionBackend())` exercises event,
+  cancellation, session, and settings policy without constructing an Agent.
+- Base: `LionCodingSession(agent)` remains a valid composition-root call because
+  `Agent` structurally implements `CodingSessionBackend`.
+- Good: runtime converts queued `UserMessage` objects to a `QueueSnapshot`.
+- Bad: application reads `backend.harness.queued_messages` or caches
+  `agent.core_runtime` to bypass the port.
+- Bad: moving overflow retry into the runtime would make application settled
+  semantics and retry policy implicit rather than testable.
+
+### 6. Tests Required
+
+- `tests/application/test_coding_session_ports.py`: prompt event bridge,
+  steering/follow-up, queue snapshots, cancel, settled ordering, overflow
+  compaction/retry, abort during retry, session operations, and settings.
+- `tests/application/fakes.py`: deterministic backend with no Agent import.
+- `tests/integration/test_application_coding_session.py`: real Agent facade,
+  Core events, provider replacement, JSONL/session persistence, and overflow.
+- `tests/architecture/test_application_ports.py`: application import and
+  Harness-storage guards, TUI/runtime direction, runtime reverse-import guard,
+  and Fake backend source isolation.
+
+### 7. Wrong vs Correct
+
+```python
+# Wrong: application knows runtime ownership and Harness queue types.
+self._runtime = agent.core_runtime
+self._runtime.harness.queued_messages.steering
+
+# Correct: application consumes semantic ports only.
+self._backend = backend
+self._backend.queue_snapshot().steering
+await self._backend.compact_for_overflow()
 ```
 
 ## 3. Contracts
@@ -181,7 +319,10 @@ For cancellation, `ExecutionControl` owns the one Core `CancellationToken` and
 `AgentRuntimeCoordinator` owns begin/cancel orchestration, including Memory prefetch,
 Core stream, compaction, explicit abort, and timeout side effects. Standalone
 `AgentHarness` owns its local token only when no external cancellation view is
-supplied.
+supplied. When a coordinator-owned `LionAgentRuntime` receives that external
+view, its `cancel()` command must route back to `ExecutionControl.cancel()`;
+calling `AgentHarness.cancel()` alone is a no-op because the Harness does not own
+the external token.
 
 For permission state, `PermissionController` owns one `PermissionState` containing
 the active `PermissionMode` and `confirmed_values`. `Agent.permission_mode` is a
@@ -331,8 +472,10 @@ Usage has its own executable contract in
 
 ### Frontends
 
-- Structured frontends construct `LionCodingSession(agent, terminal_output=False)`
-  and consume Core/application events. Instance-level notice, confirmation, and Plan
+- Structured frontends construct `LionCodingSession(backend, terminal_output=False)`
+  and consume Core/application events. The composition root may pass `Agent`
+  because it structurally implements `CodingSessionBackend`; frontends do not
+  import the runtime engine. Instance-level notice, confirmation, and Plan
   callbacks cover non-streaming interaction.
 - Direct Agent/REPL use keeps terminal output enabled and renders through `ui.print_*`.
 - Never add a process-global sink or redirect stdout to feed Textual. The notice
@@ -443,7 +586,7 @@ lint-imports --no-cache
 python -m pytest -q tests/architecture/test_runtime_boundaries.py
 ~~~
 
-pyproject.toml contains these five import-linter contracts:
+pyproject.toml contains these six import-linter contracts:
 
 - core cannot depend on providers, tooling, permission/Plan/Usage state, observers,
   application, or tui, including indirect paths.
@@ -455,6 +598,9 @@ pyproject.toml contains these five import-linter contracts:
 - tui cannot directly import a runtime engine layer. It consumes
   application / core events; config, prompt, and version remain narrow
   presentation/configuration exceptions.
+- capabilities cannot depend on the Agent engine (`agent`, `agent_lifecycle`,
+  `agent_runtime`). The Capability SPI is a separate layer from the Agent
+  composition root; see [Capability SPI](./capability-spi.md).
 - Product code cannot import tests or benchmarks.
 
 tests/architecture/test_runtime_boundaries.py parses production source and
@@ -486,6 +632,10 @@ also rejects patterns an import graph cannot express:
   state, permission or prompt by hand.
 - Usage single-writer, composition, projection, and reverse-import scanners follow
   [Usage Ownership](./usage-ownership.md).
+- Capability SPI source importing `agent`, `agent_lifecycle`, or
+  `agent_runtime`; referencing `AgentHarness`; or defining
+  `CapabilityContext`, `ServiceLocator`, or `AgentCapability` god-object
+  types. See [Capability SPI](./capability-spi.md).
 
 When a legitimate architecture move requires a new exception, change the
 runtime code, this contract, the AST allowlist, and the focused test in one
@@ -502,7 +652,7 @@ exception, or silently broaden an allowlist to make a regression pass.
 - `tests/session_runtime/`: append/replay ordering, compaction projection, incomplete
   tails, invalid legacy data, and same-ID precedence.
 - `tests/runtime/test_terminal_renderer.py` and
-  `tests/application/test_coding_session.py`: observer identity, usage continuity,
+  `tests/integration/test_application_coding_session.py`: observer identity, usage continuity,
   structured-frontend terminal suppression, and notice callbacks.
 - `tests/runtime/test_agent_runtime.py`: `agent_runtime` imports without importing
   `lion_code.agent`, and a constructed `Agent` exposes the coordinator's one Core
@@ -540,7 +690,7 @@ exception, or silently broaden an allowlist to make a regression pass.
   root-to-cwd instruction precedence, non-destructive three-layer projection,
   `/clear`/restore lifecycle, and fixed per-turn overlays.
 - `tests/test_session_memory.py`, `tests/test_dream.py`,
-  `tests/application/test_coding_session.py`, and `tests/test_cli.py`: deterministic
+  `tests/integration/test_application_coding_session.py`, and `tests/test_cli.py`: deterministic
   tool evidence, task/handoff persistence, filtered Dream candidates, and matching
   REPL/TUI command intents.
 - `tests/test_context_formal_benchmark.py`: offline benchmark imports without the
@@ -581,7 +731,7 @@ outcome = agent.plan.enter()
 await agent.plan.exit()
 agent.plan.reset_for_new_session()
 agent.plan.complete_context_reset()
-session = LionCodingSession(agent, terminal_output=False)
+session = LionCodingSession(backend, terminal_output=False)
 session.set_notice_fn(app_notice)
 storage = repository.storage_for(session_id)
 # AgentLifecycle calls host._create_provider(**provider_kwargs).

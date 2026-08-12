@@ -37,12 +37,12 @@ from .events import (
     QueueUpdateEvent,
     SessionAgentEndEvent,
 )
+from .ports import CodingSessionBackend
 from .prompt_templates import PromptTemplate
 from .provider_settings import ModelChoice, load_model_choices, remember_model
 from .skills import Skill
 
 if TYPE_CHECKING:
-    from lion_code.agent import Agent
     from lion_code.permission_state import PermissionMode
     from lion_code.usage import UsageSnapshot
 type StreamingBehavior = Literal["steer", "follow_up"]
@@ -72,12 +72,16 @@ def _is_context_overflow_error(message: AssistantMessage | None) -> bool:
 
 
 class LionCodingSession:
-    """把 ``Agent``(Core Runtime 路径)包装为前端可消费的会话门面。"""
+    """前端可消费的 application 会话门面，依赖稳定 backend ports。"""
 
-    def __init__(self, agent: Agent, *, terminal_output: bool = False) -> None:
-        self._agent = agent
-        self._agent.set_terminal_output(terminal_output)
-        self._runtime = agent.core_runtime
+    def __init__(
+        self,
+        backend: CodingSessionBackend,
+        *,
+        terminal_output: bool = False,
+    ) -> None:
+        self._backend = backend
+        self._backend.set_terminal_output(terminal_output)
         self._running = False
         self._command_registry = create_default_command_registry()
         self._skills_cache: tuple[Skill, ...] | None = None
@@ -86,27 +90,27 @@ class LionCodingSession:
 
     @property
     def cwd(self) -> Path:
-        return Path(self._agent.tool_context.cwd)
+        return self._backend.cwd
 
     @property
     def model(self) -> str:
-        return self._agent.model
+        return self._backend.model
 
     @property
     def provider_name(self) -> str:
-        return "openai-compatible" if self._agent.use_openai else "anthropic"
+        return self._backend.provider_name
 
     @property
     def permission_mode(self) -> PermissionMode:
-        return self._agent.permission_mode
+        return self._backend.permission_mode
 
     @property
     def session_id(self) -> str:
-        return self._agent.session_id
+        return self._backend.session_id
 
     @property
     def api_configured(self) -> bool:
-        return self._agent.api_configured
+        return self._backend.api_configured
 
     # ─── 状态 ────────────────────────────────────────────────
 
@@ -122,19 +126,15 @@ class LionCodingSession:
     @property
     def messages(self) -> tuple[AgentMessage, ...]:
         """Canonical transcript 快照(不含 Memory overlay 等临时投影)。"""
-        return self._runtime.messages
+        return self._backend.messages
 
     @property
     def queued_steering_messages(self) -> tuple[str, ...]:
-        return tuple(
-            message.text for message in self._runtime.harness.queued_messages.steering
-        )
+        return self._backend.queue_snapshot().steering
 
     @property
     def queued_follow_up_messages(self) -> tuple[str, ...]:
-        return tuple(
-            message.text for message in self._runtime.harness.queued_messages.follow_up
-        )
+        return self._backend.queue_snapshot().follow_up
 
     def queue_update_event(self) -> QueueUpdateEvent:
         """把当前队列状态打包为事件,供前端主动同步。"""
@@ -164,64 +164,63 @@ class LionCodingSession:
                     "'follow_up' 将消息入队"
                 )
             if streaming_behavior == "steer":
-                self._runtime.harness.steer(content)
+                self._backend.steer(content)
             else:
-                self._runtime.harness.follow_up(content)
+                self._backend.follow_up(content)
             yield self.queue_update_event()
             return
 
-        async for event in self._drive(self._agent.chat(content)):
+        async for event in self._drive(self._backend.prompt(content)):
             yield event
 
     async def continue_(self) -> AsyncIterator[LionSessionEvent]:
         """不追加用户消息,从当前上下文继续运行。"""
         if self.is_running:
             raise RuntimeError("会话正在运行,无法 continue_")
-        async for event in self._drive(self._runtime.continue_()):
+        async for event in self._drive(self._backend.continue_()):
             yield event
 
     def cancel(self) -> None:
         """取消当前一轮:同时中断模型流、工具执行与在途 Memory 预取。"""
-        self._agent.abort()
+        self._backend.cancel()
 
     async def aclose(self) -> None:
         """关闭底层 Agent(落盘会话、回收 Memory 任务与 MCP 连接)。"""
-        await self._agent.close()
+        await self._backend.aclose()
 
     # ─── 会话管理 ────────────────────────────────────────────
 
     async def list_sessions(self) -> list[dict]:
-        return await self._agent.list_sessions()
+        return await self._backend.list_sessions()
 
     async def resume(self, session_id: str) -> bool:
-        return await self._agent.restore_session_id(session_id)
+        return await self._backend.resume(session_id)
 
     async def restore_latest(self) -> bool:
-        return await self._agent.restore_latest_session()
+        return await self._backend.restore_latest()
 
     async def new_session(self) -> None:
-        await self._agent.clear_history()
+        await self._backend.new_session()
 
     # ─── 压缩 / 用量 ─────────────────────────────────────────
 
     async def compact(self) -> None:
-        await self._agent.compact()
+        await self._backend.compact()
 
     def token_usage(self) -> UsageSnapshot:
         """返回当前 Agent 的冻结 UsageSnapshot。"""
-        return self._agent.get_token_usage()
+        return self._backend.token_usage()
 
     # ─── Provider / 模型配置 ─────────────────────────────────
 
     def get_provider_config(self) -> dict:
-        return self._agent.get_api_config()
+        return self._backend.provider_config()
 
     def configure_provider(self, **kwargs: Any) -> None:
         """仅在会话空闲时切换模型或凭证。"""
         if self._running:
             raise RuntimeError("会话运行中，无法切换 Provider 或模型")
-        self._agent.configure_api(**kwargs)
-        self._runtime = self._agent.core_runtime
+        self._backend.configure_provider(**kwargs)
         if kwargs.get("model"):
             remember_model(provider=self.provider_name, model=kwargs["model"])
 
@@ -240,24 +239,24 @@ class LionCodingSession:
     @property
     def thinking_level(self) -> str:
         """当前 thinking 档位(off..xhigh)。"""
-        return self._agent.thinking_level
+        return self._backend.thinking_level
 
     @property
     def available_thinking_levels(self) -> tuple[str, ...]:
         """当前后端支持的 thinking 档位。"""
-        return self._agent.available_thinking_levels
+        return self._backend.available_thinking_levels
 
     def set_thinking_level(self, level: str) -> str:
         """设定 thinking 档位;返回生效档位(未变也返回当前值)。"""
         if self._running:
             raise RuntimeError("会话运行中，无法切换 thinking 档位")
-        return self._agent.set_thinking_level(level)
+        return self._backend.set_thinking_level(level)
 
     def cycle_thinking_level(self) -> str:
         """循环到下一档;返回生效档位。"""
         if self._running:
             raise RuntimeError("会话运行中，无法切换 thinking 档位")
-        return self._agent.cycle_thinking_level()
+        return self._backend.cycle_thinking_level()
 
     # ─── 技能 / 模板视图(补全与 picker 消费)─────────────────
 
@@ -302,19 +301,19 @@ class LionCodingSession:
         if self._running:
             raise RuntimeError("会话运行中，取消当前任务后再执行命令")
         if result.task_action == "show":
-            return self._agent.show_active_task()
+            return self._backend.show_active_task()
         if result.task_action == "switch":
             if result.task_text is None:
                 raise ValueError("缺少要切换的任务")
-            return self._agent.switch_session_task(result.task_text)
+            return self._backend.switch_session_task(result.task_text)
         if result.task_action == "done":
-            return self._agent.finish_session_task()
+            return self._backend.finish_session_task()
         if result.session_memory_requested:
-            return self._agent.show_session_memory()
+            return self._backend.show_session_memory()
         if result.handoff_requested:
-            return self._agent.create_session_handoff()
+            return self._backend.create_session_handoff()
         if result.dream_requested:
-            return await self._agent.dream()
+            return await self._backend.dream()
         return None
 
     # ─── Lion 特有交互(权限确认 / Plan 审批)─────────────────
@@ -322,12 +321,12 @@ class LionCodingSession:
     def set_confirm_fn(
         self, fn: Callable[[str], Awaitable[bool]] | None
     ) -> None:
-        self._agent.set_confirm_fn(fn)
+        self._backend.set_confirm_fn(fn)
 
     def set_plan_approval_fn(
         self, fn: Callable[[str], Awaitable[dict]] | None
     ) -> None:
-        self._agent.set_plan_approval_fn(fn)
+        self._backend.set_plan_approval_fn(fn)
 
     def set_notice_fn(
         self,
@@ -335,12 +334,13 @@ class LionCodingSession:
     ) -> None:
         """把 Agent 的非对话状态交给当前前端实例。"""
 
-        self._agent.set_notice_fn(fn)
+        self._backend.set_notice_fn(fn)
 
     def toggle_plan_mode(self) -> None:
-        self._agent.toggle_plan_mode()
+        self._backend.toggle_plan_mode()
 
     # ─── 事件桥 ──────────────────────────────────────────────
+    # 统一承载正常运行与 overflow retry 的事件桥接。
 
     async def _drive(self, run) -> AsyncIterator[LionSessionEvent]:
         """驱动一个 Agent 协程,把订阅事件转成异步流并补应用级事件。
@@ -351,7 +351,7 @@ class LionCodingSession:
         前端以异常路径处理)。
         """
         queue: asyncio.Queue[AgentEvent] = asyncio.Queue()
-        unsubscribe = self._runtime.subscribe(queue.put_nowait)
+        unsubscribe = self._backend.subscribe(queue.put_nowait)
         task = asyncio.ensure_future(run)
         retry_started = False
         terminal_assistant: AssistantMessage | None = None
@@ -427,7 +427,7 @@ class LionCodingSession:
 
                 yield CompactionStartEvent(reason="overflow")
                 try:
-                    compacted = await self._agent.compact_core_context_for_overflow()
+                    compacted = await self._backend.compact_for_overflow()
                 except asyncio.CancelledError:
                     yield CompactionEndEvent(
                         reason="overflow",
@@ -453,7 +453,7 @@ class LionCodingSession:
                     )
                     break
 
-                if self._agent.is_aborted:
+                if self._backend.cancelled:
                     yield CompactionEndEvent(
                         reason="overflow",
                         aborted=True,
@@ -472,18 +472,17 @@ class LionCodingSession:
                     attempt=1,
                     max_attempts=1,
                     delay_ms=0,
-                    error_message=(
-                        terminal_assistant.error_message or "Context overflow"
-                    ),
+                    error_message=getattr(terminal_assistant, "error_message", None)
+                    or "Context overflow",
                 )
-                if self._agent.is_aborted:
+                if self._backend.cancelled:
                     yield AutoRetryEndEvent(
                         success=False,
                         attempt=1,
                         final_error="aborted",
                     )
                     break
-                task = asyncio.ensure_future(self._runtime.continue_())
+                task = asyncio.ensure_future(self._backend.continue_())
         finally:
             unsubscribe()
             if task.done():

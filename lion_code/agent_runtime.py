@@ -35,11 +35,12 @@ from lion_code.core import (
     AgentHarnessConfig,
     AgentMessage,
     EventListener,
+    QueueSnapshot,
 )
 from lion_code.core.cancellation import CancellationView
 from lion_code.core.events import AgentEvent, MessageEndEvent, MessageUpdateEvent
 from lion_code.core.loop import BeforeToolCalls, PrepareContext
-from lion_code.core.messages import AssistantMessage, UserMessage
+from lion_code.core.messages import AssistantMessage, UserMessage, message_text
 from lion_code.core.provider import ModelProvider
 from lion_code.core.provider_events import TextDeltaEvent
 from lion_code.execution_control import ExecutionControl
@@ -113,12 +114,14 @@ class LionAgentRuntime(ReadOnlyMessageSource):
         get_system: Callable[[], str],
         tool_runtime: ToolRuntime,
         cancellation: CancellationView | None = None,
+        cancel_callback: Callable[[], None] | None = None,
         prepare_context: PrepareContext | None = None,
         max_turns: int | None = None,
         before_tool_calls: BeforeToolCalls | None = None,
     ) -> None:
         self._provider = provider
         self._tool_runtime = tool_runtime
+        self._cancel_callback = cancel_callback
 
         self.harness = AgentHarness(
             AgentHarnessConfig(
@@ -187,6 +190,9 @@ class LionAgentRuntime(ReadOnlyMessageSource):
 
     def cancel(self) -> None:
         """请求取消当前正在进行的模型流。"""
+        if self._cancel_callback is not None:
+            self._cancel_callback()
+            return
         self.harness.cancel()
 
     async def aclose(self) -> None:
@@ -199,6 +205,33 @@ class LionAgentRuntime(ReadOnlyMessageSource):
     def messages(self) -> tuple[AgentMessage, ...]:
         """返回当前对话的消息快照。"""
         return self.harness.messages
+
+    def steer(self, content: str) -> QueueSnapshot:
+        """将新的用户消息加入流中操作队列。"""
+
+        self.harness.steer(content)
+        return self.queue_snapshot()
+
+    def follow_up(self, content: str) -> QueueSnapshot:
+        """将新的用户消息加入本轮后续队列。"""
+
+        self.harness.follow_up(content)
+        return self.queue_snapshot()
+
+    def queue_snapshot(self) -> QueueSnapshot:
+        """返回只包含文本的队列快照，不泄漏 Harness 类型。"""
+
+        queued = self.harness.queued_messages
+        return QueueSnapshot(
+            steering=tuple(message_text(message) for message in queued.steering),
+            follow_up=tuple(message_text(message) for message in queued.follow_up),
+        )
+
+    @property
+    def cancelled(self) -> bool:
+        """返回运行协调器的取消视图。"""
+
+        return self.harness._cancellation.is_cancelled()
 
 
 # ─── 窄端口：按 coordinator 实际访问模式分组 ──────────────────
@@ -232,7 +265,11 @@ class RuntimeIdentityHost(Protocol):
 
     def _apply_core_thinking_level(self, level: ThinkingLevel) -> None: ...
 
-    async def _ensure_mcp_tools(self) -> None: ...
+    async def _before_turn_capabilities(self) -> None: ...
+
+    async def _after_turn_capabilities(self) -> None: ...
+
+    async def _close_capabilities(self) -> None: ...
 
 
 class SessionStateHost(Protocol):
@@ -325,6 +362,7 @@ class AgentRuntimeCoordinator:
             get_system=lambda: self._identity._system_prompt,
             tool_runtime=tool_runtime,
             cancellation=execution.cancellation,
+            cancel_callback=execution.cancel,
             prepare_context=self.prepare_core_context,
             max_turns=budget.max_turns,
             before_tool_calls=self.before_core_tool_calls,
@@ -704,43 +742,47 @@ class AgentRuntimeCoordinator:
         memory = self._memory
         self._execution.begin()
         identity._last_stop_reason = None
-        await identity._ensure_mcp_tools()
-        if not identity.api_configured:
-            identity._emit_notice(
-                "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
-                "或在 TUI 中用 /model 配置。",
-                role="error",
-            )
-            return
-        await self.ensure_core_session_ready()
-        if self._execution.cancelled:
-            return
-        await self.compact_core_context_if_needed()
-        if self._execution.cancelled:
-            return
-        turn_start_index = len(self._runtime.messages)
-        memory._prepare_turn_memory_snapshot(user_message)
+        await identity._before_turn_capabilities()
         try:
-            await self._runtime.prompt(user_message)
-            while (
-                not self._execution.cancelled and await self.apply_plan_context_reset()
-            ):
-                if self._execution.cancelled:
-                    break
-                await self._runtime.continue_()
-            self.sync_core_outcome()
-            self._core_compaction_required = self._context_manager.should_compact(
-                self.context_runtime_state()
-            )
-        finally:
+            if not identity.api_configured:
+                identity._emit_notice(
+                    "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
+                    "或在 TUI 中用 /model 配置。",
+                    role="error",
+                )
+                return
+            await self.ensure_core_session_ready()
+            if self._execution.cancelled:
+                return
+            await self.compact_core_context_if_needed()
+            if self._execution.cancelled:
+                return
+            turn_start_index = len(self._runtime.messages)
+            memory._prepare_turn_memory_snapshot(user_message)
             try:
-                if not identity.is_sub_agent:
-                    await memory._update_session_memory_after_turn(
-                        user_message,
-                        turn_start_index,
-                    )
+                await self._runtime.prompt(user_message)
+                while (
+                    not self._execution.cancelled
+                    and await self.apply_plan_context_reset()
+                ):
+                    if self._execution.cancelled:
+                        break
+                    await self._runtime.continue_()
+                self.sync_core_outcome()
+                self._core_compaction_required = self._context_manager.should_compact(
+                    self.context_runtime_state()
+                )
             finally:
-                memory._turn_memory_overlays = memory._build_turn_memory_overlays()
+                try:
+                    if not identity.is_sub_agent:
+                        await memory._update_session_memory_after_turn(
+                            user_message,
+                            turn_start_index,
+                        )
+                finally:
+                    memory._turn_memory_overlays = memory._build_turn_memory_overlays()
+        finally:
+            await identity._after_turn_capabilities()
 
     async def run_once(self, prompt: str) -> dict[str, Any]:
         """运行一次并返回捕获的文本与本次 token 差值。"""

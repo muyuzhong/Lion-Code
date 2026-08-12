@@ -1071,3 +1071,46 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 32: 修复运行时预算取消与 Capability 类型边界
+
+**Date**: 2026-08-11
+**Task**: 修复运行时预算取消与 Capability 类型边界
+**Branch**: `muyuzhong/capability-spi-foundation`
+
+### Summary
+
+修复 Coordinator 的通用 max_turns 截断、外部取消命令路由、CapabilitySpec 容器归一化和 Capability 测试类型契约；完整 pytest 通过 666 项，6 项跳过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `557cdf8` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 33: 完成 Application Port 架构重构
+
+**Date**: 2026-08-12
+**Task**: 完成 Application Port 架构重构
+**Branch**: `muyuzhong/capability-spi-foundation`
+
+### Summary
+
+完成 Application Ports、QueueSnapshot、Agent/runtime facade、Fake backend 与架构门禁；704 个测试通过，已归档任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4a0725b` | (see git log) |
+| `f85e248` | (see git log) |
+
+### Status
+
+[OK] **Completed**
