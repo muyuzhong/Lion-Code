@@ -39,7 +39,7 @@ from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 
 
-def _echo_lion_tool(gate: "asyncio.Event | None" = None) -> LionTool:
+def _echo_lion_tool(gate: asyncio.Event | None = None) -> LionTool:
     """echo 工具;传入 gate 时在放行前挂起,用于制造真实的运行中状态。"""
 
     async def execute(_ctx, _id, arguments, _on_update):
@@ -133,9 +133,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
     # ─── 构造约束 ────────────────────────────────────────────
 
-    async def test_uses_required_core_runtime(self) -> None:
+    async def test_uses_injected_backend(self) -> None:
         session, agent, _fake = self._make_session([])
-        self.assertIs(session._runtime, agent.core_runtime)
+        self.assertIs(session._backend, agent)
         self.assertIsNone(agent._terminal_renderer)
 
     async def test_structured_session_only_unsubscribes_terminal_renderer(self) -> None:
@@ -609,7 +609,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(state.messages[-1].text, transcript[-1].text)
 
-    async def test_configure_provider_keeps_runtime_binding(self) -> None:
+    async def test_configure_provider_keeps_backend_binding(self) -> None:
         from core.fakes import FakeProvider
 
         session, agent, original_provider = self._make_session([_stop_event("old")])
@@ -620,7 +620,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             session.configure_provider(api_key="new-key")
 
         self.assertIs(agent.core_runtime, original_runtime)
-        self.assertIs(session._runtime, agent.core_runtime)
+        self.assertIs(session._backend, agent)
         async for _ in session.prompt("hello"):
             pass
         self.assertEqual(original_provider.call_count, 0)
