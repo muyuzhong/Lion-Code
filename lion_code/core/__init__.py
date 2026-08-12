@@ -3,6 +3,7 @@
 # ruff: noqa: F401 - this module intentionally defines the public facade
 
 from lion_code.core.cancellation import CancellationToken, CancellationView
+from lion_code.core.conversation import QueueSnapshot
 from lion_code.core.events import (
     AgentEndEvent,
     AgentEvent,

@@ -35,11 +35,12 @@ from lion_code.core import (
     AgentHarnessConfig,
     AgentMessage,
     EventListener,
+    QueueSnapshot,
 )
 from lion_code.core.cancellation import CancellationView
 from lion_code.core.events import AgentEvent, MessageEndEvent, MessageUpdateEvent
 from lion_code.core.loop import BeforeToolCalls, PrepareContext
-from lion_code.core.messages import AssistantMessage, UserMessage
+from lion_code.core.messages import AssistantMessage, UserMessage, message_text
 from lion_code.core.provider import ModelProvider
 from lion_code.core.provider_events import TextDeltaEvent
 from lion_code.execution_control import ExecutionControl
@@ -204,6 +205,33 @@ class LionAgentRuntime(ReadOnlyMessageSource):
     def messages(self) -> tuple[AgentMessage, ...]:
         """返回当前对话的消息快照。"""
         return self.harness.messages
+
+    def steer(self, content: str) -> QueueSnapshot:
+        """将新的用户消息加入流中操作队列。"""
+
+        self.harness.steer(content)
+        return self.queue_snapshot()
+
+    def follow_up(self, content: str) -> QueueSnapshot:
+        """将新的用户消息加入本轮后续队列。"""
+
+        self.harness.follow_up(content)
+        return self.queue_snapshot()
+
+    def queue_snapshot(self) -> QueueSnapshot:
+        """返回只包含文本的队列快照，不泄漏 Harness 类型。"""
+
+        queued = self.harness.queued_messages
+        return QueueSnapshot(
+            steering=tuple(message_text(message) for message in queued.steering),
+            follow_up=tuple(message_text(message) for message in queued.follow_up),
+        )
+
+    @property
+    def cancelled(self) -> bool:
+        """返回运行协调器的取消视图。"""
+
+        return self.harness._cancellation.is_cancelled()
 
 
 # ─── 窄端口：按 coordinator 实际访问模式分组 ──────────────────

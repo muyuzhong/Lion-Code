@@ -32,6 +32,8 @@ from .context import (
     effective_window_tokens,
     fallback_model_limits,
 )
+from .core.conversation import QueueSnapshot
+from .core.harness import EventListener
 from .core.messages import AgentMessage, AssistantMessage, TextContent, UserMessage
 from .core.provider import ModelProvider
 from .execution_control import ExecutionControl
@@ -578,6 +580,69 @@ class Agent:
 
     def abort(self) -> None:
         self._runtime_coordinator.abort()
+
+    # 应用层只通过这些语义方法访问会话，不接触 Core Runtime 的所有权细节。
+
+    @property
+    def cwd(self) -> Path:
+        return Path(self.tool_context.cwd)
+
+    @property
+    def provider_name(self) -> str:
+        return "openai-compatible" if self.use_openai else "anthropic"
+
+    @property
+    def messages(self) -> tuple[AgentMessage, ...]:
+        return self._core_runtime.messages
+
+    def subscribe(self, listener: EventListener) -> Callable[[], None]:
+        return self._core_runtime.subscribe(listener)
+
+    async def prompt(self, content: str) -> None:
+        await self.chat(content)
+
+    async def continue_(self) -> None:
+        await self._core_runtime.continue_()
+
+    def steer(self, content: str) -> QueueSnapshot:
+        return self._core_runtime.steer(content)
+
+    def follow_up(self, content: str) -> QueueSnapshot:
+        return self._core_runtime.follow_up(content)
+
+    def queue_snapshot(self) -> QueueSnapshot:
+        return self._core_runtime.queue_snapshot()
+
+    def cancel(self) -> None:
+        self.abort()
+
+    @property
+    def cancelled(self) -> bool:
+        return self.is_aborted
+
+    async def compact_for_overflow(self) -> bool:
+        return await self.compact_core_context_for_overflow()
+
+    async def aclose(self) -> None:
+        await self.close()
+
+    async def resume(self, session_id: str) -> bool:
+        return await self.restore_session_id(session_id)
+
+    async def restore_latest(self) -> bool:
+        return await self.restore_latest_session()
+
+    async def new_session(self) -> None:
+        await self.clear_history()
+
+    def token_usage(self) -> UsageSnapshot:
+        return self.get_token_usage()
+
+    def provider_config(self) -> dict[str, Any]:
+        return self.get_api_config()
+
+    def configure_provider(self, **kwargs: Any) -> None:
+        self.configure_api(**kwargs)
 
     # ─── Core Runtime ────────────────────────────────────────
 

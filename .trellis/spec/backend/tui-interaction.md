@@ -26,7 +26,7 @@ async def LionTuiApp._apply_streaming_transcript_event(
 ) -> None: ...
 
 def LionCodingSession.__init__(
-    agent: Agent,
+    backend: CodingSessionBackend,
     *,
     terminal_output: bool = False,
 ) -> None: ...
@@ -79,7 +79,8 @@ def LionCodingSession.set_notice_fn(
 ### Frontend output ownership
 
 - Textual owns rendering through Core/application events and constructs
-  `LionCodingSession(agent, terminal_output=False)`. It must not capture stdout or
+  `LionCodingSession(backend, terminal_output=False)`. The composition root may
+  pass an Agent structurally, but TUI must not import the runtime engine. It must not capture stdout or
   install a process-global UI sink.
 - Non-streaming info/error state enters the app through the session's instance-level
   notice callback. Queue synchronous notices with Textual `call_later()` when the

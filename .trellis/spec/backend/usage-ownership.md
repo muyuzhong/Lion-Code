@@ -215,7 +215,7 @@ The minimum focused matrix is:
   nonzero Ledger state.
 - `tests/integration/test_agent_core_runtime.py`: clear/restore full reset,
   compaction/Plan tracking reset, observer rebuild identity, and shared owner.
-- `tests/application/test_coding_session.py`: typed snapshot boundary and
+- `tests/integration/test_application_coding_session.py`: typed snapshot boundary and
   terminal-toggle observer identity.
 - child, Skill, Dream, goal, and loop suites: cumulative aggregation and common
   budget decisions.
