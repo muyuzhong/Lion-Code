@@ -1092,3 +1092,25 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 33: 完成 Application Port 架构重构
+
+**Date**: 2026-08-12
+**Task**: 完成 Application Port 架构重构
+**Branch**: `muyuzhong/capability-spi-foundation`
+
+### Summary
+
+完成 Application Ports、QueueSnapshot、Agent/runtime facade、Fake backend 与架构门禁；704 个测试通过，已归档任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4a0725b` | (see git log) |
+| `f85e248` | (see git log) |
+
+### Status
+
+[OK] **Completed**
