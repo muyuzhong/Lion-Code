@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend spec index and final quality-check routing."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Architecture review contract for ownership, Provider lifecycle, Session restore, and one canonical runtime/history."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Review the module placement and removal of the obsolete lifecycle module."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review the full validation matrix and changed-scope baseline handling."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review consistency across Agent facade, Runtime, Context, Memory query, recorder, and Session restore."}

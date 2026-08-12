@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend spec index and quality-check entry point for the Provider/runtime refactor."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Defines single-owner state, Provider replacement, canonical Core history, factory patch seam, and narrow runtime boundaries."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Defines placement and naming rules for the new ProviderManager module and related tests."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines required focused/full tests, static checks, and baseline reporting."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Required cross-layer checklist for Provider, Runtime, Memory query, Session restore, and facade projections."}
