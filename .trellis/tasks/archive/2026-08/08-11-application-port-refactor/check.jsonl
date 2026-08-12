@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "质量检查阶段的 backend 指南入口。"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "检查 Ports 依赖方向、TUI/runtime 边界和 Harness 封装。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "执行 lint、typing、测试和差异检查要求。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "复核跨层契约、事件顺序和重复状态风险。"}
+{"file": ".trellis/tasks/08-11-application-port-refactor/research/application-port-audit.md", "reason": "对照初始泄漏证据检查实现是否完整收敛。"}
