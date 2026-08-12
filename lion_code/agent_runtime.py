@@ -364,6 +364,7 @@ class AgentRuntimeCoordinator:
             cancellation=execution.cancellation,
             cancel_callback=execution.cancel,
             prepare_context=self.prepare_core_context,
+            max_turns=budget.max_turns,
             before_tool_calls=self.before_core_tool_calls,
         )
         if self._context_compactor is None:
