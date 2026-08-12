@@ -340,6 +340,7 @@ class LionCodingSession:
         self._backend.toggle_plan_mode()
 
     # ─── 事件桥 ──────────────────────────────────────────────
+    # 统一承载正常运行与 overflow retry 的事件桥接。
 
     async def _drive(self, run) -> AsyncIterator[LionSessionEvent]:
         """驱动一个 Agent 协程,把订阅事件转成异步流并补应用级事件。
@@ -471,14 +472,8 @@ class LionCodingSession:
                     attempt=1,
                     max_attempts=1,
                     delay_ms=0,
-                    error_message=(
-                        (
-                            terminal_assistant.error_message
-                            if terminal_assistant is not None
-                            else None
-                        )
-                        or "Context overflow"
-                    ),
+                    error_message=getattr(terminal_assistant, "error_message", None)
+                    or "Context overflow",
                 )
                 if self._backend.cancelled:
                     yield AutoRetryEndEvent(

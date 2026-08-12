@@ -10,7 +10,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from .agent_lifecycle import AgentLifecycle
 from .agent_runtime import (
@@ -221,7 +221,7 @@ class Agent:
                 if selected_tool_names is None or tool.name in selected_tool_names:
                     self.tool_registry.register(tool)
         else:
-            self.tool_registry = tool_registry
+            self.tool_registry = cast(ToolRegistry, tool_registry)
 
         # 系统提示词按前缀缓存拆成静态核心和动态尾部。项目指令改由 Provider
         # Overlay 注入，既不破坏缓存边界，也不污染 canonical Session history。
@@ -293,32 +293,12 @@ class Agent:
         self._mcp_initialized = False
         self._subagent_factory = SubagentFactory(self)
 
-        # Capability SPI: register extension slots that contribute tools and
-        # turn lifecycle hooks.  Agent only composes; it does not know how MCP
-        # discovers tools or how Skill/SubAgent tools are defined.
-        self._capability_registry = CapabilityRegistry()
-        mcp_is_root = (
-            mcp_enabled and not is_sub_agent and self.tool_environment.owns_mcp_manager
+        self._register_capabilities(
+            mcp_enabled=mcp_enabled,
+            is_sub_agent=is_sub_agent,
+            selected_tool_names=selected_tool_names,
+            created_own_registry=_created_own_registry,
         )
-        self._mcp_capability = McpCapability(
-            mcp_manager=self._mcp_manager,
-            tool_registry=self.tool_registry,
-            emit_notice=lambda msg: self._emit_notice(msg),
-            is_already_initialized=lambda: self._mcp_initialized,
-            mark_initialized=lambda: setattr(self, "_mcp_initialized", True),
-            is_root=mcp_is_root,
-        )
-        self._capability_registry.register(self._mcp_capability.spec)
-        self._capability_registry.register(create_skill_capability())
-        self._capability_registry.register(create_subagent_capability())
-
-        # Register capability-provided tools only for fresh registries;
-        # sub-agents inherit tools from the parent's filtered registry.
-        if _created_own_registry:
-            for source in self._capability_registry.tool_sources:
-                for tool in source.tools():
-                    if selected_tool_names is None or tool.name in selected_tool_names:
-                        self.tool_registry.register(tool)
 
         self._lifecycle = AgentLifecycle(self)
         provider = self._lifecycle.build_core_provider(self._thinking_level)
@@ -339,6 +319,37 @@ class Agent:
         self._session_memory_coord.set_query_service(
             self._build_core_memory_query_service()
         )
+
+    def _register_capabilities(
+        self,
+        *,
+        mcp_enabled: bool,
+        is_sub_agent: bool,
+        selected_tool_names: set[str] | None,
+        created_own_registry: bool,
+    ) -> None:
+        """注册 Agent 能力并将其提供的工具接入自有注册表。"""
+        self._capability_registry = CapabilityRegistry()
+        mcp_is_root = (
+            mcp_enabled and not is_sub_agent and self.tool_environment.owns_mcp_manager
+        )
+        self._mcp_capability = McpCapability(
+            mcp_manager=self._mcp_manager,
+            tool_registry=self.tool_registry,
+            emit_notice=lambda msg: self._emit_notice(msg),
+            is_already_initialized=lambda: self._mcp_initialized,
+            mark_initialized=lambda: setattr(self, "_mcp_initialized", True),
+            is_root=mcp_is_root,
+        )
+        self._capability_registry.register(self._mcp_capability.spec)
+        self._capability_registry.register(create_skill_capability())
+        self._capability_registry.register(create_subagent_capability())
+
+        if created_own_registry:
+            for source in self._capability_registry.tool_sources:
+                for tool in source.tools():
+                    if selected_tool_names is None or tool.name in selected_tool_names:
+                        self.tool_registry.register(tool)
 
     def _resolve_thinking_mode(self) -> str:
         if not self.thinking:

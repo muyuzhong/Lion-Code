@@ -78,11 +78,7 @@ class LionCodingSessionPortTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(steering, [QueueUpdateEvent(steering=("steer me",))])
         self.assertEqual(
             follow_up,
-            [
-                QueueUpdateEvent(
-                    steering=("steer me",), follow_up=("follow me",)
-                )
-            ],
+            [QueueUpdateEvent(steering=("steer me",), follow_up=("follow me",))],
         )
         self.assertEqual(session.queued_steering_messages, ("steer me",))
         self.assertEqual(session.queued_follow_up_messages, ("follow me",))

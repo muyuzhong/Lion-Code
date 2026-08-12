@@ -13,10 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from lion_code.core.tools import AgentTool
-
 from .prompt_templates import PromptTemplate
-from .resources import ResourceDiagnostic
 from .skills import Skill
 
 
@@ -37,34 +34,16 @@ class CommandSession(Protocol):
     def provider_name(self) -> str: ...
 
     @property
-    def available_models(self) -> Sequence[str]: ...
-
-    @property
-    def tools(self) -> Sequence[AgentTool]: ...
-
-    @property
     def skills(self) -> Sequence[Skill]: ...
 
     @property
     def prompt_templates(self) -> Sequence[PromptTemplate]: ...
 
     @property
-    def context_token_estimate(self) -> int: ...
-
-    @property
-    def context_window_tokens(self) -> int: ...
-
-    @property
     def thinking_level(self) -> str: ...
 
     @property
     def available_thinking_levels(self) -> Sequence[str]: ...
-
-    @property
-    def resource_diagnostics(self) -> Sequence[ResourceDiagnostic]: ...
-
-    @property
-    def system_prompt(self) -> str: ...
 
     @property
     def session_id(self) -> str | None: ...

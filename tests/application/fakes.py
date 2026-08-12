@@ -174,9 +174,7 @@ class FakeCodingSessionBackend:
     def token_usage(self) -> UsageSnapshot:
         return self.usage
 
-    def set_confirm_fn(
-        self, fn: Callable[[str], Awaitable[bool]] | None
-    ) -> None:
+    def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]] | None) -> None:
         self.confirm_fn = fn
 
     def set_plan_approval_fn(
@@ -188,9 +186,7 @@ class FakeCodingSessionBackend:
         self.notice_fn = fn
 
     def toggle_plan_mode(self) -> str:
-        self.permission_mode = (
-            "default" if self.permission_mode == "plan" else "plan"
-        )
+        self.permission_mode = "default" if self.permission_mode == "plan" else "plan"
         return self.permission_mode
 
     def show_active_task(self) -> str:

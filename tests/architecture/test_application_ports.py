@@ -30,9 +30,7 @@ def _application_files() -> tuple[Path, ...]:
 
 def _attribute_names(path: Path) -> set[str]:
     return {
-        node.attr
-        for node in ast.walk(_tree(path))
-        if isinstance(node, ast.Attribute)
+        node.attr for node in ast.walk(_tree(path)) if isinstance(node, ast.Attribute)
     }
 
 
