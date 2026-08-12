@@ -1114,3 +1114,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 34: 移除 Agent 工具业务路由
+
+**Date**: 2026-08-12
+**Task**: 移除 Agent 工具业务路由
+**Branch**: `master`
+
+### Summary
+
+完成 ToolContext/controller 链路拆除：新增 SkillRuntime、SubagentExecutor、PlanCapability，动态唤醒直接绑定 AutonomyRuntime；补齐架构与行为测试并通过全量 pytest、import-linter、compileall。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0b9b798` | (see git log) |
+
+### Status
+
+[OK] **Completed**
