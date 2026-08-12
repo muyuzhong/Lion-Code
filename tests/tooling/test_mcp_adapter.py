@@ -43,7 +43,6 @@ def _context(registry, *, confirm_fn=None, permission=None):
         session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
         cancellation=CancellationToken(),
         cwd=Path.cwd(),
-        controller=object(),
         registry=registry,
         permission=permission or PermissionController(PermissionState("default")),
         plan=FakePlanView(),

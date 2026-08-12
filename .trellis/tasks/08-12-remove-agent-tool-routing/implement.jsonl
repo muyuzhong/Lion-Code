@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Defines the ToolContext live-view, PlanRuntime ownership, SubagentFactory construction boundary, and no-compatibility-migration contracts preserved by this refactor."}
+{"file":".trellis/spec/backend/usage-ownership.md","reason":"Defines child usage aggregation through UsageLedger without overwriting parent response, turn, or context fields."}
+{"file":".trellis/tasks/08-12-remove-agent-tool-routing/design.md","reason":"Records the selected narrow command, runtime, executor, capability, and composition boundaries for implementation."}

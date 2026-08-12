@@ -67,13 +67,19 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             patch("lion_code.agent.Agent", _ChildAgent),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
+            patch.object(
+                parent._autonomy,
+                "_classify_tool_call",
+                new=AsyncMock(return_value={"action": "allow"}),
+            ),
         ):
-            result = await parent._execute_agent_tool(
+            result = await parent._execute_tool_call(
+                "agent",
                 {
                     "type": "general",
                     "description": "research",
                     "prompt": "find docs",
-                }
+                },
             )
 
         kwargs = _ChildAgent.created_with
@@ -82,7 +88,9 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         usage = parent.get_token_usage()
         self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
         self.assertEqual((usage.responses, usage.turns), (0, 0))
-        self.assertIs(child_registry.resolve(mcp_name), parent.tool_registry.resolve(mcp_name))
+        self.assertIs(
+            child_registry.resolve(mcp_name), parent.tool_registry.resolve(mcp_name)
+        )
         with self.assertRaises(LookupError):
             child_registry.resolve("agent")
         self.assertIs(
@@ -103,13 +111,19 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             patch("lion_code.agent.Agent", _ChildAgent),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
+            patch.object(
+                parent._autonomy,
+                "_classify_tool_call",
+                new=AsyncMock(return_value={"action": "allow"}),
+            ),
         ):
-            await parent._execute_agent_tool(
+            await parent._execute_tool_call(
+                "agent",
                 {
                     "type": "general",
                     "description": "research",
                     "prompt": "find docs",
-                }
+                },
             )
 
         self.assertEqual(
@@ -143,19 +157,25 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             patch("lion_code.skills.execute_skill", return_value=skill_result),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
+            patch.object(
+                parent._autonomy,
+                "_classify_tool_call",
+                new=AsyncMock(return_value={"action": "allow"}),
+            ),
         ):
-            await parent._execute_agent_tool(
+            await parent._execute_tool_call(
+                "agent",
                 {
                     "type": "general",
                     "description": "research",
                     "prompt": "find docs",
-                }
+                },
             )
             agent_kwargs = dict(_ChildAgent.created_with)
 
             parent._permission_controller.set_mode("plan")
-            await parent._execute_skill_tool(
-                {"skill_name": "research", "args": "find docs"}
+            await parent._execute_tool_call(
+                "skill", {"skill_name": "research", "args": "find docs"}
             )
             skill_kwargs = dict(_ChildAgent.created_with)
 
@@ -175,7 +195,9 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(parent.permission_mode, "auto")
 
-    async def test_agent_tool_error_emits_end_before_closing_without_charging_usage(self):
+    async def test_agent_tool_error_emits_end_before_closing_without_charging_usage(
+        self,
+    ):
         with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
             parent = Agent(api_key="test-key")
         events: list[object] = []
@@ -196,14 +218,24 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
                 "create_for_agent_type",
                 return_value=child,
             ),
-            patch.object(parent, "_emit_subagent_status", side_effect=record_status),
+            patch.object(
+                parent._subagent_executor,
+                "_status_callback",
+                side_effect=record_status,
+            ),
+            patch.object(
+                parent._autonomy,
+                "_classify_tool_call",
+                new=AsyncMock(return_value={"action": "allow"}),
+            ),
         ):
-            result = await parent._execute_agent_tool(
+            result = await parent._execute_tool_call(
+                "agent",
                 {
                     "type": "general",
                     "description": "research",
                     "prompt": "find docs",
-                }
+                },
             )
 
         self.assertEqual(result, "Sub-agent error: boom")
@@ -232,9 +264,14 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             patch("lion_code.agent.Agent", _ChildAgent),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
+            patch.object(
+                parent._autonomy,
+                "_classify_tool_call",
+                new=AsyncMock(return_value={"action": "allow"}),
+            ),
         ):
-            result = await parent._execute_skill_tool(
-                {"skill_name": "research", "args": "find docs"}
+            result = await parent._execute_tool_call(
+                "skill", {"skill_name": "research", "args": "find docs"}
             )
 
         kwargs = _ChildAgent.created_with

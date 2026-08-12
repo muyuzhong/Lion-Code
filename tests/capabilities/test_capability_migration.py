@@ -46,6 +46,14 @@ class _FakeCapabilityResource:
         self.close_calls += 1
 
 
+class _CapabilityDependency:
+    async def __call__(self, _arguments):
+        return None
+
+
+_CAPABILITY_DEPENDENCY = _CapabilityDependency()
+
+
 # ---------------------------------------------------------------------------
 # Tool installation via Capability ToolSource
 # ---------------------------------------------------------------------------
@@ -53,7 +61,7 @@ class _FakeCapabilityResource:
 
 class TestCapabilityToolInstallation:
     def test_skill_capability_provides_skill_tool(self) -> None:
-        spec = create_skill_capability()
+        spec = create_skill_capability(_CAPABILITY_DEPENDENCY)
         sources = spec.tool_sources
         assert len(sources) == 1
         tools = sources[0].tools()
@@ -61,7 +69,7 @@ class TestCapabilityToolInstallation:
         assert tools[0].name == "skill"
 
     def test_subagent_capability_provides_agent_tool(self) -> None:
-        spec = create_subagent_capability()
+        spec = create_subagent_capability(_CAPABILITY_DEPENDENCY)
         sources = spec.tool_sources
         assert len(sources) == 1
         tools = sources[0].tools()
@@ -70,8 +78,8 @@ class TestCapabilityToolInstallation:
 
     def test_capability_registry_aggregates_both_tool_sources(self) -> None:
         registry = CapabilityRegistry()
-        registry.register(create_skill_capability())
-        registry.register(create_subagent_capability())
+        registry.register(create_skill_capability(_CAPABILITY_DEPENDENCY))
+        registry.register(create_subagent_capability(_CAPABILITY_DEPENDENCY))
 
         sources = registry.tool_sources
         assert len(sources) == 2
@@ -85,7 +93,7 @@ class TestCapabilityToolInstallation:
 
     def test_tool_source_returns_same_tool_instance(self) -> None:
         """ToolSource should return a stable tool definition, not recreate it."""
-        source = _SkillToolSource()
+        source = _SkillToolSource(_CAPABILITY_DEPENDENCY)
         first = source.tools()
         second = source.tools()
         assert first[0] is second[0]
@@ -273,8 +281,8 @@ class TestCapabilityClose:
 
     async def test_skill_and_subagent_capabilities_have_no_resources(self) -> None:
         registry = CapabilityRegistry()
-        registry.register(create_skill_capability())
-        registry.register(create_subagent_capability())
+        registry.register(create_skill_capability(_CAPABILITY_DEPENDENCY))
+        registry.register(create_subagent_capability(_CAPABILITY_DEPENDENCY))
 
         assert registry.resources == ()
 
@@ -304,14 +312,14 @@ class TestCapabilityBoundaryCompliance:
         assert spec.resources == ()
 
     def test_skill_capability_spec_is_tool_source_only(self) -> None:
-        spec = create_skill_capability()
+        spec = create_skill_capability(_CAPABILITY_DEPENDENCY)
         assert spec.name == "skill"
         assert len(spec.tool_sources) == 1
         assert spec.turn_participants == ()
         assert spec.resources == ()
 
     def test_subagent_capability_spec_is_tool_source_only(self) -> None:
-        spec = create_subagent_capability()
+        spec = create_subagent_capability(_CAPABILITY_DEPENDENCY)
         assert spec.name == "subagent"
         assert len(spec.tool_sources) == 1
         assert spec.turn_participants == ()
@@ -340,6 +348,8 @@ class TestAgentCompositionWithCapabilities:
         tool_names = {t.name for t in agent.tool_registry.all_tools()}
         assert "skill" in tool_names
         assert "agent" in tool_names
+        assert "enter_plan_mode" in tool_names
+        assert "exit_plan_mode" in tool_names
 
     def test_root_agent_with_mcp_disabled_has_no_mcp_tools(self) -> None:
         """When mcp_enabled=False, no MCP tools should be registered."""
@@ -369,6 +379,7 @@ class TestAgentCompositionWithCapabilities:
         assert "mcp" in names
         assert "skill" in names
         assert "subagent" in names
+        assert "plan" in names
 
     def test_before_turn_capabilities_calls_mcp_before_turn(self) -> None:
         """_before_turn_capabilities should invoke the MCP TurnParticipant."""

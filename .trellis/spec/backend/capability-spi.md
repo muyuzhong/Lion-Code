@@ -27,6 +27,12 @@ class AsyncCloseable(Protocol):
 class ToolSource(Protocol):
     def tools(self) -> Sequence[LionTool]: ...
 
+class ToolCommand(Protocol):
+    async def __call__(
+        self,
+        arguments: Mapping[str, JSONValue],
+    ) -> ToolResult: ...
+
 class PromptLayer(Protocol):
     @property
     def layer_id(self) -> str: ...
@@ -78,6 +84,10 @@ class CapabilityRegistry:
    runtime state beyond the registry itself.
 4. No ``CapabilityContext``, ``ServiceLocator``, or monolithic
    ``AgentCapability`` interface with a dozen lifecycle hooks.
+5. Capability-specific tools receive their command dependency when the
+   ``ToolSource`` is constructed. Their ``LionTool.execute_fn`` may ignore
+   ``ToolContext``; it must not recover a controller or service locator from
+   that context at execution time.
 
 ### CapabilitySpec Immutability
 
@@ -195,10 +205,15 @@ AST tests in ``tests/architecture/test_runtime_boundaries.py``:
   capability installation, disabled-capability tool absence, MCP fail-soft
   semantics, SubAgent permission inheritance, Skill tool delegation,
   close-does-not-double-release, and architecture boundary compliance.
+- ``tests/tooling/test_capability_runtimes.py``: Skill inline/unknown/fork
+  routing plus Subagent success/error conversion, status ordering, usage
+  aggregation, and child closure.
+- ``tests/architecture/test_tool_routing.py``: ToolContext/controller removal,
+  forbidden Agent route names, and capability/runtime reverse-import guards.
 
-## 7. First-Batch Migrations (MCP, Skill, SubAgent)
+## 7. Capability Contributions and Tool Bindings
 
-Three capabilities have been migrated from direct Agent wiring to the SPI:
+The tool-bearing capabilities use construction-time command binding:
 
 ### McpCapability (``capabilities/mcp.py``)
 
@@ -213,27 +228,46 @@ Three capabilities have been migrated from direct Agent wiring to the SPI:
 
 ### SkillCapability (``capabilities/skill.py``)
 
-- Implements ``ToolSource``: provides the ``skill`` tool definition.
-- The tool delegates to ``ToolContext.controller.run_skill_tool()`` at
-  execution time; the inline/fork business logic remains in the Agent
-  controller.
+- ``create_skill_capability(runtime: SkillRuntime)`` implements
+  ``ToolSource`` and captures the supplied runtime in the ``skill`` tool.
+- ``SkillRuntime`` owns lookup, inline activation, unknown-skill handling, and
+  fork dispatch. It does not receive or import ``Agent``.
+- A fork delegates child construction and lifecycle to ``SubagentExecutor``;
+  inline activation does not create a child.
 - No ``TurnParticipant`` or ``AsyncCloseable`` slots.
 
 ### SubagentCapability (``capabilities/subagent.py``)
 
-- Implements ``ToolSource``: provides the ``agent`` (sub-agent) tool
-  definition.
-- ``SubagentFactory`` remains the independent domain service for child
-  construction; the capability only contributes the tool definition.
+- ``create_subagent_capability(executor: SubagentExecutor)`` implements
+  ``ToolSource`` and captures the supplied executor in the ``agent`` tool.
+- ``SubagentFactory`` remains responsible only for child selection and
+  construction. ``SubagentExecutor`` owns start/end status, ``run_once``,
+  child usage merge, error conversion, and final child closure.
 - No ``TurnParticipant`` or ``AsyncCloseable`` slots.
+
+### PlanCapability (``capabilities/plan.py``)
+
+- ``create_plan_capability(runtime: PlanRuntime)`` contributes only ToolSource
+  tools for entering and exiting Plan mode.
+- The tools call the bound ``PlanRuntime`` directly and preserve the
+  ``ToolResult.terminate`` value returned by Plan approval.
+- This slice does not add PromptLayer or SessionParticipant contributions.
+
+### Dynamic wakeup tool
+
+- ``create_wakeup_tool(runtime.schedule_wakeup)`` captures the command while
+  the dynamic loop temporarily registers the tool.
+- ``AutonomyRuntime`` owns ``pending_wakeup`` and delay clamping; the tool
+  does not route through ``Agent``.
 
 ### Agent Composition Changes
 
-- ``Agent.__init__`` creates a ``CapabilityRegistry`` and registers all
-  three capabilities.
-- Capability-provided tools are registered into the ``ToolRegistry`` only
-  for fresh registries (root agents).  Sub-agents inherit the parent's
-  filtered registry.
+- ``Agent.__init__`` creates ``SkillRuntime``, ``SubagentExecutor``, and
+  ``PlanRuntime`` before registering the corresponding capabilities.
+- Capability-provided tools are registered into fresh root registries. When a
+  child receives a filtered registry, the composition root replaces the
+  inherited capability tool objects with tools bound to the child runtimes;
+  MCP and ordinary built-in tools remain shared by registry view.
 - ``Agent._ensure_mcp_tools()`` is replaced by
   ``Agent._before_turn_capabilities()``, which iterates all
   ``TurnParticipant`` hooks without knowing what MCP is.
@@ -248,4 +282,5 @@ Three capabilities have been migrated from direct Agent wiring to the SPI:
   ``ToolEnvironment``.
 - ``tooling/internal.py``'s ``create_internal_tools()`` no longer includes
   ``create_skill_tool()`` or ``create_agent_tool()``; they are provided by
-  capabilities.
+  capabilities. Plan tools are provided by ``PlanCapability`` and the wakeup
+  tool is registered only by the dynamic loop.

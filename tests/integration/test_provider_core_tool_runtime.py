@@ -40,7 +40,6 @@ def _context(registry: ToolRegistry) -> ToolContext:
         session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
         cancellation=CancellationToken(),
         cwd=Path.cwd(),
-        controller=_Controller(),
         registry=registry,
         permission=PermissionController(PermissionState("default")),
         plan=FakePlanView(),

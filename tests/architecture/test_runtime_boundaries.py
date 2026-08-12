@@ -1290,7 +1290,7 @@ def test_usage_state_has_one_owner_and_command_only_writes() -> None:
     }
     assert record_model_sites == {"observers/usage.py": ["UsageObserver.handle"]}
     assert record_child_sites == {
-        "agent.py": ["Agent._execute_agent_tool", "Agent._execute_skill_tool"],
+        "subagent_runtime.py": ["SubagentExecutor._run_child"],
         "dream.py": ["DreamCoordinator.run"],
     }
     assert record_turn_sites == {

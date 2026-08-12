@@ -4,12 +4,13 @@ from .environment import ToolEnvironment
 from .registry import ToolRegistry
 from .runtime import ToolRuntime
 from .selection import ToolSelectionPolicy, select_tools
-from .types import JSONValue, LionTool, ToolCapabilities, ToolResult
+from .types import JSONValue, LionTool, ToolCapabilities, ToolCommand, ToolResult
 
 __all__ = [
     "JSONValue",
     "LionTool",
     "ToolCapabilities",
+    "ToolCommand",
     "ToolEnvironment",
     "ToolRegistry",
     "ToolResult",

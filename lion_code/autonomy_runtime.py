@@ -35,9 +35,9 @@ from .autonomy import (
 )
 from .core.messages import AssistantMessage
 from .prompt import load_claude_md
-from .tooling.internal import create_schedule_wakeup_tool
+from .tooling.internal import create_wakeup_tool
 from .tooling.middleware import is_auto_fast_path
-from .tooling.types import JSONValue
+from .tooling.types import JSONValue, ToolResult
 from .usage import BudgetPolicy, UsageLedger
 
 
@@ -286,7 +286,9 @@ class AutonomyRuntime:
         )
         prompt = spec["prompt"]
         iterations = 0
-        with self._host.tool_registry.temporary_tool(create_schedule_wakeup_tool()):
+        with self._host.tool_registry.temporary_tool(
+            create_wakeup_tool(self.schedule_wakeup)
+        ):
             try:
                 while not self.loop_stop and not self._host.is_aborted:
                     iterations += 1
@@ -328,17 +330,30 @@ class AutonomyRuntime:
             finally:
                 self.pending_wakeup = None
 
-    def _execute_schedule_wakeup(self, inp: dict) -> str:
-        """记录唤醒请求;延迟限制在 [60, 3600],本轮收敛后由 loop 驱动器读取。"""
-        delay = clamp_wakeup_delay(inp.get("delaySeconds"))
-        reason = inp.get("reason") if isinstance(inp.get("reason"), str) else ""
-        prompt = inp.get("prompt") if isinstance(inp.get("prompt"), str) else ""
+    async def schedule_wakeup(
+        self,
+        arguments: Mapping[str, JSONValue],
+    ) -> ToolResult:
+        """记录唤醒请求并返回工具结果；状态仍由本运行时持有。"""
+
+        delay = clamp_wakeup_delay(arguments.get("delaySeconds"))
+        reason = (
+            arguments.get("reason") if isinstance(arguments.get("reason"), str) else ""
+        )
+        prompt = (
+            arguments.get("prompt") if isinstance(arguments.get("prompt"), str) else ""
+        )
         self.pending_wakeup = {
             "delay_seconds": delay,
             "reason": reason,
             "prompt": prompt,
         }
-        return f"Wakeup scheduled in {delay}s. The loop will resume then; end your turn now."
+        return ToolResult(
+            content=(
+                f"Wakeup scheduled in {delay}s. The loop will resume then; "
+                "end your turn now."
+            )
+        )
 
     async def _interruptible_sleep(self, seconds: float) -> bool:
         """分段等待,并在 loop 停止或本轮 abort 时提前返回 True。"""

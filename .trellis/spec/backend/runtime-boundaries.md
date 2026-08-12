@@ -105,6 +105,33 @@ class PlanRuntime:
     def complete_context_reset(self) -> None: ...
     def refresh_prompt(self) -> None: ...
 
+class ToolCommand(Protocol):
+    async def __call__(
+        self,
+        arguments: Mapping[str, JSONValue],
+    ) -> ToolResult: ...
+
+class SkillRuntime:
+    def __init__(self, executor: SubagentExecutor) -> None: ...
+    async def __call__(
+        self,
+        arguments: Mapping[str, JSONValue],
+    ) -> ToolResult: ...
+
+class SubagentExecutor:
+    async def __call__(
+        self,
+        arguments: Mapping[str, JSONValue],
+    ) -> ToolResult: ...
+    async def execute_skill_fork(
+        self,
+        *,
+        skill_name: str,
+        prompt: str,
+        allowed_tools: list[str] | None,
+        args: str,
+    ) -> ToolResult: ...
+
 def Agent.configure_api(
     *,
     model: str | None = None,
@@ -335,6 +362,35 @@ The Agent composition root gives one `PlanState` to its only writer, `PlanRuntim
 `ToolContext.plan` is the same live read-only View; Agent and lifecycle APIs are
 delegates. Pending reset is completed only after persistence, replay and Core reset.
 
+### Tool command and capability boundary
+
+`ToolContext` carries execution state and middleware views only. It has no
+`controller` field and is never used as a business-service locator. A
+capability-specific tool captures a narrow `ToolCommand` when its `ToolSource`
+is constructed; the existing four-argument `LionTool.execute_fn` signature
+remains unchanged, and such a tool may ignore the context argument.
+
+The concrete routing and ownership contract is:
+
+- `skill` -> `SkillRuntime`. Lookup, inline activation, unknown-skill handling,
+  and fork selection live there. A fork reuses `SubagentExecutor`.
+- `agent` -> `SubagentExecutor`. The executor asks `SubagentFactory` for a
+  child, emits start/end status, calls `run_once`, merges child input/output
+  usage without changing parent turns/responses, converts child failures to an
+  error `ToolResult`, and closes the child in `finally`.
+- `enter_plan_mode` / `exit_plan_mode` -> `PlanRuntime` through the
+  ToolSource-only `PlanCapability`. The adapter copies `terminate` from
+  `PlanToolOutcome` into `ToolResult`.
+- Dynamic `schedule_wakeup` -> `AutonomyRuntime.schedule_wakeup`. The runtime
+  owns delay clamping and `pending_wakeup`; registration remains temporary to
+  the dynamic loop.
+
+`SubagentFactory` remains child construction and tool selection only. It must
+not absorb execution lifecycle, status, usage, error conversion, or closure.
+Capabilities and `SkillRuntime`/`SubagentExecutor` must not import `Agent` or
+`AgentHarness`. Do not replace these narrow commands with a generic controller,
+service locator, or aggregate Agent-services interface.
+
 Usage has its own executable contract in
 [Usage Ownership](./usage-ownership.md); this runtime composes that single Owner.
 
@@ -398,8 +454,9 @@ Usage has its own executable contract in
   `terminal_output` setting. They must not infer credentials from a transport client.
 - `SubagentFactory` owns child tool selection and construction through a narrow
   parent-host contract. It imports `Agent` only while constructing a child to avoid
-  a module-level cycle; `Agent` retains child execution, status presentation, usage
-  accounting, error text, and resource closure.
+  a module-level cycle. `SubagentExecutor` owns child execution, status
+  presentation, usage accounting, expected error text, and resource closure;
+  `Agent` supplies the composition-time factory, ledger, and status callback.
 - `LearningRuntime` owns explicit `/learn` transcript projection, evaluator decision
   parsing, and Skill creation through a narrow host contract. It reads the existing
   canonical Core history and uses the existing side-query path; `Agent` retains the
@@ -526,6 +583,14 @@ Usage has its own executable contract in
 | Context reset step fails | Keep `pending_context_reset`; never acknowledge a half-applied switch |
 | Child construction | Inherit `plan` and `auto`; map every other parent mode to `bypassPermissions` |
 | Hook trust in `dontAsk` | Continue to deny trust without treating tool permission bypass as Hook trust |
+| Capability tool construction | Capture the narrow `ToolCommand`; do not look up an Agent/controller from `ToolContext` |
+| Inline Skill | Return the resolved activation prompt without constructing a child |
+| Unknown Skill | Return `ToolResult("Unknown skill: ...")` without a child |
+| Fork Skill | Reuse `SubagentExecutor`; preserve start/end status, usage merge, error conversion, and close |
+| Child `run_once` success | Return child text, merge input/output usage, emit end status, then close |
+| Child construction or execution error | Return an error `ToolResult`, emit end status, and close any created child |
+| Plan exit approval with clear-and-execute | Copy `terminate=True` into `ToolResult` and retain pending reset until Core reset succeeds |
+| Dynamic wakeup command | Clamp delay, update `AutonomyRuntime.pending_wakeup`, and expose the tool only in the dynamic loop scope |
 
 ## 5. Good / Base / Bad Cases
 
@@ -677,6 +742,13 @@ exception, or silently broaden an allowlist to make a regression pass.
   `tests/integration/test_agent_core_runtime.py`: read-only Agent facade, live child
   inheritance, `dontAsk` Hook trust, and Plan approval transitions without
   ToolContext permission synchronization.
+- `tests/tooling/test_capability_runtimes.py` and
+  `tests/tooling/test_internal_tools.py`: construction-time command binding,
+  Skill inline/unknown/fork behavior, child status/usage/error/closure, and
+  capability-specific tool adapters that ignore ToolContext.
+- `tests/architecture/test_tool_routing.py`: no ToolContext controller field,
+  no removed Agent route names in production, and no Agent reverse-import from
+  capabilities or the independent child runtimes.
 - `tests/architecture/test_runtime_boundaries.py`: the PermissionState/Controller
   composition count, removed mirrors, write-site confinement, middleware port shape,
   and Core/Provider import ownership.

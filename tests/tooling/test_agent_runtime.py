@@ -90,11 +90,11 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
             "_generate_file_path",
             return_value=Path("plan.md"),
         ):
-            await agent.enter_plan_mode_tool()
+            await agent._execute_tool_call("enter_plan_mode", {})
             self.assertIs(agent.tool_context.permission, permission)
             self.assertEqual(permission.mode, "plan")
 
-            await agent.exit_plan_mode_tool()
+            await agent._execute_tool_call("exit_plan_mode", {})
             self.assertIs(agent.tool_context.permission, permission)
             self.assertEqual(permission.mode, "auto")
 

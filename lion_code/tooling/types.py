@@ -4,20 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, TypeAlias
+from typing import TYPE_CHECKING, Literal, Protocol
 
 if TYPE_CHECKING:
     from .context import ToolContext
 
 
-JSONValue: TypeAlias = (
-    None
-    | bool
-    | int
-    | float
-    | str
-    | list["JSONValue"]
-    | dict[str, "JSONValue"]
+type JSONValue = (
+    bool | int | float | str | list[JSONValue] | dict[str, JSONValue] | None
 )
 
 
@@ -49,12 +43,21 @@ class ToolResult:
     terminate: bool = False
 
 
-ToolUpdateCallback: TypeAlias = Callable[
+class ToolCommand(Protocol):
+    """构造时绑定的 capability 工具命令。"""
+
+    async def __call__(
+        self,
+        arguments: Mapping[str, JSONValue],
+    ) -> ToolResult: ...
+
+
+type ToolUpdateCallback = Callable[
     [ToolResult],
     Awaitable[None] | None,
 ]
 
-ToolExecutor = Callable[
+type ToolExecutor = Callable[
     [
         "ToolContext",
         str,
@@ -81,7 +84,7 @@ class LionTool:
 
     async def execute(
         self,
-        context: "ToolContext",
+        context: ToolContext,
         tool_call_id: str,
         arguments: Mapping[str, JSONValue],
         on_update: ToolUpdateCallback | None = None,

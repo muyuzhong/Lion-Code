@@ -22,6 +22,7 @@ from .autonomy_runtime import AutonomyRuntime
 from .capabilities import (
     CapabilityRegistry,
     McpCapability,
+    create_plan_capability,
     create_skill_capability,
     create_subagent_capability,
 )
@@ -79,8 +80,10 @@ from .session_runtime import (
     list_legacy_sessions,
     load_legacy_session,
 )
+from .skill_runtime import SkillRuntime
 from .subagent_factory import SubagentFactory
-from .tooling import ToolEnvironment, ToolRegistry, ToolResult, ToolRuntime
+from .subagent_runtime import SubagentExecutor
+from .tooling import ToolEnvironment, ToolRegistry, ToolRuntime
 from .tooling.builtin import create_builtin_tools
 from .tooling.context import ToolContext
 from .tooling.internal import create_internal_tools
@@ -215,6 +218,25 @@ class Agent:
             if custom_tools is not None
             else None
         )
+        # 根 Agent 拥有 MCP 生命周期；子 Agent 只接收共享环境的非拥有视图。
+        self.tool_environment = tool_environment or ToolEnvironment(
+            owns_mcp_manager=not is_sub_agent
+        )
+        self._mcp_manager = self.tool_environment.mcp_manager
+        self._mcp_initialized = False
+        self._subagent_factory = SubagentFactory(self)
+        self._subagent_executor = SubagentExecutor(
+            self._subagent_factory,
+            self._usage,
+            self._emit_subagent_status,
+        )
+        self._skill_runtime = SkillRuntime(self._subagent_executor)
+        self.plan = PlanRuntime(
+            self,
+            self._permission_controller,
+            PlanState(),
+        )
+
         if _created_own_registry:
             self.tool_registry = ToolRegistry()
             for tool in [*create_builtin_tools(), *create_internal_tools()]:
@@ -222,6 +244,13 @@ class Agent:
                     self.tool_registry.register(tool)
         else:
             self.tool_registry = cast(ToolRegistry, tool_registry)
+
+        self._register_capabilities(
+            mcp_enabled=mcp_enabled,
+            is_sub_agent=is_sub_agent,
+            selected_tool_names=selected_tool_names,
+            created_own_registry=_created_own_registry,
+        )
 
         # 系统提示词按前缀缓存拆成静态核心和动态尾部。项目指令改由 Provider
         # Overlay 注入，既不破坏缓存边界，也不污染 canonical Session history。
@@ -239,17 +268,11 @@ class Agent:
             else self._static_system_prompt
         )
         self._system_prompt = self._base_system_prompt
-        self.plan = PlanRuntime(
-            self,
-            self._permission_controller,
-            PlanState(),
-        )
         self.plan.initialize()
         self.tool_context = ToolContext(
             session=self._session_state,
             cancellation=execution.cancellation,
             cwd=Path.cwd(),
-            controller=self,
             registry=self.tool_registry,
             permission=self._permission_controller,
             plan=self.plan,
@@ -283,21 +306,6 @@ class Agent:
         )
         runtime_context_manager = context_manager or ContextManager(
             is_snippable_tool=self._is_snippable_tool
-        )
-
-        # 根 Agent 拥有 MCP 生命周期；子 Agent 只接收共享环境的非拥有视图。
-        self.tool_environment = tool_environment or ToolEnvironment(
-            owns_mcp_manager=not is_sub_agent
-        )
-        self._mcp_manager = self.tool_environment.mcp_manager
-        self._mcp_initialized = False
-        self._subagent_factory = SubagentFactory(self)
-
-        self._register_capabilities(
-            mcp_enabled=mcp_enabled,
-            is_sub_agent=is_sub_agent,
-            selected_tool_names=selected_tool_names,
-            created_own_registry=_created_own_registry,
         )
 
         self._lifecycle = AgentLifecycle(self)
@@ -342,14 +350,28 @@ class Agent:
             is_root=mcp_is_root,
         )
         self._capability_registry.register(self._mcp_capability.spec)
-        self._capability_registry.register(create_skill_capability())
-        self._capability_registry.register(create_subagent_capability())
+        self._capability_registry.register(create_skill_capability(self._skill_runtime))
+        self._capability_registry.register(
+            create_subagent_capability(self._subagent_executor)
+        )
+        self._capability_registry.register(create_plan_capability(self.plan))
 
-        if created_own_registry:
-            for source in self._capability_registry.tool_sources:
-                for tool in source.tools():
+        for source in self._capability_registry.tool_sources:
+            for tool in source.tools():
+                if created_own_registry:
                     if selected_tool_names is None or tool.name in selected_tool_names:
                         self.tool_registry.register(tool)
+                    continue
+                try:
+                    was_active = self.tool_registry.is_active(tool.name)
+                    self.tool_registry.resolve(tool.name)
+                except LookupError:
+                    continue
+                self.tool_registry.register(
+                    tool,
+                    replace=True,
+                    activate=was_active,
+                )
 
     def _resolve_thinking_mode(self) -> str:
         if not self.thinking:
@@ -868,7 +890,9 @@ class Agent:
 
         if not self._dynamic_system_context:
             return
-        self._dynamic_system_context = build_dynamic_system_context()
+        self._dynamic_system_context = build_dynamic_system_context(
+            self.tool_registry.deferred_tool_names()
+        )
         self._base_system_prompt = (
             self._static_system_prompt + "\n\n" + self._dynamic_system_context
         )
@@ -980,10 +1004,6 @@ class Agent:
     async def _run_loop_dynamic(self, spec: dict) -> None:
         """动态 /loop 驱动;实现在 AutonomyRuntime,保留入口供内部测试。"""
         await self._autonomy._run_loop_dynamic(spec)
-
-    def _execute_schedule_wakeup(self, inp: dict) -> str:
-        """记录唤醒请求;由 schedule_wakeup_tool 调用,实现在 AutonomyRuntime。"""
-        return self._autonomy._execute_schedule_wakeup(inp)
 
     def stop_loop(self) -> None:
         """通知正在运行的 /loop 在最近的检查点停止。"""
@@ -1148,7 +1168,7 @@ class Agent:
             return False
         return tool.capabilities.result_policy == "snippable"
 
-    # ─── 工具路由（含 Agent、Skill 与 Plan 内部工具）────────
+    # ─── 工具执行 ────────────────────────────────────────────
 
     async def _execute_tool_call(
         self,
@@ -1162,99 +1182,6 @@ class Agent:
             arguments=inp,
         )
         return result.content
-
-    async def run_subagent_tool(
-        self,
-        arguments: Mapping[str, JSONValue],
-    ) -> ToolResult:
-        """向 agent 工具暴露受限的子 Agent 业务入口。"""
-        return ToolResult(content=await self._execute_agent_tool(dict(arguments)))
-
-    async def run_skill_tool(
-        self,
-        arguments: Mapping[str, JSONValue],
-    ) -> ToolResult:
-        """向 skill 工具暴露受限的 Skill 业务入口。"""
-        return ToolResult(content=await self._execute_skill_tool(dict(arguments)))
-
-    async def enter_plan_mode_tool(self) -> ToolResult:
-        """进入 Plan 模式并返回结构化工具结果。"""
-        outcome = self.plan.enter()
-        return ToolResult(content=outcome.content, terminate=outcome.terminate)
-
-    async def exit_plan_mode_tool(self) -> ToolResult:
-        """退出 Plan 模式并返回结构化工具结果。"""
-        outcome = await self.plan.exit()
-        return ToolResult(content=outcome.content, terminate=outcome.terminate)
-
-    async def schedule_wakeup_tool(
-        self,
-        arguments: Mapping[str, JSONValue],
-    ) -> ToolResult:
-        """记录动态循环的下一次唤醒请求。"""
-        return ToolResult(content=self._execute_schedule_wakeup(dict(arguments)))
-
-    # ─── Skill fork 模式 ─────────────────────────────────────
-
-    async def _execute_skill_tool(self, inp: dict) -> str:
-        from .skills import execute_skill
-
-        result = execute_skill(inp.get("skill_name", ""), inp.get("args", ""))
-        if not result:
-            return f"Unknown skill: {inp.get('skill_name', '')}"
-
-        if result["context"] == "fork":
-            self._emit_subagent_status(
-                "skill-fork", inp.get("skill_name", ""), started=True
-            )
-            sub_agent = self._subagent_factory.create_for_skill(
-                system_prompt=result["prompt"],
-                allowed_tools=result.get("allowed_tools"),
-            )
-            try:
-                sub_result = await sub_agent.run_once(
-                    inp.get("args") or "Execute this skill task."
-                )
-                self._usage.record_child_usage(
-                    sub_result["tokens"]["input"],
-                    sub_result["tokens"]["output"],
-                )
-                self._emit_subagent_status(
-                    "skill-fork", inp.get("skill_name", ""), started=False
-                )
-                return sub_result["text"] or "(Skill produced no output)"
-            except Exception as e:
-                self._emit_subagent_status(
-                    "skill-fork", inp.get("skill_name", ""), started=False
-                )
-                return f"Skill fork error: {e}"
-            finally:
-                await sub_agent.close()
-
-        return f'[Skill "{inp.get("skill_name", "")}" activated]\n\n{result["prompt"]}'
-
-    async def _execute_agent_tool(self, inp: dict) -> str:
-        agent_type = inp.get("type", "general")
-        description = inp.get("description", "sub-agent task")
-        prompt = inp.get("prompt", "")
-
-        self._emit_subagent_status(agent_type, description, started=True)
-
-        sub_agent = self._subagent_factory.create_for_agent_type(agent_type)
-
-        try:
-            result = await sub_agent.run_once(prompt)
-            self._usage.record_child_usage(
-                result["tokens"]["input"],
-                result["tokens"]["output"],
-            )
-            self._emit_subagent_status(agent_type, description, started=False)
-            return result["text"] or "(Sub-agent produced no output)"
-        except Exception as e:
-            self._emit_subagent_status(agent_type, description, started=False)
-            return f"Sub-agent error: {e}"
-        finally:
-            await sub_agent.close()
 
     # ─── 外部资源与 Memory 预取 ──────────────────────────────
 

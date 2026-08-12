@@ -832,7 +832,11 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             return {"choice": "clear-and-execute"}
 
         agent.set_plan_approval_fn(approve)
-        outcome = await agent.exit_plan_mode_tool()
+        outcome = await agent.tool_runtime.execute(
+            tool_call_id="exit-plan",
+            name="exit_plan_mode",
+            arguments={},
+        )
         self.assertTrue(outcome.terminate)
         pending = agent.plan.pending_context_reset
         self.assertIsNotNone(pending)
