@@ -29,6 +29,7 @@ from lion_code.context import (
     ModelLimitsResolver,
     ProviderContextCompactor,
     effective_window_tokens,
+    fallback_model_limits,
 )
 from lion_code.core import (
     AgentHarness,
@@ -52,7 +53,7 @@ from lion_code.memory_runtime import (
 )
 from lion_code.observers import TerminalRenderer, UsageObserver
 from lion_code.plan_runtime import PlanRuntime
-from lion_code.providers.thinking import ThinkingLevel
+from lion_code.provider_manager import ProviderManager
 from lion_code.session_identity import SessionIdentityState
 from lion_code.session_lifecycle import SessionLifecycle
 from lion_code.session_runtime import SessionRecorder, SessionRepository
@@ -240,9 +241,7 @@ class LionAgentRuntime(ReadOnlyMessageSource):
 class RuntimeIdentityHost(Protocol):
     """模型标识、终端渲染与中止/通知所需的宿主边界。"""
 
-    model: str
     is_sub_agent: bool
-    _thinking_level: ThinkingLevel
     _terminal_output: bool
     _system_prompt: str
     _last_stop_reason: str | None
@@ -262,8 +261,6 @@ class RuntimeIdentityHost(Protocol):
         *,
         role: Literal["info", "error"] = "info",
     ) -> None: ...
-
-    def _apply_core_thinking_level(self, level: ThinkingLevel) -> None: ...
 
     async def _before_turn_capabilities(self) -> None: ...
 
@@ -333,6 +330,7 @@ class AgentRuntimeCoordinator:
         context_manager: ContextManager,
         context_compactor: ContextCompactor | None,
         model_limits_resolver: ModelLimitsResolver,
+        provider_manager: ProviderManager,
     ) -> None:
         self._usage = usage
         self._budget = budget
@@ -343,6 +341,7 @@ class AgentRuntimeCoordinator:
         self._context_manager = context_manager
         self._context_compactor = context_compactor
         self._model_limits_resolver = model_limits_resolver
+        self._provider_manager = provider_manager
         self._resolved_model_limits_for: tuple[int, str] | None = None
         self._core_compaction_required = False
         self._last_context_actions: tuple[Any, ...] = ()
@@ -370,7 +369,7 @@ class AgentRuntimeCoordinator:
         if self._context_compactor is None:
             self._context_compactor = ProviderContextCompactor(
                 provider=provider,
-                get_model=lambda: self._identity.model,
+                get_model=lambda: self._provider_manager.view.model,
             )
         self._session_lifecycle = SessionLifecycle(self)
         self.reset_core_observers()
@@ -408,6 +407,30 @@ class AgentRuntimeCoordinator:
     @property
     def context_manager(self) -> ContextManager:
         return self._context_manager
+
+    def replace_context_compactor(self, compactor: ContextCompactor) -> None:
+        """替换当前 Provider 对应的上下文压缩器。"""
+
+        self._context_compactor = compactor
+
+    @property
+    def provider_manager(self) -> ProviderManager:
+        """返回 Provider 配置命令的唯一 Owner。"""
+
+        return self._provider_manager
+
+    @property
+    def is_running(self) -> bool:
+        return self._runtime.harness.is_running
+
+    def invalidate_model_limit_cache(self, model: str) -> None:
+        """使模型限制重新解析，并清除旧模型的压缩决策。"""
+
+        self._resolved_model_limits_for = None
+        self._core_compaction_required = False
+        self._identity.effective_window = effective_window_tokens(
+            fallback_model_limits(model)
+        )
 
     @property
     def resolved_model_limits_for(self) -> tuple[int, str] | None:
@@ -524,10 +547,11 @@ class AgentRuntimeCoordinator:
         if identity.is_sub_agent:
             self._session_recorder = None
         else:
+            provider_view = self._provider_manager.view
             self._session_recorder = SessionRecorder(
                 session_id=session.session_state.id,
-                model=identity.model,
-                thinking_level=identity._thinking_level,
+                model=provider_view.model,
+                thinking_level=provider_view.thinking_level,
                 cwd=session.tool_context.cwd,
                 storage=session._session_repository.storage_for(
                     session.session_state.id
@@ -556,12 +580,13 @@ class AgentRuntimeCoordinator:
             await self._session_recorder.initialize()
 
     async def resolve_core_model_limits(self) -> None:
-        key = (id(self._runtime.provider), self._identity.model)
+        model = self._provider_manager.view.model
+        key = (id(self._runtime.provider), model)
         if self._resolved_model_limits_for == key:
             return
         limits = await self._model_limits_resolver.resolve(
             self._runtime.provider,
-            self._identity.model,
+            model,
         )
         self._identity.effective_window = effective_window_tokens(limits)
         self._resolved_model_limits_for = key

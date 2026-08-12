@@ -11,9 +11,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
-from lion_code.context import effective_window_tokens, fallback_model_limits
 from lion_code.memory_runtime import MemoryInjectionReport
-from lion_code.providers.thinking import coerce_thinking_level
 
 if TYPE_CHECKING:
     from lion_code.agent_runtime import (
@@ -85,6 +83,10 @@ class SessionLifecycle:
         state = await session._session_repository.load(session_id)
         if state is None:
             return False
+        coord.provider_manager.restore_configuration(
+            model=state.model,
+            thinking_level=state.thinking_level,
+        )
         memory._memory_coordinator.reset()
         memory._reload_project_memory()
         memory._reload_session_memory()
@@ -95,17 +97,6 @@ class SessionLifecycle:
         coord._last_context_actions = ()
         coord._runtime.harness.clear_queues()
         coord._runtime.harness.replace_messages(state.messages)
-        if state.model is not None:
-            identity.model = state.model
-            identity.effective_window = effective_window_tokens(
-                fallback_model_limits(identity.model)
-            )
-            coord._resolved_model_limits_for = None
-            coord._runtime.set_model(identity.model)
-        if state.thinking_level is not None:
-            restored_level = coerce_thinking_level(state.thinking_level)
-            if restored_level != identity._thinking_level:
-                identity._apply_core_thinking_level(restored_level)
         if state.session_info is not None:
             started_at = time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ",

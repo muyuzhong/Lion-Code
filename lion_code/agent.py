@@ -12,7 +12,6 @@ from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from .agent_lifecycle import AgentLifecycle
 from .agent_runtime import (
     AgentRunResult,
     AgentRuntimeCoordinator,
@@ -48,6 +47,7 @@ from .memory_runtime import (
     MemoryCoordinator,
     MemoryInjectionReport,
     MemoryOverlay,
+    ProviderTextQueryService,
 )
 from .observers import TerminalRenderer
 from .permission_state import (
@@ -61,6 +61,15 @@ from .prompt import (
     build_dynamic_system_context,
     build_static_system_prompt,
     load_project_context_files,
+)
+from .provider_manager import (
+    ConfigurationRecorder,
+    MemoryQuerySink,
+    ModelContextControl,
+    ProviderManager,
+    ProviderRuntimePort,
+    ProviderState,
+    ProviderView,
 )
 from .providers.factory import create_provider
 from .providers.oneshot import complete_text
@@ -111,18 +120,123 @@ from .usage import BudgetPolicy, UsageLedger, UsageSnapshot
 # ─── Thinking 能力检测 ──────────────────────────────────────
 
 
-def _model_supports_thinking(model: str) -> bool:
-    m = model.lower()
-    if "claude-3-" in m or "3-5-" in m or "3-7-" in m:
-        return False
-    if "claude" in m and any(x in m for x in ("opus", "sonnet", "haiku")):
-        return True
-    return False
+class _DeferredProviderRuntimePort(ProviderRuntimePort):
+    """在组合根完成 Runtime 构造前暂存 ProviderManager 的端口。"""
+
+    def __init__(self) -> None:
+        self._runtime: AgentRuntimeCoordinator | None = None
+
+    def bind(self, runtime: AgentRuntimeCoordinator) -> None:
+        self._runtime = runtime
+
+    @property
+    def is_running(self) -> bool:
+        return self._runtime is not None and self._runtime.core_runtime.harness.is_running
+
+    def replace_provider(self, provider: ModelProvider) -> ModelProvider:
+        if self._runtime is None:
+            raise RuntimeError("Provider Runtime 尚未初始化")
+        return self._runtime.core_runtime.replace_provider(provider)
+
+    def set_model(self, model: str) -> None:
+        if self._runtime is None:
+            raise RuntimeError("Provider Runtime 尚未初始化")
+        self._runtime.core_runtime.set_model(model)
 
 
-def _model_supports_adaptive_thinking(model: str) -> bool:
-    m = model.lower()
-    return "opus-4-6" in m or "sonnet-4-6" in m
+class _DeferredModelContextControl(ModelContextControl):
+    """把 Provider 派生服务更新转给现有 RuntimeCoordinator。"""
+
+    def __init__(self) -> None:
+        self._runtime: AgentRuntimeCoordinator | None = None
+
+    def bind(self, runtime: AgentRuntimeCoordinator) -> None:
+        self._runtime = runtime
+
+    def replace_context_compactor(self, compactor: ContextCompactor) -> None:
+        if self._runtime is None:
+            raise RuntimeError("Provider Runtime 尚未初始化")
+        self._runtime.replace_context_compactor(compactor)
+
+    def invalidate_model_limit_cache(self, model: str) -> None:
+        if self._runtime is None:
+            raise RuntimeError("Provider Runtime 尚未初始化")
+        self._runtime.invalidate_model_limit_cache(model)
+
+
+class _MemoryQuerySinkAdapter(MemoryQuerySink):
+    """只向 ProviderManager 暴露 Memory 的 query service 写入口。"""
+
+    def __init__(self, coordinator: SessionMemoryCoordinator) -> None:
+        self._coordinator = coordinator
+
+    def set_query_service(self, service: ProviderTextQueryService) -> None:
+        self._coordinator.set_query_service(service)
+
+
+class _SessionRecorderConfigurationRecorder(ConfigurationRecorder):
+    """将 Manager 的同步配置命令适配到已有异步 SessionRecorder。"""
+
+    def __init__(self) -> None:
+        self._recorder: Callable[[], SessionRecorder | None] | None = None
+        self._schedule: Callable[
+            [Callable[[], Coroutine[Any, Any, object]]], None
+        ] | None = None
+
+    def bind(
+        self,
+        recorder: Callable[[], SessionRecorder | None],
+        schedule: Callable[[Callable[[], Coroutine[Any, Any, object]]], None],
+    ) -> None:
+        self._recorder = recorder
+        self._schedule = schedule
+
+    def record_configuration_change(
+        self,
+        previous: ProviderView,
+        current: ProviderView,
+    ) -> None:
+        recorder_getter = self._recorder
+        schedule = self._schedule
+        if recorder_getter is None or schedule is None:
+            return
+        recorder = recorder_getter()
+        if recorder is None:
+            return
+        model_changed = previous.model != current.model
+        thinking_level_changed = previous.thinking_level != current.thinking_level
+        thinking_mode_changed = previous.thinking_mode != current.thinking_mode
+        if not (model_changed or thinking_level_changed or thinking_mode_changed):
+            return
+
+        async def persist_configuration() -> object:
+            if model_changed:
+                await recorder.record_model_change(current.model)
+            if thinking_level_changed:
+                await recorder.record_thinking_level_change(current.thinking_level)
+            elif thinking_mode_changed:
+                await recorder.record_thinking_level_change(current.thinking_mode)
+            return None
+
+        schedule(persist_configuration)
+
+
+class _DeferredBackgroundScheduler:
+    """在 RuntimeCoordinator 创建后才转发后台清理任务。"""
+
+    def __init__(self) -> None:
+        self._runtime: AgentRuntimeCoordinator | None = None
+
+    def bind(self, runtime: AgentRuntimeCoordinator) -> None:
+        self._runtime = runtime
+
+    def __call__(
+        self,
+        operation: Callable[[], Coroutine[Any, Any, object]],
+    ) -> None:
+        if self._runtime is None:
+            raise RuntimeError("Provider Runtime 尚未初始化")
+        self._runtime.schedule_background_operation(operation)
 
 
 # ─── Agent ──────────────────────────────────────────────────
@@ -159,20 +273,11 @@ class Agent:
         self._permission_controller = PermissionController(
             PermissionState(mode=permission_mode)
         )
-        self.thinking = thinking
-        self.model = model
-        self.use_openai = bool(api_base)
         self.is_sub_agent = is_sub_agent
         self._terminal_output = terminal_output
         # 评测根 Agent 必须阻止机器级 MCP 发现；默认值保留 CLI/TUI 语义。
         self._mcp_enabled = mcp_enabled
         self._notice_fn: Callable[[str, Literal["info", "error"]], None] | None = None
-        self._api_key = api_key or os.environ.get(
-            "OPENAI_API_KEY" if self.use_openai else "ANTHROPIC_API_KEY",
-            "",
-        )
-        self._api_base = api_base
-        self._anthropic_base_url = anthropic_base_url
         self._pre_tool_use_hooks = load_pre_tool_use_hooks()
         self.confirm_fn = confirm_fn
         self.effective_window = effective_window_tokens(fallback_model_limits(model))
@@ -201,11 +306,14 @@ class Agent:
         # 最近一次 chat/run 的终止原因，供 run() 结构化返回；chat 自身不读取。
         self._last_stop_reason: str | None = None
 
-        # 根据用户开关和模型能力解析实际 Thinking 模式。
-        self._thinking_mode = self._resolve_thinking_mode()
         # Core 路径采用 Tau 6 档词汇(off..xhigh);由 ``thinking`` 开关推导初始档,
         # 运行中经 set_thinking_level/cycle_thinking_level 调整并热重建 Provider。
-        self._thinking_level: ThinkingLevel = "medium" if thinking else "off"
+        initial_provider_kind = "openai-compatible" if api_base else "anthropic"
+        initial_api_key = api_key or os.environ.get(
+            "OPENAI_API_KEY" if initial_provider_kind == "openai-compatible" else "ANTHROPIC_API_KEY",
+            "",
+        )
+        initial_thinking_level: ThinkingLevel = "medium" if thinking else "off"
 
         # 记录文件读取时的 mtime，落实“先读后改”并检测外部并发修改。
         self._read_file_state: dict[str, float] = {}
@@ -308,8 +416,29 @@ class Agent:
             is_snippable_tool=self._is_snippable_tool
         )
 
-        self._lifecycle = AgentLifecycle(self)
-        provider = self._lifecycle.build_core_provider(self._thinking_level)
+        provider_runtime_port = _DeferredProviderRuntimePort()
+        model_context_control = _DeferredModelContextControl()
+        memory_query_sink = _MemoryQuerySinkAdapter(self._session_memory_coord)
+        configuration_recorder = _SessionRecorderConfigurationRecorder()
+        background_scheduler = _DeferredBackgroundScheduler()
+        self._provider_manager = ProviderManager(
+            state=ProviderState(
+                model=model,
+                provider_kind=initial_provider_kind,
+                api_key=initial_api_key,
+                openai_base_url=api_base,
+                anthropic_base_url=anthropic_base_url,
+                thinking_enabled=thinking,
+                thinking_level=initial_thinking_level,
+            ),
+            runtime=provider_runtime_port,
+            context=model_context_control,
+            memory=memory_query_sink,
+            recorder=configuration_recorder,
+            provider_factory=self._create_provider,
+            schedule_background_operation=background_scheduler,
+        )
+        provider = self._provider_manager.build_provider()
         self._runtime_coordinator = AgentRuntimeCoordinator(
             usage=self._usage,
             budget=self._budget,
@@ -323,7 +452,15 @@ class Agent:
             context_manager=runtime_context_manager,
             context_compactor=context_compactor,
             model_limits_resolver=model_limits_resolver or ModelLimitsResolver(),
+            provider_manager=self._provider_manager,
         )
+        provider_runtime_port.bind(self._runtime_coordinator)
+        model_context_control.bind(self._runtime_coordinator)
+        configuration_recorder.bind(
+            lambda: self._runtime_coordinator.session_recorder,
+            self._runtime_coordinator.schedule_background_operation,
+        )
+        background_scheduler.bind(self._runtime_coordinator)
         self._session_memory_coord.set_query_service(
             self._build_core_memory_query_service()
         )
@@ -374,13 +511,25 @@ class Agent:
                 )
 
     def _resolve_thinking_mode(self) -> str:
-        if not self.thinking:
-            return "disabled"
-        if not _model_supports_thinking(self.model):
-            return "disabled"
-        if _model_supports_adaptive_thinking(self.model):
-            return "adaptive"
-        return "enabled"
+        return self._provider_manager.view.thinking_mode
+
+    @property
+    def model(self) -> str:
+        """当前模型的只读 ProviderView 投影。"""
+
+        return self._provider_manager.view.model
+
+    @property
+    def thinking(self) -> bool:
+        """兼容布尔 Thinking API 的只读投影。"""
+
+        return self._provider_manager.view.thinking_enabled
+
+    @property
+    def use_openai(self) -> bool:
+        """兼容旧 API 的 Provider kind 投影。"""
+
+        return self._provider_manager.view.provider_kind == "openai-compatible"
 
     @property
     def _core_runtime(self) -> LionAgentRuntime:
@@ -622,7 +771,7 @@ class Agent:
 
     @property
     def provider_name(self) -> str:
-        return "openai-compatible" if self.use_openai else "anthropic"
+        return self._provider_manager.view.provider_kind
 
     @property
     def messages(self) -> tuple[AgentMessage, ...]:
@@ -745,11 +894,11 @@ class Agent:
 
     @property
     def api_configured(self) -> bool:
-        return self._lifecycle.api_configured
+        return self._provider_manager.api_configured
 
     def get_api_config(self) -> dict:
-        """返回 Agent 自己持有的当前 Provider 配置。"""
-        return self._lifecycle.get_api_config()
+        """返回当前 Provider 配置的兼容投影。"""
+        return self._provider_manager.get_api_config()
 
     def configure_api(
         self,
@@ -761,7 +910,7 @@ class Agent:
         use_openai: bool | None = None,
     ) -> None:
         """在空闲态原子切换模型/凭证，并保留 canonical history。"""
-        self._lifecycle.configure_api(
+        self._provider_manager.configure(
             model=model,
             api_key=api_key,
             api_base=api_base,
@@ -771,19 +920,19 @@ class Agent:
 
     def set_thinking(self, enabled: bool) -> str:
         """切换 Thinking，并把实际生效级别写入当前 Core Session。"""
-        return self._lifecycle.set_thinking(enabled)
+        return self._provider_manager.set_thinking(enabled)
 
     # ─── Core 路径 Thinking 档位(Tau 6 档)─────────────────────
 
     @property
     def thinking_level(self) -> str:
         """Core 路径当前 thinking 档位(off..xhigh)。"""
-        return self._lifecycle.thinking_level
+        return self._provider_manager.view.thinking_level
 
     @property
     def available_thinking_levels(self) -> tuple[str, ...]:
         """当前后端支持的 thinking 档位(v1 两后端均返回全 6 档)。"""
-        return self._lifecycle.available_thinking_levels
+        return self._provider_manager.available_thinking_levels
 
     def set_thinking_level(self, level: ThinkingLevel | str) -> ThinkingLevel:
         """设定 thinking 档位并热重建 Core Provider,持久化档位变更。
@@ -791,27 +940,19 @@ class Agent:
         与布尔 ``set_thinking(bool)`` 接口互不影响:本方法采用
         Tau 6 档词汇;档位经归一化,未变则直接返回,不重建不落盘。
         """
-        return self._lifecycle.set_thinking_level(level)
+        return self._provider_manager.set_thinking_level(level)
 
     def cycle_thinking_level(self) -> ThinkingLevel:
         """循环到下一档并持久化(供 TUI shift+tab 与 /thinking 无参调用)。"""
-        return self._lifecycle.cycle_thinking_level()
+        return self._provider_manager.cycle_thinking_level()
 
     def _build_core_provider(self, thinking_level: ThinkingLevel) -> ModelProvider:
         """用当前凭证与指定档位构建一个新 Core Provider。"""
-        return self._lifecycle.build_core_provider(thinking_level)
+        return self._provider_manager.build_provider(thinking_level)
 
     def _create_provider(self, **kwargs: Any) -> ModelProvider:
         """在调用时读取本模块 factory，保留测试替身的动态 patch 锚点。"""
         return create_provider(**kwargs)
-
-    def _apply_core_thinking_level(self, level: ThinkingLevel) -> None:
-        """设定 ``self._thinking_level`` 并热重建 Core Provider 使档位生效。
-
-        不落盘档位变更(由调用方按需记录):恢复会话时复用本方法仅重建 Provider,
-        避免对已有 entry 重复写。``context_compactor`` 与模型限制缓存一并刷新。
-        """
-        self._lifecycle.apply_core_thinking_level(level)
 
     # ─── 主对话入口 ──────────────────────────────────────────
 
@@ -1031,18 +1172,8 @@ class Agent:
         此前 fork 只传 api_base 不传 key,/model 配置(无环境变量)的用户
         fork 出的子 Agent 是无凭证的。
         """
-        if self.use_openai:
-            return {
-                "model": self.model,
-                "api_base": self._api_base,
-                "api_key": self._api_key,
-                "terminal_output": self._terminal_output,
-            }
         return {
-            "model": self.model,
-            "api_base": None,
-            "anthropic_base_url": self._anthropic_base_url,
-            "api_key": self._api_key,
+            **self._provider_manager.child_api_kwargs(),
             "terminal_output": self._terminal_output,
         }
 
@@ -1153,7 +1284,7 @@ class Agent:
         recorder = SessionRecorder(
             session_id=session_id,
             model=str(metadata.get("model") or self.model),
-            thinking_level=self._thinking_level,
+            thinking_level=self.thinking_level,
             cwd=Path(str(metadata.get("cwd") or self.tool_context.cwd)),
             storage=self._session_repository.storage_for(session_id),
         )

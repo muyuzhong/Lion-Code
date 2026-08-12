@@ -420,7 +420,7 @@ class TestAgentCompositionWithCapabilities:
             terminal_output=False,
             mcp_enabled=False,
         )
-        agent._api_key = ""  # noqa: SLF001
+        agent.configure_api(api_key="")
         participant = _RecordingTurnParticipant()
         agent._capability_registry.register(  # noqa: SLF001
             CapabilitySpec(

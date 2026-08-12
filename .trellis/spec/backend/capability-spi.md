@@ -77,7 +77,7 @@ class CapabilityRegistry:
 ### Kernel–Capability Separation
 
 1. ``lion_code.capabilities`` must not import ``lion_code.agent``,
-   ``lion_code.agent_lifecycle``, or ``lion_code.agent_runtime``.
+   ``lion_code.agent_runtime``.
 2. ``lion_code.capabilities`` must not reference ``AgentHarness`` in any form.
 3. ``CapabilityRegistry`` must not import ``Agent``, create ``Provider``
    objects, create ``Session`` objects, modify ``Permission``, or hold
@@ -170,7 +170,7 @@ python -m pytest -q tests/architecture/test_runtime_boundaries.py
 import-linter contracts in ``pyproject.toml``:
 
 - ``lion_code.capabilities`` cannot import ``lion_code.agent``,
-  ``lion_code.agent_lifecycle``, or ``lion_code.agent_runtime``.
+  ``lion_code.agent_runtime``.
 - Existing contracts (Core, Providers, Application, TUI) automatically
   forbid ``capabilities`` where applicable because whitelist-based
   boundaries derive their forbidden set from ``ALL_ROOTS``.
@@ -178,7 +178,7 @@ import-linter contracts in ``pyproject.toml``:
 AST tests in ``tests/architecture/test_runtime_boundaries.py``:
 
 - ``test_capabilities_do_not_import_agent_engine``: capabilities source
-  files must not import from ``agent``, ``agent_lifecycle``, or
+  files must not import from ``agent`` or
   ``agent_runtime``.
 - ``test_capabilities_do_not_reference_agent_harness``: capabilities
   source files must not reference ``AgentHarness`` in any form.

@@ -141,8 +141,25 @@ def Agent.configure_api(
     use_openai: bool | None = None,
 ) -> None: ...
 
-class AgentLifecycle:
-    def configure_api(
+@dataclass(slots=True)
+class ProviderState:
+    model: str
+    provider_kind: Literal["anthropic", "openai-compatible"]
+    api_key: str
+    openai_base_url: str | None
+    anthropic_base_url: str | None
+    thinking_enabled: bool
+    thinking_level: ThinkingLevel
+
+@dataclass(frozen=True, slots=True)
+class ProviderView:
+    model: str
+    provider_kind: Literal["anthropic", "openai-compatible"]
+    thinking_enabled: bool
+    thinking_level: ThinkingLevel
+
+class ProviderManager:
+    def configure(
         self,
         *,
         model: str | None = None,
@@ -151,8 +168,19 @@ class AgentLifecycle:
         anthropic_base_url: str | None = None,
         use_openai: bool | None = None,
     ) -> None: ...
+    def set_thinking(self, enabled: bool) -> str: ...
     def set_thinking_level(self, level: ThinkingLevel | str) -> ThinkingLevel: ...
-    def apply_core_thinking_level(self, level: ThinkingLevel) -> None: ...
+    def cycle_thinking_level(self) -> ThinkingLevel: ...
+    def restore_configuration(
+        self,
+        *,
+        model: str | None = None,
+        thinking_level: str | None = None,
+    ) -> None: ...
+    def build_provider(
+        self,
+        level: ThinkingLevel | str | None = None,
+    ) -> ModelProvider: ...
 
 def Agent.set_terminal_output(enabled: bool) -> None: ...
 
@@ -419,11 +447,20 @@ Usage has its own executable contract in
   first, replace it without clearing canonical history, update stored credentials and
   model, refresh the compactor, query service, and model-limit cache, then schedule
   the old Provider for closing.
-- `AgentLifecycle` owns that configuration transaction and both Thinking-change
-  paths through `AgentLifecycleHost`; `Agent` exposes coordinator-backed Core,
-  compactor, recorder and background-operation compatibility views while retaining
-  configuration fields and Memory composition. The lifecycle module must not import
-  `Agent` or create another Provider, message history, or session writer.
+- `ProviderManager` owns that configuration transaction and all Provider/Thinking commands.
+  `ProviderView` is the only provider/model/thinking projection exposed to consumers;
+  credentials and base URLs stay inside the manager.
+- `ProviderManager` receives only `ProviderRuntimePort`, `ModelContextControl`,
+  `MemoryQuerySink`, `ConfigurationRecorder`, the provider factory Callable and a
+  background scheduler. It never imports or accepts `Agent`, Core history or a
+  runtime host aggregate.
+- Replacement commands build every Provider and derived service before mutating
+  Runtime or State. They then replace Runtime, commit State, refresh Context and
+  Memory services, record the change, and schedule old Provider closure. A
+  model-only change uses Runtime `set_model()` without rebuilding the Provider.
+- `Agent` exposes facade delegates and does not retain Provider credentials,
+  backend kind, Thinking mode or Thinking level as mutable fields. Session restore
+  calls `ProviderManager.restore_configuration()`.
 - `Agent.is_aborted` is a read-only facade over the coordinator's
   `ExecutionControl`. A new chat calls `begin()` before setup; explicit abort and
   timeout call the same coordinator cancellation path, while timeout retains its
@@ -445,8 +482,9 @@ Usage has its own executable contract in
   it. Base prompt changes always call `PlanRuntime.refresh_prompt()`.
 - `Agent._create_provider(**kwargs)` is the required host factory boundary. It reads
   `lion_code.agent.create_provider` at call time, so existing patches of that name
-  affect initial construction, Provider swaps, and Thinking rebuilds. Do not import
-  the factory directly into `agent_lifecycle.py`.
+  affect initial construction, Provider swaps, and Thinking rebuilds. The
+  `ProviderManager` receives this method as a Callable and does not import the
+  factory module directly.
 - `Agent._create_terminal_renderer()` is the corresponding renderer factory boundary:
   it resolves `lion_code.agent.TerminalRenderer` at call time, so terminal renderer
   patches remain effective while the coordinator rebuilds observers.
@@ -599,9 +637,9 @@ Usage has its own executable contract in
   services use the replacement.
 - Base: changing only the model updates the live Core model and records one model
   change without rebuilding the Provider.
-- Good: `AgentLifecycle` receives the current `Agent` as a narrow host, builds a
-  replacement through `host._create_provider()`, and only writes host fields after
-  that construction succeeds.
+- Good: `ProviderManager` receives narrow runtime/context/memory/recorder ports,
+  builds a replacement through its injected factory, and only commits State after
+  Runtime replacement succeeds.
 - Bad: importing `create_provider` inside the lifecycle module bypasses the
   established test and compatibility patch point.
 - Bad: keeping `_openai_messages` and `_anthropic_messages` beside Core history makes
@@ -663,7 +701,7 @@ pyproject.toml contains these six import-linter contracts:
 - tui cannot directly import a runtime engine layer. It consumes
   application / core events; config, prompt, and version remain narrow
   presentation/configuration exceptions.
-- capabilities cannot depend on the Agent engine (`agent`, `agent_lifecycle`,
+- capabilities cannot depend on the Agent engine (`agent`,
   `agent_runtime`). The Capability SPI is a separate layer from the Agent
   composition root; see [Capability SPI](./capability-spi.md).
 - Product code cannot import tests or benchmarks.
@@ -697,7 +735,7 @@ also rejects patterns an import graph cannot express:
   state, permission or prompt by hand.
 - Usage single-writer, composition, projection, and reverse-import scanners follow
   [Usage Ownership](./usage-ownership.md).
-- Capability SPI source importing `agent`, `agent_lifecycle`, or
+- Capability SPI source importing `agent` or
   `agent_runtime`; referencing `AgentHarness`; or defining
   `CapabilityContext`, `ServiceLocator`, or `AgentCapability` god-object
   types. See [Capability SPI](./capability-spi.md).
@@ -712,7 +750,7 @@ exception, or silently broaden an allowlist to make a regression pass.
 - `tests/integration/test_agent_core_runtime.py`: both Provider protocols, idle and
   active hot-switch behavior, derived-service refresh, child inheritance, JSONL
   restore, immutable legacy migration, and that `Agent` composes
-  `AgentLifecycle` while preserving the `lion_code.agent.create_provider` patch
+  `ProviderManager` while preserving the `lion_code.agent.create_provider` patch
   anchor for all Provider creation paths.
 - `tests/session_runtime/`: append/replay ordering, compaction projection, incomplete
   tails, invalid legacy data, and same-ID precedence.
@@ -787,7 +825,7 @@ self._pending_core_context_reset = None
 self.tool_context.confirmed_paths.add(reason)
 ui.set_sink(tui_sink)
 legacy_path.replace(jsonl_path)
-# agent_lifecycle.py: from .providers.factory import create_provider
+# ProviderManager receives Agent._create_provider as a Callable factory seam.
 ```
 
 ### Correct
@@ -806,6 +844,6 @@ agent.plan.complete_context_reset()
 session = LionCodingSession(backend, terminal_output=False)
 session.set_notice_fn(app_notice)
 storage = repository.storage_for(session_id)
-# AgentLifecycle calls host._create_provider(**provider_kwargs).
+# ProviderManager calls its injected factory after replacement validation.
 # Legacy input is read-only; SessionRecorder appends canonical entries to storage.
 ```

@@ -140,7 +140,6 @@ BOUNDARIES: tuple[Boundary, ...] = (
         forbidden=frozenset(
             {
                 "agent",
-                "agent_lifecycle",
                 "agent_runtime",
             }
         ),

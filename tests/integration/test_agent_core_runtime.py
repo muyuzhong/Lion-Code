@@ -17,11 +17,11 @@ from unittest.mock import AsyncMock, patch
 from core.fakes import FakeProvider
 
 from lion_code.agent import Agent
-from lion_code.agent_lifecycle import AgentLifecycle
 from lion_code.context import SUMMARY_SYSTEM_PROMPT
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 from lion_code.project_identity import resolve_project_identity
+from lion_code.provider_manager import ProviderManager
 from lion_code.providers import RuntimeModelLimits
 from lion_code.session_memory import SessionMemoryRepository
 from lion_code.session_runtime import SessionRepository
@@ -621,7 +621,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await restored.restore_core_session(agent.session_id))
         self.assertEqual(restored.model, "claude-sonnet-4-6")
         # Core 路径恢复采用 Tau 档位;旧 SDK 词汇 "adaptive" 被 coerce 为 "medium"。
-        self.assertEqual(restored._thinking_level, "medium")
+        self.assertEqual(restored.thinking_level, "medium")
 
     async def test_legacy_json_is_migrated_without_deleting_source(self) -> None:
         session_id = "legacy01"
@@ -856,7 +856,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_configure_api_replaces_provider_in_existing_runtime(self) -> None:
         """换 key/base 原位替换 Provider，并保留 Harness 与 canonical history。"""
         agent, old_fake = self._make_agent([_stop_event("done")], ToolRegistry())
-        self.assertIsInstance(agent._lifecycle, AgentLifecycle)
+        self.assertIsInstance(agent._provider_manager, ProviderManager)
         await agent.chat("hello")
         old_runtime = agent._core_runtime
         old_compactor = agent._context_compactor
