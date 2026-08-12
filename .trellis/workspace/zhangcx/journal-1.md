@@ -1135,3 +1135,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 35: Provider 配置与 Thinking 生命周期所有权重构
+
+**Date**: 2026-08-12
+**Task**: Provider 配置与 Thinking 生命周期所有权重构
+**Branch**: `master`
+
+### Summary
+
+新增 ProviderState、ProviderView、ProviderManager，移除 AgentLifecycle 与 Agent Provider mutable mirrors；完成 Runtime、Session restore 窄端口接线、事务切换、架构测试与全量质量门禁。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `28d8bc5` | (see git log) |
+
+### Status
+
+[OK] **Completed**

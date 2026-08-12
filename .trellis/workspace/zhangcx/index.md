@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 34
+- **Total Sessions**: 35
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1137 | Active |
+| `journal-1.md` | ~1158 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 35 | 2026-08-12 | Provider 配置与 Thinking 生命周期所有权重构 | `28d8bc5` | `master` |
 | 34 | 2026-08-12 | 移除 Agent 工具业务路由 | `0b9b798` | `master` |
 | 33 | 2026-08-12 | 完成 Application Port 架构重构 | `4a0725b`, `f85e248` | `muyuzhong/capability-spi-foundation` |
 | 32 | 2026-08-11 | 修复运行时预算取消与 Capability 类型边界 | `557cdf8` | `muyuzhong/capability-spi-foundation` |
