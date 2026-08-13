@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from lion_code.adapters import adapt_active_tools
+from lion_code.capabilities import CapabilityLifecycle
 from lion_code.context import (
     ContextCompactor,
     ContextManager,
@@ -242,7 +243,6 @@ class RuntimeIdentityHost(Protocol):
 
     is_sub_agent: bool
     _terminal_output: bool
-    _system_prompt: str
     _last_stop_reason: str | None
     effective_window: int
 
@@ -260,12 +260,6 @@ class RuntimeIdentityHost(Protocol):
         *,
         role: Literal["info", "error"] = "info",
     ) -> None: ...
-
-    async def _before_turn_capabilities(self) -> None: ...
-
-    async def _after_turn_capabilities(self) -> None: ...
-
-    async def _close_capabilities(self) -> None: ...
 
 
 class SessionStateHost(Protocol):
@@ -323,6 +317,8 @@ class AgentRuntimeCoordinator:
         session: SessionStateHost,
         memory: MemoryTurnHost,
         execution: ExecutionControl,
+        capabilities: CapabilityLifecycle,
+        get_system: Callable[[], str],
         provider: ModelProvider,
         model: str,
         tool_runtime: ToolRuntime,
@@ -337,6 +333,7 @@ class AgentRuntimeCoordinator:
         self._session = session
         self._memory = memory
         self._execution = execution
+        self._capabilities = capabilities
         self._context_manager = context_manager
         self._context_compactor = context_compactor
         self._model_limits_resolver = model_limits_resolver
@@ -357,7 +354,7 @@ class AgentRuntimeCoordinator:
         self._runtime = LionAgentRuntime(
             provider=provider,
             model=model,
-            get_system=lambda: self._identity._system_prompt,
+            get_system=get_system,
             tool_runtime=tool_runtime,
             cancellation=execution.cancellation,
             cancel_callback=execution.cancel,
@@ -370,7 +367,7 @@ class AgentRuntimeCoordinator:
                 provider=provider,
                 get_model=lambda: self._provider_manager.view.model,
             )
-        self._session_lifecycle = SessionLifecycle(self)
+        self._session_lifecycle = SessionLifecycle(self, capabilities)
         self.reset_core_observers()
 
     @property
@@ -766,8 +763,8 @@ class AgentRuntimeCoordinator:
         memory = self._memory
         self._execution.begin()
         identity._last_stop_reason = None
-        await identity._before_turn_capabilities()
         try:
+            await self._capabilities.before_turn()
             if not identity.api_configured:
                 identity._emit_notice(
                     "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
@@ -806,7 +803,7 @@ class AgentRuntimeCoordinator:
                 finally:
                     memory._turn_memory_overlays = memory._build_turn_memory_overlays()
         finally:
-            await identity._after_turn_capabilities()
+            await self._capabilities.after_turn()
 
     async def run_once(self, prompt: str) -> dict[str, Any]:
         """运行一次并返回捕获的文本与本次 token 差值。"""

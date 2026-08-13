@@ -6,13 +6,18 @@ import os
 import platform
 import subprocess
 import sys
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .memory import build_memory_prompt_section
 from .project_identity import ProjectIdentity, resolve_project_identity
 from .skills import build_skill_descriptions
 from .subagent import build_agent_descriptions
+
+if TYPE_CHECKING:
+    from .capabilities.types import PromptLayer
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +26,46 @@ class ProjectContextFile:
 
     path: str
     content: str
+
+
+class PromptComposer:
+    """组合当前 Provider system prompt，不持有会话历史或 Capability 状态。"""
+
+    def __init__(
+        self,
+        stable_base_prompt: str,
+        dynamic_context: str = "",
+        layers: Callable[[], Sequence[PromptLayer]] | None = None,
+    ) -> None:
+        self._stable_base_prompt = stable_base_prompt
+        self._dynamic_context = dynamic_context
+        self._layers = layers if layers is not None else (lambda: ())
+
+    @property
+    def stable_base_prompt(self) -> str:
+        return self._stable_base_prompt
+
+    @property
+    def dynamic_context(self) -> str:
+        return self._dynamic_context
+
+    def set_dynamic_context(self, dynamic_context: str) -> None:
+        """替换后续请求使用的未缓存动态上下文尾部。"""
+
+        self._dynamic_context = dynamic_context
+
+    def get_system(self) -> str:
+        """每次重新渲染 system prompt，不保留 layer 输出缓存。"""
+
+        parts: list[str] = [self._stable_base_prompt]
+        if self._dynamic_context.strip():
+            parts.append(self._dynamic_context)
+        for layer in self._layers():
+            fragment = layer.render()
+            if fragment.strip():
+                parts.append(fragment)
+        return "\n\n".join(parts)
+
 
 # ─── 内嵌的系统提示词模板 ───────────────────────────────────
 
@@ -146,7 +191,9 @@ def _load_rules_dir(directory: Path) -> str:
     if not rules_dir.is_dir():
         return ""
     try:
-        files = sorted(f for f in rules_dir.iterdir() if f.suffix == ".md" and f.is_file())
+        files = sorted(
+            f for f in rules_dir.iterdir() if f.suffix == ".md" and f.is_file()
+        )
         if not files:
             return ""
         parts: list[str] = []
@@ -175,6 +222,7 @@ def load_project_context_files(
 
     current_cwd = (cwd or Path.cwd()).resolve()
     project = identity or resolve_project_identity(current_cwd)
+    directories: tuple[Path, ...]
     try:
         relative = current_cwd.relative_to(project.root)
     except ValueError:
@@ -194,10 +242,12 @@ def load_project_context_files(
             if not path.is_file():
                 continue
             try:
-                files.append(ProjectContextFile(
-                    path=str(path),
-                    content=_resolve_includes(path.read_text(), directory),
-                ))
+                files.append(
+                    ProjectContextFile(
+                        path=str(path),
+                        content=_resolve_includes(path.read_text(), directory),
+                    )
+                )
             except Exception:
                 pass
     return tuple(files)
@@ -221,10 +271,19 @@ def load_claude_md() -> str:
 def get_git_context() -> str:
     """获取分支、近期提交和工作区状态；非 Git 目录或超时时返回空上下文。"""
     try:
-        opts = {"encoding": "utf-8", "timeout": 3, "capture_output": True}
-        branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], **opts).stdout.strip()
-        log = subprocess.run(["git", "log", "--oneline", "-5"], **opts).stdout.strip()
-        status = subprocess.run(["git", "status", "--short"], **opts).stdout.strip()
+
+        def run_git(args: list[str]) -> str:
+            return subprocess.run(
+                ["git", *args],
+                capture_output=True,
+                encoding="utf-8",
+                text=True,
+                timeout=3,
+            ).stdout.strip()
+
+        branch = run_git(["rev-parse", "--abbrev-ref", "HEAD"])
+        log = run_git(["log", "--oneline", "-5"])
+        status = run_git(["status", "--short"])
         result = f"\nGit branch: {branch}"
         if log:
             result += f"\nRecent commits:\n{log}"
@@ -251,7 +310,11 @@ def build_dynamic_system_context(
 ) -> str:
     """返回会话内稳定、但随机器和项目变化的未缓存上下文。"""
     plat = f"{platform.system()} {platform.machine()}"
-    shell = (os.environ.get("ComSpec") or "cmd.exe") if sys.platform == "win32" else os.environ.get("SHELL", "/bin/sh")
+    shell = (
+        (os.environ.get("ComSpec") or "cmd.exe")
+        if sys.platform == "win32"
+        else os.environ.get("SHELL", "/bin/sh")
+    )
     git_context = get_git_context()
     memory_section = build_memory_prompt_section()
     skills_section = build_skill_descriptions()
@@ -270,7 +333,8 @@ def build_dynamic_system_context(
         deferred_names = deferred_tool_names
     deferred_section = (
         f"\n\nThe following deferred tools are available via tool_search: {', '.join(deferred_names)}. Use tool_search to fetch their full schemas when needed."
-        if deferred_names else ""
+        if deferred_names
+        else ""
     )
 
     return (

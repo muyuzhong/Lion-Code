@@ -24,6 +24,7 @@ from lion_code.frontmatter import format_frontmatter, parse_frontmatter
 from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.plan_runtime import PlanRuntime, PlanState
 from lion_code.project_identity import ProjectIdentity
+from lion_code.prompt import PromptComposer
 from lion_code.session_memory import SessionMemory
 from lion_code.session_runtime import SessionRepository
 from lion_code.subagent_factory import ChildAgentConfig
@@ -477,10 +478,8 @@ class TestAgentDreamRefresh(unittest.TestCase):
         memory_coordinator = Mock()
         host = SimpleNamespace(
             _memory_coordinator=memory_coordinator,
-            _dynamic_system_context="old dynamic",
-            _static_system_prompt="static",
-            _base_system_prompt="old base",
-            _system_prompt="old system",
+            _refresh_dynamic_context_enabled=True,
+            _prompt_composer=PromptComposer("static", "old dynamic"),
             tool_registry=SimpleNamespace(
                 deferred_tool_names=Mock(return_value=["enter_plan_mode"])
             ),
@@ -509,8 +508,8 @@ class TestAgentDreamRefresh(unittest.TestCase):
         build_dynamic_system_context.assert_called_once_with(["enter_plan_mode"])
 
         memory_coordinator.invalidate.assert_called_once_with(["project_changed.md"])
-        self.assertEqual(host._base_system_prompt, "static\n\nnew dynamic")
-        self.assertEqual(host._system_prompt, "static\n\nnew dynamic")
+        self.assertEqual(host._prompt_composer.dynamic_context, "new dynamic")
+        self.assertEqual(host._prompt_composer.get_system(), "static\n\nnew dynamic")
 
 
 if __name__ == "__main__":

@@ -103,7 +103,17 @@ class PlanRuntime:
     def reset_for_new_session(self) -> None: ...
     def reset_after_restore(self) -> None: ...
     def complete_context_reset(self) -> None: ...
-    def refresh_prompt(self) -> None: ...
+
+class PromptComposer:
+    def get_system(self) -> str: ...
+    def set_dynamic_context(self, dynamic_context: str) -> None: ...
+
+class CapabilityLifecycle(Protocol):
+    async def before_turn(self) -> None: ...
+    async def after_turn(self) -> None: ...
+    async def on_new_session(self) -> None: ...
+    async def on_restore_session(self) -> None: ...
+    async def close(self) -> None: ...
 
 class ToolCommand(Protocol):
     async def __call__(
@@ -518,8 +528,9 @@ The concrete routing and ownership contract is:
   usage without changing parent turns/responses, converts child failures to an
   error `ToolResult`, and closes the child in `finally`.
 - `enter_plan_mode` / `exit_plan_mode` -> `PlanRuntime` through the
-  ToolSource-only `PlanCapability`. The adapter copies `terminate` from
-  `PlanToolOutcome` into `ToolResult`.
+  `PlanCapability` ToolSource. The same capability contributes a live
+  `PlanPromptLayer` over `PlanView` and a `PlanSessionParticipant`; the tool
+  adapter copies `terminate` from `PlanToolOutcome` into `ToolResult`.
 - Dynamic `schedule_wakeup` -> `AutonomyRuntime.schedule_wakeup`. The runtime
   owns delay clamping and `pending_wakeup`; registration remains temporary to
   the dynamic loop.
@@ -590,7 +601,9 @@ Usage has its own executable contract in
   `keep-planning`, read errors and callback errors do not transition state.
   `clear-and-execute` retains pending until compaction, replay and Core reset finish.
 - `/clear` regenerates an active path after Session identity reset; restore retains
-  it. Base prompt changes always call `PlanRuntime.refresh_prompt()`.
+  it. `PromptComposer.get_system()` renders the live Plan projection on every
+  request, while dynamic context replacement updates only the Composer-owned
+  tail.
 - `Agent._create_provider(**kwargs)` is the required host factory boundary. It reads
   `lion_code.agent.create_provider` at call time, so existing patches of that name
   affect initial construction, Provider swaps, and Thinking rebuilds. The
@@ -753,8 +766,8 @@ Usage has its own executable contract in
 | Controller changes mode after ToolContext construction | The existing `PermissionView` observes the new mode without replacement or synchronization |
 | Repeated default-mode confirmation reason | Ask once, then read the Controller-owned confirmation cache |
 | Repeated Auto classifier `confirm` decision | Ask every time and do not populate the confirmation cache |
-| Initial `permission_mode="plan"` | Create one active Plan path/prompt; exit falls back to `default` |
-| Approval returns `keep-planning` or raises | Preserve active status, path, permission and Plan prompt for retry |
+| Initial `permission_mode="plan"` | Create one active Plan path; the live prompt projection is visible on the next request; exit falls back to `default` |
+| Approval returns `keep-planning` or raises | Preserve active status, path and permission; the live Plan projection remains available for retry |
 | `execute` / `clear-and-execute` | Exit to `acceptEdits`; only clear-and-execute records pending and terminates |
 | Approval callback absent | Restore the entering mode without claiming user approval |
 | Plan file missing / unreadable | Use `(No plan file found)` when absent; propagate read errors without partial exit |
@@ -823,11 +836,12 @@ Usage has its own executable contract in
 - Bad: assigning `Agent.permission_mode`, copying it into
   `ToolContext.permission_mode`, or mutating `confirmed_values` in middleware creates
   multiple writers and requires manual synchronization.
-- Good: `PlanRuntime.enter()` updates its state, permission and prompt; the existing
-  `ToolContext.plan` immediately observes the new `Path`.
+- Good: `PlanRuntime.enter()` updates its state and permission; the existing
+  `ToolContext.plan` and `PlanPromptLayer` immediately observe the new `Path`.
 - Good: clear-and-execute keeps pending until replay and Core reset succeed.
 - Bad: copying the path, clearing pending early, or rebuilding Plan prompt in a
-  lifecycle layer creates a second writer.
+  lifecycle layer creates a second writer; prompt composition must read the live
+  `PlanView` instead.
 - Good: `Agent` composes `AutonomyRuntime` from separate conversation, transcript,
   query, notice, cancellation, registry, confirmation, usage, and budget objects.
 - Base: `LearningRuntime` receives only the canonical transcript View, one

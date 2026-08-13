@@ -44,15 +44,7 @@ class ToolSource(Protocol):
 
 
 class PromptLayer(Protocol):
-    """Contributes a prompt fragment without directly modifying the system prompt.
-
-    Each layer has a stable ``layer_id`` for ordering and debugging, and a
-    ``render`` method that returns its text fragment.  The future
-    ``PromptComposer`` will compose layers in registry-resolved order.
-
-    This PR does not change the existing static-prefix + dynamic-tail prompt
-    cache design; ``PromptLayer`` only establishes the type contract.
-    """
+    """Contribute a fresh prompt fragment without mutating runtime state."""
 
     @property
     def layer_id(self) -> str: ...

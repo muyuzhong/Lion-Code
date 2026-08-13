@@ -14,7 +14,7 @@ PlanApprovalFn = Callable[[str], Awaitable[dict[str, Any]]]
 
 
 class PlanView(Protocol):
-    """工具层可读取的实时 Plan 投影，不暴露命令或可写状态。"""
+    """供工具和提示词层读取的实时 Plan 投影。"""
 
     @property
     def is_active(self) -> bool: ...
@@ -24,10 +24,7 @@ class PlanView(Protocol):
 
 
 class PlanRuntimeHost(Protocol):
-    """Plan 事务更新提示词与通知所需的最窄宿主端口。"""
-
-    _base_system_prompt: str
-    _system_prompt: str
+    """Plan 通知与路径生成所需的最窄宿主端口。"""
 
     @property
     def session_id(self) -> str: ...
@@ -55,7 +52,7 @@ class PlanToolOutcome:
 
 
 class PlanRuntime:
-    """拥有 Plan 状态，并原子协调权限、提示词、审批与上下文重置。"""
+    """拥有 Plan 状态、权限事务、审批和上下文重置命令。"""
 
     def __init__(
         self,
@@ -81,17 +78,15 @@ class PlanRuntime:
         return self._state.pending_context_reset
 
     def initialize(self) -> None:
-        """在初始权限为 Plan 时建立状态；其他模式保持 inactive。"""
+        """初始权限为 Plan 时建立激活事务。"""
 
         if self._permission.mode != "plan":
-            self.refresh_prompt()
             return
         path = self._generate_file_path()
         self._state.status = "active"
         self._state.file_path = path
         self._state.previous_permission_mode = None
         self._state.pending_context_reset = None
-        self.refresh_prompt()
 
     def set_approval_fn(self, fn: PlanApprovalFn | None) -> None:
         self._approval_fn = fn
@@ -181,29 +176,22 @@ class PlanRuntime:
         )
 
     def reset_for_new_session(self) -> None:
-        """清理旧 pending；active Plan 为新 Session 重建 path 与 prompt。"""
+        """清理 pending reset，并为新会话重新生成激活 Plan 路径。"""
 
         path = self._generate_file_path() if self.is_active else None
         self._state.pending_context_reset = None
         if path is not None:
             self._state.file_path = path
-        self.refresh_prompt()
 
     def reset_after_restore(self) -> None:
-        """恢复 JSONL 时只撤销未完成 reset，不改当前 Plan path。"""
+        """恢复 JSONL 时清理未完成 reset，但保留已有 Plan 路径。"""
 
         self._state.pending_context_reset = None
 
     def complete_context_reset(self) -> None:
-        """仅由 Core 上下文持久化、回放和 reset 全部成功后确认完成。"""
+        """仅在 Core reset 与回放成功后确认 pending reset 完成。"""
 
         self._state.pending_context_reset = None
-
-    def refresh_prompt(self) -> None:
-        prompt = self._host._base_system_prompt
-        if self.is_active:
-            prompt += self._build_prompt()
-        self._host._system_prompt = prompt
 
     def _enter(self) -> None:
         path = self._generate_file_path()
@@ -213,7 +201,6 @@ class PlanRuntime:
         self._state.file_path = path
         self._state.previous_permission_mode = previous_mode
         self._state.pending_context_reset = None
-        self.refresh_prompt()
 
     def _leave(
         self,
@@ -226,33 +213,11 @@ class PlanRuntime:
         self._state.file_path = None
         self._state.previous_permission_mode = None
         self._state.pending_context_reset = pending_context_reset
-        self.refresh_prompt()
 
     def _generate_file_path(self) -> Path:
         directory = Path.home() / ".claude" / "plans"
         directory.mkdir(parents=True, exist_ok=True)
         return directory / f"plan-{self._host.session_id}.md"
-
-    def _build_prompt(self) -> str:
-        return f"""
-
-# Plan Mode Active
-
-Plan mode is active. You MUST NOT make any edits (except the plan file below), run non-readonly tools, or make any changes to the system.
-
-## Plan File: {self._state.file_path}
-Write your plan incrementally to this file using write_file or edit_file. This is the ONLY file you are allowed to edit.
-
-## Workflow
-1. **Explore**: Read code to understand the task. Use read_file, list_files, grep_search.
-2. **Design**: Design your implementation approach. Use the agent tool with type="plan" if the task is complex.
-3. **Write Plan**: Write a structured plan to the plan file including:
-   - **Context**: Why this change is needed
-   - **Steps**: Implementation steps with critical file paths
-   - **Verification**: How to test the changes
-4. **Exit**: Call exit_plan_mode when your plan is ready for user review.
-
-IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask the user to approve — exit_plan_mode handles that."""
 
     def _read_plan_content(self) -> str:
         path = self._state.file_path

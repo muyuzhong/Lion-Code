@@ -1431,6 +1431,63 @@ def test_plan_state_has_one_owner_and_live_read_port() -> None:
     assert middleware_source.count("context.plan.file_path") == 2
 
 
+def test_prompt_and_capability_lifecycle_boundaries() -> None:
+    plan_runtime_source = (SOURCE_ROOT / "plan_runtime.py").read_text(encoding="utf-8")
+    for symbol in (
+        "self._base_system_prompt",
+        "self._system_prompt",
+        "refresh_prompt",
+        "_build_prompt",
+    ):
+        assert symbol not in plan_runtime_source
+
+    lifecycle_source = (SOURCE_ROOT / "session_lifecycle.py").read_text(
+        encoding="utf-8"
+    )
+    assert "PlanRuntime" not in lifecycle_source
+    assert ".plan" not in lifecycle_source
+
+    agent_source = (SOURCE_ROOT / "agent.py").read_text(encoding="utf-8")
+    for symbol in (
+        "_before_turn_capabilities",
+        "_after_turn_capabilities",
+        "_close_capabilities",
+        "self._base_system_prompt",
+        "self._system_prompt",
+    ):
+        assert symbol not in agent_source
+
+    prompt_tree = _tree(SOURCE_ROOT / "prompt.py")
+    capability_imports = {
+        alias.name
+        for node in ast.walk(prompt_tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module is not None
+        and "capabilit" in node.module
+        for alias in node.names
+    }
+    assert capability_imports <= {"PromptLayer"}
+
+    plan_capability_tree = _tree(SOURCE_ROOT / "capabilities" / "plan.py")
+    render_method = next(
+        node
+        for node in ast.walk(plan_capability_tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "render"
+    )
+    assert not any(
+        isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Delete))
+        for node in ast.walk(render_method)
+    )
+    participant = next(
+        node
+        for node in plan_capability_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "PlanSessionParticipant"
+    )
+    assert {
+        node.name for node in participant.body if isinstance(node, ast.AsyncFunctionDef)
+    } == {"on_new_session", "on_restore_session"}
+
+
 def test_jsonl_writer_primitives_do_not_escape_persistence_boundary() -> None:
     violations = {
         _source_key(path): sorted(_escaped_jsonl_writer_symbols(_tree(path)))
