@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import inspect
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from lion_code.agent import Agent
+from lion_code.tooling.types import ToolResult
 
 
 class TestAgentInternalRuntime(unittest.IsolatedAsyncioTestCase):
@@ -12,9 +14,11 @@ class TestAgentInternalRuntime(unittest.IsolatedAsyncioTestCase):
         with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
             return Agent(api_key="test-key")
 
-    async def test_internal_tool_uses_runtime_controller(self):
+    async def test_internal_tool_uses_bound_executor(self):
         agent = self._agent()
-        agent._execute_agent_tool = AsyncMock(return_value="sub-agent result")
+        agent._subagent_executor.execute = AsyncMock(
+            return_value=ToolResult(content="sub-agent result")
+        )
 
         result = await agent._execute_tool_call(
             "agent",
@@ -23,21 +27,21 @@ class TestAgentInternalRuntime(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result, "sub-agent result")
-        agent._execute_agent_tool.assert_awaited_once()
+        agent._subagent_executor.execute.assert_awaited_once_with(
+            agent_type="general",
+            description="inspect",
+            prompt="inspect the repo",
+        )
 
     async def test_tool_search_updates_model_schema_from_registry(self):
         agent = self._agent()
-        before = {
-            tool.name for tool in agent.core_runtime.harness.config.get_tools()
-        }
+        before = {tool.name for tool in agent.core_runtime.harness.config.get_tools()}
 
         result = await agent._execute_tool_call(
             "tool_search",
             {"query": "enter plan"},
         )
-        after = {
-            tool.name for tool in agent.core_runtime.harness.config.get_tools()
-        }
+        after = {tool.name for tool in agent.core_runtime.harness.config.get_tools()}
 
         self.assertNotIn("enter_plan_mode", before)
         self.assertIn("enter_plan_mode", after)
@@ -48,11 +52,9 @@ class TestAgentInternalRuntime(unittest.IsolatedAsyncioTestCase):
         visible_during_chat = []
 
         async def chat(_prompt):
-            visible_during_chat.append(
-                agent.tool_registry.is_active("schedule_wakeup")
-            )
+            visible_during_chat.append(agent.tool_registry.is_active("schedule_wakeup"))
 
-        agent.chat = chat
+        agent._autonomy._conversation = SimpleNamespace(chat=chat)
 
         with patch("lion_code.agent.print_info"):
             await agent._run_loop_dynamic({"prompt": "check"})

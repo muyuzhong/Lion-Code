@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from .permission_state import PermissionMode
+from .permission_state import PermissionMode, PermissionView
 from .subagent import get_sub_agent_config
 from .tooling import ToolEnvironment, ToolRegistry
 from .tooling.selection import ToolSelectionPolicy, select_tools
@@ -13,22 +15,32 @@ if TYPE_CHECKING:
     from .agent import Agent
 
 
-class SubagentFactoryHost(Protocol):
-    """提供子 Agent 构造所需的最小父运行时能力。"""
+@dataclass(frozen=True, slots=True)
+class ChildAgentConfig:
+    """构造一个子 Agent 所需的 Provider 与界面配置快照。"""
 
-    tool_registry: ToolRegistry
-    tool_environment: ToolEnvironment
-
-    def _child_api_kwargs(self) -> dict[str, Any]: ...
-
-    def _child_permission_mode(self) -> PermissionMode: ...
+    model: str
+    api_key: str
+    api_base: str | None = None
+    anthropic_base_url: str | None = None
+    terminal_output: bool = True
 
 
 class SubagentFactory:
     """为父 Agent 创建受限工具与共享环境的子 Agent。"""
 
-    def __init__(self, host: SubagentFactoryHost) -> None:
-        self._host = host
+    def __init__(
+        self,
+        *,
+        registry: ToolRegistry,
+        environment: ToolEnvironment,
+        child_config: Callable[[], ChildAgentConfig],
+        permission: PermissionView,
+    ) -> None:
+        self._registry = registry
+        self._environment = environment
+        self._child_config = child_config
+        self._permission = permission
 
     def create_for_agent_type(self, agent_type: str) -> Agent:
         """按内置或自定义 Agent 类型创建子实例。"""
@@ -68,11 +80,20 @@ class SubagentFactory:
 
         from .agent import Agent
 
+        config = self._child_config()
         return Agent(
-            **self._host._child_api_kwargs(),
+            model=config.model,
+            api_key=config.api_key,
+            api_base=config.api_base,
+            anthropic_base_url=config.anthropic_base_url,
+            terminal_output=config.terminal_output,
             custom_system_prompt=system_prompt,
-            tool_registry=select_tools(self._host.tool_registry, tool_policy),
-            tool_environment=self._host.tool_environment.child_view(),
+            tool_registry=select_tools(self._registry, tool_policy),
+            tool_environment=self._environment.child_view(),
             is_sub_agent=True,
-            permission_mode=self._host._child_permission_mode(),
+            permission_mode=self._child_permission_mode(),
         )
+
+    def _child_permission_mode(self) -> PermissionMode:
+        mode = self._permission.mode
+        return mode if mode in {"plan", "auto"} else "bypassPermissions"

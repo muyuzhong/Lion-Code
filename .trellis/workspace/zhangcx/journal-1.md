@@ -1114,3 +1114,66 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 34: 移除 Agent 工具业务路由
+
+**Date**: 2026-08-12
+**Task**: 移除 Agent 工具业务路由
+**Branch**: `master`
+
+### Summary
+
+完成 ToolContext/controller 链路拆除：新增 SkillRuntime、SubagentExecutor、PlanCapability，动态唤醒直接绑定 AutonomyRuntime；补齐架构与行为测试并通过全量 pytest、import-linter、compileall。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0b9b798` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 35: Provider 配置与 Thinking 生命周期所有权重构
+
+**Date**: 2026-08-12
+**Task**: Provider 配置与 Thinking 生命周期所有权重构
+**Branch**: `master`
+
+### Summary
+
+新增 ProviderState、ProviderView、ProviderManager，移除 AgentLifecycle 与 Agent Provider mutable mirrors；完成 Runtime、Session restore 窄端口接线、事务切换、架构测试与全量质量门禁。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `28d8bc5` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 36: 收窄 Domain Runtime 的 Agent 依赖
+
+**Date**: 2026-08-13
+**Task**: 收窄 Domain Runtime 的 Agent 依赖
+**Branch**: `master`
+
+### Summary
+
+新增最小 Domain 读取与查询端口；将 Autonomy、Learning、Session Memory、Dream 和 SubagentFactory 改为显式窄依赖；把受限 Dream 子 Agent 移入组合适配层并保持只读、根目录限制、禁用 MCP/嵌套/Hook、最大轮次、计划校验和原子回滚；补齐架构与行为测试，完成全量质量门禁。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d00fbed` | (see git log) |
+
+### Status
+
+[OK] **Completed**

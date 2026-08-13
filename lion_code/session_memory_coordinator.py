@@ -1,9 +1,7 @@
 """Session Memory、Memory Overlay 与 Dream 的运行时协调层。
 
-``SessionMemoryCoordinator`` 只拥有项目短期状态和 Memory 召回状态，通过
-``SessionMemoryHost`` 回调 Agent 的 Core、Provider 与界面通知能力。这样 Agent
-仍负责运行时组装和 canonical history，而新增或修改 Memory 功能不必再穿透
-Goal、Provider 切换和 TUI 输出。
+协调器只接收 canonical transcript、query、状态只读视图和具名命令，不持有
+Agent、Provider、Tool Runtime 或界面实现。
 """
 
 from __future__ import annotations
@@ -11,19 +9,22 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from typing import Any, Literal, Protocol, cast, runtime_checkable
+from typing import Protocol
 
+from .core.cancellation import CancellationView
 from .core.messages import AgentMessage, AssistantMessage
+from .domain_ports import NoticeSink, TranscriptView
+from .dream import DreamResult
 from .memory_runtime import (
     MemoryContextInjector,
     MemoryCoordinator,
     MemoryInjectionReport,
     MemoryOverlay,
-    ProviderTextQueryService,
-    ReadOnlyMessageSource,
+    TextQueryService,
 )
-from .permission_state import PermissionMode
+from .permission_state import PermissionView
 from .project_identity import ProjectIdentity
+from .prompt import ProjectContextFile
 from .session_memory import (
     SessionMemory,
     SessionMemoryError,
@@ -46,41 +47,18 @@ You may use only these optional keys: currentGoal, activeTask, completed, pendin
 Use concise strings. completed, pending, decisions, and blockers must be arrays of strings. Do not include relevantFiles or verification: they are extracted deterministically. Do not invent test outcomes, file changes, or work that is not supported by the supplied evidence."""
 
 
-@runtime_checkable
-class SessionMemoryHost(Protocol):
-    """协调器使用的 Agent 窄协议，不持有 Provider 或 TUI。"""
+class DreamRunner(Protocol):
+    async def run(self) -> DreamResult: ...
 
-    @property
-    def _core_runtime(self) -> ReadOnlyMessageSource: ...
 
-    @property
-    def is_aborted(self) -> bool: ...
-
-    _session_repository: Any
-    is_sub_agent: bool
-    model: str
-    tool_environment: Any
-    tool_registry: Any
-    tool_context: Any
-
-    @property
-    def permission_mode(self) -> PermissionMode: ...
-
-    def _child_api_kwargs(self) -> dict[str, Any]: ...
-
-    def _emit_notice(
-        self, message: str, *, role: Literal["info", "error"] = "info"
+class StatusCallback(Protocol):
+    def __call__(
+        self,
+        agent_type: str,
+        description: str,
+        *,
+        started: bool,
     ) -> None: ...
-
-    def _emit_subagent_status(
-        self, agent_type: str, description: str, *, started: bool
-    ) -> None: ...
-
-    def _refresh_dynamic_system_context(self) -> None: ...
-
-    def _load_project_context_files(
-        self, identity: ProjectIdentity
-    ) -> tuple[Any, ...]: ...
 
 
 def _turn_assistant_text(messages: tuple[AgentMessage, ...]) -> str:
@@ -119,12 +97,22 @@ class SessionMemoryCoordinator:
 
     def __init__(
         self,
-        host: SessionMemoryHost,
         *,
         identity: ProjectIdentity,
         repository: SessionMemoryRepository | None = None,
+        transcript: TranscriptView,
+        cancellation: CancellationView,
+        permission: PermissionView,
+        load_project_context: Callable[
+            [ProjectIdentity], tuple[ProjectContextFile, ...]
+        ],
+        notices: NoticeSink,
+        query: TextQueryService | None,
+        dream_runner: DreamRunner,
+        is_sub_agent: bool,
+        status_callback: StatusCallback,
+        refresh_context: Callable[[], None],
     ) -> None:
-        self._host = host
         self._project_identity = identity
         self._session_memory_repository = repository or SessionMemoryRepository(
             identity
@@ -132,12 +120,22 @@ class SessionMemoryCoordinator:
         if self._session_memory_repository.identity != identity:
             raise ValueError("Session Memory repository belongs to another project")
 
-        self._project_context_files: tuple[Any, ...] = ()
+        self._transcript = transcript
+        self._cancellation = cancellation
+        self._permission = permission
+        self._load_project_context = load_project_context
+        self._notices = notices
+        self._query = query
+        self._dream_runner = dream_runner
+        self._is_sub_agent = is_sub_agent
+        self._status_callback = status_callback
+        self._refresh_context = refresh_context
+        self._project_context_files: tuple[ProjectContextFile, ...] = ()
         self._project_memory_overlays: tuple[MemoryOverlay, ...] = ()
         self._session_memory: SessionMemory | None = None
         self._session_memory_error: str | None = None
         self._reported_session_memory_error: str | None = None
-        self._memory_coordinator: Any = MemoryCoordinator(query_service=None)
+        self._memory_coordinator = MemoryCoordinator(query_service=query)
         self._memory_injector = MemoryContextInjector()
         self._last_memory_injection = MemoryInjectionReport()
         self._turn_memory_overlays: tuple[MemoryOverlay, ...] = ()
@@ -155,7 +153,7 @@ class SessionMemoryCoordinator:
         return self._session_memory_repository
 
     @property
-    def project_context_files(self) -> tuple[Any, ...]:
+    def project_context_files(self) -> tuple[ProjectContextFile, ...]:
         return self._project_context_files
 
     @property
@@ -183,11 +181,11 @@ class SessionMemoryCoordinator:
         return self._reported_session_memory_error
 
     @property
-    def memory_coordinator(self) -> Any:
+    def memory_coordinator(self) -> MemoryCoordinator:
         return self._memory_coordinator
 
     @memory_coordinator.setter
-    def memory_coordinator(self, value: Any) -> None:
+    def memory_coordinator(self, value: MemoryCoordinator) -> None:
         self._memory_coordinator = value
 
     @property
@@ -210,9 +208,10 @@ class SessionMemoryCoordinator:
     def turn_memory_overlays(self, value: tuple[MemoryOverlay, ...]) -> None:
         self._turn_memory_overlays = value
 
-    def set_query_service(self, service: ProviderTextQueryService | None) -> None:
+    def set_query_service(self, service: TextQueryService | None) -> None:
         """绑定当前 Core Provider 的 side-query，并取消旧 Provider 的预取。"""
 
+        self._query = service
         self._memory_coordinator.set_query_service(service)
 
     def show_session_memory(self) -> str:
@@ -280,9 +279,7 @@ class SessionMemoryCoordinator:
     def _reload_project_memory(self) -> None:
         """重新读取当前项目指令，始终保持在人写文件的只读边界内。"""
 
-        self._project_context_files = self._host._load_project_context_files(
-            self._project_identity
-        )
+        self._project_context_files = self._load_project_context(self._project_identity)
         self._project_memory_overlays = tuple(
             MemoryOverlay(
                 path=item.path,
@@ -315,20 +312,12 @@ class SessionMemoryCoordinator:
     def _prepare_turn_memory_snapshot(self, user_message: str) -> None:
         """压缩后固定三层 Overlay，当前预取结果只留给下一轮。"""
 
-        if not self._host.is_sub_agent:
+        if not self._is_sub_agent:
             self._reload_session_memory()
             self._report_session_memory_error()
             self._memory_coordinator.collect_ready()
             self._memory_coordinator.begin_turn(user_message)
         self._turn_memory_overlays = self._build_turn_memory_overlays()
-
-    def _build_core_memory_query_service(self) -> ProviderTextQueryService:
-        """构建绑定当前 Core Provider 的文本查询服务。"""
-
-        return ProviderTextQueryService(
-            provider=self._host._core_runtime.provider,
-            model=lambda: self._host.model,
-        )
 
     def _reload_session_memory(self) -> None:
         """重载当前项目状态；损坏文件仅暴露错误，绝不回写空状态。"""
@@ -345,7 +334,7 @@ class SessionMemoryCoordinator:
         if error is None or error == self._reported_session_memory_error:
             return
         self._reported_session_memory_error = error
-        self._host._emit_notice(f"Session Memory unavailable: {error}", role="error")
+        self._notices.emit(f"Session Memory unavailable: {error}", role="error")
 
     async def _update_session_memory_after_turn(
         self,
@@ -358,14 +347,14 @@ class SessionMemoryCoordinator:
 
         if self._session_memory is None or self._session_memory_error is not None:
             return
-        messages = self._host._core_runtime.messages[turn_start_index:]
+        messages = self._transcript.messages[turn_start_index:]
         if not messages:
             return
         memory = apply_tool_evidence(
             self._session_memory,
             extract_tool_evidence(messages),
         )
-        if not self._host.is_aborted:
+        if not self._cancellation.cancelled:
             try:
                 extractor = semantic_extractor or self._extract_session_memory_semantics
                 patch = await extractor(
@@ -394,7 +383,10 @@ class SessionMemoryCoordinator:
             "userInput": _trim_session_memory_text(user_message),
             "finalAssistantReply": _trim_session_memory_text(assistant_text),
         }
-        raw = await self._build_core_memory_query_service().complete(
+        query = self._query
+        if query is None:
+            return {}
+        raw = await query.complete(
             system=SESSION_MEMORY_EXTRACTION_SYSTEM,
             user=json.dumps(payload, ensure_ascii=False),
             max_output_tokens=512,
@@ -404,23 +396,16 @@ class SessionMemoryCoordinator:
     async def dream(self) -> str:
         """显式整合当前项目 Memory，并返回本次文件变更摘要。"""
 
-        if self._host.permission_mode == "plan":
+        if self._permission.mode == "plan":
             raise RuntimeError("Plan 模式为只读，退出后才能执行 /dream")
-
-        # 延迟导入以避免 dream.py 的 Agent 类型导入与本模块形成循环依赖。
-        from .dream import DreamCoordinator
 
         self._reload_session_memory()
         self._report_session_memory_error()
-        self._host._emit_subagent_status(
-            "dream", "consolidate project memory", started=True
-        )
+        self._status_callback("dream", "consolidate project memory", started=True)
         try:
-            result = await DreamCoordinator(cast(Any, self._host)).run()
+            result = await self._dream_runner.run()
         finally:
-            self._host._emit_subagent_status(
-                "dream", "consolidate project memory", started=False
-            )
+            self._status_callback("dream", "consolidate project memory", started=False)
         if result.created or result.updated or result.deleted:
             self._refresh_memory_context_after_dream(
                 result.created + result.updated + result.deleted
@@ -431,7 +416,7 @@ class SessionMemoryCoordinator:
         """丢弃旧预取，并让后续请求看到 Dream 后的索引和文件内容。"""
 
         self._memory_coordinator.invalidate(filenames)
-        self._host._refresh_dynamic_system_context()
+        self._refresh_context()
 
     async def close(self) -> None:
         """关闭 Memory 预取，避免退出时留下异步任务。"""

@@ -1290,7 +1290,7 @@ def test_usage_state_has_one_owner_and_command_only_writes() -> None:
     }
     assert record_model_sites == {"observers/usage.py": ["UsageObserver.handle"]}
     assert record_child_sites == {
-        "agent.py": ["Agent._execute_agent_tool", "Agent._execute_skill_tool"],
+        "subagent_runtime.py": ["SubagentExecutor._run_child"],
         "dream.py": ["DreamCoordinator.run"],
     }
     assert record_turn_sites == {
@@ -1523,8 +1523,8 @@ def _type_annotation_mentions(tree: ast.Module, name: str) -> bool:
 def test_memory_layer_does_not_reference_agent_harness_in_types() -> None:
     """Memory layer type annotations must not mention ``AgentHarness``.
 
-    The ``ReadOnlyMessageSource`` Protocol replaces direct Harness access;
-    type-level references to ``AgentHarness`` would bypass that boundary.
+    The shared ``TranscriptView`` replaces direct Harness access; type-level
+    references to ``AgentHarness`` would bypass that boundary.
     """
     paths = (
         *_source_files("memory_runtime"),
@@ -1833,6 +1833,119 @@ def test_production_code_does_not_import_tests_or_benchmarks() -> None:
     assert not violations, (
         f"Production code must not import tests/benchmarks: {violations}"
     )
+
+
+def test_domain_runtimes_use_only_narrow_dependencies() -> None:
+    """Domain runtimes must not regain an Agent-shaped host or private runtime seam."""
+
+    scoped = {
+        "autonomy_runtime.py": ("AutonomyRuntime",),
+        "learning_runtime.py": ("LearningRuntime",),
+        "session_memory_coordinator.py": ("SessionMemoryCoordinator",),
+        "dream.py": ("DreamCoordinator",),
+        "subagent_factory.py": ("SubagentFactory",),
+    }
+    removed_hosts = {
+        "AutonomyHost",
+        "LearningRuntimeHost",
+        "SessionMemoryHost",
+        "SubagentFactoryHost",
+    }
+    forbidden_modules = {
+        "lion_code.agent",
+        "lion_code.agent_runtime",
+        "lion_code.providers",
+        "lion_code.tooling",
+    }
+
+    for filename, class_names in scoped.items():
+        tree = _tree(SOURCE_ROOT / filename)
+        defined = {
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        assert not defined.intersection(removed_hosts), filename
+
+        service_locators = {
+            node.name
+            for node in tree.body
+            if isinstance(node, ast.ClassDef)
+            and (
+                node.name in {"RuntimeContext", "AgentServices", "DomainContext"}
+                or node.name.endswith("Services")
+            )
+        }
+        assert not service_locators, {filename: service_locators}
+
+        imported: set[str] = set()
+        for item in ast.walk(tree):
+            if isinstance(item, ast.Import):
+                imported.update(alias.name for alias in item.names)
+            elif isinstance(item, ast.ImportFrom):
+                if item.level and item.module:
+                    imported.add(f"lion_code.{item.module}")
+                elif item.module:
+                    imported.add(item.module)
+        if filename == "session_memory_coordinator.py":
+            assert not imported.intersection(forbidden_modules), {
+                filename: sorted(imported.intersection(forbidden_modules))
+            }
+        if filename in {"autonomy_runtime.py", "learning_runtime.py", "dream.py"}:
+            assert "lion_code.agent" not in imported
+            assert "lion_code.agent_runtime" not in imported
+
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef) or node.name not in class_names:
+                continue
+            init = next(
+                (
+                    item
+                    for item in node.body
+                    if isinstance(item, ast.FunctionDef) and item.name == "__init__"
+                ),
+                None,
+            )
+            assert init is not None, f"{filename}:{node.name} missing __init__"
+            parameters = {
+                arg.arg
+                for arg in [
+                    *init.args.posonlyargs,
+                    *init.args.args,
+                    *init.args.kwonlyargs,
+                ]
+            }
+            assert not parameters.intersection({"agent", "host"}), {
+                filename: sorted(parameters)
+            }
+
+        forbidden_attributes = {
+            node.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and node.attr in {"_core_runtime", "_host"}
+        }
+        assert not forbidden_attributes, {filename: sorted(forbidden_attributes)}
+
+
+def test_dream_domain_has_typed_runner_factory_and_no_agent_field() -> None:
+    """Dream domain keeps pure policy while concrete Agent construction stays outside."""
+
+    tree = _tree(SOURCE_ROOT / "dream.py")
+    class_names = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
+    assert {"DreamAgentRunner", "DreamAgentFactory", "SessionMemoryView"} <= class_names
+    agent_fields = {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "agent"
+    }
+    assert not agent_fields
+
+    adapter = (SOURCE_ROOT / "dream_adapter.py").read_text(encoding="utf-8")
+    assert "mcp_enabled=False" in adapter
+    assert 'permission_mode="bypassPermissions"' in adapter
+    assert "DREAM_MAX_TURNS" in adapter
+    assert "require_read_only=True" in adapter
 
 
 # ---------------------------------------------------------------------------

@@ -15,11 +15,13 @@ Concrete capability implementations live in sub-modules:
 - ``mcp``: MCP tool discovery and registration (TurnParticipant)
 - ``skill``: Skill tool contribution (ToolSource)
 - ``subagent``: Sub-agent tool contribution (ToolSource)
+- ``plan``: Plan mode tool contribution (ToolSource)
 """
 
 from __future__ import annotations
 
 from .mcp import McpCapability
+from .plan import create_plan_capability
 from .registry import (
     CapabilityRegistry,
     CircularDependencyError,
@@ -49,6 +51,7 @@ __all__ = [
     "SessionParticipant",
     "ToolSource",
     "TurnParticipant",
+    "create_plan_capability",
     "create_skill_capability",
     "create_subagent_capability",
 ]

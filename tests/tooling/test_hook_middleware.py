@@ -44,7 +44,6 @@ class TestHookMiddleware(unittest.IsolatedAsyncioTestCase):
             session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
             cancellation=CancellationToken(),
             cwd=Path.cwd(),
-            controller=object(),
             registry=registry,
             permission=permission,
             plan=FakePlanView(),

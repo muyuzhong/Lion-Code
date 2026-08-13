@@ -105,6 +105,33 @@ class PlanRuntime:
     def complete_context_reset(self) -> None: ...
     def refresh_prompt(self) -> None: ...
 
+class ToolCommand(Protocol):
+    async def __call__(
+        self,
+        arguments: Mapping[str, JSONValue],
+    ) -> ToolResult: ...
+
+class SkillRuntime:
+    def __init__(self, executor: SubagentExecutor) -> None: ...
+    async def __call__(
+        self,
+        arguments: Mapping[str, JSONValue],
+    ) -> ToolResult: ...
+
+class SubagentExecutor:
+    async def __call__(
+        self,
+        arguments: Mapping[str, JSONValue],
+    ) -> ToolResult: ...
+    async def execute_skill_fork(
+        self,
+        *,
+        skill_name: str,
+        prompt: str,
+        allowed_tools: list[str] | None,
+        args: str,
+    ) -> ToolResult: ...
+
 def Agent.configure_api(
     *,
     model: str | None = None,
@@ -114,8 +141,25 @@ def Agent.configure_api(
     use_openai: bool | None = None,
 ) -> None: ...
 
-class AgentLifecycle:
-    def configure_api(
+@dataclass(slots=True)
+class ProviderState:
+    model: str
+    provider_kind: Literal["anthropic", "openai-compatible"]
+    api_key: str
+    openai_base_url: str | None
+    anthropic_base_url: str | None
+    thinking_enabled: bool
+    thinking_level: ThinkingLevel
+
+@dataclass(frozen=True, slots=True)
+class ProviderView:
+    model: str
+    provider_kind: Literal["anthropic", "openai-compatible"]
+    thinking_enabled: bool
+    thinking_level: ThinkingLevel
+
+class ProviderManager:
+    def configure(
         self,
         *,
         model: str | None = None,
@@ -124,8 +168,19 @@ class AgentLifecycle:
         anthropic_base_url: str | None = None,
         use_openai: bool | None = None,
     ) -> None: ...
+    def set_thinking(self, enabled: bool) -> str: ...
     def set_thinking_level(self, level: ThinkingLevel | str) -> ThinkingLevel: ...
-    def apply_core_thinking_level(self, level: ThinkingLevel) -> None: ...
+    def cycle_thinking_level(self) -> ThinkingLevel: ...
+    def restore_configuration(
+        self,
+        *,
+        model: str | None = None,
+        thinking_level: str | None = None,
+    ) -> None: ...
+    def build_provider(
+        self,
+        level: ThinkingLevel | str | None = None,
+    ) -> ModelProvider: ...
 
 def Agent.set_terminal_output(enabled: bool) -> None: ...
 
@@ -159,6 +214,108 @@ class SessionMemoryRepository:
     def save(self, memory: SessionMemory) -> SessionMemory: ...
 
 def resolve_project_identity(cwd: Path | None = None) -> ProjectIdentity: ...
+
+class TranscriptView(Protocol):
+    @property
+    def messages(self) -> tuple[AgentMessage, ...]: ...
+
+class NoticeSink(Protocol):
+    def emit(
+        self,
+        message: str,
+        *,
+        role: Literal["info", "error"] = "info",
+    ) -> None: ...
+
+class ConversationRunner(Protocol):
+    async def chat(self, prompt: str) -> None: ...
+
+class ModelQuery(Protocol):
+    async def complete_text(
+        self,
+        *,
+        system: str,
+        user: str,
+        max_output_tokens: int = 512,
+    ) -> str: ...
+    async def complete_messages(
+        self,
+        *,
+        system: str,
+        messages: Sequence[AgentMessage],
+        max_output_tokens: int = 512,
+    ) -> str: ...
+
+class DreamAgentRunner(Protocol):
+    async def run_once(self, prompt: str) -> DreamAgentResult: ...
+    async def close(self) -> None: ...
+
+class DreamAgentFactory(Protocol):
+    def create(self, context: DreamContext) -> DreamAgentRunner: ...
+
+class AutonomyRuntime:
+    def __init__(
+        self,
+        *,
+        conversation: ConversationRunner,
+        transcript: TranscriptView,
+        query: ModelQuery,
+        notices: NoticeSink,
+        cancellation: CancellationView,
+        tool_registry: ToolRegistry,
+        confirm: ConfirmCallback | None,
+        usage: UsageLedger,
+        budget: BudgetPolicy,
+    ) -> None: ...
+
+class LearningRuntime:
+    def __init__(
+        self,
+        transcript: TranscriptView,
+        query: ModelQuery,
+        cwd: Path,
+    ) -> None: ...
+
+class SessionMemoryCoordinator:
+    def __init__(
+        self,
+        *,
+        identity: ProjectIdentity,
+        repository: SessionMemoryRepository | None,
+        transcript: TranscriptView,
+        cancellation: CancellationView,
+        permission: PermissionView,
+        load_project_context: Callable[
+            [ProjectIdentity], tuple[ProjectContextFile, ...]
+        ],
+        notices: NoticeSink,
+        query: TextQueryService | None,
+        dream_runner: DreamRunner,
+        is_sub_agent: bool,
+        status_callback: StatusCallback,
+        refresh_context: Callable[[], None],
+    ) -> None: ...
+
+class DreamCoordinator:
+    def __init__(
+        self,
+        *,
+        repository: SessionRepository,
+        identity: ProjectIdentity,
+        session_memory: SessionMemoryView,
+        factory: DreamAgentFactory,
+        usage: ChildUsageRecorder,
+    ) -> None: ...
+
+class SubagentFactory:
+    def __init__(
+        self,
+        *,
+        registry: ToolRegistry,
+        environment: ToolEnvironment,
+        child_config: Callable[[], ChildAgentConfig],
+        permission: PermissionView,
+    ) -> None: ...
 ```
 
 ## Application Port Boundary
@@ -179,6 +336,7 @@ class QueueSnapshot:
     steering: tuple[str, ...] = ()
     follow_up: tuple[str, ...] = ()
 
+
 class ConversationPort(Protocol):
     @property
     def messages(self) -> tuple[AgentMessage, ...]: ...
@@ -193,6 +351,7 @@ class ConversationPort(Protocol):
     def cancelled(self) -> bool: ...
     async def compact_for_overflow(self) -> bool: ...
 
+
 class SessionPort(Protocol):
     @property
     def session_id(self) -> str: ...
@@ -202,6 +361,7 @@ class SessionPort(Protocol):
     async def new_session(self) -> None: ...
     async def compact(self) -> None: ...
     async def aclose(self) -> None: ...
+
 
 class SettingsPort(Protocol):
     @property
@@ -223,9 +383,15 @@ class SettingsPort(Protocol):
     def set_thinking_level(self, level: str) -> str: ...
     def cycle_thinking_level(self) -> str: ...
 
+
 class CodingSessionBackend(
-    ConversationPort, SessionPort, SettingsPort, UsagePort,
-    ControlPort, SessionMemoryPort, Protocol,
+    ConversationPort,
+    SessionPort,
+    SettingsPort,
+    UsagePort,
+    ControlPort,
+    SessionMemoryPort,
+    Protocol,
 ): ...
 ```
 
@@ -335,6 +501,35 @@ The Agent composition root gives one `PlanState` to its only writer, `PlanRuntim
 `ToolContext.plan` is the same live read-only View; Agent and lifecycle APIs are
 delegates. Pending reset is completed only after persistence, replay and Core reset.
 
+### Tool command and capability boundary
+
+`ToolContext` carries execution state and middleware views only. It has no
+`controller` field and is never used as a business-service locator. A
+capability-specific tool captures a narrow `ToolCommand` when its `ToolSource`
+is constructed; the existing four-argument `LionTool.execute_fn` signature
+remains unchanged, and such a tool may ignore the context argument.
+
+The concrete routing and ownership contract is:
+
+- `skill` -> `SkillRuntime`. Lookup, inline activation, unknown-skill handling,
+  and fork selection live there. A fork reuses `SubagentExecutor`.
+- `agent` -> `SubagentExecutor`. The executor asks `SubagentFactory` for a
+  child, emits start/end status, calls `run_once`, merges child input/output
+  usage without changing parent turns/responses, converts child failures to an
+  error `ToolResult`, and closes the child in `finally`.
+- `enter_plan_mode` / `exit_plan_mode` -> `PlanRuntime` through the
+  ToolSource-only `PlanCapability`. The adapter copies `terminate` from
+  `PlanToolOutcome` into `ToolResult`.
+- Dynamic `schedule_wakeup` -> `AutonomyRuntime.schedule_wakeup`. The runtime
+  owns delay clamping and `pending_wakeup`; registration remains temporary to
+  the dynamic loop.
+
+`SubagentFactory` remains child construction and tool selection only. It must
+not absorb execution lifecycle, status, usage, error conversion, or closure.
+Capabilities and `SkillRuntime`/`SubagentExecutor` must not import `Agent` or
+`AgentHarness`. Do not replace these narrow commands with a generic controller,
+service locator, or aggregate Agent-services interface.
+
 Usage has its own executable contract in
 [Usage Ownership](./usage-ownership.md); this runtime composes that single Owner.
 
@@ -363,11 +558,20 @@ Usage has its own executable contract in
   first, replace it without clearing canonical history, update stored credentials and
   model, refresh the compactor, query service, and model-limit cache, then schedule
   the old Provider for closing.
-- `AgentLifecycle` owns that configuration transaction and both Thinking-change
-  paths through `AgentLifecycleHost`; `Agent` exposes coordinator-backed Core,
-  compactor, recorder and background-operation compatibility views while retaining
-  configuration fields and Memory composition. The lifecycle module must not import
-  `Agent` or create another Provider, message history, or session writer.
+- `ProviderManager` owns that configuration transaction and all Provider/Thinking commands.
+  `ProviderView` is the only provider/model/thinking projection exposed to consumers;
+  credentials and base URLs stay inside the manager.
+- `ProviderManager` receives only `ProviderRuntimePort`, `ModelContextControl`,
+  `MemoryQuerySink`, `ConfigurationRecorder`, the provider factory Callable and a
+  background scheduler. It never imports or accepts `Agent`, Core history or a
+  runtime host aggregate.
+- Replacement commands build every Provider and derived service before mutating
+  Runtime or State. They then replace Runtime, commit State, refresh Context and
+  Memory services, record the change, and schedule old Provider closure. A
+  model-only change uses Runtime `set_model()` without rebuilding the Provider.
+- `Agent` exposes facade delegates and does not retain Provider credentials,
+  backend kind, Thinking mode or Thinking level as mutable fields. Session restore
+  calls `ProviderManager.restore_configuration()`.
 - `Agent.is_aborted` is a read-only facade over the coordinator's
   `ExecutionControl`. A new chat calls `begin()` before setup; explicit abort and
   timeout call the same coordinator cancellation path, while timeout retains its
@@ -389,26 +593,58 @@ Usage has its own executable contract in
   it. Base prompt changes always call `PlanRuntime.refresh_prompt()`.
 - `Agent._create_provider(**kwargs)` is the required host factory boundary. It reads
   `lion_code.agent.create_provider` at call time, so existing patches of that name
-  affect initial construction, Provider swaps, and Thinking rebuilds. Do not import
-  the factory directly into `agent_lifecycle.py`.
+  affect initial construction, Provider swaps, and Thinking rebuilds. The
+  `ProviderManager` receives this method as a Callable and does not import the
+  factory module directly.
 - `Agent._create_terminal_renderer()` is the corresponding renderer factory boundary:
   it resolves `lion_code.agent.TerminalRenderer` at call time, so terminal renderer
   patches remain effective while the coordinator rebuilds observers.
 - Child and Dream agents inherit the parent's stored Provider configuration and
   `terminal_output` setting. They must not infer credentials from a transport client.
-- `SubagentFactory` owns child tool selection and construction through a narrow
-  parent-host contract. It imports `Agent` only while constructing a child to avoid
-  a module-level cycle; `Agent` retains child execution, status presentation, usage
-  accounting, error text, and resource closure.
+- `SubagentFactory` owns child tool selection and construction from the concrete
+  registry/environment, typed child-config provider, and live permission View. It
+  imports `Agent` only while constructing a child to avoid a module-level cycle.
+  `SubagentExecutor` owns child execution, status
+  presentation, usage accounting, expected error text, and resource closure;
+  `Agent` supplies the composition-time factory, ledger, and status callback.
 - `LearningRuntime` owns explicit `/learn` transcript projection, evaluator decision
-  parsing, and Skill creation through a narrow host contract. It reads the existing
-  canonical Core history and uses the existing side-query path; `Agent` retains the
+  parsing, and Skill creation from `TranscriptView`, `ModelQuery`, and an immutable
+  cwd. It reads the existing canonical Core history and uses the existing side-query
+  path; `Agent` retains the
   public delegation and composition boundary, and no second history or Provider is
   created.
 - Base product dependencies and imports do not include the OpenAI or Anthropic Python
   SDKs. The online context benchmark may use the `benchmark` optional extra, but the
   import must remain lazy so product startup and offline benchmark validation work
   without it.
+
+### Domain Runtime narrow ports
+
+- `lion_code/domain_ports.py` owns four structural contracts only:
+  `TranscriptView`, `NoticeSink`, `ConversationRunner`, and `ModelQuery`. They do
+  not expose Agent, Core Runtime implementations, Provider implementations,
+  tools, UI objects, or an API-readiness flag.
+- `ProviderModelQuery` resolves the active Provider and model through live
+  callables for every request. It owns the API-readiness precondition and
+  preserves typed Core message roles for evaluator requests.
+- `AutonomyRuntime` receives conversation, transcript, query, notice,
+  cancellation, concrete registry, confirmation, Ledger, and Policy separately.
+  `LearningRuntime` receives transcript, query, and an immutable cwd only.
+- `SessionMemoryCoordinator` receives project identity/repository, transcript,
+  cancellation and permission Views, the typed project-context loader, notice,
+  current Memory query service, Dream command, sub-agent flag, status callback,
+  and refresh callback. It does not receive Agent, ToolContext, ToolEnvironment,
+  ToolRegistry, Provider, or Core Runtime implementations.
+- `DreamCoordinator` is pure domain coordination over repository, identity,
+  Session Memory View, typed child factory/runner, and the child usage command.
+  The concrete restricted child lives in `dream_adapter.py`, selects only the
+  three read-only tools, disables MCP and project hooks, prevents nesting,
+  enforces `DREAM_MAX_TURNS`, and validates all resolved read paths against the
+  project and Memory roots.
+- `SubagentFactory` receives the concrete registry/environment, a typed
+  `ChildAgentConfig` provider, and `PermissionView`. It remains a constructor;
+  child execution, status, usage, errors, and closing remain in
+  `SubagentExecutor`.
 
 ### Project Identity and Memory
 
@@ -434,9 +670,10 @@ Usage has its own executable contract in
   never contain their XML wrapper or injected text.
 - `SessionMemoryCoordinator` owns project identity, Session Memory persistence,
   project/turn overlays, Auto Memory recall coordination, Dream, and post-turn
-  Session Memory updates. `Agent` remains the host for Core/Provider/TUI capabilities
-  and exposes compatibility delegates; the coordinator must use its narrow
-  `SessionMemoryHost` boundary rather than a global service locator.
+  Session Memory updates. `Agent` remains the composition root for Core/Provider/TUI
+  capabilities and exposes compatibility delegates; the coordinator receives its
+  transcript, query, state views, and commands independently rather than through an
+  Agent-shaped host or global service locator.
 - A root chat compresses canonical context first, reloads and fixes the Session Memory
   snapshot, collects any completed Auto Memory recall, starts recall for the next
   turn, and then calls the Provider. Tool-loop Provider calls reuse exactly that
@@ -526,6 +763,22 @@ Usage has its own executable contract in
 | Context reset step fails | Keep `pending_context_reset`; never acknowledge a half-applied switch |
 | Child construction | Inherit `plan` and `auto`; map every other parent mode to `bypassPermissions` |
 | Hook trust in `dontAsk` | Continue to deny trust without treating tool permission bypass as Hook trust |
+| Capability tool construction | Capture the narrow `ToolCommand`; do not look up an Agent/controller from `ToolContext` |
+| Inline Skill | Return the resolved activation prompt without constructing a child |
+| Unknown Skill | Return `ToolResult("Unknown skill: ...")` without a child |
+| Fork Skill | Reuse `SubagentExecutor`; preserve start/end status, usage merge, error conversion, and close |
+| Child `run_once` success | Return child text, merge input/output usage, emit end status, then close |
+| Child construction or execution error | Return an error `ToolResult`, emit end status, and close any created child |
+| Domain side query before API configuration | Raise `ModelQueryUnavailableError`; Auto Mode may ask through its explicit confirmation callback without incrementing denial counters |
+| Confirmation callback replaced after Agent construction | Refresh the existing `AutonomyRuntime`; the next Auto decision must call the replacement |
+| Session Memory repository identity differs from the injected project identity | Raise `ValueError` during coordinator construction before any Memory mutation |
+| Dream has no durable evidence | Return an empty `DreamResult` without constructing a child |
+| Dream child creation succeeds, then execution or parsing fails | Always close the child; do not apply a partial plan |
+| Dream read resolves outside project or Memory roots | Deny the tool input before the concrete child executes it |
+| Dream child inherits separate project-hook collections | Clear both the Agent hook list and the existing `ToolContext.hooks` collection |
+| Dream plan is invalid, conflicts, or the Memory snapshot changed | Reject it; atomic apply restores every touched file and index on failure |
+| Plan exit approval with clear-and-execute | Copy `terminate=True` into `ToolResult` and retain pending reset until Core reset succeeds |
+| Dynamic wakeup command | Clamp delay, update `AutonomyRuntime.pending_wakeup`, and expose the tool only in the dynamic loop scope |
 
 ## 5. Good / Base / Bad Cases
 
@@ -534,9 +787,9 @@ Usage has its own executable contract in
   services use the replacement.
 - Base: changing only the model updates the live Core model and records one model
   change without rebuilding the Provider.
-- Good: `AgentLifecycle` receives the current `Agent` as a narrow host, builds a
-  replacement through `host._create_provider()`, and only writes host fields after
-  that construction succeeds.
+- Good: `ProviderManager` receives narrow runtime/context/memory/recorder ports,
+  builds a replacement through its injected factory, and only commits State after
+  Runtime replacement succeeds.
 - Bad: importing `create_provider` inside the lifecycle module bypasses the
   established test and compatibility patch point.
 - Bad: keeping `_openai_messages` and `_anthropic_messages` beside Core history makes
@@ -575,6 +828,17 @@ Usage has its own executable contract in
 - Good: clear-and-execute keeps pending until replay and Core reset succeed.
 - Bad: copying the path, clearing pending early, or rebuilding Plan prompt in a
   lifecycle layer creates a second writer.
+- Good: `Agent` composes `AutonomyRuntime` from separate conversation, transcript,
+  query, notice, cancellation, registry, confirmation, usage, and budget objects.
+- Base: `LearningRuntime` receives only the canonical transcript View, one
+  Provider-neutral query, and an immutable cwd.
+- Bad: passing `agent`, `host`, `_core_runtime`, or an aggregate Context/Services
+  object into a Domain Runtime recreates a service locator.
+- Good: `DreamCoordinator` receives a typed child factory while
+  `RestrictedDreamAgentFactory` alone imports and configures the concrete Agent.
+- Bad: moving read-root checks, read-only tool selection, hook disabling, MCP
+  disabling, nesting prevention, or turn limits into the model prompt weakens the
+  executable Dream boundary.
 
 ## 6. Executable Enforcement
 
@@ -598,7 +862,7 @@ pyproject.toml contains these six import-linter contracts:
 - tui cannot directly import a runtime engine layer. It consumes
   application / core events; config, prompt, and version remain narrow
   presentation/configuration exceptions.
-- capabilities cannot depend on the Agent engine (`agent`, `agent_lifecycle`,
+- capabilities cannot depend on the Agent engine (`agent`,
   `agent_runtime`). The Capability SPI is a separate layer from the Agent
   composition root; see [Capability SPI](./capability-spi.md).
 - Product code cannot import tests or benchmarks.
@@ -632,7 +896,7 @@ also rejects patterns an import graph cannot express:
   state, permission or prompt by hand.
 - Usage single-writer, composition, projection, and reverse-import scanners follow
   [Usage Ownership](./usage-ownership.md).
-- Capability SPI source importing `agent`, `agent_lifecycle`, or
+- Capability SPI source importing `agent` or
   `agent_runtime`; referencing `AgentHarness`; or defining
   `CapabilityContext`, `ServiceLocator`, or `AgentCapability` god-object
   types. See [Capability SPI](./capability-spi.md).
@@ -647,7 +911,7 @@ exception, or silently broaden an allowlist to make a regression pass.
 - `tests/integration/test_agent_core_runtime.py`: both Provider protocols, idle and
   active hot-switch behavior, derived-service refresh, child inheritance, JSONL
   restore, immutable legacy migration, and that `Agent` composes
-  `AgentLifecycle` while preserving the `lion_code.agent.create_provider` patch
+  `ProviderManager` while preserving the `lion_code.agent.create_provider` patch
   anchor for all Provider creation paths.
 - `tests/session_runtime/`: append/replay ordering, compaction projection, incomplete
   tails, invalid legacy data, and same-ID precedence.
@@ -677,6 +941,13 @@ exception, or silently broaden an allowlist to make a regression pass.
   `tests/integration/test_agent_core_runtime.py`: read-only Agent facade, live child
   inheritance, `dontAsk` Hook trust, and Plan approval transitions without
   ToolContext permission synchronization.
+- `tests/tooling/test_capability_runtimes.py` and
+  `tests/tooling/test_internal_tools.py`: construction-time command binding,
+  Skill inline/unknown/fork behavior, child status/usage/error/closure, and
+  capability-specific tool adapters that ignore ToolContext.
+- `tests/architecture/test_tool_routing.py`: no ToolContext controller field,
+  no removed Agent route names in production, and no Agent reverse-import from
+  capabilities or the independent child runtimes.
 - `tests/architecture/test_runtime_boundaries.py`: the PermissionState/Controller
   composition count, removed mirrors, write-site confinement, middleware port shape,
   and Core/Provider import ownership.
@@ -693,6 +964,18 @@ exception, or silently broaden an allowlist to make a regression pass.
   `tests/integration/test_application_coding_session.py`, and `tests/test_cli.py`: deterministic
   tool evidence, task/handoff persistence, filtered Dream candidates, and matching
   REPL/TUI command intents.
+- `tests/test_autonomy_goal_loop.py`, `tests/test_autonomy_flow.py`,
+  `tests/test_learning.py`, and `tests/test_model_query.py`: explicit narrow
+  construction, Goal/loop/classifier behavior, live confirmation replacement,
+  role-preserving side queries, and unavailable-query handling.
+- `tests/test_session_memory_coordinator.py`, `tests/memory_runtime/`, and
+  `tests/test_dream.py`: Memory read/update and semantic extraction, repository
+  identity validation, restricted Dream child construction, root checks, hook/MCP/
+  nesting/turn limits, validated plans, close-on-error, and atomic rollback.
+- `tests/architecture/test_runtime_boundaries.py`: migrated Domain modules do not
+  import or reference Agent/Core Runtime, Dream does not accept Agent, forbidden
+  Memory dependencies remain absent, and no Context/Services locator or wide
+  `agent`/`host` constructor parameter appears.
 - `tests/test_context_formal_benchmark.py`: offline benchmark imports without the
   optional SDK and every dataset source snapshot exists.
 - Before completion run the full test suite, `compileall`, changed-scope lint/type
@@ -703,6 +986,11 @@ exception, or silently broaden an allowlist to make a regression pass.
 ### Wrong
 
 ```python
+self._autonomy = AutonomyRuntime(self)
+self._learning = LearningRuntime(self)
+self._session_memory = SessionMemoryCoordinator(host=self)
+self._dream = DreamCoordinator(agent=self)
+self._subagents = SubagentFactory(host=self)
 self._openai_messages = []
 self._anthropic_messages = []
 self.tool_context.session_id = self.session_id
@@ -715,12 +1003,31 @@ self._pending_core_context_reset = None
 self.tool_context.confirmed_paths.add(reason)
 ui.set_sink(tui_sink)
 legacy_path.replace(jsonl_path)
-# agent_lifecycle.py: from .providers.factory import create_provider
+# ProviderManager receives Agent._create_provider as a Callable factory seam.
 ```
 
 ### Correct
 
 ```python
+self._autonomy = AutonomyRuntime(
+    conversation=self,
+    transcript=self._core_runtime,
+    query=model_query,
+    notices=self,
+    cancellation=self._runtime_coordinator.cancellation,
+    tool_registry=self.tool_registry,
+    confirm=self._confirm_fn,
+    usage=self.usage,
+    budget=self.budget_policy,
+)
+self._learning = LearningRuntime(self._core_runtime, model_query, self.cwd)
+self._dream = DreamCoordinator(
+    repository=self._session_repository,
+    identity=self._project_identity,
+    session_memory=session_memory_view,
+    factory=restricted_dream_factory,
+    usage=self.usage,
+)
 history = agent.core_runtime.messages
 session_id = agent.tool_context.session.id
 cancelled = agent.tool_context.cancellation.cancelled
@@ -734,6 +1041,6 @@ agent.plan.complete_context_reset()
 session = LionCodingSession(backend, terminal_output=False)
 session.set_notice_fn(app_notice)
 storage = repository.storage_for(session_id)
-# AgentLifecycle calls host._create_provider(**provider_kwargs).
+# ProviderManager calls its injected factory after replacement validation.
 # Legacy input is read-only; SessionRecorder appends canonical entries to storage.
 ```

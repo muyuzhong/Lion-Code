@@ -8,6 +8,7 @@ API(``Agent.set_goal``/``pursue_goal``/``run_loop`` 等,经委托保留)仍应�
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -31,6 +32,7 @@ def _make_agent(**kwargs) -> Agent:
     )
     agent._emit_notice = lambda *a, **k: None
     agent.chat = AsyncMock()
+    agent._autonomy._conversation = SimpleNamespace(chat=agent.chat)
     return agent
 
 
@@ -43,19 +45,19 @@ class TestGoalPursuit(unittest.IsolatedAsyncioTestCase):
 
     async def test_goal_met_on_first_eval_clears_active_goal(self) -> None:
         agent = _make_agent()
-        agent._run_evaluator_query = AsyncMock(
+        agent._autonomy._query.complete_messages = AsyncMock(
             return_value='{"ok": true, "reason": "tests green"}'
         )
         directive = agent.set_goal("build passes")
         await agent.pursue_goal(directive)
 
         agent.chat.assert_awaited_once_with(directive)
-        agent._run_evaluator_query.assert_awaited_once()
+        agent._autonomy._query.complete_messages.assert_awaited_once()
         self.assertIsNone(agent.active_goal)
 
     async def test_goal_not_met_then_met_chats_keep_working(self) -> None:
         agent = _make_agent()
-        agent._run_evaluator_query = AsyncMock(
+        agent._autonomy._query.complete_messages = AsyncMock(
             side_effect=[
                 '{"ok": false, "reason": "not yet"}',
                 '{"ok": true, "reason": "done"}',
@@ -69,7 +71,7 @@ class TestGoalPursuit(unittest.IsolatedAsyncioTestCase):
 
     async def test_goal_impossible_stops_without_keep_working(self) -> None:
         agent = _make_agent()
-        agent._run_evaluator_query = AsyncMock(
+        agent._autonomy._query.complete_messages = AsyncMock(
             return_value='{"ok": false, "impossible": true, "reason": "nope"}'
         )
         directive = agent.set_goal("build passes")
@@ -80,7 +82,7 @@ class TestGoalPursuit(unittest.IsolatedAsyncioTestCase):
 
     async def test_goal_budget_exceeded_stops(self) -> None:
         agent = _make_agent(max_cost_usd=0.0)
-        agent._run_evaluator_query = AsyncMock(
+        agent._autonomy._query.complete_messages = AsyncMock(
             return_value='{"ok": false, "reason": "not yet"}'
         )
         directive = agent.set_goal("build passes")
@@ -91,7 +93,7 @@ class TestGoalPursuit(unittest.IsolatedAsyncioTestCase):
 
     async def test_stop_goal_interrupts_pursuit(self) -> None:
         agent = _make_agent()
-        agent._run_evaluator_query = AsyncMock(
+        agent._autonomy._query.complete_messages = AsyncMock(
             return_value='{"ok": false, "reason": "not yet"}'
         )
         directive = agent.set_goal("build passes")

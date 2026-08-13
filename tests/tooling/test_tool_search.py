@@ -11,20 +11,25 @@ from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.internal import (
-    create_enter_plan_mode_tool,
-    create_exit_plan_mode_tool,
+    create_enter_plan_tool,
+    create_exit_plan_tool,
     create_tool_search_tool,
 )
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
+from lion_code.tooling.types import ToolResult
+
+
+async def _plan_command(_arguments):
+    return ToolResult(content="ok")
 
 
 class TestToolSearch(unittest.IsolatedAsyncioTestCase):
     def _runtime(self):
         registry = ToolRegistry()
         for tool in (
-            create_enter_plan_mode_tool(),
-            create_exit_plan_mode_tool(),
+            create_enter_plan_tool(_plan_command),
+            create_exit_plan_tool(_plan_command),
             create_tool_search_tool(),
         ):
             registry.register(tool)
@@ -32,7 +37,6 @@ class TestToolSearch(unittest.IsolatedAsyncioTestCase):
             session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
             cancellation=CancellationToken(),
             cwd=Path.cwd(),
-            controller=object(),
             registry=registry,
             permission=PermissionController(PermissionState("default")),
             plan=FakePlanView(),
@@ -66,10 +70,13 @@ class TestToolSearch(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(first.is_active("enter_plan_mode"))
-        self.assertEqual(second.deferred_tool_names(), [
-            "enter_plan_mode",
-            "exit_plan_mode",
-        ])
+        self.assertEqual(
+            second.deferred_tool_names(),
+            [
+                "enter_plan_mode",
+                "exit_plan_mode",
+            ],
+        )
 
 
 if __name__ == "__main__":

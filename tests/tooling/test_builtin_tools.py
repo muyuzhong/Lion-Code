@@ -40,7 +40,6 @@ class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
                 session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
                 cancellation=CancellationToken(),
                 cwd=Path(directory),
-                controller=object(),
                 registry=registry,
                 permission=PermissionController(PermissionState("default")),
                 plan=FakePlanView(),

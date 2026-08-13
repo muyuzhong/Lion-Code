@@ -58,11 +58,13 @@ class TestCreateSkill(unittest.TestCase):
 class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def _runtime(messages) -> LearningRuntime:
-        host = SimpleNamespace(
-            _core_runtime=SimpleNamespace(messages=messages),
-            _run_evaluator_query=AsyncMock(),
+        query = SimpleNamespace(complete_messages=AsyncMock())
+        runtime = LearningRuntime(
+            SimpleNamespace(messages=messages),
+            query,
+            Path("/project"),
         )
-        return LearningRuntime(host)
+        return runtime
 
     def test_agent_reexports_meta_skill_prompt(self):
         self.assertIs(LEARN_META_SKILL_PROMPT, RUNTIME_LEARN_META_SKILL_PROMPT)
@@ -95,7 +97,7 @@ class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
             "name": "fix-build",
             "content": "---\nname: fix-build\ndescription: fix build\n---\n\nRun checks.",
         }
-        runtime._host._run_evaluator_query = AsyncMock(
+        runtime._query.complete_messages = AsyncMock(
             return_value=f"```json\n{json.dumps(decision)}\n```"
         )
 
@@ -105,14 +107,12 @@ class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
             result = await runtime.learn_from_current_session()
 
         self.assertEqual(result, "Skill created")
-        runtime._host._run_evaluator_query.assert_awaited_once()
-        system, messages = runtime._host._run_evaluator_query.await_args.args
-        self.assertEqual(system, LEARN_META_SKILL_PROMPT)
-        self.assertNotIn("ordinary prompt", messages[0]["content"])
-        self.assertIn("fix the build", messages[0]["content"])
-        self.assertEqual(
-            runtime._host._run_evaluator_query.await_args.kwargs["max_tokens"], 4096
-        )
+        runtime._query.complete_messages.assert_awaited_once()
+        kwargs = runtime._query.complete_messages.await_args.kwargs
+        self.assertEqual(kwargs["system"], LEARN_META_SKILL_PROMPT)
+        self.assertNotIn("ordinary prompt", kwargs["messages"][0].text)
+        self.assertIn("fix the build", kwargs["messages"][0].text)
+        self.assertEqual(kwargs["max_output_tokens"], 4096)
         create.assert_called_once_with(
             name="fix-build",
             content=decision["content"],
@@ -121,7 +121,7 @@ class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
 
     async def test_rejected_decision_does_not_write(self):
         runtime = self._runtime((UserMessage(content="hello"),))
-        runtime._host._run_evaluator_query = AsyncMock(
+        runtime._query.complete_messages = AsyncMock(
             return_value='{"create": false, "reason": "only small talk"}'
         )
 
@@ -135,7 +135,7 @@ class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
         for raw in ("not a JSON decision", '{"create": false'):
             with self.subTest(raw=raw):
                 runtime = self._runtime((UserMessage(content="hello"),))
-                runtime._host._run_evaluator_query = AsyncMock(return_value=raw)
+                runtime._query.complete_messages = AsyncMock(return_value=raw)
 
                 with patch("lion_code.learning_runtime.create_skill") as create:
                     with self.assertRaisesRegex(
@@ -156,7 +156,7 @@ class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
                 }
                 del decision[missing]
                 runtime = self._runtime((UserMessage(content="hello"),))
-                runtime._host._run_evaluator_query = AsyncMock(
+                runtime._query.complete_messages = AsyncMock(
                     return_value=json.dumps(decision)
                 )
 

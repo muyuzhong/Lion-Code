@@ -103,6 +103,8 @@ BOUNDARIES: tuple[Boundary, ...] = (
                 "tui",
                 "permission_state",
                 "plan_runtime",
+                "skill_runtime",
+                "subagent_runtime",
                 "usage",
             }
         ),
@@ -138,7 +140,6 @@ BOUNDARIES: tuple[Boundary, ...] = (
         forbidden=frozenset(
             {
                 "agent",
-                "agent_lifecycle",
                 "agent_runtime",
             }
         ),

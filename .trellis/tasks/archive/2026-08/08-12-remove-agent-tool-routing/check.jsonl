@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/error-handling.md","reason":"Defines structured ToolResult errors, cancellation behavior, and middleware/runtime error boundaries."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines focused tests, full pytest, compileall, diff check, Ruff, and mypy expectations."}
+{"file":".trellis/tasks/08-12-remove-agent-tool-routing/implement.md","reason":"Defines the ordered implementation checklist, validation commands, review gates, and rollback points."}

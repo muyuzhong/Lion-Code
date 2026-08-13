@@ -68,7 +68,7 @@ def _forbidden_root_imports(
 
 def test_application_only_imports_consumer_side_dependencies() -> None:
     violations = _forbidden_root_imports(
-        _application_files(), {"agent", "agent_lifecycle", "agent_runtime"}
+        _application_files(), {"agent", "agent_runtime"}
     )
     assert not violations, violations
 
@@ -105,7 +105,7 @@ def test_runtime_implementation_does_not_import_application() -> None:
         for name in (
             "agent.py",
             "agent_runtime.py",
-            "agent_lifecycle.py",
+            "provider_manager.py",
             "session_lifecycle.py",
         )
     )
@@ -115,7 +115,7 @@ def test_runtime_implementation_does_not_import_application() -> None:
 
 def test_tui_does_not_import_runtime_engine() -> None:
     violations = _forbidden_root_imports(
-        _source_files("tui"), {"agent", "agent_runtime", "agent_lifecycle"}
+        _source_files("tui"), {"agent", "agent_runtime"}
     )
     assert not violations, violations
 

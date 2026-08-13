@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 
-from .types import LionTool, ToolCapabilities, ToolResult
+from .types import LionTool, ToolCapabilities, ToolCommand, ToolResult
 
 
-def create_agent_tool() -> LionTool:
+def create_agent_tool(command: ToolCommand) -> LionTool:
     async def execute(context, tool_call_id, arguments, on_update):
-        del tool_call_id, on_update
-        return await context.controller.run_subagent_tool(arguments)
+        del context, tool_call_id, on_update
+        return await command(arguments)
 
     return LionTool(
         name="agent",
@@ -43,10 +43,10 @@ def create_agent_tool() -> LionTool:
     )
 
 
-def create_skill_tool() -> LionTool:
+def create_skill_tool(command: ToolCommand) -> LionTool:
     async def execute(context, tool_call_id, arguments, on_update):
-        del tool_call_id, on_update
-        return await context.controller.run_skill_tool(arguments)
+        del context, tool_call_id, on_update
+        return await command(arguments)
 
     return LionTool(
         name="skill",
@@ -74,10 +74,10 @@ def create_skill_tool() -> LionTool:
     )
 
 
-def create_enter_plan_mode_tool() -> LionTool:
+def create_enter_plan_tool(command: ToolCommand) -> LionTool:
     async def execute(context, tool_call_id, arguments, on_update):
-        del tool_call_id, arguments, on_update
-        return await context.controller.enter_plan_mode_tool()
+        del context, tool_call_id, arguments, on_update
+        return await command({})
 
     return LionTool(
         name="enter_plan_mode",
@@ -93,10 +93,10 @@ def create_enter_plan_mode_tool() -> LionTool:
     )
 
 
-def create_exit_plan_mode_tool() -> LionTool:
+def create_exit_plan_tool(command: ToolCommand) -> LionTool:
     async def execute(context, tool_call_id, arguments, on_update):
-        del tool_call_id, arguments, on_update
-        return await context.controller.exit_plan_mode_tool()
+        del context, tool_call_id, arguments, on_update
+        return await command({})
 
     return LionTool(
         name="exit_plan_mode",
@@ -159,10 +159,10 @@ def create_tool_search_tool() -> LionTool:
     )
 
 
-def create_schedule_wakeup_tool() -> LionTool:
+def create_wakeup_tool(command: ToolCommand) -> LionTool:
     async def execute(context, tool_call_id, arguments, on_update):
-        del tool_call_id, on_update
-        return await context.controller.schedule_wakeup_tool(arguments)
+        del context, tool_call_id, on_update
+        return await command(arguments)
 
     return LionTool(
         name="schedule_wakeup",
@@ -204,7 +204,5 @@ def create_internal_tools() -> list[LionTool]:
     ``schedule_wakeup`` 由动态循环临时注册。
     """
     return [
-        create_enter_plan_mode_tool(),
-        create_exit_plan_mode_tool(),
         create_tool_search_tool(),
     ]

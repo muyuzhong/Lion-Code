@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 33
-- **Last Active**: 2026-08-12
+- **Total Sessions**: 36
+- **Last Active**: 2026-08-13
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1116 | Active |
+| `journal-1.md` | ~1179 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,9 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 36 | 2026-08-13 | 收窄 Domain Runtime 的 Agent 依赖 | `d00fbed` | `master` |
+| 35 | 2026-08-12 | Provider 配置与 Thinking 生命周期所有权重构 | `28d8bc5` | `master` |
+| 34 | 2026-08-12 | 移除 Agent 工具业务路由 | `0b9b798` | `master` |
 | 33 | 2026-08-12 | 完成 Application Port 架构重构 | `4a0725b`, `f85e248` | `muyuzhong/capability-spi-foundation` |
 | 32 | 2026-08-11 | 修复运行时预算取消与 Capability 类型边界 | `557cdf8` | `muyuzhong/capability-spi-foundation` |
 | 31 | 2026-08-10 | 完成 PR 23 CI 基线修复 | `b25ea2c` | `muyuzhong/state-ownership-migration` |
