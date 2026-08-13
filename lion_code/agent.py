@@ -34,8 +34,11 @@ from .context import (
 )
 from .core.conversation import QueueSnapshot
 from .core.harness import EventListener
-from .core.messages import AgentMessage, AssistantMessage, TextContent, UserMessage
+from .core.messages import AgentMessage
 from .core.provider import ModelProvider
+from .domain_ports import NoticeSink
+from .dream import DreamCoordinator, SessionMemoryView
+from .dream_adapter import RestrictedDreamAgentFactory
 from .execution_control import ExecutionControl
 from .hooks import load_pre_tool_use_hooks
 from .learning_runtime import (
@@ -49,6 +52,7 @@ from .memory_runtime import (
     MemoryOverlay,
     ProviderTextQueryService,
 )
+from .model_query import ProviderModelQuery
 from .observers import TerminalRenderer
 from .permission_state import (
     PermissionController,
@@ -66,13 +70,13 @@ from .provider_manager import (
     ConfigurationRecorder,
     MemoryQuerySink,
     ModelContextControl,
+    ProviderKind,
     ProviderManager,
     ProviderRuntimePort,
     ProviderState,
     ProviderView,
 )
 from .providers.factory import create_provider
-from .providers.oneshot import complete_text
 from .providers.thinking import (
     ThinkingLevel,
 )
@@ -90,7 +94,7 @@ from .session_runtime import (
     load_legacy_session,
 )
 from .skill_runtime import SkillRuntime
-from .subagent_factory import SubagentFactory
+from .subagent_factory import ChildAgentConfig, SubagentFactory
 from .subagent_runtime import SubagentExecutor
 from .tooling import ToolEnvironment, ToolRegistry, ToolRuntime
 from .tooling.builtin import create_builtin_tools
@@ -131,7 +135,9 @@ class _DeferredProviderRuntimePort(ProviderRuntimePort):
 
     @property
     def is_running(self) -> bool:
-        return self._runtime is not None and self._runtime.core_runtime.harness.is_running
+        return (
+            self._runtime is not None and self._runtime.core_runtime.harness.is_running
+        )
 
     def replace_provider(self, provider: ModelProvider) -> ModelProvider:
         if self._runtime is None:
@@ -174,14 +180,54 @@ class _MemoryQuerySinkAdapter(MemoryQuerySink):
         self._coordinator.set_query_service(service)
 
 
+class _DeferredMemoryQuerySink(MemoryQuerySink):
+    """允许 ProviderManager 在 Session Memory 组合前先完成构造。"""
+
+    def __init__(self) -> None:
+        self._sink: MemoryQuerySink | None = None
+
+    def bind(self, sink: MemoryQuerySink) -> None:
+        self._sink = sink
+
+    def set_query_service(self, service: ProviderTextQueryService) -> None:
+        if self._sink is None:
+            raise RuntimeError("Session Memory query sink 尚未初始化")
+        self._sink.set_query_service(service)
+
+
+class _AgentNoticeSink(NoticeSink):
+    """把 Domain 通知适配到当前 Agent 的实例级通知入口。"""
+
+    def __init__(self, emit: Callable[..., None]) -> None:
+        self._emit = emit
+
+    def emit(
+        self,
+        message: str,
+        *,
+        role: Literal["info", "error"] = "info",
+    ) -> None:
+        self._emit(message, role=role)
+
+
+class _SessionMemorySnapshotView(SessionMemoryView):
+    """只向 Dream 暴露最近一次有效 Session Memory 快照。"""
+
+    def __init__(self, load: Callable[[], SessionMemory | None]) -> None:
+        self._load = load
+
+    def load(self) -> SessionMemory | None:
+        return self._load()
+
+
 class _SessionRecorderConfigurationRecorder(ConfigurationRecorder):
     """将 Manager 的同步配置命令适配到已有异步 SessionRecorder。"""
 
     def __init__(self) -> None:
         self._recorder: Callable[[], SessionRecorder | None] | None = None
-        self._schedule: Callable[
-            [Callable[[], Coroutine[Any, Any, object]]], None
-        ] | None = None
+        self._schedule: (
+            Callable[[Callable[[], Coroutine[Any, Any, object]]], None] | None
+        ) = None
 
     def bind(
         self,
@@ -293,14 +339,6 @@ class Agent:
             max_turns=max_turns,
         )
 
-        # /goal、/loop 与 Auto Mode 的状态和协调循环由 AutonomyRuntime 拥有。
-        self._autonomy = AutonomyRuntime(
-            self,
-            usage=self._usage,
-            budget=self._budget,
-        )
-        self._learning = LearningRuntime(self)
-
         # 当前异步任务用于把 Ctrl+C 传播到正在等待的模型或工具调用。
         self._current_task: asyncio.Task | None = None
         # 最近一次 chat/run 的终止原因，供 run() 结构化返回；chat 自身不读取。
@@ -308,9 +346,13 @@ class Agent:
 
         # Core 路径采用 Tau 6 档词汇(off..xhigh);由 ``thinking`` 开关推导初始档,
         # 运行中经 set_thinking_level/cycle_thinking_level 调整并热重建 Provider。
-        initial_provider_kind = "openai-compatible" if api_base else "anthropic"
+        initial_provider_kind: ProviderKind = (
+            "openai-compatible" if api_base else "anthropic"
+        )
         initial_api_key = api_key or os.environ.get(
-            "OPENAI_API_KEY" if initial_provider_kind == "openai-compatible" else "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY"
+            if initial_provider_kind == "openai-compatible"
+            else "ANTHROPIC_API_KEY",
             "",
         )
         initial_thinking_level: ThinkingLevel = "medium" if thinking else "off"
@@ -332,13 +374,6 @@ class Agent:
         )
         self._mcp_manager = self.tool_environment.mcp_manager
         self._mcp_initialized = False
-        self._subagent_factory = SubagentFactory(self)
-        self._subagent_executor = SubagentExecutor(
-            self._subagent_factory,
-            self._usage,
-            self._emit_subagent_status,
-        )
-        self._skill_runtime = SkillRuntime(self._subagent_executor)
         self.plan = PlanRuntime(
             self,
             self._permission_controller,
@@ -352,6 +387,19 @@ class Agent:
                     self.tool_registry.register(tool)
         else:
             self.tool_registry = cast(ToolRegistry, tool_registry)
+
+        self._subagent_factory = SubagentFactory(
+            registry=self.tool_registry,
+            environment=self.tool_environment,
+            child_config=self._child_agent_config,
+            permission=self._permission_controller,
+        )
+        self._subagent_executor = SubagentExecutor(
+            self._subagent_factory,
+            self._usage,
+            self._emit_subagent_status,
+        )
+        self._skill_runtime = SkillRuntime(self._subagent_executor)
 
         self._register_capabilities(
             mcp_enabled=mcp_enabled,
@@ -390,11 +438,6 @@ class Agent:
             confirm_hook_trust=self._confirm_hook_trust,
             auto_permission_fn=self._classify_tool_call,
         )
-        self._session_memory_coord = SessionMemoryCoordinator(
-            self,
-            identity=resolve_project_identity(self.tool_context.cwd),
-            repository=session_memory_repository,
-        )
         self._permission_policy = PermissionPolicy(cwd=self.tool_context.cwd)
         self._result_store = ResultStore()
         self.tool_runtime = ToolRuntime(
@@ -418,7 +461,7 @@ class Agent:
 
         provider_runtime_port = _DeferredProviderRuntimePort()
         model_context_control = _DeferredModelContextControl()
-        memory_query_sink = _MemoryQuerySinkAdapter(self._session_memory_coord)
+        memory_query_sink = _DeferredMemoryQuerySink()
         configuration_recorder = _SessionRecorderConfigurationRecorder()
         background_scheduler = _DeferredBackgroundScheduler()
         self._provider_manager = ProviderManager(
@@ -461,9 +504,69 @@ class Agent:
             self._runtime_coordinator.schedule_background_operation,
         )
         background_scheduler.bind(self._runtime_coordinator)
-        self._session_memory_coord.set_query_service(
-            self._build_core_memory_query_service()
+        query = ProviderModelQuery(
+            provider=lambda: self._core_runtime.provider,
+            model=lambda: self.model,
+            available=lambda: self.api_configured,
         )
+        notices = _AgentNoticeSink(self._emit_notice)
+        memory_query = ProviderTextQueryService(
+            provider=provider,
+            model=lambda: self.model,
+        )
+        dream_factory = RestrictedDreamAgentFactory(
+            registry=self.tool_registry,
+            environment=self.tool_environment,
+            child_config=self._child_agent_config,
+        )
+        identity = resolve_project_identity(self.tool_context.cwd)
+        self._session_memory_coord: SessionMemoryCoordinator
+        dream = DreamCoordinator(
+            repository=self._session_repository,
+            identity=identity,
+            session_memory=_SessionMemorySnapshotView(
+                lambda: (
+                    None
+                    if self._session_memory_coord.session_memory_error is not None
+                    else self._session_memory_coord.session_memory
+                )
+            ),
+            factory=dream_factory,
+            usage=self._usage,
+        )
+        self._session_memory_coord = SessionMemoryCoordinator(
+            identity=identity,
+            repository=session_memory_repository,
+            transcript=self._core_runtime,
+            cancellation=execution.cancellation,
+            permission=self._permission_controller,
+            load_project_context=self._load_project_context_files,
+            notices=notices,
+            query=memory_query,
+            dream_runner=dream,
+            is_sub_agent=is_sub_agent,
+            status_callback=self._emit_subagent_status,
+            refresh_context=self._refresh_dynamic_system_context,
+        )
+        memory_sink = _MemoryQuerySinkAdapter(self._session_memory_coord)
+        memory_query_sink.bind(memory_sink)
+        self._autonomy = AutonomyRuntime(
+            conversation=self._runtime_coordinator,
+            transcript=self._core_runtime,
+            query=query,
+            notices=notices,
+            cancellation=execution.cancellation,
+            tool_registry=self.tool_registry,
+            confirm=self.confirm_fn,
+            usage=self._usage,
+            budget=self._budget,
+        )
+        self._learning = LearningRuntime(
+            self._core_runtime,
+            query,
+            self.tool_context.cwd,
+        )
+        self._model_query = query
 
     def _register_capabilities(
         self,
@@ -755,11 +858,6 @@ class Agent:
 
         self._session_memory_coord._prepare_turn_memory_snapshot(user_message)
 
-    def _build_core_memory_query_service(self):
-        """构建绑定当前 Core Provider 的文本查询服务。"""
-
-        return self._session_memory_coord._build_core_memory_query_service()
-
     def abort(self) -> None:
         self._runtime_coordinator.abort()
 
@@ -878,6 +976,7 @@ class Agent:
 
     def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]] | None) -> None:
         self.confirm_fn = fn
+        self._autonomy.set_confirm(fn)
 
     def set_plan_approval_fn(self, fn: Callable[[str], Awaitable[dict]] | None) -> None:
         self.plan.set_approval_fn(fn)
@@ -1089,43 +1188,25 @@ class Agent:
         """持续执行运行->评估->反馈,直到目标终止条件出现。"""
         await self._autonomy.pursue_goal(directive)
 
-    def _canonical_side_messages(self, messages: list) -> list[AgentMessage]:
-        """把 {role, content} 字典消息转为 canonical,供 Provider side-query。"""
-        canonical: list[AgentMessage] = []
-        for message in messages:
-            content = str(message.get("content", ""))
-            if message.get("role") == "assistant":
-                canonical.append(
-                    AssistantMessage(
-                        model=self.model,
-                        content=[TextContent(text=content)],
-                        stop_reason="stop",
-                    )
-                )
-            else:
-                canonical.append(UserMessage(content=content))
-        return canonical
-
     async def _run_evaluator_query(
-        self, system: str, messages: list, max_tokens: int = 512
+        self,
+        system: str,
+        messages: list[AgentMessage],
+        max_tokens: int = 512,
     ) -> str:
-        """通过当前 Provider 发送保留 role 的评估请求，并返回模型文本。
+        """兼容内部测试 seam；实际查询由 live ModelQuery 执行。"""
 
-        与只接受单条 user 消息的 sideQuery 分开，避免 Memory 接口限制目标评估结构。
-        """
-        del max_tokens
-        return await complete_text(
-            self._core_runtime.provider,
-            model=self.model,
+        return await self._model_query.complete_messages(
             system=system,
-            messages=self._canonical_side_messages(messages),
+            messages=messages,
+            max_output_tokens=max_tokens,
         )
 
     async def _run_classifier_query(
         self, system: str, user: str, max_tokens: int
     ) -> str:
-        """通过当前 Provider 发送单消息分类请求。"""
-        return await self._build_core_memory_query_service().complete(
+        """兼容内部测试 seam；实际查询由 live ModelQuery 执行。"""
+        return await self._model_query.complete_text(
             system=system,
             user=user,
             max_output_tokens=max_tokens,
@@ -1166,28 +1247,17 @@ class Agent:
         """以两阶段分类器决定工具调用,返回 allow/deny/confirm。"""
         return await self._autonomy._classify_tool_call(tool_name, inp)
 
-    def _child_api_kwargs(self) -> dict:
-        """子 Agent fork 的模型与凭证参数:继承父级当前后端的 key/base。
+    def _child_agent_config(self) -> ChildAgentConfig:
+        """返回 typed 子 Agent 配置，不把 ProviderManager 传入 child factory。"""
 
-        此前 fork 只传 api_base 不传 key,/model 配置(无环境变量)的用户
-        fork 出的子 Agent 是无凭证的。
-        """
-        return {
-            **self._provider_manager.child_api_kwargs(),
-            "terminal_output": self._terminal_output,
-        }
-
-    def _child_permission_mode(self) -> PermissionMode:
-        """确定子 Agent 继承的权限模式。
-
-        plan 与 auto 必须向下传递；否则默认 bypassPermissions 会让主模型借子 Agent
-        绕过只读或分类器限制。其他模式允许子 Agent 独立执行已授权任务。
-        """
-        if self.permission_mode == "plan":
-            return "plan"
-        if self.permission_mode == "auto":
-            return "auto"
-        return "bypassPermissions"
+        kwargs = self._provider_manager.child_api_kwargs()
+        return ChildAgentConfig(
+            model=str(kwargs["model"]),
+            api_key=str(kwargs["api_key"]),
+            api_base=kwargs.get("api_base"),
+            anthropic_base_url=kwargs.get("anthropic_base_url"),
+            terminal_output=self._terminal_output,
+        )
 
     # ─── 会话持久化 ──────────────────────────────────────────
 

@@ -475,7 +475,7 @@ class TestSubAgentPermissionInheritance:
             permission_mode="plan",
         )
 
-        assert agent._child_permission_mode() == "plan"  # noqa: SLF001
+        assert agent._subagent_factory._child_permission_mode() == "plan"  # noqa: SLF001
 
     def test_subagent_inherits_auto_permission_mode(self) -> None:
         """SubAgent created from an auto-mode parent should inherit 'auto'."""
@@ -488,7 +488,7 @@ class TestSubAgentPermissionInheritance:
             permission_mode="auto",
         )
 
-        assert agent._child_permission_mode() == "auto"  # noqa: SLF001
+        assert agent._subagent_factory._child_permission_mode() == "auto"  # noqa: SLF001
 
     def test_subagent_defaults_to_bypass_for_other_modes(self) -> None:
         """Non-plan, non-auto modes should map to bypassPermissions."""
@@ -501,13 +501,15 @@ class TestSubAgentPermissionInheritance:
             permission_mode="default",
         )
 
-        assert agent._child_permission_mode() == "bypassPermissions"  # noqa: SLF001
+        assert (
+            agent._subagent_factory._child_permission_mode()  # noqa: SLF001
+            == "bypassPermissions"
+        )
 
     def test_subagent_inherits_parent_tool_registry_filtered(self) -> None:
         """SubAgent should receive a filtered view of the parent's registry,
         including capability-contributed tools like 'agent' and 'skill'."""
         from lion_code.agent import Agent
-        from lion_code.subagent_factory import SubagentFactory
 
         agent = Agent(
             api_key="test-key",
@@ -515,8 +517,7 @@ class TestSubAgentPermissionInheritance:
             mcp_enabled=False,
         )
 
-        factory = SubagentFactory(agent)
-        sub_agent = factory.create_for_agent_type("general")
+        sub_agent = agent._subagent_factory.create_for_agent_type("general")  # noqa: SLF001
 
         try:
             sub_tools = {t.name for t in sub_agent.tool_registry.all_tools()}

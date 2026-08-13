@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Review the final dependency graph, Provider replacement behavior, canonical transcript, cancellation, permission, Session Memory, and Dream boundaries."}
+{"file":".trellis/spec/backend/usage-ownership.md","reason":"Review child usage recording and verify no second Usage owner or writer was introduced."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Run and assess the repository's required behavioral, architecture, import, static, and diff gates."}

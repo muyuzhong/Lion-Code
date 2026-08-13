@@ -8,12 +8,11 @@ import os
 import re
 import shutil
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from .agent import Agent
 from .core import AgentMessage, AssistantMessage, ToolResultMessage, UserMessage
 from .frontmatter import format_frontmatter, parse_frontmatter
 from .memory import VALID_TYPES, _update_memory_index, get_memory_dir, load_memory_index
@@ -25,7 +24,6 @@ from .session_memory import (
     extract_long_term_candidates,
 )
 from .session_runtime import SessionRepository
-from .tooling.selection import ToolSelectionPolicy, select_tools
 
 DREAM_SESSION_LIMIT = 5
 DREAM_MAX_TURNS = 12
@@ -132,6 +130,41 @@ class DreamResult:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class DreamAgentResult:
+    """Dream 子 Agent 的文本与本次调用用量。"""
+
+    text: str
+    input_tokens: int
+    output_tokens: int
+
+
+class DreamAgentRunner(Protocol):
+    """隔离 Dream 子 Agent 的最小执行与释放接口。"""
+
+    async def run_once(self, prompt: str) -> DreamAgentResult: ...
+
+    async def close(self) -> None: ...
+
+
+class DreamAgentFactory(Protocol):
+    """按已验证的 Dream 上下文创建受限子 Agent。"""
+
+    def create(self, context: DreamContext) -> DreamAgentRunner: ...
+
+
+class SessionMemoryView(Protocol):
+    """Dream 只读的 Session Memory 快照入口。"""
+
+    def load(self) -> SessionMemory | None: ...
+
+
+class ChildUsageRecorder(Protocol):
+    """把 Dream 子调用用量并入唯一 Usage owner。"""
+
+    def record_child_usage(self, input_tokens: int, output_tokens: int) -> None: ...
+
+
 def _path_key(value: str | Path) -> str:
     raw = str(value)
     if os.name == "nt" and raw.startswith("\\\\?\\"):
@@ -151,7 +184,9 @@ def _clip(value: str, limit: int) -> str:
 
 def _strip_system_reminders(value: str) -> str:
     return re.sub(
-        r"<system-reminder>[\s\S]*?</system-reminder>", "", value,
+        r"<system-reminder>[\s\S]*?</system-reminder>",
+        "",
+        value,
         flags=re.IGNORECASE,
     ).strip()
 
@@ -164,19 +199,21 @@ def _project_session_messages(
         if isinstance(message, UserMessage):
             text = _strip_system_reminders(message.text)
             if text:
-                projected.append({
-                    "role": (
-                        "summary"
-                        if text.startswith(
-                            (
-                                "Previous conversation summary:",
-                                "[Previous conversation summary]",
+                projected.append(
+                    {
+                        "role": (
+                            "summary"
+                            if text.startswith(
+                                (
+                                    "Previous conversation summary:",
+                                    "[Previous conversation summary]",
+                                )
                             )
-                        )
-                        else "user"
-                    ),
-                    "content": text,
-                })
+                            else "user"
+                        ),
+                        "content": text,
+                    }
+                )
         elif isinstance(message, AssistantMessage):
             text = _strip_system_reminders(message.text)
             if text and not message.tool_calls:
@@ -184,10 +221,12 @@ def _project_session_messages(
         elif isinstance(message, ToolResultMessage):
             result = message.text
             if result:
-                projected.append({
-                    "role": "tool",
-                    "content": _clip(result, MAX_TOOL_RESULT_CHARS),
-                })
+                projected.append(
+                    {
+                        "role": "tool",
+                        "content": _clip(result, MAX_TOOL_RESULT_CHARS),
+                    }
+                )
 
     selected: list[dict[str, str]] = []
     used = 0
@@ -221,11 +260,13 @@ async def _recent_project_sessions(
         state = await repository.load(str(metadata["id"]))
         if state is None:
             continue
-        sessions.append({
-            "id": metadata["id"],
-            "startTime": metadata["startTime"],
-            "messages": _project_session_messages(state.messages),
-        })
+        sessions.append(
+            {
+                "id": metadata["id"],
+                "startTime": metadata["startTime"],
+                "messages": _project_session_messages(state.messages),
+            }
+        )
         if len(sessions) == DREAM_SESSION_LIMIT:
             break
     return sessions
@@ -257,13 +298,15 @@ async def build_dream_context(
         path = memory_dir / filename
         raw = path.read_text(encoding="utf-8", errors="replace")
         parsed = parse_frontmatter(raw)
-        manifest.append({
-            "filename": filename,
-            "name": parsed.meta.get("name"),
-            "description": parsed.meta.get("description"),
-            "type": parsed.meta.get("type"),
-            "bytes": path.stat().st_size,
-        })
+        manifest.append(
+            {
+                "filename": filename,
+                "name": parsed.meta.get("name"),
+                "description": parsed.meta.get("description"),
+                "type": parsed.meta.get("type"),
+                "bytes": path.stat().st_size,
+            }
+        )
     return DreamContext(
         project_root=project_root,
         memory_dir=memory_dir,
@@ -298,44 +341,36 @@ def _contains_parent_segment(pattern: str) -> bool:
     return ".." in pattern.replace("\\", "/").split("/")
 
 
-class _DreamAgent(Agent):
-    """只允许读取项目和当前项目 Memory 的隔离 Agent。"""
+def validate_dream_read_input(
+    name: str,
+    inp: Mapping[str, Any],
+    read_roots: Sequence[Path],
+) -> dict[str, Any] | None:
+    """把 Dream 工具输入限制在只读工具和已解析的项目/Memory 根目录。"""
 
-    def __init__(self, *, read_roots: list[Path], **kwargs: Any):
-        self._dream_read_roots = tuple(root.resolve() for root in read_roots)
-        super().__init__(**kwargs)
-        # Dream 不能通过项目 Hook 间接启动 Shell；路径边界由本类独立执行。
-        self._pre_tool_use_hooks = []
-
-    def _safe_read_input(self, name: str, inp: dict[str, Any]) -> dict[str, Any] | None:
-        if name not in DREAM_READ_TOOLS:
-            return None
-        try:
-            key = "file_path" if name == "read_file" else "path"
-            raw_path = inp.get(key) or "."
-            candidate = Path(raw_path)
-            if not candidate.is_absolute():
-                candidate = Path.cwd() / candidate
-            resolved = candidate.resolve()
-        except (OSError, TypeError, ValueError):
-            return None
-        if not any(resolved == root or root in resolved.parents for root in self._dream_read_roots):
-            return None
-        if name == "list_files" and _contains_parent_segment(str(inp.get("pattern", ""))):
-            return None
-        return {**inp, key: str(resolved)}
-
-    async def _execute_tool_call(self, name: str, inp: dict) -> str:
-        safe_input = self._safe_read_input(name, inp)
-        if safe_input is None:
-            return "Action denied: Dream Agent is read-only and restricted to project Memory and code."
-        return await super()._execute_tool_call(name, safe_input)
+    if name not in DREAM_READ_TOOLS:
+        return None
+    try:
+        key = "file_path" if name == "read_file" else "path"
+        raw_path = inp.get(key) or "."
+        candidate = Path(raw_path)
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        resolved = candidate.resolve()
+    except (OSError, TypeError, ValueError):
+        return None
+    roots = tuple(root.resolve() for root in read_roots)
+    if not any(resolved == root or root in resolved.parents for root in roots):
+        return None
+    if name == "list_files" and _contains_parent_segment(str(inp.get("pattern", ""))):
+        return None
+    return {**inp, key: str(resolved)}
 
 
 def _extract_json_object(raw: str) -> dict[str, Any]:
     try:
         start = raw.index("{")
-        parsed = json.loads(raw[start:raw.rindex("}") + 1])
+        parsed = json.loads(raw[start : raw.rindex("}") + 1])
     except (ValueError, json.JSONDecodeError) as exc:
         raise ValueError("Dream Agent 返回了无效 JSON") from exc
     if not isinstance(parsed, dict):
@@ -362,6 +397,46 @@ def _validate_delete_filename(filename: Any) -> str:
     return filename
 
 
+def _parse_memory_draft(item: Any, seen: set[str]) -> MemoryDraft:
+    if not isinstance(item, dict):
+        raise ValueError("Dream upsert 项必须是对象")
+    filename = _validate_filename(item.get("filename"))
+    memory_type = item.get("type")
+    name = item.get("name")
+    description = item.get("description")
+    content = item.get("content")
+    if memory_type not in VALID_TYPES or not filename.startswith(f"{memory_type}_"):
+        raise ValueError(f"Memory 类型与文件名不一致：{filename}")
+    if (
+        not isinstance(name, str)
+        or not name.strip()
+        or any(c in name for c in "\r\n")
+        or len(name) > 120
+    ):
+        raise ValueError(f"Memory name 无效：{filename}")
+    if (
+        not isinstance(description, str)
+        or not description.strip()
+        or any(c in description for c in "\r\n")
+        or len(description) > 300
+    ):
+        raise ValueError(f"Memory description 无效：{filename}")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError(f"Memory content 无效：{filename}")
+    if len(content.encode("utf-8")) > MAX_MEMORY_BODY_BYTES:
+        raise ValueError(f"Memory content 超过 4 KiB：{filename}")
+    if filename in seen:
+        raise ValueError(f"Dream 计划包含重复文件：{filename}")
+    seen.add(filename)
+    return MemoryDraft(
+        filename=filename,
+        name=name.strip(),
+        description=description.strip(),
+        type=memory_type,
+        content=content.strip(),
+    )
+
+
 def parse_dream_plan(raw: str) -> DreamPlan:
     """解析并完整校验模型计划；任何非法操作都会拒绝整个计划。"""
     value = _extract_json_object(raw)
@@ -375,43 +450,7 @@ def parse_dream_plan(raw: str) -> DreamPlan:
     drafts: list[MemoryDraft] = []
     seen: set[str] = set()
     for item in raw_upsert:
-        if not isinstance(item, dict):
-            raise ValueError("Dream upsert 项必须是对象")
-        filename = _validate_filename(item.get("filename"))
-        memory_type = item.get("type")
-        name = item.get("name")
-        description = item.get("description")
-        content = item.get("content")
-        if memory_type not in VALID_TYPES or not filename.startswith(f"{memory_type}_"):
-            raise ValueError(f"Memory 类型与文件名不一致：{filename}")
-        if (
-            not isinstance(name, str)
-            or not name.strip()
-            or any(c in name for c in "\r\n")
-            or len(name) > 120
-        ):
-            raise ValueError(f"Memory name 无效：{filename}")
-        if (
-            not isinstance(description, str)
-            or not description.strip()
-            or any(c in description for c in "\r\n")
-            or len(description) > 300
-        ):
-            raise ValueError(f"Memory description 无效：{filename}")
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError(f"Memory content 无效：{filename}")
-        if len(content.encode("utf-8")) > MAX_MEMORY_BODY_BYTES:
-            raise ValueError(f"Memory content 超过 4 KiB：{filename}")
-        if filename in seen:
-            raise ValueError(f"Dream 计划包含重复文件：{filename}")
-        seen.add(filename)
-        drafts.append(MemoryDraft(
-            filename=filename,
-            name=name.strip(),
-            description=description.strip(),
-            type=memory_type,
-            content=content.strip(),
-        ))
+        drafts.append(_parse_memory_draft(item, seen))
 
     deletes = [_validate_delete_filename(item) for item in raw_delete]
     if len(deletes) != len(set(deletes)):
@@ -435,8 +474,16 @@ def apply_dream_plan(context: DreamContext, plan: DreamPlan) -> DreamResult:
     if missing:
         raise ValueError(f"Dream 不能删除不存在的 Memory：{missing[0]}")
 
-    created = [draft.filename for draft in plan.upsert if draft.filename not in context.memory_snapshot]
-    updated = [draft.filename for draft in plan.upsert if draft.filename in context.memory_snapshot]
+    created = [
+        draft.filename
+        for draft in plan.upsert
+        if draft.filename not in context.memory_snapshot
+    ]
+    updated = [
+        draft.filename
+        for draft in plan.upsert
+        if draft.filename in context.memory_snapshot
+    ]
     affected = {draft.filename for draft in plan.upsert}.union(plan.delete)
     if not affected:
         return DreamResult([], [], [], plan.reason)
@@ -453,7 +500,11 @@ def apply_dream_plan(context: DreamContext, plan: DreamPlan) -> DreamResult:
                 shutil.copy2(source, backup_dir / filename)
         for draft in plan.upsert:
             text = format_frontmatter(
-                {"name": draft.name, "description": draft.description, "type": draft.type},
+                {
+                    "name": draft.name,
+                    "description": draft.description,
+                    "type": draft.type,
+                },
                 draft.content,
             )
             (staged_dir / draft.filename).write_text(text, encoding="utf-8")
@@ -481,8 +532,20 @@ def apply_dream_plan(context: DreamContext, plan: DreamPlan) -> DreamResult:
 class DreamCoordinator:
     """收集上下文、运行隔离 Dream Agent，并应用经过校验的变更计划。"""
 
-    def __init__(self, agent: Agent):
-        self.agent = agent
+    def __init__(
+        self,
+        *,
+        repository: SessionRepository,
+        identity: ProjectIdentity,
+        session_memory: SessionMemoryView,
+        factory: DreamAgentFactory,
+        usage: ChildUsageRecorder,
+    ) -> None:
+        self._repository = repository
+        self._identity = identity
+        self._session_memory = session_memory
+        self._factory = factory
+        self._usage = usage
 
     def _build_prompt(self, context: DreamContext) -> str:
         payload = {
@@ -497,59 +560,30 @@ class DreamCoordinator:
             payload, ensure_ascii=False, default=str
         )
 
-    def _create_agent(self, context: DreamContext) -> _DreamAgent:
-        child_registry = select_tools(
-            self.agent.tool_registry,
-            ToolSelectionPolicy(
-                allowed_names=frozenset(DREAM_READ_TOOLS),
-                require_read_only=True,
-            ),
-        )
-        kwargs: dict[str, Any] = {
-            "model": self.agent.model,
-            "custom_system_prompt": DREAM_SYSTEM_PROMPT,
-            "tool_registry": child_registry,
-            "tool_environment": self.agent.tool_environment.child_view(),
-            "is_sub_agent": True,
-            "permission_mode": "bypassPermissions",
-            "max_turns": DREAM_MAX_TURNS,
-            "read_roots": [context.project_root, context.memory_dir],
-        }
-        # 凭证与后端继承走公共 seam,不再直读 Agent 私有客户端。
-        api_kwargs = self.agent._child_api_kwargs()
-        api_kwargs.pop("model", None)
-        kwargs.update(api_kwargs)
-        return _DreamAgent(**kwargs)
-
     async def run(self) -> DreamResult:
-        kwargs: dict[str, Any] = {}
-        identity = getattr(self.agent, "_project_identity", None)
-        memory = (
-            None
-            if getattr(self.agent, "session_memory_error", None) is not None
-            else getattr(self.agent, "session_memory", None)
+        context = await build_dream_context(
+            self._repository,
+            identity=self._identity,
+            session_memory=self._session_memory.load(),
         )
-        if isinstance(identity, ProjectIdentity):
-            kwargs["identity"] = identity
-        if isinstance(memory, SessionMemory):
-            kwargs["session_memory"] = memory
-        context = await build_dream_context(self.agent._session_repository, **kwargs)
         if (
             not context.memory_manifest
             and not context.sessions
             and not context.session_memory_candidates
         ):
-            return DreamResult([], [], [], "没有可供整理的 Auto Memory、项目 Session 或候选。")
+            return DreamResult(
+                [], [], [], "没有可供整理的 Auto Memory、项目 Session 或候选。"
+            )
 
-        dream_agent = self._create_agent(context)
+        dream_agent = self._factory.create(context)
         try:
             raw_result = await dream_agent.run_once(self._build_prompt(context))
-            self.agent._usage.record_child_usage(
-                raw_result["tokens"]["input"],
-                raw_result["tokens"]["output"],
+            self._usage.record_child_usage(
+                raw_result.input_tokens,
+                raw_result.output_tokens,
             )
         finally:
             await dream_agent.close()
 
-        plan = parse_dream_plan(raw_result["text"])
+        plan = parse_dream_plan(raw_result.text)
         return apply_dream_plan(context, plan)

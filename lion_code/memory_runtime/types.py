@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Protocol
-
-from lion_code.core.messages import AgentMessage
-from lion_code.core.provider import ModelProvider
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,17 +33,3 @@ class MemoryContextPolicy:
     max_active_memories: int = 8
     max_injection_bytes: int = 24_000
     max_session_bytes: int = 60 * 1024
-
-
-class ReadOnlyMessageSource(Protocol):
-    """只读 Core Runtime 视图：只暴露消息快照和 Provider，不暴露 mutation 方法。
-
-    Memory 层通过此 Protocol 访问 Core 状态，在类型层面无法调用
-    ``clear_queues``、``follow_up``、``replace_messages`` 等 Harness 方法。
-    """
-
-    @property
-    def messages(self) -> tuple[AgentMessage, ...]: ...
-
-    @property
-    def provider(self) -> ModelProvider: ...

@@ -49,7 +49,6 @@ from lion_code.memory_runtime import (
     MemoryContextInjector,
     MemoryInjectionReport,
     MemoryOverlay,
-    ReadOnlyMessageSource,
 )
 from lion_code.observers import TerminalRenderer, UsageObserver
 from lion_code.plan_runtime import PlanRuntime
@@ -104,7 +103,7 @@ def _recent_context_boundary(
     return len(messages)
 
 
-class LionAgentRuntime(ReadOnlyMessageSource):
+class LionAgentRuntime:
     """组装 Provider + Core Harness + ToolRuntime 的应用运行时。"""
 
     def __init__(

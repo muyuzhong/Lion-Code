@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from lion_code.agent import Agent
@@ -53,7 +54,7 @@ class TestAgentInternalRuntime(unittest.IsolatedAsyncioTestCase):
         async def chat(_prompt):
             visible_during_chat.append(agent.tool_registry.is_active("schedule_wakeup"))
 
-        agent.chat = chat
+        agent._autonomy._conversation = SimpleNamespace(chat=chat)
 
         with patch("lion_code.agent.print_info"):
             await agent._run_loop_dynamic({"prompt": "check"})

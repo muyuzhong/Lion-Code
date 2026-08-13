@@ -1,17 +1,15 @@
 """/goal、/loop 与 Auto Mode 的协调层(状态与循环)。
 
 纯提示词与解析函数在 :mod:`lion_code.autonomy`;本模块承载它们的运行时状态与
-驱动循环。``AutonomyRuntime`` 经一个窄 ``AutonomyHost`` 协议回调 ``Agent`` 的
-``chat``/``_emit_notice`` 与 side-query 工具,自身不持有 Provider
-或 TUI,从而把「自主运行」与「Provider 切换/TUI 输出」分离。
+驱动循环。``AutonomyRuntime`` 只接收会话、transcript、side-query、通知、取消与
+工具注册表等具名依赖,不持有 Agent、Provider 或 TUI。
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping
-from typing import Any, Literal, Protocol, runtime_checkable
+from collections.abc import Awaitable, Callable, Mapping
 
 from .autonomy import (
     DENIAL_LIMITS,
@@ -33,45 +31,18 @@ from .autonomy import (
     parse_goal_verdict,
     parse_loop_input,
 )
-from .core.messages import AssistantMessage
+from .core.cancellation import CancellationView
+from .core.messages import AgentMessage, AssistantMessage, TextContent, UserMessage
+from .domain_ports import ConversationRunner, ModelQuery, NoticeSink, TranscriptView
+from .model_query import ModelQueryUnavailableError
 from .prompt import load_claude_md
 from .tooling.internal import create_wakeup_tool
 from .tooling.middleware import is_auto_fast_path
+from .tooling.registry import ToolRegistry
 from .tooling.types import JSONValue, ToolResult
 from .usage import BudgetPolicy, UsageLedger
 
-
-@runtime_checkable
-class AutonomyHost(Protocol):
-    """``AutonomyRuntime`` 依赖的 ``Agent`` 表面(窄协议,非 Service Locator)。
-
-    复杂属性(``tool_registry``/``_core_runtime``/``confirm_fn``)用 ``Any`` 标注,
-    只约束本模块实际回调的方法签名。
-    """
-
-    confirm_fn: Any
-    tool_registry: Any
-    _core_runtime: Any
-
-    @property
-    def api_configured(self) -> bool: ...
-
-    @property
-    def is_aborted(self) -> bool: ...
-
-    def _emit_notice(
-        self, message: str, *, role: Literal["info", "error"] = "info"
-    ) -> None: ...
-
-    async def chat(self, user_message: str) -> None: ...
-
-    async def _run_evaluator_query(
-        self, system: str, messages: list, max_tokens: int = 512
-    ) -> str: ...
-
-    async def _run_classifier_query(
-        self, system: str, user: str, max_tokens: int
-    ) -> str: ...
+ConfirmCallback = Callable[[str], Awaitable[bool]]
 
 
 class AutonomyRuntime:
@@ -79,12 +50,24 @@ class AutonomyRuntime:
 
     def __init__(
         self,
-        host: AutonomyHost,
         *,
+        conversation: ConversationRunner,
+        transcript: TranscriptView,
+        query: ModelQuery,
+        notices: NoticeSink,
+        cancellation: CancellationView,
+        tool_registry: ToolRegistry,
+        confirm: ConfirmCallback | None,
         usage: UsageLedger,
         budget: BudgetPolicy,
     ) -> None:
-        self._host = host
+        self._conversation = conversation
+        self._transcript = transcript
+        self._query = query
+        self._notices = notices
+        self._cancellation = cancellation
+        self._tool_registry = tool_registry
+        self._confirm = confirm
         self._usage = usage
         self._budget = budget
         # /goal 是跨轮次、会话级的 Stop-hook 条件。
@@ -97,6 +80,11 @@ class AutonomyRuntime:
         self.auto_consecutive_denials = 0
         self.auto_total_denials = 0
 
+    def set_confirm(self, confirm: ConfirmCallback | None) -> None:
+        """替换 Auto Mode 达到拒绝上限后的当前人工确认入口。"""
+
+        self._confirm = confirm
+
     # ─── /goal 追踪 ──────────────────────────────────────────
 
     def set_goal(self, condition: str) -> str:
@@ -107,13 +95,13 @@ class AutonomyRuntime:
             "started_at": time.time(),
             "last_reason": None,
         }
-        self._host._emit_notice(f'◎ /goal active - Stop hook condition: "{condition}"')
+        self._notices.emit(f'◎ /goal active - Stop hook condition: "{condition}"')
         return goal_directive(condition)
 
     def show_goal(self) -> None:
         """处理无参数 `/goal`,显示当前目标状态。"""
         if not self.active_goal:
-            self._host._emit_notice("No active goal. Set one with /goal <condition>.")
+            self._notices.emit("No active goal. Set one with /goal <condition>.")
             return
         secs = time.time() - self.active_goal["started_at"]
         last = (
@@ -121,7 +109,7 @@ class AutonomyRuntime:
             if self.active_goal["last_reason"]
             else ""
         )
-        self._host._emit_notice(
+        self._notices.emit(
             f"◎ /goal active\n  condition: {self.active_goal['condition']}\n"
             f"  iterations: {self.active_goal['iterations']}\n  elapsed: {secs:.1f}s{last}"
         )
@@ -132,20 +120,24 @@ class AutonomyRuntime:
             return
         self.goal_stop = False
         try:
-            await self._host.chat(directive)
+            await self._conversation.chat(directive)
             # 先评估刚结束的一轮,再检查上限或决定下一轮,确保最终输出不会漏判。
-            while self.active_goal and not self.goal_stop and not self._host.is_aborted:
+            while (
+                self.active_goal
+                and not self.goal_stop
+                and not self._cancellation.cancelled
+            ):
                 verdict = await self._evaluate_goal(self.active_goal["condition"])
                 if verdict["ok"]:
                     turns = self.active_goal["iterations"] + 1
                     secs = time.time() - self.active_goal["started_at"]
                     plural = "" if turns == 1 else "s"
-                    self._host._emit_notice(
+                    self._notices.emit(
                         f"✓ Goal achieved ({turns} turn{plural}, {secs:.1f}s): {verdict['reason']}"
                     )
                     break
                 if verdict.get("impossible"):
-                    self._host._emit_notice(
+                    self._notices.emit(
                         f"Hooks: Prompt hook condition judged impossible: {verdict['reason']}"
                     )
                     break
@@ -153,29 +145,29 @@ class AutonomyRuntime:
                 # 未满足时记录原因,再检查预算和硬上限是否允许继续。
                 self.active_goal["iterations"] += 1
                 self.active_goal["last_reason"] = verdict["reason"]
-                self._host._emit_notice(
+                self._notices.emit(
                     f"Hooks: Prompt hook condition was not met: {verdict['reason']}"
                 )
 
                 decision = self._budget.check(self._usage.snapshot())
                 if decision.exceeded:
-                    self._host._emit_notice(f"Goal stopped: {decision.reason}")
+                    self._notices.emit(f"Goal stopped: {decision.reason}")
                     break
                 # --max-turns 只统计执行工具的轮次;纯文本目标循环可能永远不触发它,
                 # 因此仍需独立的无条件硬上限。
                 if self.active_goal["iterations"] >= GOAL_MAX_ITERATIONS:
-                    self._host._emit_notice(
+                    self._notices.emit(
                         f"Goal stopped: reached {GOAL_MAX_ITERATIONS} iterations without meeting the condition."
                     )
                     break
-                if self.goal_stop or self._host.is_aborted:
+                if self.goal_stop or self._cancellation.cancelled:
                     break
 
-                await self._host.chat(
+                await self._conversation.chat(
                     f"Hooks: Prompt hook condition was not met: {verdict['reason']}\n\nKeep working toward the goal."
                 )
-            if self.goal_stop or self._host.is_aborted:
-                self._host._emit_notice("Goal pursuit interrupted.")
+            if self.goal_stop or self._cancellation.cancelled:
+                self._notices.emit("Goal pursuit interrupted.")
         finally:
             # 无论满足、不可能、超限还是中断都清除状态,避免旧目标污染后续对话;
             # 当前实现不支持恢复进行中的 /goal。
@@ -187,13 +179,20 @@ class AutonomyRuntime:
         前置 user 消息明确它只是待判定数据,防止被评估内容夹带伪造的用户或裁判文本。
         """
         transcript = self._extract_last_assistant_text()
-        messages = [
-            {"role": "user", "content": GOAL_TRANSCRIPT_FRAMING},
-            {"role": "assistant", "content": transcript or "(no assistant output)"},
-            {"role": "user", "content": goal_judge_user_message(condition)},
+        messages: list[AgentMessage] = [
+            UserMessage(content=GOAL_TRANSCRIPT_FRAMING),
+            AssistantMessage(
+                model="goal-evidence",
+                content=[TextContent(text=transcript or "(no assistant output)")],
+                stop_reason="stop",
+            ),
+            UserMessage(content=goal_judge_user_message(condition)),
         ]
         try:
-            raw = await self._host._run_evaluator_query(GOAL_EVALUATOR_SYSTEM, messages)
+            raw = await self._query.complete_messages(
+                system=GOAL_EVALUATOR_SYSTEM,
+                messages=messages,
+            )
             return parse_goal_verdict(raw)
         except Exception as e:
             # 评估异常按“未满足”处理,绝不能因故障误清除目标。
@@ -201,7 +200,7 @@ class AutonomyRuntime:
 
     def _extract_last_assistant_text(self) -> str:
         """提取最近一轮 assistant 文本,确保评估目标只覆盖刚完成的动作。"""
-        for message in reversed(self._host._core_runtime.messages):
+        for message in reversed(self._transcript.messages):
             if isinstance(message, AssistantMessage):
                 return message.text
         return ""
@@ -212,7 +211,7 @@ class AutonomyRuntime:
         """解析 /loop 输入并驱动对应模式;格式错误时直接返回。"""
         spec = parse_loop_input(raw_input)
         if "error" in spec:
-            self._host._emit_notice(spec["error"])
+            self._notices.emit(spec["error"])
             return
         # 长间隔或 daily 措辞在真实客户端会触发持久化云计划建议;教学版没有云端,
         # 这里只显式告知差异,仍在当前进程内运行。
@@ -221,7 +220,7 @@ class AutonomyRuntime:
             and spec["interval_seconds"] >= OFFER_CLOUD_THRESHOLD_SECONDS
         ) or is_daily_wording(raw_input)
         if wants_cloud:
-            self._host._emit_notice(
+            self._notices.emit(
                 "(Real Claude Code would offer to convert this to a persistent cloud schedule "
                 "that keeps running after the session ends. This teaching build has no cloud "
                 "backend - continuing in-session.)"
@@ -234,44 +233,44 @@ class AutonomyRuntime:
             else:
                 await self._run_loop_dynamic(spec)
         except asyncio.CancelledError:
-            self._host._emit_notice("Loop interrupted.")
+            self._notices.emit("Loop interrupted.")
 
     async def _run_loop_interval(self, spec: dict) -> None:
         """按固定秒数重复提示词,直到中断、预算或迭代上限。
 
         这是仅会话内生效的简化计时器,不提供 Cron/KAIROS 的持久化能力。
         """
-        self._host._emit_notice(
+        self._notices.emit(
             f"⟳ /loop scheduled every {spec['interval_label']} (session-only, not persisted - "
             "dies when this process exits). Ctrl+C to stop."
         )
         iterations = 0
-        while not self.loop_stop and not self._host.is_aborted:
+        while not self.loop_stop and not self._cancellation.cancelled:
             iterations += 1
-            self._host._emit_notice(f"⟳ loop tick {iterations}")
-            await self._host.chat(spec["prompt"])
+            self._notices.emit(f"⟳ loop tick {iterations}")
+            await self._conversation.chat(spec["prompt"])
 
             decision = self._budget.check(self._usage.snapshot())
             if decision.exceeded:
-                self._host._emit_notice(f"Loop stopped: {decision.reason}")
+                self._notices.emit(f"Loop stopped: {decision.reason}")
                 break
             # 工具轮次计数无法约束纯文本 loop,因此这里同时把 --max-turns 解释为 tick 上限。
             if (
                 self._budget.max_turns is not None
                 and iterations >= self._budget.max_turns
             ):
-                self._host._emit_notice(
+                self._notices.emit(
                     f"Loop stopped: tick limit reached ({iterations} >= {self._budget.max_turns})."
                 )
                 break
             if iterations >= LOOP_MAX_ITERATIONS:
-                self._host._emit_notice(
+                self._notices.emit(
                     f"Loop stopped: reached {LOOP_MAX_ITERATIONS} ticks."
                 )
                 break
             interrupted = await self._interruptible_sleep(spec["interval_seconds"])
             if interrupted:
-                self._host._emit_notice("Loop stopped.")
+                self._notices.emit("Loop stopped.")
                 break
 
     async def _run_loop_dynamic(self, spec: dict) -> None:
@@ -280,52 +279,52 @@ class AutonomyRuntime:
         有唤醒计划则等待裁剪后的延迟并复用回传提示词;没有计划即视为收敛。动态节奏
         不使用独立评估器,schedule_wakeup 也只在 loop 生命周期内暴露。
         """
-        self._host._emit_notice(
+        self._notices.emit(
             "⟳ /loop dynamic (self-paced) - the model schedules its own next run, or ends the "
             "loop. Ctrl+C to stop."
         )
         prompt = spec["prompt"]
         iterations = 0
-        with self._host.tool_registry.temporary_tool(
+        with self._tool_registry.temporary_tool(
             create_wakeup_tool(self.schedule_wakeup)
         ):
             try:
-                while not self.loop_stop and not self._host.is_aborted:
+                while not self.loop_stop and not self._cancellation.cancelled:
                     iterations += 1
                     self.pending_wakeup = None
-                    await self._host.chat(dynamic_loop_directive(prompt))
+                    await self._conversation.chat(dynamic_loop_directive(prompt))
 
                     if not self.pending_wakeup:
                         plural = "" if iterations == 1 else "s"
-                        self._host._emit_notice(
+                        self._notices.emit(
                             f"⟳ Loop converged after {iterations} tick{plural} (model scheduled no wakeup)."
                         )
                         break
                     decision = self._budget.check(self._usage.snapshot())
                     if decision.exceeded:
-                        self._host._emit_notice(f"Loop stopped: {decision.reason}")
+                        self._notices.emit(f"Loop stopped: {decision.reason}")
                         break
                     if (
                         self._budget.max_turns is not None
                         and iterations >= self._budget.max_turns
                     ):
-                        self._host._emit_notice(
+                        self._notices.emit(
                             f"Loop stopped: tick limit reached ({iterations} >= {self._budget.max_turns})."
                         )
                         break
                     if iterations >= LOOP_MAX_ITERATIONS:
-                        self._host._emit_notice(
+                        self._notices.emit(
                             f"Loop stopped: reached {LOOP_MAX_ITERATIONS} ticks."
                         )
                         break
                     delay = self.pending_wakeup["delay_seconds"]
-                    self._host._emit_notice(
+                    self._notices.emit(
                         f"⟳ next run in {delay}s - {self.pending_wakeup['reason']}"
                     )
                     prompt = self.pending_wakeup["prompt"] or prompt
                     interrupted = await self._interruptible_sleep(delay)
                     if interrupted:
-                        self._host._emit_notice("Loop stopped.")
+                        self._notices.emit("Loop stopped.")
                         break
             finally:
                 self.pending_wakeup = None
@@ -361,7 +360,7 @@ class AutonomyRuntime:
 
         start = _time.time()
         while _time.time() - start < seconds:
-            if self.loop_stop or self._host.is_aborted:
+            if self.loop_stop or self._cancellation.cancelled:
                 return True
             await asyncio.sleep(min(0.2, seconds))
         return False
@@ -389,19 +388,14 @@ class AutonomyRuntime:
         # 直接调用此兼容方法时也按 Capability 跳过无副作用只读工具;显式 deny 和
         # Plan 硬边界统一由 PermissionMiddleware 在进入分类器前执行。
         try:
-            if is_auto_fast_path(self._host.tool_registry.resolve(tool_name)):
+            if is_auto_fast_path(self._tool_registry.resolve(tool_name)):
                 return {"action": "allow"}
         except LookupError:
             pass
 
-        if not self._host.api_configured:
-            # 没有可用模型时 fail-closed:交互环境转人工,headless 直接拒绝。
-            return self._auto_fallback(
-                f"{tool_name} (auto-mode classifier unavailable)"
-            )
         try:
             rules = load_auto_mode_rules()
-            history = list(self._host._core_runtime.messages)
+            history = list(self._transcript.messages)
             if history and isinstance(history[-1], AssistantMessage):
                 history.pop()
             transcript = build_classifier_transcript(
@@ -411,26 +405,31 @@ class AutonomyRuntime:
             # CLAUDE.md 是不可信仓库内容,只能放在 user 消息,不能获得 system 权威。
             claude_md = load_claude_md()
             # 第一阶段只需简短 block 结论,因此使用较小 Token 预算。
-            s1_raw = await self._host._run_classifier_query(
-                system,
-                classifier_user_message(
+            s1_raw = await self._query.complete_text(
+                system=system,
+                user=classifier_user_message(
                     rules, transcript, rules["suffix_stage1"], claude_md
                 ),
-                256,
+                max_output_tokens=256,
             )
             s1 = parse_block_verdict(s1_raw)
             if not s1["block"]:
                 verdict = s1  # 第一阶段已放行,无需支付第二次模型调用成本。
             else:
                 # 第二阶段会权衡用户意图并可能撤销拦截,允许先输出 thinking。
-                s2_raw = await self._host._run_classifier_query(
-                    system,
-                    classifier_user_message(
+                s2_raw = await self._query.complete_text(
+                    system=system,
+                    user=classifier_user_message(
                         rules, transcript, rules["suffix_stage2"], claude_md
                     ),
-                    1024,
+                    max_output_tokens=1024,
                 )
                 verdict = parse_block_verdict(s2_raw)
+        except ModelQueryUnavailableError:
+            # 无可用模型时沿用人工确认降级，不把配置缺失计入分类器拒绝上限。
+            return self._auto_fallback(
+                f"{tool_name} (auto-mode classifier unavailable)"
+            )
         except Exception as e:
             # 配置或分类器异常一律 fail-closed;在这里兜住资源加载错误,避免本轮崩溃
             # 后留下没有配对结果的 tool_use。
@@ -447,7 +446,7 @@ class AutonomyRuntime:
             or self.auto_total_denials >= DENIAL_LIMITS["max_total"]
         ):
             # 拒绝过多说明分类器可能卡住:交互环境转人工,headless 环境继续拒绝。
-            self._host._emit_notice(
+            self._notices.emit(
                 "Auto Mode: denial limit reached - handing back to manual confirmation."
             )
             return self._auto_fallback(f"[Auto Mode blocked] {verdict['reason']}")
@@ -455,6 +454,6 @@ class AutonomyRuntime:
 
     def _auto_fallback(self, message: str) -> dict:
         """Auto Mode 的安全降级:能人工确认则询问,否则拒绝,绝不自动放行未判定动作。"""
-        if self._host.confirm_fn:
+        if self._confirm:
             return {"action": "confirm", "message": message}
         return {"action": "deny", "message": f"{message} (headless - denied)"}

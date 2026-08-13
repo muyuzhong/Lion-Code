@@ -10,7 +10,6 @@ from lion_code.memory_runtime.types import (
     MemoryContextPolicy,
     MemoryInjectionReport,
     MemoryOverlay,
-    ReadOnlyMessageSource,
 )
 
 __all__ = [
@@ -20,6 +19,5 @@ __all__ = [
     "MemoryInjectionReport",
     "MemoryOverlay",
     "ProviderTextQueryService",
-    "ReadOnlyMessageSource",
     "TextQueryService",
 ]

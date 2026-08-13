@@ -18,7 +18,14 @@ from core.fakes import FakeProvider
 
 from lion_code.agent import Agent
 from lion_code.context import SUMMARY_SYSTEM_PROMPT
-from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
+from lion_code.core import (
+    AssistantMessage,
+    TextContent,
+    ToolCall,
+    TurnEndEvent,
+    Usage,
+    UserMessage,
+)
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 from lion_code.project_identity import resolve_project_identity
 from lion_code.provider_manager import ProviderManager
@@ -1067,14 +1074,16 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_side_queries_use_core_provider(self) -> None:
         """Memory/分类器/评估器的 side-query 全部改走 Core Provider,不再用 SDK。"""
         from lion_code.memory_runtime import ProviderTextQueryService
+        from lion_code.model_query import ProviderModelQuery
 
         agent, fake = self._make_agent(
             [_stop_event("cls-ok"), _stop_event("eval-ok")], ToolRegistry()
         )
 
         self.assertIsInstance(
-            agent._build_core_memory_query_service(), ProviderTextQueryService
+            agent._session_memory_coord._query, ProviderTextQueryService
         )
+        self.assertIsInstance(agent._model_query, ProviderModelQuery)
 
         out_cls = await agent._run_classifier_query("sys", "user text", 16)
         self.assertEqual(out_cls, "cls-ok")
@@ -1082,8 +1091,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         out_eval = await agent._run_evaluator_query(
             "sys",
             [
-                {"role": "user", "content": "hi"},
-                {"role": "assistant", "content": "prev"},
+                UserMessage(content="hi"),
+                AssistantMessage(model="test", content="prev"),
             ],
         )
         self.assertEqual(out_eval, "eval-ok")
