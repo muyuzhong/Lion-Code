@@ -10,7 +10,8 @@
 ```text
 lion_code/
 ├── __main__.py          # CLI / REPL entry point and process-level error boundary
-├── agent.py             # Agent composition and high-level runtime ownership
+├── agent.py             # Public Agent facade and compatibility delegates
+├── composition/         # AgentConfig/Dependencies and the one-shot object graph root
 ├── provider_manager.py  # ProviderState/View and Provider/Thinking commands
 ├── application/         # LionCodingSession, application events and slash commands
 ├── core/                # Canonical messages, events, harness, loops and session protocol
@@ -37,6 +38,11 @@ diagram look cleaner.
   `lion_code/application/`.  `lion_code/application/session.py` turns Agent
   events into `LionSessionEvent` values; `application/commands.py` owns slash
   command parsing and dispatch.
+- Put Agent object-graph construction in `lion_code/composition/`.  The builder
+  owns concrete runtime wiring and default capability registration; `agent.py`
+  keeps the public facade and application-facing delegates.  The composition
+  result is explicit and one-shot: no builder, container, or service locator is
+  retained by runtime or domain modules.
 - Put provider-specific HTTP/request/stream handling in `lion_code/providers/`.
   `providers/factory.py`, `providers/anthropic.py`, and
   `providers/openai_compatible.py` are the current protocol boundary.
@@ -74,7 +80,7 @@ diagram look cleaner.
 
 | Concern | Current example |
 |---|---|
-| Process boundary | `lion_code/__main__.py` parses CLI options, constructs `Agent`, and starts the TUI or REPL. |
+| Process boundary | `lion_code/__main__.py` parses CLI options, constructs the `Agent` facade, and starts the TUI or REPL. |
 | Application bridge | `lion_code/application/session.py::LionCodingSession._drive` subscribes to Agent events and yields application events. |
 | Tool execution | `lion_code/tooling/runtime.py::ToolRuntime.execute` resolves a registered tool and runs the middleware chain. |
 | Persistence | `lion_code/session_runtime/repository.py::SessionRepository` and `recorder.py::SessionRecorder` split read/replay from append-only writes. |

@@ -1194,14 +1194,14 @@ def test_session_and_cancellation_state_have_single_owners() -> None:
         for path in _source_files()
         if _named_constructor_count(_tree(path), "SessionIdentityState")
     }
-    assert identity_constructors == {"agent.py": 1}
+    assert identity_constructors == {"composition/agent_builder.py": 1}
 
     execution_constructors = {
         _source_key(path): _named_constructor_count(_tree(path), "ExecutionControl")
         for path in _source_files()
         if _named_constructor_count(_tree(path), "ExecutionControl")
     }
-    assert execution_constructors == {"agent.py": 1}
+    assert execution_constructors == {"composition/agent_builder.py": 1}
 
     token_constructors = {
         _source_key(path): _named_constructor_count(_tree(path), "CancellationToken")
@@ -1238,8 +1238,8 @@ def test_usage_state_has_one_owner_and_command_only_writes() -> None:
         for path in _source_files()
         if _named_constructor_count(_tree(path), "BudgetPolicy")
     }
-    assert ledger_constructors == {"agent.py": 1}
-    assert policy_constructors == {"agent.py": 1}
+    assert ledger_constructors == {"composition/agent_builder.py": 1}
+    assert policy_constructors == {"composition/agent_builder.py": 1}
 
     observer_fields = _self_fields(_tree(SOURCE_ROOT / "observers" / "usage.py"))
     assert observer_fields == {"_ledger"}
@@ -1327,8 +1327,8 @@ def test_permission_state_has_one_owner_and_live_read_ports() -> None:
         for path in _source_files()
         if _named_constructor_count(_tree(path), "PermissionController")
     }
-    assert state_constructors == {"agent.py": 1}
-    assert controller_constructors == {"agent.py": 1}
+    assert state_constructors == {"composition/agent_builder.py": 1}
+    assert controller_constructors == {"composition/agent_builder.py": 1}
 
     mutations = {
         _source_key(path): sorted(_permission_state_mutations(_tree(path)))
@@ -1414,8 +1414,8 @@ def test_plan_state_has_one_owner_and_live_read_port() -> None:
         for path in _source_files()
         if _named_constructor_count(_tree(path), "PlanRuntime")
     }
-    assert state_constructors == {"agent.py": 1}
-    assert runtime_constructors == {"agent.py": 1}
+    assert state_constructors == {"composition/agent_builder.py": 1}
+    assert runtime_constructors == {"composition/agent_builder.py": 1}
 
     mutations = {
         _source_key(path): sorted(_plan_state_mutations(_tree(path)))
@@ -1642,7 +1642,10 @@ def test_mcp_lifecycle_management_has_single_owner() -> None:
         if _attribute_call_sites(_tree(path), "disconnect_all")
     }
 
-    assert lifecycle_classes == {"mcp_client.py": ["McpConnection", "McpManager"]}
+    assert lifecycle_classes == {
+        "composition/ports.py": ["McpLifecycleState"],
+        "mcp_client.py": ["McpConnection", "McpManager"],
+    }
     assert disconnect_calls == {"tooling/environment.py": ["ToolEnvironment.close"]}, (
         "MCP disconnect lifecycle must remain owned by ToolEnvironment: "
         f"{disconnect_calls}"

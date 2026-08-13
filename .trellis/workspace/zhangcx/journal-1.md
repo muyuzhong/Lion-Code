@@ -1198,3 +1198,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 38: 提取 Agent Composition Root
+
+**Date**: 2026-08-14
+**Task**: 提取 Agent Composition Root
+**Branch**: `master`
+
+### Summary
+
+完成 AgentConfig、AgentDependencies 与 Composition Root；Agent 收敛为公共 facade 和结构端口实现，新增能力接线验收测试。全量 pytest 745 passed、6 skipped，架构测试 58 passed。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c1510ae` | (see git log) |
+
+### Status
+
+[OK] **Completed**

@@ -274,8 +274,10 @@ The tool-bearing capabilities use construction-time command binding:
 
 ### Agent Composition Changes
 
-- ``Agent.__init__`` creates ``SkillRuntime``, ``SubagentExecutor``, and
-  ``PlanRuntime`` before registering the corresponding capabilities.
+- ``composition/agent_builder.py`` creates ``SkillRuntime``,
+  ``SubagentExecutor``, and ``PlanRuntime`` before registering the corresponding
+  capabilities. ``Agent.__init__`` only normalizes the public configuration,
+  invokes the composition root, and exposes the resulting facade delegates.
 - Capability-provided tools are registered into fresh root registries. When a
   child receives a filtered registry, the composition root replaces the
   inherited capability tool objects with tools bound to the child runtimes;
@@ -293,3 +295,8 @@ The tool-bearing capabilities use construction-time command binding:
   ``create_skill_tool()`` or ``create_agent_tool()``; they are provided by
   capabilities. Plan tools are provided by ``PlanCapability`` and the wakeup
   tool is registered only by the dynamic loop.
+
+Adding a built-in capability requires its implementation and a registration in
+the composition wiring plus focused tests. It must not require edits to
+``agent.py``, ``agent_runtime.py``, ``session_lifecycle.py``,
+``tooling/context.py``, ``application/``, or ``tui/``.
