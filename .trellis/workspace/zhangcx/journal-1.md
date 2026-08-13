@@ -1177,3 +1177,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 37: 接入 Capability PromptLayer 与 SessionParticipant
+
+**Date**: 2026-08-13
+**Task**: 接入 Capability PromptLayer 与 SessionParticipant
+**Branch**: `master`
+
+### Summary
+
+完成 PromptComposer、PlanPromptLayer、PlanSessionParticipant 与 CapabilityRuntime 运行时接入；移除 Agent/PlanRuntime prompt mutable mirror 和 Agent generic hook forwarding；SessionLifecycle 改用通用 capability lifecycle port；保留 Plan permission、approval、clear-and-execute、pending reset、Plan path、MCP 与 ToolEnvironment ownership。全量测试 736 passed、6 skipped，compileall、lint-imports、任务校验、任务范围 ruff/mypy 与 diff check 通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a8c65bd` | (see git log) |
+
+### Status
+
+[OK] **Completed**

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 36
+- **Total Sessions**: 37
 - **Last Active**: 2026-08-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1179 | Active |
+| `journal-1.md` | ~1200 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 37 | 2026-08-13 | 接入 Capability PromptLayer 与 SessionParticipant | `a8c65bd` | `master` |
 | 36 | 2026-08-13 | 收窄 Domain Runtime 的 Agent 依赖 | `d00fbed` | `master` |
 | 35 | 2026-08-12 | Provider 配置与 Thinking 生命周期所有权重构 | `28d8bc5` | `master` |
 | 34 | 2026-08-12 | 移除 Agent 工具业务路由 | `0b9b798` | `master` |
