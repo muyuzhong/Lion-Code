@@ -21,13 +21,19 @@ if TYPE_CHECKING:
         RuntimeIdentityHost,
         SessionStateHost,
     )
+    from lion_code.capabilities import CapabilityLifecycle
 
 
 class SessionLifecycle:
     """拥有 clear/restore/compact/close 的会话生命周期协调。"""
 
-    def __init__(self, coordinator: AgentRuntimeCoordinator) -> None:
+    def __init__(
+        self,
+        coordinator: AgentRuntimeCoordinator,
+        capabilities: CapabilityLifecycle,
+    ) -> None:
         self._coord = coordinator
+        self._capabilities = capabilities
 
     @property
     def _identity(self) -> RuntimeIdentityHost:
@@ -61,7 +67,7 @@ class SessionLifecycle:
             uuid.uuid4().hex[:8],
             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         )
-        session.plan.reset_for_new_session()
+        await self._capabilities.on_new_session()
         coord._core_compaction_required = False
         coord._last_context_actions = ()
         coord._runtime.harness.clear_queues()
@@ -92,7 +98,6 @@ class SessionLifecycle:
         memory._reload_session_memory()
         memory._last_memory_injection = MemoryInjectionReport()
         started_at = session.session_state.started_at
-        session.plan.reset_after_restore()
         coord._core_compaction_required = False
         coord._last_context_actions = ()
         coord._runtime.harness.clear_queues()
@@ -103,6 +108,7 @@ class SessionLifecycle:
                 time.gmtime(state.session_info.created_at),
             )
         session.session_state.reset(session_id, started_at)
+        await self._capabilities.on_restore_session()
         coord.reset_core_observers()
         await coord.ensure_core_session_ready()
         coord.reset_session_usage()
@@ -130,6 +136,6 @@ class SessionLifecycle:
                     await coord._runtime.aclose()
                 finally:
                     try:
-                        await self._identity._close_capabilities()
+                        await self._capabilities.close()
                     finally:
                         await self._session.tool_environment.close()

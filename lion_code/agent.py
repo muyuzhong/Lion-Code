@@ -20,6 +20,7 @@ from .agent_runtime import (
 from .autonomy_runtime import AutonomyRuntime
 from .capabilities import (
     CapabilityRegistry,
+    CapabilityRuntime,
     McpCapability,
     create_plan_capability,
     create_skill_capability,
@@ -62,6 +63,7 @@ from .permission_state import (
 from .plan_runtime import PlanRuntime, PlanState
 from .project_identity import ProjectIdentity, resolve_project_identity
 from .prompt import (
+    PromptComposer,
     build_dynamic_system_context,
     build_static_system_prompt,
     load_project_context_files,
@@ -410,20 +412,16 @@ class Agent:
 
         # 系统提示词按前缀缓存拆成静态核心和动态尾部。项目指令改由 Provider
         # Overlay 注入，既不破坏缓存边界，也不污染 canonical Session history。
-        if custom_system_prompt:
-            self._static_system_prompt = custom_system_prompt
-            self._dynamic_system_context = ""
-        else:
-            self._static_system_prompt = build_static_system_prompt()
-            self._dynamic_system_context = build_dynamic_system_context(
-                self.tool_registry.deferred_tool_names()
-            )
-        self._base_system_prompt = (
-            self._static_system_prompt + "\n\n" + self._dynamic_system_context
-            if self._dynamic_system_context
-            else self._static_system_prompt
+        self._refresh_dynamic_context_enabled = not bool(custom_system_prompt)
+        self._prompt_composer = PromptComposer(
+            stable_base_prompt=custom_system_prompt or build_static_system_prompt(),
+            dynamic_context=(
+                build_dynamic_system_context(self.tool_registry.deferred_tool_names())
+                if self._refresh_dynamic_context_enabled
+                else ""
+            ),
+            layers=lambda: self._capability_registry.prompt_layers,
         )
-        self._system_prompt = self._base_system_prompt
         self.plan.initialize()
         self.tool_context = ToolContext(
             session=self._session_state,
@@ -489,6 +487,8 @@ class Agent:
             session=self,
             memory=self,
             execution=execution,
+            capabilities=self._capability_runtime,
+            get_system=self._prompt_composer.get_system,
             provider=provider,
             model=self.model,
             tool_runtime=self.tool_runtime,
@@ -612,6 +612,8 @@ class Agent:
                     replace=True,
                     activate=was_active,
                 )
+
+        self._capability_runtime = CapabilityRuntime(self._capability_registry)
 
     def _resolve_thinking_mode(self) -> str:
         return self._provider_manager.view.thinking_mode
@@ -1055,21 +1057,6 @@ class Agent:
 
     # ─── 主对话入口 ──────────────────────────────────────────
 
-    async def _before_turn_capabilities(self) -> None:
-        """Invoke all registered TurnParticipant hooks before a chat starts.
-
-        This replaces the former ``_ensure_mcp_tools`` with a generic
-        capability-driven entry point.  Agent does not know which
-        capabilities exist or what they do.
-        """
-        for participant in self._capability_registry.turn_participants:
-            await participant.before_turn()
-
-    async def _after_turn_capabilities(self) -> None:
-        """调用所有已注册 Capability 的轮次结束钩子。"""
-        for participant in self._capability_registry.turn_participants:
-            await participant.after_turn()
-
     async def chat(self, user_message: str) -> None:
         await self._runtime_coordinator.chat(user_message)
 
@@ -1128,15 +1115,11 @@ class Agent:
     def _refresh_dynamic_system_context(self) -> None:
         """刷新 Dream 修改 Auto Memory 后的动态系统提示词尾部。"""
 
-        if not self._dynamic_system_context:
+        if not self._refresh_dynamic_context_enabled:
             return
-        self._dynamic_system_context = build_dynamic_system_context(
-            self.tool_registry.deferred_tool_names()
+        self._prompt_composer.set_dynamic_context(
+            build_dynamic_system_context(self.tool_registry.deferred_tool_names())
         )
-        self._base_system_prompt = (
-            self._static_system_prompt + "\n\n" + self._dynamic_system_context
-        )
-        self.plan.refresh_prompt()
 
     def _refresh_memory_context_after_dream(self, filenames: list[str]) -> None:
         """丢弃旧预取，并让本会话后续请求看到 Dream 后的索引和文件内容。"""
@@ -1389,10 +1372,6 @@ class Agent:
     async def close(self) -> None:
         """释放 Capability、MCP 子进程等外部资源，确保进程正常退出（issue #8）。"""
         await self._runtime_coordinator.close()
-
-    async def _close_capabilities(self) -> None:
-        """关闭 Capability 声明的资源，具体顺序由 Registry 负责。"""
-        await self._capability_registry.close_all()
 
     async def _confirm_hook_trust(self, message: str) -> bool:
         # 项目 Hook 信任独立于工具权限；--yolo 也不能替仓库代码自动取得信任。

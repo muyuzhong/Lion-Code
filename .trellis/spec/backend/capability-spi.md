@@ -70,6 +70,16 @@ class CapabilityRegistry:
     @property
     def resources(self) -> tuple[AsyncCloseable, ...]: ...
     async def close_all(self) -> None: ...
+
+class CapabilityLifecycle(Protocol):
+    async def before_turn(self) -> None: ...
+    async def after_turn(self) -> None: ...
+    async def on_new_session(self) -> None: ...
+    async def on_restore_session(self) -> None: ...
+    async def close(self) -> None: ...
+
+class CapabilityRuntime(CapabilityLifecycle):
+    def __init__(self, registry: CapabilityRegistry) -> None: ...
 ~~~
 
 ## 3. Contracts
@@ -247,11 +257,13 @@ The tool-bearing capabilities use construction-time command binding:
 
 ### PlanCapability (``capabilities/plan.py``)
 
-- ``create_plan_capability(runtime: PlanRuntime)`` contributes only ToolSource
-  tools for entering and exiting Plan mode.
+- ``create_plan_capability(runtime: PlanRuntime)`` contributes the enter/exit
+  ToolSource, a live ``PlanPromptLayer`` over ``PlanView``, and a
+  ``PlanSessionParticipant`` for new/restore transitions.
 - The tools call the bound ``PlanRuntime`` directly and preserve the
   ``ToolResult.terminate`` value returned by Plan approval.
-- This slice does not add PromptLayer or SessionParticipant contributions.
+- The prompt layer renders the current Plan state on every Composer request;
+  it does not mutate Plan state or retain a prompt mirror.
 
 ### Dynamic wakeup tool
 
@@ -268,17 +280,14 @@ The tool-bearing capabilities use construction-time command binding:
   child receives a filtered registry, the composition root replaces the
   inherited capability tool objects with tools bound to the child runtimes;
   MCP and ordinary built-in tools remain shared by registry view.
-- ``Agent._ensure_mcp_tools()`` is replaced by
-  ``Agent._before_turn_capabilities()``, which iterates all
-  ``TurnParticipant`` hooks without knowing what MCP is.
-- ``AgentRuntimeCoordinator.chat()`` calls
-  ``identity._before_turn_capabilities()`` instead of
-  ``identity._ensure_mcp_tools()``, then invokes
-  ``identity._after_turn_capabilities()`` from a ``finally`` block covering
-  early exits, cancellation, and Provider/tool failures.
-- ``SessionLifecycle.close()`` invokes
-  ``identity._close_capabilities()`` so resources declared by the registry
-  participate in the Agent shutdown chain; MCP process ownership remains with
+- ``CapabilityRuntime`` is the only generic lifecycle adapter. It dispatches
+  turn and session participants from the registry and closes registry resources
+  once; it does not expose capability lookup or kernel state.
+- ``AgentRuntimeCoordinator.chat()`` calls the lifecycle port's
+  ``before_turn()`` and invokes ``after_turn()`` from a ``finally`` block
+  covering early exits, cancellation, and Provider/tool failures.
+- ``SessionLifecycle`` receives the same lifecycle port for new/restore
+  callbacks and close. MCP process ownership remains with
   ``ToolEnvironment``.
 - ``tooling/internal.py``'s ``create_internal_tools()`` no longer includes
   ``create_skill_tool()`` or ``create_agent_tool()``; they are provided by

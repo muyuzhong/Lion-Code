@@ -6,13 +6,18 @@ import os
 import platform
 import subprocess
 import sys
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .memory import build_memory_prompt_section
 from .project_identity import ProjectIdentity, resolve_project_identity
 from .skills import build_skill_descriptions
 from .subagent import build_agent_descriptions
+
+if TYPE_CHECKING:
+    from .capabilities.types import PromptLayer
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +26,45 @@ class ProjectContextFile:
 
     path: str
     content: str
+
+
+class PromptComposer:
+    """组合当前 Provider system prompt，不持有会话历史或 Capability 状态。"""
+
+    def __init__(
+        self,
+        stable_base_prompt: str,
+        dynamic_context: str = "",
+        layers: Callable[[], Sequence[PromptLayer]] | None = None,
+    ) -> None:
+        self._stable_base_prompt = stable_base_prompt
+        self._dynamic_context = dynamic_context
+        self._layers = layers if layers is not None else (lambda: ())
+
+    @property
+    def stable_base_prompt(self) -> str:
+        return self._stable_base_prompt
+
+    @property
+    def dynamic_context(self) -> str:
+        return self._dynamic_context
+
+    def set_dynamic_context(self, dynamic_context: str) -> None:
+        """替换后续请求使用的未缓存动态上下文尾部。"""
+
+        self._dynamic_context = dynamic_context
+
+    def get_system(self) -> str:
+        """每次重新渲染 system prompt，不保留 layer 输出缓存。"""
+
+        parts: list[str] = [self._stable_base_prompt]
+        if self._dynamic_context.strip():
+            parts.append(self._dynamic_context)
+        for layer in self._layers():
+            fragment = layer.render()
+            if fragment.strip():
+                parts.append(fragment)
+        return "\n\n".join(parts)
 
 # ─── 内嵌的系统提示词模板 ───────────────────────────────────
 

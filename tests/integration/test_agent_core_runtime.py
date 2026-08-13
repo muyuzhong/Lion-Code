@@ -480,25 +480,29 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_dynamic_system_prompt_refetched_per_turn(self) -> None:
-        # 模拟 Plan 模式切换：运行中改 _system_prompt，下一轮请求必须看到新值。
+        # 模拟 Plan 模式切换：运行中替换 Composer 动态尾部，下一轮请求读取新值。
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
         agent, fake = self._make_agent(
             [_tooluse_event(), _stop_event("done")], registry
         )
-        agent._system_prompt = "initial"
+        agent._prompt_composer.set_dynamic_context("initial")
+        stable_base = agent._prompt_composer.stable_base_prompt
 
         mutated = {"done": False}
 
         async def mutate_after_first_turn(event) -> None:
             if not mutated["done"] and isinstance(event, TurnEndEvent):
-                agent._system_prompt = "plan-prompt"
+                agent._prompt_composer.set_dynamic_context("plan-prompt")
                 mutated["done"] = True
 
         agent._core_runtime.subscribe(mutate_after_first_turn)
         await agent.chat("hello")
 
-        self.assertEqual(fake.received_systems, ["initial", "plan-prompt"])
+        self.assertEqual(
+            fake.received_systems,
+            [f"{stable_base}\n\ninitial", f"{stable_base}\n\nplan-prompt"],
+        )
 
     async def test_dynamic_tools_refetched_per_turn(self) -> None:
         registry = ToolRegistry()

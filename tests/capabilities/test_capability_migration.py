@@ -13,6 +13,7 @@ These tests verify that:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from unittest.mock import patch
 
 from lion_code.capabilities import (
@@ -35,7 +36,19 @@ class _RecordingTurnParticipant:
         self.calls.append("before")
 
     async def after_turn(self) -> None:
-        self.calls.append("after")
+            self.calls.append("after")
+
+
+class _RecordingSessionParticipant:
+    def __init__(self, session_id: Callable[[], str]) -> None:
+        self._session_id = session_id
+        self.calls: list[tuple[str, str]] = []
+
+    async def on_new_session(self) -> None:
+        self.calls.append(("new", self._session_id()))
+
+    async def on_restore_session(self) -> None:
+        self.calls.append(("restore", self._session_id()))
 
 
 class _FakeCapabilityResource:
@@ -381,8 +394,8 @@ class TestAgentCompositionWithCapabilities:
         assert "subagent" in names
         assert "plan" in names
 
-    def test_before_turn_capabilities_calls_mcp_before_turn(self) -> None:
-        """_before_turn_capabilities should invoke the MCP TurnParticipant."""
+    def test_capability_runtime_calls_mcp_before_turn(self) -> None:
+        """CapabilityRuntime should invoke the MCP TurnParticipant."""
         from lion_code.agent import Agent
 
         agent = Agent(
@@ -393,9 +406,9 @@ class TestAgentCompositionWithCapabilities:
 
         # MCP capability is registered with is_root=False when mcp_enabled=False,
         # so before_turn should be a no-op.
-        asyncio.run(agent._before_turn_capabilities())  # noqa: SLF001
+        asyncio.run(agent._capability_runtime.before_turn())  # noqa: SLF001
 
-    def test_before_turn_capabilities_with_mcp_enabled_skips_if_initialized(
+    def test_capability_runtime_with_mcp_enabled_skips_if_initialized(
         self,
     ) -> None:
         """When _mcp_initialized is True, before_turn should skip MCP discovery."""
@@ -409,9 +422,9 @@ class TestAgentCompositionWithCapabilities:
         agent._mcp_initialized = True  # noqa: SLF001
 
         # Should not raise or attempt MCP discovery.
-        asyncio.run(agent._before_turn_capabilities())  # noqa: SLF001
+        asyncio.run(agent._capability_runtime.before_turn())  # noqa: SLF001
 
-    def test_after_turn_capabilities_runs_on_early_chat_exit(self) -> None:
+    def test_capability_runtime_after_turn_runs_on_early_chat_exit(self) -> None:
         """轮次结束钩子覆盖未配置 API 时的提前返回。"""
         from lion_code.agent import Agent
 
@@ -435,6 +448,32 @@ class TestAgentCompositionWithCapabilities:
             asyncio.run(agent.close())
 
         assert participant.calls == ["before", "after"]
+
+    def test_session_participant_runs_after_new_identity_transition(self) -> None:
+        """Session callbacks observe the new identity before Core is reset."""
+        from lion_code.agent import Agent
+
+        agent = Agent(
+            api_key="test-key",
+            terminal_output=False,
+            mcp_enabled=False,
+        )
+        original_id = agent.session_id
+        participant = _RecordingSessionParticipant(lambda: agent.session_id)
+        agent._capability_registry.register(  # noqa: SLF001
+            CapabilitySpec(
+                name="test-session-lifecycle",
+                session_participants=(participant,),
+            )
+        )
+
+        try:
+            asyncio.run(agent.clear_history())
+        finally:
+            asyncio.run(agent.close())
+
+        assert participant.calls == [("new", agent.session_id)]
+        assert participant.calls[0][1] != original_id
 
     def test_agent_close_closes_capability_resources(self) -> None:
         """Agent.close 应通过 SessionLifecycle 回收 Capability 资源。"""

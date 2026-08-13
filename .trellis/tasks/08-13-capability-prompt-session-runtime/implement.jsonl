@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend spec entry point and quality-check routing for runtime changes."}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"Capability slots, dependency order, state ownership, Plan tool binding and lifecycle constraints."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Single-owner Plan/session/runtime boundaries and Core/Capability composition contracts."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required focused/full tests, compile/import checks and dirty-worktree validation."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Required data-flow and boundary review for the cross-layer prompt/session lifecycle change."}

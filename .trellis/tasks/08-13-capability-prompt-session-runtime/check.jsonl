@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/capability-spi.md","reason":"Check all Capability slots, registry ordering, resource closure and forbidden service-locator patterns."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Check PlanState ownership, SessionLifecycle boundaries, prompt projection and MCP ownership."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check repository quality gates, test scope and documentation truthfulness."}
+{"file":".trellis/spec/backend/index.md","reason":"Check final backend quality section and required validation routing."}

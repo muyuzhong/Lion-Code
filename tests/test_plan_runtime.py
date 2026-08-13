@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from lion_code.capabilities.plan import PlanPromptLayer, PlanSessionParticipant
 from lion_code.permission_state import (
     PermissionController,
     PermissionMode,
@@ -16,8 +17,6 @@ from lion_code.plan_runtime import PlanRuntime, PlanState
 class _Host:
     def __init__(self) -> None:
         self.session_id = "session-one"
-        self._base_system_prompt = "base prompt"
-        self._system_prompt = ""
         self.notices: list[str] = []
 
     def _emit_notice(self, message: str, *, role: str = "info") -> None:
@@ -39,7 +38,7 @@ def _runtime(
 
 class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
     def test_initial_plan_path_error_does_not_publish_partial_state(self) -> None:
-        runtime, permission, host = _runtime("plan")
+        runtime, permission, _host = _runtime("plan")
 
         with (
             patch.object(
@@ -54,10 +53,9 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(runtime.is_active)
         self.assertIsNone(runtime.file_path)
         self.assertEqual(permission.mode, "plan")
-        self.assertEqual(host._system_prompt, "")
 
     def test_initial_plan_builds_live_view_and_exits_to_default(self) -> None:
-        runtime, permission, host = _runtime("plan")
+        runtime, permission, _host = _runtime("plan")
         plan_path = Path("initial-plan.md")
 
         with patch.object(runtime, "_generate_file_path", return_value=plan_path):
@@ -65,12 +63,10 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(runtime.is_active)
         self.assertEqual(runtime.file_path, plan_path)
-        self.assertIn(str(plan_path), host._system_prompt)
         self.assertEqual(runtime.toggle(), "default")
         self.assertFalse(runtime.is_active)
         self.assertIsNone(runtime.file_path)
         self.assertEqual(permission.mode, "default")
-        self.assertEqual(host._system_prompt, host._base_system_prompt)
 
     def test_toggle_restores_each_entering_permission_mode(self) -> None:
         modes: tuple[PermissionMode, ...] = (
@@ -98,7 +94,7 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(permission.mode, mode)
 
     async def test_duplicate_enter_and_inactive_exit_do_not_change_state(self) -> None:
-        runtime, permission, host = _runtime("auto")
+        runtime, permission, _host = _runtime("auto")
         runtime.initialize()
         inactive = await runtime.exit()
         self.assertEqual(inactive.content, "Not in plan mode.")
@@ -106,21 +102,18 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         path = Path("plan.md")
         with patch.object(runtime, "_generate_file_path", return_value=path):
             runtime.enter()
-        prompt = host._system_prompt
         duplicate = runtime.enter()
 
         self.assertEqual(duplicate.content, "Already in plan mode.")
         self.assertEqual(permission.mode, "plan")
         self.assertEqual(runtime.file_path, path)
-        self.assertEqual(host._system_prompt, prompt)
 
     async def test_keep_planning_and_approval_error_preserve_transaction(self) -> None:
-        runtime, permission, host = _runtime("dontAsk")
+        runtime, permission, _host = _runtime("dontAsk")
         runtime.initialize()
         path = Path("retry-plan.md")
         with patch.object(runtime, "_generate_file_path", return_value=path):
             runtime.enter()
-        prompt = host._system_prompt
 
         runtime.set_approval_fn(
             AsyncMock(return_value={"choice": "keep-planning", "feedback": "revise"})
@@ -130,7 +123,6 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(runtime.is_active)
         self.assertEqual(runtime.file_path, path)
         self.assertEqual(permission.mode, "plan")
-        self.assertEqual(host._system_prompt, prompt)
 
         runtime.set_approval_fn(AsyncMock(side_effect=RuntimeError("approval failed")))
         with self.assertRaisesRegex(RuntimeError, "approval failed"):
@@ -138,7 +130,6 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(runtime.is_active)
         self.assertEqual(runtime.file_path, path)
         self.assertEqual(permission.mode, "plan")
-        self.assertEqual(host._system_prompt, prompt)
 
     async def test_approval_choices_apply_expected_exit_transactions(self) -> None:
         cases = (
@@ -152,7 +143,7 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
             plan_path.write_text("make the change", encoding="utf-8")
             for choice, expected_mode, terminate in cases:
                 with self.subTest(choice=choice):
-                    runtime, permission, host = _runtime("dontAsk")
+                    runtime, permission, _host = _runtime("dontAsk")
                     runtime.initialize()
                     with patch.object(
                         runtime,
@@ -167,7 +158,6 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(permission.mode, expected_mode)
                     self.assertFalse(runtime.is_active)
                     self.assertIsNone(runtime.file_path)
-                    self.assertEqual(host._system_prompt, host._base_system_prompt)
                     self.assertEqual(outcome.terminate, terminate)
                     if terminate:
                         self.assertIn(
@@ -210,13 +200,12 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(permission.mode, "auto")
 
     async def test_plan_read_error_propagates_without_partial_exit(self) -> None:
-        runtime, permission, host = _runtime("bypassPermissions")
+        runtime, permission, _host = _runtime("bypassPermissions")
         runtime.initialize()
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
             with patch.object(runtime, "_generate_file_path", return_value=path):
                 runtime.enter()
-            prompt = host._system_prompt
 
             with self.assertRaises(OSError):
                 await runtime.exit()
@@ -224,14 +213,12 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(runtime.is_active)
         self.assertEqual(runtime.file_path, path)
         self.assertEqual(permission.mode, "plan")
-        self.assertEqual(host._system_prompt, prompt)
 
     def test_new_session_path_error_preserves_active_transaction(self) -> None:
-        runtime, permission, host = _runtime("plan")
+        runtime, permission, _host = _runtime("plan")
         path = Path("current-plan.md")
         with patch.object(runtime, "_generate_file_path", return_value=path):
             runtime.initialize()
-        prompt = host._system_prompt
 
         with (
             patch.object(
@@ -246,7 +233,6 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(runtime.is_active)
         self.assertEqual(runtime.file_path, path)
         self.assertEqual(permission.mode, "plan")
-        self.assertEqual(host._system_prompt, prompt)
 
     async def test_restore_clears_pending_reset(self) -> None:
         runtime, _permission, _host = _runtime("default")
@@ -265,7 +251,7 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(runtime.pending_context_reset)
 
-    async def test_clear_restore_and_prompt_refresh_keep_one_live_view(self) -> None:
+    async def test_clear_and_restore_keep_one_live_view(self) -> None:
         runtime, permission, host = _runtime("plan")
         first_path = Path("first.md")
         second_path = Path("second.md")
@@ -285,15 +271,32 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         runtime.reset_after_restore()
         self.assertEqual(runtime.file_path, second_path)
 
-        host._base_system_prompt = "new base"
-        runtime.refresh_prompt()
-        self.assertTrue(host._system_prompt.startswith("new base"))
-        self.assertIn(str(second_path), host._system_prompt)
+        runtime.toggle()
+        self.assertFalse(runtime.is_active)
+
+    def test_plan_prompt_layer_reads_live_view(self) -> None:
+        runtime, _permission, _host = _runtime("default")
+        layer = PlanPromptLayer(runtime)
+        self.assertEqual(layer.layer_id, "plan")
+        self.assertEqual(layer.render(), "")
+
+        path = Path("live-plan.md")
+        with patch.object(runtime, "_generate_file_path", return_value=path):
+            runtime.enter()
+        self.assertIn(str(path), layer.render())
 
         runtime.toggle()
-        host._base_system_prompt = "latest base"
-        runtime.refresh_prompt()
-        self.assertEqual(host._system_prompt, "latest base")
+        self.assertEqual(layer.render(), "")
+
+    async def test_plan_session_participant_delegates_to_runtime(self) -> None:
+        runtime, _permission, _host = _runtime("default")
+        participant = PlanSessionParticipant(runtime)
+        with patch.object(runtime, "reset_for_new_session") as on_new:
+            await participant.on_new_session()
+        on_new.assert_called_once_with()
+        with patch.object(runtime, "reset_after_restore") as on_restore:
+            await participant.on_restore_session()
+        on_restore.assert_called_once_with()
 
 
 if __name__ == "__main__":
