@@ -5,78 +5,42 @@ Plan 模式、子 Agent、权限与预算控制。整体分层参考 Claude Code
 from __future__ import annotations
 
 import asyncio
-import os
-import time
-import uuid
-from collections.abc import Awaitable, Callable, Coroutine, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from .agent_runtime import (
     AgentRunResult,
-    AgentRuntimeCoordinator,
     LionAgentRuntime,
 )
-from .autonomy_runtime import AutonomyRuntime
-from .capabilities import (
-    CapabilityRegistry,
-    CapabilityRuntime,
-    McpCapability,
-    create_plan_capability,
-    create_skill_capability,
-    create_subagent_capability,
-)
+from .composition import AgentConfig, AgentDependencies, build_agent_composition
 from .context import (
     ContextCompactor,
     ContextManager,
     ModelLimitsResolver,
-    effective_window_tokens,
-    fallback_model_limits,
 )
 from .core.conversation import QueueSnapshot
 from .core.harness import EventListener
 from .core.messages import AgentMessage
 from .core.provider import ModelProvider
-from .domain_ports import NoticeSink
-from .dream import DreamCoordinator, SessionMemoryView
-from .dream_adapter import RestrictedDreamAgentFactory
-from .execution_control import ExecutionControl
 from .hooks import load_pre_tool_use_hooks
 from .learning_runtime import (
     LEARN_META_SKILL_PROMPT,  # noqa: F401
-    LearningRuntime,
 )
 from .memory_runtime import (
     MemoryContextInjector,
     MemoryCoordinator,
     MemoryInjectionReport,
     MemoryOverlay,
-    ProviderTextQueryService,
 )
-from .model_query import ProviderModelQuery
 from .observers import TerminalRenderer
 from .permission_state import (
-    PermissionController,
     PermissionMode,
-    PermissionState,
 )
-from .plan_runtime import PlanRuntime, PlanState
 from .project_identity import ProjectIdentity, resolve_project_identity
 from .prompt import (
-    PromptComposer,
     build_dynamic_system_context,
-    build_static_system_prompt,
     load_project_context_files,
-)
-from .provider_manager import (
-    ConfigurationRecorder,
-    MemoryQuerySink,
-    ModelContextControl,
-    ProviderKind,
-    ProviderManager,
-    ProviderRuntimePort,
-    ProviderState,
-    ProviderView,
 )
 from .providers.factory import create_provider
 from .providers.thinking import (
@@ -87,7 +51,6 @@ from .session_memory import (
     SessionMemory,
     SessionMemoryRepository,
 )
-from .session_memory_coordinator import SessionMemoryCoordinator
 from .session_runtime import (
     SessionRecorder,
     SessionRepository,
@@ -95,23 +58,8 @@ from .session_runtime import (
     list_legacy_sessions,
     load_legacy_session,
 )
-from .skill_runtime import SkillRuntime
-from .subagent_factory import ChildAgentConfig, SubagentFactory
-from .subagent_runtime import SubagentExecutor
-from .tooling import ToolEnvironment, ToolRegistry, ToolRuntime
-from .tooling.builtin import create_builtin_tools
-from .tooling.context import ToolContext
-from .tooling.internal import create_internal_tools
-from .tooling.middleware import (
-    AuditMiddleware,
-    CancellationMiddleware,
-    PermissionMiddleware,
-    PreToolHookMiddleware,
-    ReadFreshnessMiddleware,
-    ResultPolicyMiddleware,
-)
-from .tooling.permission import PermissionPolicy
-from .tooling.result_store import ResultStore
+from .subagent_factory import ChildAgentConfig
+from .tooling import ToolEnvironment, ToolRegistry
 from .tooling.types import JSONValue
 from .tools import ToolDef
 from .ui import (
@@ -121,170 +69,58 @@ from .ui import (
     print_sub_agent_end,
     print_sub_agent_start,
 )
-from .usage import BudgetPolicy, UsageLedger, UsageSnapshot
+from .usage import UsageSnapshot
 
-# ─── Thinking 能力检测 ──────────────────────────────────────
-
-
-class _DeferredProviderRuntimePort(ProviderRuntimePort):
-    """在组合根完成 Runtime 构造前暂存 ProviderManager 的端口。"""
-
-    def __init__(self) -> None:
-        self._runtime: AgentRuntimeCoordinator | None = None
-
-    def bind(self, runtime: AgentRuntimeCoordinator) -> None:
-        self._runtime = runtime
-
-    @property
-    def is_running(self) -> bool:
-        return (
-            self._runtime is not None and self._runtime.core_runtime.harness.is_running
-        )
-
-    def replace_provider(self, provider: ModelProvider) -> ModelProvider:
-        if self._runtime is None:
-            raise RuntimeError("Provider Runtime 尚未初始化")
-        return self._runtime.core_runtime.replace_provider(provider)
-
-    def set_model(self, model: str) -> None:
-        if self._runtime is None:
-            raise RuntimeError("Provider Runtime 尚未初始化")
-        self._runtime.core_runtime.set_model(model)
+_ORIGINAL_AGENT_SEMANTIC_EXTRACTOR: object | None = None
 
 
-class _DeferredModelContextControl(ModelContextControl):
-    """把 Provider 派生服务更新转给现有 RuntimeCoordinator。"""
+def _agent_provider_factory(**kwargs: Any) -> ModelProvider:
+    """保留 ``lion_code.agent.create_provider`` 的动态 monkeypatch seam。"""
 
-    def __init__(self) -> None:
-        self._runtime: AgentRuntimeCoordinator | None = None
-
-    def bind(self, runtime: AgentRuntimeCoordinator) -> None:
-        self._runtime = runtime
-
-    def replace_context_compactor(self, compactor: ContextCompactor) -> None:
-        if self._runtime is None:
-            raise RuntimeError("Provider Runtime 尚未初始化")
-        self._runtime.replace_context_compactor(compactor)
-
-    def invalidate_model_limit_cache(self, model: str) -> None:
-        if self._runtime is None:
-            raise RuntimeError("Provider Runtime 尚未初始化")
-        self._runtime.invalidate_model_limit_cache(model)
+    return create_provider(**kwargs)
 
 
-class _MemoryQuerySinkAdapter(MemoryQuerySink):
-    """只向 ProviderManager 暴露 Memory 的 query service 写入口。"""
-
-    def __init__(self, coordinator: SessionMemoryCoordinator) -> None:
-        self._coordinator = coordinator
-
-    def set_query_service(self, service: ProviderTextQueryService) -> None:
-        self._coordinator.set_query_service(service)
+def _agent_hooks_loader() -> list[Any]:
+    return load_pre_tool_use_hooks()
 
 
-class _DeferredMemoryQuerySink(MemoryQuerySink):
-    """允许 ProviderManager 在 Session Memory 组合前先完成构造。"""
-
-    def __init__(self) -> None:
-        self._sink: MemoryQuerySink | None = None
-
-    def bind(self, sink: MemoryQuerySink) -> None:
-        self._sink = sink
-
-    def set_query_service(self, service: ProviderTextQueryService) -> None:
-        if self._sink is None:
-            raise RuntimeError("Session Memory query sink 尚未初始化")
-        self._sink.set_query_service(service)
+def _agent_project_identity_resolver(cwd: Path | None) -> ProjectIdentity:
+    return resolve_project_identity(cwd)
 
 
-class _AgentNoticeSink(NoticeSink):
-    """把 Domain 通知适配到当前 Agent 的实例级通知入口。"""
-
-    def __init__(self, emit: Callable[..., None]) -> None:
-        self._emit = emit
-
-    def emit(
-        self,
-        message: str,
-        *,
-        role: Literal["info", "error"] = "info",
-    ) -> None:
-        self._emit(message, role=role)
+def _agent_project_context_loader(
+    cwd: Path,
+    identity: ProjectIdentity,
+) -> Sequence[Any]:
+    return load_project_context_files(cwd=cwd, identity=identity)
 
 
-class _SessionMemorySnapshotView(SessionMemoryView):
-    """只向 Dream 暴露最近一次有效 Session Memory 快照。"""
-
-    def __init__(self, load: Callable[[], SessionMemory | None]) -> None:
-        self._load = load
-
-    def load(self) -> SessionMemory | None:
-        return self._load()
+def _agent_dynamic_context_builder(names: Sequence[str]) -> str:
+    return build_dynamic_system_context(list(names))
 
 
-class _SessionRecorderConfigurationRecorder(ConfigurationRecorder):
-    """将 Manager 的同步配置命令适配到已有异步 SessionRecorder。"""
-
-    def __init__(self) -> None:
-        self._recorder: Callable[[], SessionRecorder | None] | None = None
-        self._schedule: (
-            Callable[[Callable[[], Coroutine[Any, Any, object]]], None] | None
-        ) = None
-
-    def bind(
-        self,
-        recorder: Callable[[], SessionRecorder | None],
-        schedule: Callable[[Callable[[], Coroutine[Any, Any, object]]], None],
-    ) -> None:
-        self._recorder = recorder
-        self._schedule = schedule
-
-    def record_configuration_change(
-        self,
-        previous: ProviderView,
-        current: ProviderView,
-    ) -> None:
-        recorder_getter = self._recorder
-        schedule = self._schedule
-        if recorder_getter is None or schedule is None:
-            return
-        recorder = recorder_getter()
-        if recorder is None:
-            return
-        model_changed = previous.model != current.model
-        thinking_level_changed = previous.thinking_level != current.thinking_level
-        thinking_mode_changed = previous.thinking_mode != current.thinking_mode
-        if not (model_changed or thinking_level_changed or thinking_mode_changed):
-            return
-
-        async def persist_configuration() -> object:
-            if model_changed:
-                await recorder.record_model_change(current.model)
-            if thinking_level_changed:
-                await recorder.record_thinking_level_change(current.thinking_level)
-            elif thinking_mode_changed:
-                await recorder.record_thinking_level_change(current.thinking_mode)
-            return None
-
-        schedule(persist_configuration)
+def _agent_terminal_renderer_factory() -> TerminalRenderer:
+    return TerminalRenderer()
 
 
-class _DeferredBackgroundScheduler:
-    """在 RuntimeCoordinator 创建后才转发后台清理任务。"""
+def _agent_print_info(message: str) -> None:
+    print_info(message)
 
-    def __init__(self) -> None:
-        self._runtime: AgentRuntimeCoordinator | None = None
 
-    def bind(self, runtime: AgentRuntimeCoordinator) -> None:
-        self._runtime = runtime
+def _agent_print_error(message: str) -> None:
+    print_error(message)
 
-    def __call__(
-        self,
-        operation: Callable[[], Coroutine[Any, Any, object]],
-    ) -> None:
-        if self._runtime is None:
-            raise RuntimeError("Provider Runtime 尚未初始化")
-        self._runtime.schedule_background_operation(operation)
+
+def _agent_print_confirmation(message: str) -> None:
+    print_confirmation(message)
+
+
+def _agent_print_subagent_start(agent_type: str, description: str) -> None:
+    print_sub_agent_start(agent_type, description)
+
+
+def _agent_print_subagent_end(agent_type: str, description: str) -> None:
+    print_sub_agent_end(agent_type, description)
 
 
 # ─── Agent ──────────────────────────────────────────────────
@@ -292,6 +128,26 @@ class _DeferredBackgroundScheduler:
 
 class Agent:
     """协调模型调用、工具执行和会话状态的主运行时对象。"""
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
+        if name != "_extract_session_memory_semantics":
+            if name != "_emit_notice":
+                return
+            notices = self.__dict__.get("_notice_controller")
+            if notices is None:
+                return
+            if getattr(value, "__self__", None) is self:
+                notices.set_notice_fn(None)
+            else:
+                notices.set_notice_fn(value)
+            return
+        memory_port = self.__dict__.get("_memory_port")
+        if memory_port is not None:
+            if getattr(value, "__self__", None) is self:
+                memory_port.set_semantic_extractor(None)
+            else:
+                memory_port.set_semantic_extractor(value)
 
     def __init__(
         self,
@@ -317,303 +173,128 @@ class Agent:
         is_sub_agent: bool = False,
         terminal_output: bool = True,
         mcp_enabled: bool = True,
-    ):
-        self._permission_controller = PermissionController(
-            PermissionState(mode=permission_mode)
-        )
-        self.is_sub_agent = is_sub_agent
-        self._terminal_output = terminal_output
-        # 评测根 Agent 必须阻止机器级 MCP 发现；默认值保留 CLI/TUI 语义。
-        self._mcp_enabled = mcp_enabled
-        self._notice_fn: Callable[[str, Literal["info", "error"]], None] | None = None
-        self._pre_tool_use_hooks = load_pre_tool_use_hooks()
-        self.confirm_fn = confirm_fn
-        self.effective_window = effective_window_tokens(fallback_model_limits(model))
-        self._session_state = SessionIdentityState(
-            uuid.uuid4().hex[:8],
-            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        )
-        self._session_repository = session_repository or SessionRepository()
-        execution = ExecutionControl()
-        self._usage = UsageLedger()
-        self._budget = BudgetPolicy(
+        config: AgentConfig | None = None,
+        dependencies: AgentDependencies | None = None,
+    ) -> None:
+        legacy_config = AgentConfig(
+            permission_mode=permission_mode,
+            model=model,
+            api_base=api_base,
+            anthropic_base_url=anthropic_base_url,
+            api_key=api_key,
+            thinking=thinking,
             max_cost_usd=max_cost_usd,
             max_turns=max_turns,
-        )
-
-        # 当前异步任务用于把 Ctrl+C 传播到正在等待的模型或工具调用。
-        self._current_task: asyncio.Task | None = None
-        # 最近一次 chat/run 的终止原因，供 run() 结构化返回；chat 自身不读取。
-        self._last_stop_reason: str | None = None
-
-        # Core 路径采用 Tau 6 档词汇(off..xhigh);由 ``thinking`` 开关推导初始档,
-        # 运行中经 set_thinking_level/cycle_thinking_level 调整并热重建 Provider。
-        initial_provider_kind: ProviderKind = (
-            "openai-compatible" if api_base else "anthropic"
-        )
-        initial_api_key = api_key or os.environ.get(
-            "OPENAI_API_KEY"
-            if initial_provider_kind == "openai-compatible"
-            else "ANTHROPIC_API_KEY",
-            "",
-        )
-        initial_thinking_level: ThinkingLevel = "medium" if thinking else "off"
-
-        # 记录文件读取时的 mtime，落实“先读后改”并检测外部并发修改。
-        self._read_file_state: dict[str, float] = {}
-
-        if tool_registry is not None and custom_tools is not None:
-            raise ValueError("tool_registry and custom_tools cannot be combined")
-        _created_own_registry = tool_registry is None
-        selected_tool_names = (
-            {tool["name"] for tool in custom_tools}
-            if custom_tools is not None
-            else None
-        )
-        # 根 Agent 拥有 MCP 生命周期；子 Agent 只接收共享环境的非拥有视图。
-        self.tool_environment = tool_environment or ToolEnvironment(
-            owns_mcp_manager=not is_sub_agent
-        )
-        self._mcp_manager = self.tool_environment.mcp_manager
-        self._mcp_initialized = False
-        self.plan = PlanRuntime(
-            self,
-            self._permission_controller,
-            PlanState(),
-        )
-
-        if _created_own_registry:
-            self.tool_registry = ToolRegistry()
-            for tool in [*create_builtin_tools(), *create_internal_tools()]:
-                if selected_tool_names is None or tool.name in selected_tool_names:
-                    self.tool_registry.register(tool)
-        else:
-            self.tool_registry = cast(ToolRegistry, tool_registry)
-
-        self._subagent_factory = SubagentFactory(
-            registry=self.tool_registry,
-            environment=self.tool_environment,
-            child_config=self._child_agent_config,
-            permission=self._permission_controller,
-        )
-        self._subagent_executor = SubagentExecutor(
-            self._subagent_factory,
-            self._usage,
-            self._emit_subagent_status,
-        )
-        self._skill_runtime = SkillRuntime(self._subagent_executor)
-
-        self._register_capabilities(
+            custom_system_prompt=custom_system_prompt,
+            custom_tools=tuple(custom_tools) if custom_tools is not None else None,
+            is_sub_agent=is_sub_agent,
+            terminal_output=terminal_output,
             mcp_enabled=mcp_enabled,
-            is_sub_agent=is_sub_agent,
-            selected_tool_names=selected_tool_names,
-            created_own_registry=_created_own_registry,
         )
+        if config is not None:
+            if legacy_config != AgentConfig():
+                raise ValueError(
+                    "config cannot be combined with legacy configuration arguments"
+                )
+            resolved_config = config
+        else:
+            resolved_config = legacy_config
 
-        # 系统提示词按前缀缓存拆成静态核心和动态尾部。项目指令改由 Provider
-        # Overlay 注入，既不破坏缓存边界，也不污染 canonical Session history。
-        self._refresh_dynamic_context_enabled = not bool(custom_system_prompt)
-        self._prompt_composer = PromptComposer(
-            stable_base_prompt=custom_system_prompt or build_static_system_prompt(),
-            dynamic_context=(
-                build_dynamic_system_context(self.tool_registry.deferred_tool_names())
-                if self._refresh_dynamic_context_enabled
-                else ""
-            ),
-            layers=lambda: self._capability_registry.prompt_layers,
+        legacy_dependencies_supplied = any(
+            value is not None
+            for value in (
+                confirm_fn,
+                tool_registry,
+                tool_environment,
+                session_repository,
+                session_memory_repository,
+                context_manager,
+                context_compactor,
+                model_limits_resolver,
+            )
         )
-        self.plan.initialize()
-        self.tool_context = ToolContext(
-            session=self._session_state,
-            cancellation=execution.cancellation,
-            cwd=Path.cwd(),
-            registry=self.tool_registry,
-            permission=self._permission_controller,
-            plan=self.plan,
-            read_file_state=self._read_file_state,
-            confirm_fn=self._confirm_dangerous,
-            hooks=self._pre_tool_use_hooks,
-            confirm_hook_trust=self._confirm_hook_trust,
-            auto_permission_fn=self._classify_tool_call,
-        )
-        self._permission_policy = PermissionPolicy(cwd=self.tool_context.cwd)
-        self._result_store = ResultStore()
-        self.tool_runtime = ToolRuntime(
-            self.tool_registry,
-            self.tool_context,
-            [
-                CancellationMiddleware(),
-                PreToolHookMiddleware(),
-                PermissionMiddleware(
-                    self._permission_policy,
-                    self._permission_controller,
-                ),
-                ReadFreshnessMiddleware(),
-                ResultPolicyMiddleware(self._result_store),
-                AuditMiddleware(),
-            ],
-        )
-        runtime_context_manager = context_manager or ContextManager(
-            is_snippable_tool=self._is_snippable_tool
-        )
-
-        provider_runtime_port = _DeferredProviderRuntimePort()
-        model_context_control = _DeferredModelContextControl()
-        memory_query_sink = _DeferredMemoryQuerySink()
-        configuration_recorder = _SessionRecorderConfigurationRecorder()
-        background_scheduler = _DeferredBackgroundScheduler()
-        self._provider_manager = ProviderManager(
-            state=ProviderState(
-                model=model,
-                provider_kind=initial_provider_kind,
-                api_key=initial_api_key,
-                openai_base_url=api_base,
-                anthropic_base_url=anthropic_base_url,
-                thinking_enabled=thinking,
-                thinking_level=initial_thinking_level,
-            ),
-            runtime=provider_runtime_port,
-            context=model_context_control,
-            memory=memory_query_sink,
-            recorder=configuration_recorder,
-            provider_factory=self._create_provider,
-            schedule_background_operation=background_scheduler,
-        )
-        provider = self._provider_manager.build_provider()
-        self._runtime_coordinator = AgentRuntimeCoordinator(
-            usage=self._usage,
-            budget=self._budget,
-            identity=self,
-            session=self,
-            memory=self,
-            execution=execution,
-            capabilities=self._capability_runtime,
-            get_system=self._prompt_composer.get_system,
-            provider=provider,
-            model=self.model,
-            tool_runtime=self.tool_runtime,
-            context_manager=runtime_context_manager,
+        if dependencies is not None and legacy_dependencies_supplied:
+            raise ValueError(
+                "dependencies cannot be combined with legacy dependency arguments"
+            )
+        resolved_dependencies = dependencies or AgentDependencies(
+            confirm_fn=confirm_fn,
+            tool_registry=tool_registry,
+            tool_environment=tool_environment,
+            session_repository=session_repository,
+            session_memory_repository=session_memory_repository,
+            context_manager=context_manager,
             context_compactor=context_compactor,
-            model_limits_resolver=model_limits_resolver or ModelLimitsResolver(),
-            provider_manager=self._provider_manager,
+            model_limits_resolver=model_limits_resolver,
+            provider_factory=_agent_provider_factory,
+            pre_tool_use_hooks_loader=_agent_hooks_loader,
+            project_identity_resolver=_agent_project_identity_resolver,
+            project_context_loader=_agent_project_context_loader,
+            dynamic_system_context_builder=_agent_dynamic_context_builder,
+            terminal_renderer_factory=_agent_terminal_renderer_factory,
+            print_info=_agent_print_info,
+            print_error=_agent_print_error,
+            print_confirmation=_agent_print_confirmation,
+            print_sub_agent_start=_agent_print_subagent_start,
+            print_sub_agent_end=_agent_print_subagent_end,
         )
-        provider_runtime_port.bind(self._runtime_coordinator)
-        model_context_control.bind(self._runtime_coordinator)
-        configuration_recorder.bind(
-            lambda: self._runtime_coordinator.session_recorder,
-            self._runtime_coordinator.schedule_background_operation,
+        composition = build_agent_composition(
+            resolved_config,
+            resolved_dependencies,
         )
-        background_scheduler.bind(self._runtime_coordinator)
-        query = ProviderModelQuery(
-            provider=lambda: self._core_runtime.provider,
-            model=lambda: self.model,
-            available=lambda: self.api_configured,
-        )
-        notices = _AgentNoticeSink(self._emit_notice)
-        memory_query = ProviderTextQueryService(
-            provider=provider,
-            model=lambda: self.model,
-        )
-        dream_factory = RestrictedDreamAgentFactory(
-            registry=self.tool_registry,
-            environment=self.tool_environment,
-            child_config=self._child_agent_config,
-        )
-        identity = resolve_project_identity(self.tool_context.cwd)
-        self._session_memory_coord: SessionMemoryCoordinator
-        dream = DreamCoordinator(
-            repository=self._session_repository,
-            identity=identity,
-            session_memory=_SessionMemorySnapshotView(
-                lambda: (
-                    None
-                    if self._session_memory_coord.session_memory_error is not None
-                    else self._session_memory_coord.session_memory
-                )
-            ),
-            factory=dream_factory,
-            usage=self._usage,
-        )
-        self._session_memory_coord = SessionMemoryCoordinator(
-            identity=identity,
-            repository=session_memory_repository,
-            transcript=self._core_runtime,
-            cancellation=execution.cancellation,
-            permission=self._permission_controller,
-            load_project_context=self._load_project_context_files,
-            notices=notices,
-            query=memory_query,
-            dream_runner=dream,
-            is_sub_agent=is_sub_agent,
-            status_callback=self._emit_subagent_status,
-            refresh_context=self._refresh_dynamic_system_context,
-        )
-        memory_sink = _MemoryQuerySinkAdapter(self._session_memory_coord)
-        memory_query_sink.bind(memory_sink)
-        self._autonomy = AutonomyRuntime(
-            conversation=self._runtime_coordinator,
-            transcript=self._core_runtime,
-            query=query,
-            notices=notices,
-            cancellation=execution.cancellation,
-            tool_registry=self.tool_registry,
-            confirm=self.confirm_fn,
-            usage=self._usage,
-            budget=self._budget,
-        )
-        self._learning = LearningRuntime(
-            self._core_runtime,
-            query,
-            self.tool_context.cwd,
-        )
-        self._model_query = query
 
-    def _register_capabilities(
-        self,
-        *,
-        mcp_enabled: bool,
-        is_sub_agent: bool,
-        selected_tool_names: set[str] | None,
-        created_own_registry: bool,
-    ) -> None:
-        """注册 Agent 能力并将其提供的工具接入自有注册表。"""
-        self._capability_registry = CapabilityRegistry()
-        mcp_is_root = (
-            mcp_enabled and not is_sub_agent and self.tool_environment.owns_mcp_manager
+        self.is_sub_agent = resolved_config.is_sub_agent
+        self._mcp_enabled = resolved_config.mcp_enabled
+        self._current_task: asyncio.Task | None = None
+        self._identity_port = composition.identity_port
+        self._session_port = composition.session_port
+        self._memory_port = composition.memory_port
+        self._notice_controller = composition.notices
+        self._confirmation = composition.confirmation
+        self._status_sink = composition.status_sink
+        self._mcp_state = composition.mcp_state
+        self._permission_controller = composition.permission_controller
+        self._session_state = composition.session_state
+        self._session_repository = composition.session_repository
+        self._usage = composition.usage
+        self._budget = composition.budget
+        self._read_file_state = composition.read_file_state
+        self._pre_tool_use_hooks = composition.pre_tool_use_hooks
+        self.tool_environment = composition.tool_environment
+        self._mcp_manager = composition.mcp_manager
+        self.plan = composition.plan
+        self.tool_registry = composition.tool_registry
+        self._subagent_factory = composition.subagent_factory
+        self._subagent_executor = composition.subagent_executor
+        self._skill_runtime = composition.skill_runtime
+        self._capability_registry = composition.capability_registry
+        self._mcp_capability = composition.mcp_capability
+        self._capability_runtime = composition.capability_runtime
+        self._refresh_dynamic_context_enabled = (
+            composition.refresh_dynamic_context_enabled
         )
-        self._mcp_capability = McpCapability(
-            mcp_manager=self._mcp_manager,
-            tool_registry=self.tool_registry,
-            emit_notice=lambda msg: self._emit_notice(msg),
-            is_already_initialized=lambda: self._mcp_initialized,
-            mark_initialized=lambda: setattr(self, "_mcp_initialized", True),
-            is_root=mcp_is_root,
-        )
-        self._capability_registry.register(self._mcp_capability.spec)
-        self._capability_registry.register(create_skill_capability(self._skill_runtime))
-        self._capability_registry.register(
-            create_subagent_capability(self._subagent_executor)
-        )
-        self._capability_registry.register(create_plan_capability(self.plan))
-
-        for source in self._capability_registry.tool_sources:
-            for tool in source.tools():
-                if created_own_registry:
-                    if selected_tool_names is None or tool.name in selected_tool_names:
-                        self.tool_registry.register(tool)
-                    continue
-                try:
-                    was_active = self.tool_registry.is_active(tool.name)
-                    self.tool_registry.resolve(tool.name)
-                except LookupError:
-                    continue
-                self.tool_registry.register(
-                    tool,
-                    replace=True,
-                    activate=was_active,
-                )
-
-        self._capability_runtime = CapabilityRuntime(self._capability_registry)
+        self._prompt_composer = composition.prompt_composer
+        self.tool_context = composition.tool_context
+        self._permission_policy = composition.permission_policy
+        self._result_store = composition.result_store
+        self.tool_runtime = composition.tool_runtime
+        self._provider_manager = composition.provider_manager
+        self._runtime_coordinator = composition.runtime_coordinator
+        self._session_memory_coord = composition.session_memory_coordinator
+        self._autonomy = composition.autonomy
+        self._learning = composition.learning
+        self._model_query = composition.model_query
+        self.confirm_fn = resolved_dependencies.confirm_fn
+        # 生产路径只让 MemoryTurnPort 使用 coordinator 自己的窄实现。只有
+        # 测试替换了类级 AsyncMock 时才把这个无状态替身传入，避免 runtime
+        # 通过回调反向持有整个 Agent。
+        patched_extractor = type(self).__dict__.get("_extract_session_memory_semantics")
+        if (
+            patched_extractor is not None
+            and patched_extractor is not _ORIGINAL_AGENT_SEMANTIC_EXTRACTOR
+            and callable(patched_extractor)
+        ):
+            self._memory_port.set_semantic_extractor(patched_extractor)
 
     def _resolve_thinking_mode(self) -> str:
         return self._provider_manager.view.thinking_mode
@@ -686,10 +367,52 @@ class Agent:
     def _terminal_renderer(self) -> TerminalRenderer | None:
         return self._runtime_coordinator.terminal_renderer
 
+    @property
+    def _terminal_output(self) -> bool:
+        return self._identity_port._terminal_output
+
+    @_terminal_output.setter
+    def _terminal_output(self, enabled: bool) -> None:
+        self._identity_port._terminal_output = enabled
+        self._confirmation.terminal_output = enabled
+        self._status_sink.terminal_output = enabled
+
+    @property
+    def _mcp_initialized(self) -> bool:
+        return self._mcp_state.initialized
+
+    @_mcp_initialized.setter
+    def _mcp_initialized(self, value: bool) -> None:
+        self._mcp_state.initialized = value
+
+    @property
+    def effective_window(self) -> int:
+        return self._identity_port.effective_window
+
+    @effective_window.setter
+    def effective_window(self, value: int) -> None:
+        self._identity_port.effective_window = value
+
+    @property
+    def _last_stop_reason(self) -> str | None:
+        return self._identity_port._last_stop_reason
+
+    @_last_stop_reason.setter
+    def _last_stop_reason(self, value: str | None) -> None:
+        self._identity_port._last_stop_reason = value
+
+    @property
+    def confirm_fn(self) -> Callable[[str], Awaitable[bool]] | None:
+        return self._confirmation.confirm_fn
+
+    @confirm_fn.setter
+    def confirm_fn(self, fn: Callable[[str], Awaitable[bool]] | None) -> None:
+        self._confirmation.confirm_fn = fn
+
     def _create_terminal_renderer(self) -> TerminalRenderer:
         """在调用时读取本模块 Renderer，保留既有动态 patch 锚点。"""
 
-        return TerminalRenderer()
+        return self._identity_port._create_terminal_renderer()
 
     @property
     def is_processing(self) -> bool:
@@ -942,6 +665,8 @@ class Agent:
 
     def set_terminal_output(self, enabled: bool) -> None:
         self._runtime_coordinator.set_terminal_output(enabled)
+        self._confirmation.terminal_output = enabled
+        self._status_sink.terminal_output = enabled
 
     def set_notice_fn(
         self,
@@ -949,7 +674,7 @@ class Agent:
     ) -> None:
         """设置实例级状态通知回调；未设置时继续直接输出到终端。"""
 
-        self._notice_fn = fn
+        self._notice_controller.set_notice_fn(fn)
 
     def _emit_notice(
         self,
@@ -957,10 +682,7 @@ class Agent:
         *,
         role: Literal["info", "error"] = "info",
     ) -> None:
-        if self._notice_fn is not None:
-            self._notice_fn(message, role)
-        elif self._terminal_output:
-            (print_error if role == "error" else print_info)(message)
+        self._notice_controller.emit(message, role=role)
 
     def _emit_subagent_status(
         self,
@@ -969,12 +691,7 @@ class Agent:
         *,
         started: bool,
     ) -> None:
-        if not self._terminal_output:
-            return
-        if started:
-            print_sub_agent_start(agent_type, description)
-        else:
-            print_sub_agent_end(agent_type, description)
+        self._status_sink.emit(agent_type, description, started=started)
 
     def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]] | None) -> None:
         self.confirm_fn = fn
@@ -1053,7 +770,7 @@ class Agent:
 
     def _create_provider(self, **kwargs: Any) -> ModelProvider:
         """在调用时读取本模块 factory，保留测试替身的动态 patch 锚点。"""
-        return create_provider(**kwargs)
+        return _agent_provider_factory(**kwargs)
 
     # ─── 主对话入口 ──────────────────────────────────────────
 
@@ -1360,6 +1077,10 @@ class Agent:
         inp: dict,
         tool_call_id: str = "",
     ) -> str:
+        # 保留旧测试与嵌入方替换 Agent 确认方法的 seam；正式 Core 路径使用
+        # Composition Root 注入的 ConfirmationController。
+        self.tool_context.confirm_fn = self._confirm_dangerous
+        self.tool_context.confirm_hook_trust = self._confirm_hook_trust
         result = await self.tool_runtime.execute(
             tool_call_id=tool_call_id,
             name=name,
@@ -1380,13 +1101,7 @@ class Agent:
         return await self._confirm_dangerous(message)
 
     async def _confirm_dangerous(self, command: str) -> bool:
-        if self._terminal_output:
-            print_confirmation(command)
-        if self.confirm_fn:
-            return await self.confirm_fn(command)
-        # 无异步回调时退回阻塞式终端输入，仅用于直接嵌入 Agent 的场景。
-        try:
-            answer = input("  Allow? (y/n): ")
-            return answer.lower().startswith("y")
-        except EOFError:
-            return False
+        return await self._confirmation.confirm(command)
+
+
+_ORIGINAL_AGENT_SEMANTIC_EXTRACTOR = Agent._extract_session_memory_semantics

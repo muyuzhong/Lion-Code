@@ -1,0 +1,12 @@
+{"file": "AGENTS.md", "reason": "项目级注释、架构和提交约定"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "生产目录与 Composition Root placement rules"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "Runtime/Provider/Session/Permission/Memory boundary contracts"}
+{"file": ".trellis/spec/backend/capability-spi.md", "reason": "Capability extension slots and lifecycle contract"}
+{"file": ".trellis/spec/backend/usage-ownership.md", "reason": "Usage and budget ownership invariants"}
+{"file": "lion_code/agent.py", "reason": "Current facade constructor, delegates, compatibility seams"}
+{"file": "lion_code/agent_runtime.py", "reason": "Runtime structural ports and coordinator call paths"}
+{"file": "lion_code/plan_runtime.py", "reason": "Residual PlanRuntime host injection"}
+{"file": "lion_code/provider_manager.py", "reason": "Provider state/factory and deferred port contract"}
+{"file": "lion_code/session_lifecycle.py", "reason": "Session lifecycle ownership and capability lifecycle"}
+{"file": "lion_code/subagent_factory.py", "reason": "Child Agent construction and live config seam"}
+{"file": "tests/architecture/test_runtime_boundaries.py", "reason": "Existing AST ownership and boundary guards"}

@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required quality and verification commands"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "Acceptance boundary checks"}
+{"file": ".trellis/spec/backend/capability-spi.md", "reason": "Capability registration/lifecycle checks"}
+{"file": "pyproject.toml", "reason": "Ruff, mypy, import-linter and test configuration"}
+{"file": "tests/architecture/test_runtime_boundaries.py", "reason": "Architecture acceptance guard extension"}
+{"file": "tests/architecture/test_provider_manager_boundaries.py", "reason": "Provider ownership regression checks"}
+{"file": "tests/runtime/test_agent_runtime.py", "reason": "Core runtime construction and lifecycle tests"}
+{"file": "tests/capabilities/test_capability_migration.py", "reason": "Default capability and MCP ownership tests"}
+{"file": "tests/integration/test_application_coding_session.py", "reason": "Application backend compatibility"}
+{"file": "tests/tooling/test_skill_registry_view.py", "reason": "Sub-agent and custom registry seams"}

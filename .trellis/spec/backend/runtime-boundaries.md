@@ -9,6 +9,21 @@ output.
 These layers share one canonical Core history; adding a second message store, writer,
 or process-global output bridge is an architecture regression.
 
+## 1.1 Agent composition root
+
+`AgentConfig` is a frozen value object containing only user/runtime settings;
+`AgentDependencies` separately contains repositories, structural seams, supplied
+tool registries/environments, and test factories. Neither type owns mutable
+runtime state. `composition/agent_builder.py::build_agent_composition()` is the
+one-shot Composition Root: it constructs state owners, Provider and permission
+ports, tools, domain runtimes, capabilities, Core runtime, and the coordinator,
+then returns an explicit `AgentComposition` value.
+
+`Agent` does not retain the builder or a service registry. It remains the public
+facade and implements application ports through delegates and a small amount of
+use-case orchestration. New built-in capability wiring belongs in the composition
+root; an injected capability can use `AgentDependencies.extra_capabilities`.
+
 ## 2. Signatures
 
 ```python
@@ -560,8 +575,7 @@ Usage has its own executable contract in
   Clear/restore/compact/close orchestration is delegated to
   `SessionLifecycle` (in `session_lifecycle.py`), which calls back into the
   coordinator for shared `reset_core_observers` / `reset_session_usage`.
-  `Agent` remains the composition root for MCP discovery,
-  tools, Memory/Plan/Autonomy/Learning and UI callbacks, and exposes compatibility
+  `Agent` is the public facade over the composition root and exposes compatibility
   delegates such as `_core_runtime`, `_ensure_core_session_ready`, `chat()` and
   `close()`. The coordinator must not import `Agent` or create a second history,
   Provider, or JSONL writer.
@@ -683,8 +697,8 @@ Usage has its own executable contract in
   never contain their XML wrapper or injected text.
 - `SessionMemoryCoordinator` owns project identity, Session Memory persistence,
   project/turn overlays, Auto Memory recall coordination, Dream, and post-turn
-  Session Memory updates. `Agent` remains the composition root for Core/Provider/TUI
-  capabilities and exposes compatibility delegates; the coordinator receives its
+  Session Memory updates. `Agent` is the facade for the graph assembled by
+  `composition/agent_builder.py` and exposes compatibility delegates; the coordinator receives its
   transcript, query, state views, and commands independently rather than through an
   Agent-shaped host or global service locator.
 - A root chat compresses canonical context first, reloads and fixes the Session Memory
@@ -914,6 +928,9 @@ also rejects patterns an import graph cannot express:
   `agent_runtime`; referencing `AgentHarness`; or defining
   `CapabilityContext`, `ServiceLocator`, or `AgentCapability` god-object
   types. See [Capability SPI](./capability-spi.md).
+- `tests/architecture/test_composition_root.py` enforces one-shot builder
+  construction, absence of whole-Agent runtime constructors, and capability
+  registration without edits to facade/runtime/application/TUI modules.
 
 When a legitimate architecture move requires a new exception, change the
 runtime code, this contract, the AST allowlist, and the focused test in one
