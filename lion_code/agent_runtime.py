@@ -261,6 +261,7 @@ class RuntimeIdentityHost(Protocol):
         role: Literal["info", "error"] = "info",
     ) -> None: ...
 
+
 class SessionStateHost(Protocol):
     """会话标识、仓库、Plan 模式与工具环境所需的宿主边界。"""
 

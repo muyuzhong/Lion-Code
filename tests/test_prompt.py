@@ -68,7 +68,9 @@ def test_prompt_composer_reads_layers_per_call_without_history() -> None:
     assert "history" not in composer.get_system().lower()
 
 
-def test_prompt_composer_custom_prompt_replaces_default_context_but_keeps_layers() -> None:
+def test_prompt_composer_custom_prompt_replaces_default_context_but_keeps_layers() -> (
+    None
+):
     layer = _Layer("plan projection")
     composer = PromptComposer("custom system", layers=lambda: (layer,))
 

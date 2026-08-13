@@ -1432,9 +1432,7 @@ def test_plan_state_has_one_owner_and_live_read_port() -> None:
 
 
 def test_prompt_and_capability_lifecycle_boundaries() -> None:
-    plan_runtime_source = (SOURCE_ROOT / "plan_runtime.py").read_text(
-        encoding="utf-8"
-    )
+    plan_runtime_source = (SOURCE_ROOT / "plan_runtime.py").read_text(encoding="utf-8")
     for symbol in (
         "self._base_system_prompt",
         "self._system_prompt",
@@ -1486,9 +1484,7 @@ def test_prompt_and_capability_lifecycle_boundaries() -> None:
         if isinstance(node, ast.ClassDef) and node.name == "PlanSessionParticipant"
     )
     assert {
-        node.name
-        for node in participant.body
-        if isinstance(node, ast.AsyncFunctionDef)
+        node.name for node in participant.body if isinstance(node, ast.AsyncFunctionDef)
     } == {"on_new_session", "on_restore_session"}
 
 

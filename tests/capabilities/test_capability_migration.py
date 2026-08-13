@@ -36,7 +36,7 @@ class _RecordingTurnParticipant:
         self.calls.append("before")
 
     async def after_turn(self) -> None:
-            self.calls.append("after")
+        self.calls.append("after")
 
 
 class _RecordingSessionParticipant:

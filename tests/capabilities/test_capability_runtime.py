@@ -60,7 +60,9 @@ class _FullCapability:
         self._events.append(f"{self._name}:close")
 
 
-def _full_spec(capability: _FullCapability, *, requires: frozenset[str] = frozenset()) -> CapabilitySpec:
+def _full_spec(
+    capability: _FullCapability, *, requires: frozenset[str] = frozenset()
+) -> CapabilitySpec:
     return CapabilitySpec(
         name=capability._name,
         tool_sources=(capability,),
@@ -80,17 +82,19 @@ async def test_full_spi_capability_contributes_and_dispatches_all_slots() -> Non
     registry.register(_full_spec(capability))
     lifecycle = CapabilityRuntime(registry)
 
-    assert [tool.name for source in registry.tool_sources for tool in source.tools()] == [
-        "full_tool"
-    ]
+    assert [
+        tool.name for source in registry.tool_sources for tool in source.tools()
+    ] == ["full_tool"]
     assert registry.prompt_layers[0].render() == "full prompt"
 
     await lifecycle.on_new_session()
     await lifecycle.on_restore_session()
     await lifecycle.before_turn()
     await lifecycle.after_turn()
-    result = await registry.tool_sources[0].tools()[0].execute(
-        cast(Any, None), "call", {}, None
+    result = (
+        await registry.tool_sources[0]
+        .tools()[0]
+        .execute(cast(Any, None), "call", {}, None)
     )
     await lifecycle.close()
     await lifecycle.close()
