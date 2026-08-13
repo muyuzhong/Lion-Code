@@ -1156,3 +1156,24 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 36: 收窄 Domain Runtime 的 Agent 依赖
+
+**Date**: 2026-08-13
+**Task**: 收窄 Domain Runtime 的 Agent 依赖
+**Branch**: `master`
+
+### Summary
+
+新增最小 Domain 读取与查询端口；将 Autonomy、Learning、Session Memory、Dream 和 SubagentFactory 改为显式窄依赖；把受限 Dream 子 Agent 移入组合适配层并保持只读、根目录限制、禁用 MCP/嵌套/Hook、最大轮次、计划校验和原子回滚；补齐架构与行为测试，完成全量质量门禁。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d00fbed` | (see git log) |
+
+### Status
+
+[OK] **Completed**
