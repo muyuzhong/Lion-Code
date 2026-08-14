@@ -82,9 +82,9 @@ def test_config_and_dependencies_are_separate_frozen_values() -> None:
     dependencies = AgentDependencies()
 
     with pytest.raises(FrozenInstanceError):
-        config.model = "mutated"
+        setattr(config, "model", "mutated")
     with pytest.raises(FrozenInstanceError):
-        dependencies.extra_capabilities = ()
+        setattr(dependencies, "extra_capabilities", ())
 
     config_fields = {field.name for field in fields(config)}
     dependency_fields = {field.name for field in fields(dependencies)}

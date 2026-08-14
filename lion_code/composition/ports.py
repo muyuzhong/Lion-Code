@@ -37,11 +37,11 @@ class NoticeController:
     ) -> None:
         self._print_info = print_info
         self._print_error = print_error
-        self._notice_fn: Callable[[str, Literal["info", "error"]], None] | None = None
+        self._notice_fn: Callable[..., None] | None = None
 
     def set_notice_fn(
         self,
-        fn: Callable[[str, Literal["info", "error"]], None] | None,
+        fn: Callable[..., None] | None,
     ) -> None:
         self._notice_fn = fn
 
