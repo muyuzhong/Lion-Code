@@ -37,6 +37,33 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 - Kernel 可调用 Provider Port（协议），但不得绑定 ProviderManager / 具体 provider。
 - Kernel 的 Event Stream 必须能被 Supervisor 订阅，且暴露的仅是契约事件，不是 `Agent._xxx` 私有字段。
 
+### 1.4 Kernel Event Stream 契约
+
+`core/events.py`（`AgentEvent` union）+ `core/provider_events.py`（`AssistantMessageEvent` union）
+是 Kernel 事件契约的权威源。契约至少允许表达以下 10 个事件（PR0 验收）：
+
+| 契约事件 | Kernel 表达 | 状态 |
+|---|---|---|
+| TurnStarted | `TurnStartEvent` | 已发射 |
+| ModelStarted | `AssistantStartEvent` | 已发射 |
+| ModelDelta | `TextDeltaEvent` / `ThinkingDeltaEvent` | 已发射 |
+| ToolCallRequested | `ToolCallEndEvent` / `ToolExecutionStartEvent` | 已发射 |
+| ToolCallCompleted | `ToolExecutionEndEvent` | 已发射 |
+| CompactionStarted | `CompactionStartedEvent` | 契约声明（会话级事件在 `application/events.py::CompactionStartEvent`，Kernel 级发射为后续 PR） |
+| CompactionCompleted | `CompactionCompletedEvent` | 契约声明（同上） |
+| TurnCompleted | `TurnEndEvent` | 已发射 |
+| TurnFailed | `TurnFailedEvent` | 已发射（stop_reason="error"） |
+| Cancelled | `CancelledEvent` | 已发射（stop_reason="aborted"） |
+
+契约约束：
+
+- Supervisor 订阅事件只能引用 `core/events.py` / `core/provider_events.py` 的公开类型，
+  不得依赖 `Agent._xxx` 私有对象或 `AgentRuntimeCoordinator` 内部状态。
+- 新增 Kernel 事件必须加入 `AgentEvent` / `AssistantMessageEvent` union 并带 discriminator，
+  不得破坏既有事件的字段与判别值（Pi 兼容）。
+- 契约测试：`tests/core/test_event_contract.py`（10 事件可表达、union round-trip、
+  Kernel 事件模块无跨层 import、TurnFailed/Cancelled 真实发射）。
+
 ## 2. 生产模块 → 层映射（已核实）
 
 | 层 | 当前模块 | 说明 |

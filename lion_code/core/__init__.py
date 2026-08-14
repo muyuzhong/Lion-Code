@@ -8,6 +8,9 @@ from lion_code.core.events import (
     AgentEndEvent,
     AgentEvent,
     AgentStartEvent,
+    CancelledEvent,
+    CompactionCompletedEvent,
+    CompactionStartedEvent,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
@@ -15,6 +18,7 @@ from lion_code.core.events import (
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
     TurnEndEvent,
+    TurnFailedEvent,
     TurnStartEvent,
 )
 from lion_code.core.harness import (

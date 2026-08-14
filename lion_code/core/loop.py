@@ -13,6 +13,7 @@ from lion_code.core.events import (
     AgentEndEvent,
     AgentEvent,
     AgentStartEvent,
+    CancelledEvent,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
@@ -20,6 +21,7 @@ from lion_code.core.events import (
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
     TurnEndEvent,
+    TurnFailedEvent,
     TurnStartEvent,
 )
 from lion_code.core.messages import (
@@ -120,7 +122,9 @@ async def run_agent_loop(
             pending = ()
 
             if max_turns is not None and turn > max_turns:
-                error = _error_message(model, f"Agent stopped after max_turns={max_turns}")
+                error = _error_message(
+                    model, f"Agent stopped after max_turns={max_turns}"
+                )
                 messages.append(error)
                 new_messages.append(error)
                 yield MessageStartEvent(message=error)
@@ -163,13 +167,19 @@ async def run_agent_loop(
                     assistant = event.message
 
             if assistant is None:  # defensive: _assistant_events always terminates
-                assistant = _error_message(model, "Provider produced no assistant message")
+                assistant = _error_message(
+                    model, "Provider produced no assistant message"
+                )
                 yield MessageStartEvent(message=assistant)
                 yield MessageEndEvent(message=assistant)
 
             messages.append(assistant)
             new_messages.append(assistant)
             if assistant.stop_reason in {"error", "aborted"}:
+                if assistant.stop_reason == "error":
+                    yield TurnFailedEvent(message=assistant)
+                else:
+                    yield CancelledEvent(message=assistant)
                 yield TurnEndEvent(message=assistant)
                 yield AgentEndEvent(messages=new_messages)
                 return
@@ -290,9 +300,9 @@ async def _run_parallel_tool_batch(
     after_tool_call: AfterToolCall | None,
 ) -> AsyncIterator[AgentEvent]:
     """实时转发并行工具事件，并按调用顺序提交最终消息。"""
-    queue: asyncio.Queue[
-        tuple[int, AgentEvent | None, BaseException | None]
-    ] = asyncio.Queue()
+    queue: asyncio.Queue[tuple[int, AgentEvent | None, BaseException | None]] = (
+        asyncio.Queue()
+    )
     message_events: list[list[AgentEvent]] = [[] for _ in calls]
 
     async def forward(index: int, call: ToolCall) -> None:
@@ -312,8 +322,7 @@ async def _run_parallel_tool_batch(
             await queue.put((index, None, None))
 
     tasks = [
-        asyncio.create_task(forward(index, call))
-        for index, call in enumerate(calls)
+        asyncio.create_task(forward(index, call)) for index, call in enumerate(calls)
     ]
     remaining = len(tasks)
     try:
@@ -499,9 +508,7 @@ async def _run_tool(
         if accepting:
             updates.put_nowait(partial.model_copy(deep=True))
 
-    task = asyncio.create_task(
-        tool.execute(call.id, call.arguments, signal, on_update)
-    )
+    task = asyncio.create_task(tool.execute(call.id, call.arguments, signal, on_update))
     try:
         while not task.done():
             next_update = asyncio.create_task(updates.get())
@@ -535,7 +542,9 @@ async def _run_tool(
 
 
 def _error_result(message: str) -> AgentToolResult:
-    return AgentToolResult(content=[TextContent(text=message)], details={}, is_error=True)
+    return AgentToolResult(
+        content=[TextContent(text=message)], details={}, is_error=True
+    )
 
 
 def _error_message(model: str, message: str) -> AssistantMessage:
