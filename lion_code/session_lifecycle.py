@@ -11,13 +11,10 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
-from lion_code.memory_runtime import MemoryInjectionReport
-
 if TYPE_CHECKING:
     from lion_code.agent_runtime import (
         AgentRuntimeCoordinator,
         LionAgentRuntime,
-        MemoryTurnHost,
         RuntimeIdentityHost,
         SessionStateHost,
     )
@@ -44,25 +41,16 @@ class SessionLifecycle:
         return self._coord._session
 
     @property
-    def _memory(self) -> MemoryTurnHost:
-        return self._coord._memory
-
-    @property
     def _runtime(self) -> LionAgentRuntime:
         return self._coord._runtime
 
     async def clear_history(self) -> None:
-        """创建新的 JSONL 会话，同时保留项目级 Session Memory。"""
+        """创建新的 JSONL 会话。"""
 
         session = self._session
-        memory = self._memory
         identity = self._identity
         coord = self._coord
         await coord.flush_background_operations()
-        memory._memory_coordinator.reset()
-        memory._reload_project_memory()
-        memory._reload_session_memory()
-        memory._last_memory_injection = MemoryInjectionReport()
         session.session_state.reset(
             uuid.uuid4().hex[:8],
             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -75,14 +63,12 @@ class SessionLifecycle:
         coord.reset_core_observers()
         await coord.ensure_core_session_ready()
         coord.reset_session_usage()
-        memory._turn_memory_overlays = memory._build_turn_memory_overlays()
         identity._emit_notice("Conversation cleared.")
 
     async def restore_core_session(self, session_id: str) -> bool:
         """从 JSONL 回放唯一 Core history，并继续追加到同一会话。"""
 
         session = self._session
-        memory = self._memory
         identity = self._identity
         coord = self._coord
         await coord.flush_background_operations()
@@ -93,10 +79,6 @@ class SessionLifecycle:
             model=state.model,
             thinking_level=state.thinking_level,
         )
-        memory._memory_coordinator.reset()
-        memory._reload_project_memory()
-        memory._reload_session_memory()
-        memory._last_memory_injection = MemoryInjectionReport()
         started_at = session.session_state.started_at
         coord._core_compaction_required = False
         coord._last_context_actions = ()
@@ -112,7 +94,6 @@ class SessionLifecycle:
         coord.reset_core_observers()
         await coord.ensure_core_session_ready()
         coord.reset_session_usage()
-        memory._turn_memory_overlays = memory._build_turn_memory_overlays()
         identity._emit_notice(f"Session restored ({len(state.messages)} messages).")
         return True
 
@@ -123,19 +104,16 @@ class SessionLifecycle:
             self._identity._emit_notice("Conversation compacted.")
 
     async def close(self) -> None:
-        """按既有 finally 链回收后台、Memory、Provider、Capability 与 MCP 环境。"""
+        """按既有 finally 链回收后台、Provider、Capability 与 MCP 环境。"""
 
         coord = self._coord
         try:
             await coord.flush_background_operations()
         finally:
             try:
-                await self._memory._memory_coordinator.close()
+                await coord._runtime.aclose()
             finally:
                 try:
-                    await coord._runtime.aclose()
+                    await self._capabilities.close()
                 finally:
-                    try:
-                        await self._capabilities.close()
-                    finally:
-                        await self._session.tool_environment.close()
+                    await self._session.tool_environment.close()
