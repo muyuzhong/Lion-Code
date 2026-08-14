@@ -931,6 +931,14 @@ also rejects patterns an import graph cannot express:
 - `tests/architecture/test_composition_root.py` enforces one-shot builder
   construction, absence of whole-Agent runtime constructors, and capability
   registration without edits to facade/runtime/application/TUI modules.
+- Four-layer gates (`tests/architecture/test_kernel_isolation.py`, plus the
+  expanded Core import contract in `_boundaries.py`): Kernel code must not
+  import or reference Capability/Supervisor modules or symbols
+  (`<relevant-memory>`, `PlanRuntime`, `McpCapability`, `SubagentFactory`,
+  `AutonomyRuntime`, `DreamCoordinator`, `LearningRuntime`); Supervisor modules
+  must not import the Agent engine or touch private fields
+  (`_aborted`, `core_runtime`); a capability (e.g. MCP) is removable via
+  config. See [Four-Layer Ownership](./four-layer-ownership.md).
 
 When a legitimate architecture move requires a new exception, change the
 runtime code, this contract, the AST allowlist, and the focused test in one
