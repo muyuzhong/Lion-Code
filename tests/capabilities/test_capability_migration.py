@@ -36,19 +36,7 @@ class _RecordingTurnParticipant:
         self.calls.append("before")
 
     async def after_turn(self) -> None:
-            self.calls.append("after")
-
-
-class _RecordingSessionParticipant:
-    def __init__(self, session_id: Callable[[], str]) -> None:
-        self._session_id = session_id
-        self.calls: list[tuple[str, str]] = []
-
-    async def on_new_session(self) -> None:
-        self.calls.append(("new", self._session_id()))
-
-    async def on_restore_session(self) -> None:
-        self.calls.append(("restore", self._session_id()))
+        self.calls.append("after")
 
 
 class _RecordingSessionParticipant:
