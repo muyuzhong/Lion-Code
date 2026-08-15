@@ -74,7 +74,7 @@ class PlanSessionParticipant:
         self._runtime.reset_for_new_session()
 
     async def on_restore_session(self) -> None:
-        self._runtime.reset_after_restore()
+        """恢复会话时保留激活 Plan 路径；无迁移状态需要清理。"""
 
 
 def create_plan_capability(runtime: PlanRuntime) -> CapabilitySpec:

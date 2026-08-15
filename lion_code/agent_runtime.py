@@ -47,7 +47,6 @@ from lion_code.core.provider import ModelProvider
 from lion_code.core.provider_events import TextDeltaEvent
 from lion_code.execution_control import ExecutionControl
 from lion_code.observers import TerminalRenderer, UsageObserver
-from lion_code.plan_runtime import PlanRuntime
 from lion_code.provider_manager import ProviderManager
 from lion_code.session_identity import SessionIdentityState
 from lion_code.session_lifecycle import SessionLifecycle
@@ -258,10 +257,9 @@ class RuntimeIdentityHost(Protocol):
 
 
 class SessionStateHost(Protocol):
-    """会话标识、仓库、Plan 模式与工具环境所需的宿主边界。"""
+    """会话标识、仓库与工具环境所需的宿主边界。"""
 
     _session_repository: SessionRepository
-    plan: PlanRuntime
     tool_context: Any
     tool_environment: Any
 
@@ -274,8 +272,7 @@ class AgentRuntimeCoordinator:
 
     通过两个窄端口访问宿主能力，并直接接收 Usage Owner 与预算规则：
     - ``identity`` -- 模型标识、终端渲染、中止/通知与 MCP 初始化
-    - ``session`` -- 会话标识、仓库、Plan 模式与工具环境
-    - ``memory`` -- Memory 注入、Overlay 与轮次快照
+    - ``session`` -- 会话标识、仓库与工具环境
     """
 
     def __init__(
@@ -626,35 +623,6 @@ class AgentRuntimeCoordinator:
             keep_user_boundaries=2,
         )
 
-    async def apply_plan_context_reset(self) -> bool:
-        """把 Plan 批准摘要持久化后作为唯一活跃上下文继续运行。"""
-
-        session = self._session
-        summary = session.plan.pending_context_reset
-        if summary is None or self._session_recorder is None:
-            return False
-        replaced_ids = list(await self._session_recorder.context_entry_ids())
-        await self._session_recorder.record_compaction(
-            summary=summary,
-            replaces_entry_ids=replaced_ids,
-        )
-        state = await session._session_repository.load(session.session_state.id)
-        if state is None or len(state.messages) != 1:
-            raise RuntimeError(
-                "Compaction replay did not produce one active context message"
-            )
-        active_message = state.messages[0]
-        if not isinstance(active_message, UserMessage):
-            raise RuntimeError(
-                "Compaction replay did not produce one active context message"
-            )
-        await self._runtime.reset_active_context(active_message.text)
-        self._usage.reset_context_tracking()
-        self._last_context_actions = ()
-        self._core_compaction_required = False
-        session.plan.complete_context_reset()
-        return True
-
     def schedule_background_operation(
         self,
         operation: Callable[[], Coroutine[Any, Any, object]],
@@ -739,12 +707,6 @@ class AgentRuntimeCoordinator:
             if self._execution.cancelled:
                 return
             await self._runtime.prompt(user_message)
-            while (
-                not self._execution.cancelled and await self.apply_plan_context_reset()
-            ):
-                if self._execution.cancelled:
-                    break
-                await self._runtime.continue_()
             self.sync_core_outcome()
             self._core_compaction_required = self._context_manager.should_compact(
                 self.context_runtime_state()

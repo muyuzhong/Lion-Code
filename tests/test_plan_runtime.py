@@ -132,9 +132,11 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(permission.mode, "plan")
 
     async def test_approval_choices_apply_expected_exit_transactions(self) -> None:
+        # clear-and-execute 的上下文清空增强依赖 Kernel 特判（PR3 已移除），
+        # 迁移分支降级为与 execute 相同的退出事务。
         cases = (
             ("execute", "acceptEdits", False),
-            ("clear-and-execute", "acceptEdits", True),
+            ("clear-and-execute", "acceptEdits", False),
             ("manual-execute", "dontAsk", False),
             ("unknown", "dontAsk", False),
         )
@@ -159,13 +161,6 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
                     self.assertFalse(runtime.is_active)
                     self.assertIsNone(runtime.file_path)
                     self.assertEqual(outcome.terminate, terminate)
-                    if terminate:
-                        self.assertIn(
-                            "Approved plan:\nmake the change",
-                            runtime.pending_context_reset or "",
-                        )
-                        runtime.complete_context_reset()
-                    self.assertIsNone(runtime.pending_context_reset)
 
     async def test_missing_file_and_no_callback_preserve_existing_behavior(
         self,
@@ -234,22 +229,17 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.file_path, path)
         self.assertEqual(permission.mode, "plan")
 
-    async def test_restore_clears_pending_reset(self) -> None:
-        runtime, _permission, _host = _runtime("default")
-        runtime.initialize()
-        with patch.object(
-            runtime,
-            "_generate_file_path",
-            return_value=Path("missing-plan.md"),
-        ):
-            runtime.enter()
-        runtime.set_approval_fn(AsyncMock(return_value={"choice": "clear-and-execute"}))
-        await runtime.exit()
-        self.assertIsNotNone(runtime.pending_context_reset)
+    async def test_restore_keeps_active_plan_path(self) -> None:
+        runtime, _permission, _host = _runtime("plan")
+        first_path = Path("first.md")
+        with patch.object(runtime, "_generate_file_path", return_value=first_path):
+            runtime.initialize()
 
-        runtime.reset_after_restore()
+        participant = PlanSessionParticipant(runtime)
+        await participant.on_restore_session()
 
-        self.assertIsNone(runtime.pending_context_reset)
+        self.assertTrue(runtime.is_active)
+        self.assertEqual(runtime.file_path, first_path)
 
     async def test_clear_and_restore_keep_one_live_view(self) -> None:
         runtime, permission, host = _runtime("plan")
@@ -268,8 +258,6 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertIs(runtime, view)
         self.assertEqual(runtime.file_path, second_path)
         self.assertEqual(permission.mode, "plan")
-        runtime.reset_after_restore()
-        self.assertEqual(runtime.file_path, second_path)
 
         runtime.toggle()
         self.assertFalse(runtime.is_active)
@@ -294,9 +282,7 @@ class TestPlanRuntime(unittest.IsolatedAsyncioTestCase):
         with patch.object(runtime, "reset_for_new_session") as on_new:
             await participant.on_new_session()
         on_new.assert_called_once_with()
-        with patch.object(runtime, "reset_after_restore") as on_restore:
-            await participant.on_restore_session()
-        on_restore.assert_called_once_with()
+        await participant.on_restore_session()
 
 
 if __name__ == "__main__":

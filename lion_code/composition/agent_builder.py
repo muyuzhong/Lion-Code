@@ -661,7 +661,6 @@ def _build_tooling_graph(
     session_port = SessionStatePort(
         session_state=foundation.session_state,
         session_repository=foundation.session_repository,
-        plan=foundation.plan,
         tool_context=tool_context,
         tool_environment=foundation.tool_environment,
     )

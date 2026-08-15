@@ -12,7 +12,6 @@ from ..domain_ports import NoticeSink
 from ..memory_runtime import ProviderTextQueryService
 from ..observers import TerminalRenderer
 from ..permission_state import PermissionController
-from ..plan_runtime import PlanRuntime
 from ..provider_manager import (
     ConfigurationRecorder,
     MemoryQuerySink,
@@ -217,13 +216,11 @@ class SessionStatePort:
         *,
         session_state: SessionIdentityState,
         session_repository: SessionRepository,
-        plan: PlanRuntime,
         tool_context: Any,
         tool_environment: ToolEnvironment,
     ) -> None:
         self._session_state = session_state
         self._session_repository = session_repository
-        self.plan = plan
         self.tool_context = tool_context
         self.tool_environment = tool_environment
 

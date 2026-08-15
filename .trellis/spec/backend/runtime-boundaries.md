@@ -97,7 +97,6 @@ class PlanState:
     status: PlanStatus
     file_path: Path | None
     previous_permission_mode: PermissionMode | None
-    pending_context_reset: str | None
 
 class PlanToolOutcome:
     content: str
@@ -108,16 +107,12 @@ class PlanRuntime:
     def is_active(self) -> bool: ...
     @property
     def file_path(self) -> Path | None: ...
-    @property
-    def pending_context_reset(self) -> str | None: ...
     def initialize(self) -> None: ...
     def set_approval_fn(self, fn: PlanApprovalFn | None) -> None: ...
     def toggle(self) -> PermissionMode: ...
     def enter(self) -> PlanToolOutcome: ...
     async def exit(self) -> PlanToolOutcome: ...
     def reset_for_new_session(self) -> None: ...
-    def reset_after_restore(self) -> None: ...
-    def complete_context_reset(self) -> None: ...
 
 class PromptComposer:
     def get_system(self) -> str: ...
@@ -524,7 +519,7 @@ other layers invoke complete Plan commands.
 
 The Agent composition root gives one `PlanState` to its only writer, `PlanRuntime`.
 `ToolContext.plan` is the same live read-only View; Agent and lifecycle APIs are
-delegates. Pending reset is completed only after persistence, replay and Core reset.
+delegates.
 
 ### Tool command and capability boundary
 
@@ -570,8 +565,8 @@ Usage has its own executable contract in
 - `AgentRuntimeCoordinator` owns Core assembly, observer subscription order,
   `SessionRecorder`, context projection/compaction, background cleanup, output
   capture, the supplied `ExecutionControl`, shared `UsageLedger` / `BudgetPolicy`,
-  and chat/run orchestration through three narrow host ports
-  (`RuntimeIdentityHost`, `SessionStateHost`, `MemoryTurnHost`).
+  and chat/run orchestration through two narrow host ports
+  (`RuntimeIdentityHost`, `SessionStateHost`).
   Clear/restore/compact/close orchestration is delegated to
   `SessionLifecycle` (in `session_lifecycle.py`), which calls back into the
   coordinator for shared `reset_core_observers` / `reset_session_usage`.
@@ -613,7 +608,9 @@ Usage has its own executable contract in
   classifier confirmations are deliberately not cached.
 - Enter/exit, approval, path and prompt form one Runtime transaction.
   `keep-planning`, read errors and callback errors do not transition state.
-  `clear-and-execute` retains pending until compaction, replay and Core reset finish.
+  `clear-and-execute` no longer clears context: the Kernel no longer special-cases
+  Plan, so it degrades to the `execute` transaction until a Capability re-home PR
+  restores the enhancement.
 - `/clear` regenerates an active path after Session identity reset; restore retains
   it. `PromptComposer.get_system()` renders the live Plan projection on every
   request, while dynamic context replacement updates only the Composer-owned
@@ -782,12 +779,11 @@ Usage has its own executable contract in
 | Repeated Auto classifier `confirm` decision | Ask every time and do not populate the confirmation cache |
 | Initial `permission_mode="plan"` | Create one active Plan path; the live prompt projection is visible on the next request; exit falls back to `default` |
 | Approval returns `keep-planning` or raises | Preserve active status, path and permission; the live Plan projection remains available for retry |
-| `execute` / `clear-and-execute` | Exit to `acceptEdits`; only clear-and-execute records pending and terminates |
+| `execute` / `clear-and-execute` | Exit to `acceptEdits`; clear-and-execute degrades to execute (no context reset) until re-homed |
 | Approval callback absent | Restore the entering mode without claiming user approval |
 | Plan file missing / unreadable | Use `(No plan file found)` when absent; propagate read errors without partial exit |
 | Active Plan clear / restore | Clear generates a new-session path; restore retains the active path |
 | Active Plan new-session path generation fails | Surface the error and preserve the current Plan path, permission, and prompt |
-| Context reset step fails | Keep `pending_context_reset`; never acknowledge a half-applied switch |
 | Child construction | Inherit `plan` and `auto`; map every other parent mode to `bypassPermissions` |
 | Hook trust in `dontAsk` | Continue to deny trust without treating tool permission bypass as Hook trust |
 | Capability tool construction | Capture the narrow `ToolCommand`; do not look up an Agent/controller from `ToolContext` |
@@ -804,7 +800,7 @@ Usage has its own executable contract in
 | Dream read resolves outside project or Memory roots | Deny the tool input before the concrete child executes it |
 | Dream child inherits separate project-hook collections | Clear both the Agent hook list and the existing `ToolContext.hooks` collection |
 | Dream plan is invalid, conflicts, or the Memory snapshot changed | Reject it; atomic apply restores every touched file and index on failure |
-| Plan exit approval with clear-and-execute | Copy `terminate=True` into `ToolResult` and retain pending reset until Core reset succeeds |
+| Plan exit approval with clear-and-execute | Copy `terminate` from `PlanToolOutcome` into `ToolResult`; clear-and-execute no longer terminates |
 | Dynamic wakeup command | Clamp delay, update `AutonomyRuntime.pending_wakeup`, and expose the tool only in the dynamic loop scope |
 
 ## 5. Good / Base / Bad Cases
@@ -852,7 +848,8 @@ Usage has its own executable contract in
   multiple writers and requires manual synchronization.
 - Good: `PlanRuntime.enter()` updates its state and permission; the existing
   `ToolContext.plan` and `PlanPromptLayer` immediately observe the new `Path`.
-- Good: clear-and-execute keeps pending until replay and Core reset succeed.
+- Good: clear-and-execute degrades to the `execute` transaction; the Runtime never
+  reads Plan state to drive a context transition.
 - Bad: copying the path, clearing pending early, or rebuilding Plan prompt in a
   lifecycle layer creates a second writer; prompt composition must read the live
   `PlanView` instead.
@@ -972,10 +969,10 @@ exception, or silently broaden an allowlist to make a regression pass.
   boundaries, live mode reads, default confirmation caching, Auto non-caching, and
   narrow confirmation writes.
 - `tests/test_plan_runtime.py`: initialization, permissions, approvals, file errors,
-  clear/restore, prompt refresh, pending and View identity.
+  clear/restore, prompt refresh, and View identity.
 - `tests/tooling/test_agent_runtime.py` and
   `tests/integration/test_agent_core_runtime.py`: Agent facade delegation, existing
-  live View, clear-and-execute continuation, and reset failure.
+  live View, clear-and-execute degrade, and reset failure.
 - `tests/tooling/test_skill_registry_view.py`, `tests/test_hooks.py`, and
   `tests/integration/test_agent_core_runtime.py`: read-only Agent facade, live child
   inheritance, `dontAsk` Hook trust, and Plan approval transitions without
@@ -1076,7 +1073,7 @@ plan_path = agent.tool_context.plan.file_path
 outcome = agent.plan.enter()
 await agent.plan.exit()
 agent.plan.reset_for_new_session()
-agent.plan.complete_context_reset()
+agent.plan.exit()
 session = LionCodingSession(backend, terminal_output=False)
 session.set_notice_fn(app_notice)
 storage = repository.storage_for(session_id)

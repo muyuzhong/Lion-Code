@@ -42,7 +42,6 @@ class PlanState:
     status: PlanStatus = "inactive"
     file_path: Path | None = None
     previous_permission_mode: PermissionMode | None = None
-    pending_context_reset: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,10 +72,6 @@ class PlanRuntime:
     def file_path(self) -> Path | None:
         return self._state.file_path
 
-    @property
-    def pending_context_reset(self) -> str | None:
-        return self._state.pending_context_reset
-
     def initialize(self) -> None:
         """初始权限为 Plan 时建立激活事务。"""
 
@@ -86,7 +81,6 @@ class PlanRuntime:
         self._state.status = "active"
         self._state.file_path = path
         self._state.previous_permission_mode = None
-        self._state.pending_context_reset = None
 
     def set_approval_fn(self, fn: PlanApprovalFn | None) -> None:
         self._approval_fn = fn
@@ -145,29 +139,14 @@ class PlanRuntime:
                 "call exit_plan_mode again."
             )
 
+        # clear-and-execute 的上下文清空增强（清空 + 自动 continue）依赖 Kernel
+        # 对 Plan 的特判，PR3 已移除；迁移分支暂时降级为 execute 的事务。
         target_mode: PermissionMode = (
             "acceptEdits"
             if choice in {"execute", "clear-and-execute"}
             else self._state.previous_permission_mode or "default"
         )
-        saved_plan_path = self._state.file_path
-        pending_reset = None
-        if choice == "clear-and-execute":
-            pending_reset = (
-                f"Approved plan:\n{plan_content}\n\nProceed with implementation."
-            )
-        self._leave(target_mode, pending_context_reset=pending_reset)
-
-        if choice == "clear-and-execute":
-            self._host._emit_notice(
-                f"Plan approved. Context cleared, executing in {target_mode} mode."
-            )
-            return PlanToolOutcome(
-                "User approved the plan. Context was cleared. Permission mode: "
-                f"{target_mode}\n\nPlan file: {saved_plan_path}\n\n"
-                f"## Approved Plan:\n{plan_content}\n\nProceed with implementation.",
-                terminate=True,
-            )
+        self._leave(target_mode)
 
         self._host._emit_notice(f"Plan approved. Executing in {target_mode} mode.")
         return PlanToolOutcome(
@@ -176,22 +155,10 @@ class PlanRuntime:
         )
 
     def reset_for_new_session(self) -> None:
-        """清理 pending reset，并为新会话重新生成激活 Plan 路径。"""
+        """为新会话重新生成激活 Plan 路径。"""
 
-        path = self._generate_file_path() if self.is_active else None
-        self._state.pending_context_reset = None
-        if path is not None:
-            self._state.file_path = path
-
-    def reset_after_restore(self) -> None:
-        """恢复 JSONL 时清理未完成 reset，但保留已有 Plan 路径。"""
-
-        self._state.pending_context_reset = None
-
-    def complete_context_reset(self) -> None:
-        """仅在 Core reset 与回放成功后确认 pending reset 完成。"""
-
-        self._state.pending_context_reset = None
+        if self.is_active:
+            self._state.file_path = self._generate_file_path()
 
     def _enter(self) -> None:
         path = self._generate_file_path()
@@ -200,19 +167,12 @@ class PlanRuntime:
         self._state.status = "active"
         self._state.file_path = path
         self._state.previous_permission_mode = previous_mode
-        self._state.pending_context_reset = None
 
-    def _leave(
-        self,
-        target_mode: PermissionMode,
-        *,
-        pending_context_reset: str | None = None,
-    ) -> None:
+    def _leave(self, target_mode: PermissionMode) -> None:
         self._permission.set_mode(target_mode)
         self._state.status = "inactive"
         self._state.file_path = None
         self._state.previous_permission_mode = None
-        self._state.pending_context_reset = pending_context_reset
 
     def _generate_file_path(self) -> Path:
         directory = Path.home() / ".claude" / "plans"
