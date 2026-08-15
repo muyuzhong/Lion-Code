@@ -6,7 +6,6 @@ import asyncio
 import unittest
 from pathlib import Path
 
-
 from lion_code.adapters import adapt_active_tools, adapt_lion_tool, to_core_result
 from lion_code.core import CancellationToken
 from lion_code.permission_state import PermissionController, PermissionState

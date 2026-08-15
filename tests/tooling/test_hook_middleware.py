@@ -4,7 +4,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-
 from lion_code.core.cancellation import CancellationToken
 from lion_code.hooks import HookChainResult, HookOutcome, HookResult
 from lion_code.permission_state import PermissionController, PermissionState

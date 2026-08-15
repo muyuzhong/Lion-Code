@@ -101,7 +101,6 @@ class SessionMemoryCoordinator:
         repository: SessionMemoryRepository | None = None,
         transcript: TranscriptView,
         cancellation: CancellationView,
-        permission: PermissionView,
         load_project_context: Callable[
             [ProjectIdentity], tuple[ProjectContextFile, ...]
         ],
@@ -121,7 +120,6 @@ class SessionMemoryCoordinator:
 
         self._transcript = transcript
         self._cancellation = cancellation
-        self._permission = permission
         self._load_project_context = load_project_context
         self._notices = notices
         self._query = query

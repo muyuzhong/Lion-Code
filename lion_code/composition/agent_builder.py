@@ -756,7 +756,6 @@ def _build_session_graph(
         repository=foundation.dependencies.session_memory_repository,
         transcript=runtime_coordinator.core_runtime,
         cancellation=foundation.execution.cancellation,
-        permission=foundation.permission_controller,
         load_project_context=lambda project_identity: tuple(
             foundation.context_loader(foundation.cwd, project_identity)
         ),

@@ -1342,7 +1342,9 @@ def test_permission_state_has_one_owner_and_live_read_ports() -> None:
         if _source_key(path) != "permission_state.py"
         and _attribute_call_sites(_tree(path), "set_mode")
     }
-    assert not set_mode_sites, f"set_mode 只允许在 permission_state.py 内部出现: {set_mode_sites}"
+    assert not set_mode_sites, (
+        f"set_mode 只允许在 permission_state.py 内部出现: {set_mode_sites}"
+    )
 
     middleware_tree = _tree(SOURCE_ROOT / "tooling" / "middleware.py")
     assert not _contains_attr_call(middleware_tree, "set_mode")
@@ -1461,9 +1463,7 @@ def test_plan_state_has_one_owner_and_live_read_port() -> None:
     assert 'mode != "auto"' not in middleware_source
 
     # PlanRuntime 不再依赖 PermissionController（PR4）。
-    plan_runtime_source = (SOURCE_ROOT / "plan_runtime.py").read_text(
-        encoding="utf-8"
-    )
+    plan_runtime_source = (SOURCE_ROOT / "plan_runtime.py").read_text(encoding="utf-8")
     assert "PermissionController" not in plan_runtime_source
     assert "permission_state" not in plan_runtime_source
 
