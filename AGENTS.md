@@ -60,6 +60,16 @@
 - 本地 master / 远端引用可能陈旧。判断“某 PR 是否已落地”用 **tree 对比**
   （`git diff origin/master <sha> --stat` 为空即内容一致），不要只看 commit 祖先——
   本项目用 squash 合并并删除中间分支，历史拓扑不可靠。
+- **链式 PR（下游基于上游分支）必须在上游合并后 rebase 到新 master 再 force-push**，
+  否则 GitHub 报 `CONFLICTING`。原因：上游 squash 合并后，下游分支里的上游提交
+  与新 master 历史拓扑对不上，GitHub 无法判断下游是否已含上游内容。
+  步骤：`git fetch origin master && git rebase origin/master`（git 会
+  自动跳过已 upstream 的提交，报 "patch contents already upstream"）；
+  有冲突时逐文件解决后 `git rebase --continue`（PR4/PR5 实际冲突通常是
+  两侧已分别修过同一处，取语义正确的一侧）；完成后
+  `git push --force-with-lease origin <branch>`。
+  本地 master 引用陈旧时先 `git checkout -B master origin/master` 对齐，
+  否则 `gh pr merge` 会报 "not possible to fast-forward" 警告（squash 合并实际仍会成功）。
 
 ### 分层重构（改 Kernel 层代码）
 
