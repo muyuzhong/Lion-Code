@@ -63,6 +63,13 @@ class _ToolRunOutcome:
     is_error: bool
 
 
+# stop_reason 到收尾事件的映射：error 发 TurnFailedEvent，aborted 发 CancelledEvent。
+_TERMINAL_EVENT_TYPES: dict[str, type[TurnFailedEvent] | type[CancelledEvent]] = {
+    "error": TurnFailedEvent,
+    "aborted": CancelledEvent,
+}
+
+
 async def run_agent_loop(
     *,
     provider: ModelProvider,
@@ -176,10 +183,7 @@ async def run_agent_loop(
             messages.append(assistant)
             new_messages.append(assistant)
             if assistant.stop_reason in {"error", "aborted"}:
-                if assistant.stop_reason == "error":
-                    yield TurnFailedEvent(message=assistant)
-                else:
-                    yield CancelledEvent(message=assistant)
+                yield _TERMINAL_EVENT_TYPES[assistant.stop_reason](message=assistant)
                 yield TurnEndEvent(message=assistant)
                 yield AgentEndEvent(messages=new_messages)
                 return
