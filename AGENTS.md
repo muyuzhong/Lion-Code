@@ -36,12 +36,24 @@
 - 本地快速验证可用 unittest 风格测试：
   `PYTHONPATH=tests python3 -m unittest discover tests -p "test_*.py"`；
   依赖 pytest fixture 的测试文件需在 CI 验证。
+- **推送前必须本地跑全套质量门禁并同步基线**，否则 PR 推送后 CI 必红：
+  `python -m ruff check lion_code tests scripts --output-format=json > ruff.json && python scripts/check_quality_baseline.py ruff-check ruff.json --status 1 --baseline docs/quality-baseline-2026-08.json`
+  ruff format / mypy / radon / vulture 同理（参照 `.github/workflows/ci.yml` 的调用方式）。
+  门禁报 `new fingerprints` 时先看输出：
+  - 新违规（代码层缺陷，如 F821 未定义名、F401 未用 import、I001 排序）→ 修代码；
+  - 基线行号漂移（改文件导致指纹行号变化，指纹本身无新增）→ 更新
+    `docs/quality-baseline-2026-08.json` 中对应条目，随代码一起提交。
+  只依赖 CI 事后报错＝每轮推送必红一次再修。
 - 提交前静态预检：`py_compile` + 自写 AST 扫描（未使用变量、字段引用）。
   CI 的 ruff/mypy/coverage 都与基线（`docs/quality-baseline-2026-08.json`）比对，
   **新增任何违规（含 F841 未使用变量）都会红**。
 - CI（`.github/workflows/ci.yml`）只在 `push: master` 与 `pull_request` 触发，分支推送不跑，
   必须开 PR。所有门禁 `if: always()`，一次暴露全部问题；`gh run watch --exit-status` 等待结果。
 - 推送 amend / force-push 会触发新的 CI run。
+- 本地与 CI 行尾/编码差异是假阳性来源：WSL 编辑会写 LF，Windows checkout 是 CRLF
+  （`core.autocrlf=true`），`git diff` 可能把整个文件当改动。提交前用 Windows 侧 git
+  （`D:\Git\cmd\git.exe`）复核 `git diff --stat`，只提交真实内容改动；用
+  `git checkout HEAD -- <file>` 恢复被行尾污染的副本后重新编辑。
 
 ### GitHub PR 链
 
