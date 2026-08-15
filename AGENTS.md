@@ -28,3 +28,57 @@
 - PR 描述必须包含：迁移的状态所有权、保持不变的不变量、测试矩阵、行数与依赖变化、回滚点。
 - 出现问题时可以单独回滚，而不是回滚整条路线。
 - 大于 10 个提交或 20 个文件的 PR 需要拆分，除非改动是机械重命名或自动生成。
+
+## 工程经验（CI 门禁 / 分层重构）
+
+### 本地验证与 CI 门禁
+
+- 本地快速验证可用 unittest 风格测试：
+  `PYTHONPATH=tests python3 -m unittest discover tests -p "test_*.py"`；
+  依赖 pytest fixture 的测试文件需在 CI 验证。
+- 提交前静态预检：`py_compile` + 自写 AST 扫描（未使用变量、字段引用）。
+  CI 的 ruff/mypy/coverage 都与基线（`docs/quality-baseline-2026-08.json`）比对，
+  **新增任何违规（含 F841 未使用变量）都会红**。
+- CI（`.github/workflows/ci.yml`）只在 `push: master` 与 `pull_request` 触发，分支推送不跑，
+  必须开 PR。所有门禁 `if: always()`，一次暴露全部问题；`gh run watch --exit-status` 等待结果。
+- 推送 amend / force-push 会触发新的 CI run。
+
+### GitHub PR 链
+
+- 本地 master / 远端引用可能陈旧。判断“某 PR 是否已落地”用 **tree 对比**
+  （`git diff origin/master <sha> --stat` 为空即内容一致），不要只看 commit 祖先——
+  本项目用 squash 合并并删除中间分支，历史拓扑不可靠。
+
+### 分层重构（改 Kernel 层代码）
+
+- 四层边界由 `tests/architecture/*`（AST 门禁）+ `_boundaries.py` + import-linter 强制执行，
+  并被 `.trellis/spec/backend/*.md` 记录。动 Kernel 层代码前先读
+  `four-layer-ownership.md` / `runtime-boundaries.md`，改完同步更新架构测试期望值与 spec，
+  否则 CI 红。
+- 删除跨层特殊行为的验证路径：改 → `py_compile` → 定向 unittest → 全量可跑 unittest →
+  用架构测试 helper（`_tree` / `_class_annotated_fields` / `_attribute_call_sites` 等）写临时脚本
+  复核门禁 → 提交 → 推送 → 等 CI。
+- 被移除行为（等待 re-home）的测试用 `@unittest.skip(_REHOME)` 标注恢复条件，跟随
+  `tests/memory_runtime/test_core_integration.py` 的 PR1 模式，保留文档价值与恢复点，不要删除。
+
+<!-- TRELLIS:START -->
+# Trellis Instructions
+
+These instructions are for AI assistants working in this project.
+
+This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
+
+- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
+- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
+- `.trellis/workspace/` — per-developer journals and session traces
+- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
+
+If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
+
+If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
+- `.agents/skills/` — reusable Trellis skills
+- `.codex/agents/` — optional custom subagents
+
+Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
+
+<!-- TRELLIS:END -->
