@@ -124,15 +124,8 @@ def _matches_rule(
     return value == pattern
 
 
-def _same_path(first: str, second: Path) -> bool:
-    try:
-        return Path(first).resolve() == second.resolve()
-    except (OSError, ValueError):
-        return first == str(second)
-
-
 class PermissionPolicy:
-    """按硬边界、模式和 Capability 的固定优先级生成权限决定。"""
+    """基于 ToolCapabilities 的权限规则与危险操作判定。"""
 
     def __init__(self, *, cwd: Path | None = None, home: Path | None = None):
         self.cwd = (cwd or Path.cwd()).resolve()
@@ -156,32 +149,12 @@ class PermissionPolicy:
         tool: LionTool,
         arguments: Mapping[str, JSONValue],
         mode: PermissionMode,
-        plan_file_path: Path | None,
     ) -> PermissionDecision | None:
-        """先执行显式 deny 与 Plan 硬约束，二者不能被任何模式绕过。"""
+        """先执行显式 deny，不能被任何模式绕过。"""
         if self._rule_action(tool, arguments) == "deny":
             return PermissionDecision(
                 "deny",
                 f"Denied by permission rule for {tool.name}",
-            )
-
-        capabilities = tool.capabilities
-        if mode != "plan":
-            return None
-        if capabilities.mutates_workspace:
-            target = str(arguments.get("file_path") or arguments.get("path") or "")
-            if plan_file_path and target and _same_path(target, plan_file_path):
-                return PermissionDecision("allow")
-            return PermissionDecision(
-                "deny",
-                f"Blocked in plan mode: {tool.name}",
-            )
-        if capabilities.executes_process:
-            return PermissionDecision("deny", "Shell commands blocked in plan mode")
-        if not capabilities.allowed_in_plan:
-            return PermissionDecision(
-                "deny",
-                f"Blocked in plan mode: {tool.name}",
             )
         return None
 
@@ -191,13 +164,11 @@ class PermissionPolicy:
         tool: LionTool,
         arguments: Mapping[str, JSONValue],
         mode: PermissionMode,
-        plan_file_path: Path | None,
     ) -> PermissionDecision:
         hard = self.check_hard_boundaries(
             tool=tool,
             arguments=arguments,
             mode=mode,
-            plan_file_path=plan_file_path,
         )
         if hard is not None:
             return hard

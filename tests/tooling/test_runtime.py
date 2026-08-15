@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from core.fakes import FakePlanView
 
 from lion_code.core.cancellation import CancellationToken
 from lion_code.permission_state import PermissionController, PermissionState
@@ -25,7 +24,6 @@ def _context(registry):
         cwd=Path.cwd(),
         registry=registry,
         permission=PermissionController(PermissionState("default")),
-        plan=FakePlanView(),
         read_file_state={},
     )
 
@@ -50,7 +48,6 @@ class TestToolRuntime(unittest.IsolatedAsyncioTestCase):
             cwd=Path.cwd(),
             registry=registry,
             permission=PermissionController(PermissionState("default")),
-            plan=FakePlanView(),
             read_file_state={},
         )
 

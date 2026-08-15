@@ -61,8 +61,6 @@ PermissionMode = Literal[
     "acceptEdits",
     "bypassPermissions",
     "dontAsk",
-    "plan",
-    "auto",
 ]
 
 class PermissionView(Protocol):
@@ -96,7 +94,6 @@ class PlanView(Protocol):
 class PlanState:
     status: PlanStatus
     file_path: Path | None
-    previous_permission_mode: PermissionMode | None
 
 class PlanToolOutcome:
     content: str
@@ -107,9 +104,8 @@ class PlanRuntime:
     def is_active(self) -> bool: ...
     @property
     def file_path(self) -> Path | None: ...
-    def initialize(self) -> None: ...
     def set_approval_fn(self, fn: PlanApprovalFn | None) -> None: ...
-    def toggle(self) -> PermissionMode: ...
+    def toggle(self) -> str: ...
     def enter(self) -> PlanToolOutcome: ...
     async def exit(self) -> PlanToolOutcome: ...
     def reset_for_new_session(self) -> None: ...
@@ -304,7 +300,6 @@ class SessionMemoryCoordinator:
         repository: SessionMemoryRepository | None,
         transcript: TranscriptView,
         cancellation: CancellationView,
-        permission: PermissionView,
         load_project_context: Callable[
             [ProjectIdentity], tuple[ProjectContextFile, ...]
         ],
@@ -334,7 +329,6 @@ class SubagentFactory:
         registry: ToolRegistry,
         environment: ToolEnvironment,
         child_config: Callable[[], ChildAgentConfig],
-        permission: PermissionView,
     ) -> None: ...
 ```
 
@@ -511,15 +505,18 @@ calling `AgentHarness.cancel()` alone is a no-op because the Harness does not ow
 the external token.
 
 For permission state, `PermissionController` owns one `PermissionState` containing
-the active `PermissionMode` and `confirmed_values`. `Agent.permission_mode` is a
-read-only facade, `ToolContext.permission` is the same live `PermissionView`, and
-`PermissionMiddleware` receives only a `PermissionConfirmationSink` for cache writes.
-`PlanRuntime` is the only business caller of `PermissionController.set_mode()`;
-other layers invoke complete Plan commands.
+only the generic `PermissionMode` values (`default`, `acceptEdits`, `bypassPermissions`,
+`dontAsk`). `Agent.permission_mode` is a read-only facade, `ToolContext.permission` is
+the same live `PermissionView`, and `PermissionMiddleware` receives only a
+`PermissionConfirmationSink` for cache writes. PR4 removed `plan`/`auto` from the
+permission vocabulary: Harness Permission 只负责通用安全语义，不再认识 Plan 或
+Autonomy 产品模式，因此也不存在业务方调用 `PermissionController.set_mode()`。
 
-The Agent composition root gives one `PlanState` to its only writer, `PlanRuntime`.
-`ToolContext.plan` is the same live read-only View; Agent and lifecycle APIs are
-delegates.
+Plan 是 Capability 层产品概念：composition root 给 `PlanRuntime` 一个 `PlanState`，
+`PlanRuntime` 只管理激活状态与审批事务，不读写 Permission。`Agent.plan` 是同一
+PlanRuntime 的 live View；enter/exit/toggle 与审批都是完整的 Plan 命令。Plan 期间
+的读写限制由未来的 `PlanRestrictedPolicy`（Composition / Profile 注入）负责，
+当前 Plan Capability 只通过 `PlanPromptLayer` 表达只读约束。
 
 ### Tool command and capability boundary
 
@@ -600,12 +597,14 @@ Usage has its own executable contract in
   `CancellationToken` reaches the Provider stream and Tool adapter. `ToolContext`
   stores `session: SessionView` and `cancellation: CancellationView`, never
   `session_id`, `cancellation_fn`, or a synthesized callback mirror.
-- Permission policy remains stateless. It receives `PermissionMode` plus the current
-  `Path | None` Plan file and preserves explicit-deny and Plan hard-boundary
-  precedence. Middleware reads `ToolContext.permission.mode`, `is_confirmed()`, and
-  `ToolContext.plan.file_path` for every call;
-  default-mode approvals are cached through the narrow confirmation sink, while Auto
-  classifier confirmations are deliberately not cached.
+- Permission policy remains stateless. It receives only the generic
+  `PermissionMode` and preserves explicit-deny precedence. Middleware reads
+  `ToolContext.permission.mode` and `is_confirmed()` for every call; default-mode
+  approvals are cached through the narrow confirmation sink. PR4 removed the Plan
+  hard-boundary and the built-in LLM auto classifier from this layer: product
+  restrictions belong to future injected policies
+  (`PlanRestrictedPolicy` / `LLMPermissionPolicy`), which the base middleware never
+  names.
 - Enter/exit, approval, path and prompt form one Runtime transaction.
   `keep-planning`, read errors and callback errors do not transition state.
   `clear-and-execute` no longer clears context: the Kernel no longer special-cases
@@ -626,8 +625,9 @@ Usage has its own executable contract in
 - Child and Dream agents inherit the parent's stored Provider configuration and
   `terminal_output` setting. They must not infer credentials from a transport client.
 - `SubagentFactory` owns child tool selection and construction from the concrete
-  registry/environment, typed child-config provider, and live permission View. It
-  imports `Agent` only while constructing a child to avoid a module-level cycle.
+  registry/environment and typed child-config provider. It imports `Agent` only
+  while constructing a child to avoid a module-level cycle; children are always
+  built with `bypassPermissions` (PR4 removed plan/auto inheritance).
   `SubagentExecutor` owns child execution, status
   presentation, usage accounting, expected error text, and resource closure;
   `Agent` supplies the composition-time factory, ledger, and status callback.
@@ -655,10 +655,12 @@ Usage has its own executable contract in
   cancellation, concrete registry, confirmation, Ledger, and Policy separately.
   `LearningRuntime` receives transcript, query, and an immutable cwd only.
 - `SessionMemoryCoordinator` receives project identity/repository, transcript,
-  cancellation and permission Views, the typed project-context loader, notice,
+  cancellation View, the typed project-context loader, notice,
   current Memory query service, Dream command, sub-agent flag, status callback,
   and refresh callback. It does not receive Agent, ToolContext, ToolEnvironment,
-  ToolRegistry, Provider, or Core Runtime implementations.
+  ToolRegistry, Provider, Permission, or Core Runtime implementations.
+  The Plan read-only guard for `/dream` moved to the `Agent` facade
+  (`Agent.dream()` checks the live Plan activation state).
 - `DreamCoordinator` is pure domain coordination over repository, identity,
   Session Memory View, typed child factory/runner, and the child usage command.
   The concrete restricted child lives in `dream_adapter.py`, selects only the
@@ -776,15 +778,15 @@ Usage has its own executable contract in
 | New chat after an aborted run | Reset cancellation at the operation boundary before setup and complete normally |
 | Controller changes mode after ToolContext construction | The existing `PermissionView` observes the new mode without replacement or synchronization |
 | Repeated default-mode confirmation reason | Ask once, then read the Controller-owned confirmation cache |
-| Repeated Auto classifier `confirm` decision | Ask every time and do not populate the confirmation cache |
-| Initial `permission_mode="plan"` | Create one active Plan path; the live prompt projection is visible on the next request; exit falls back to `default` |
-| Approval returns `keep-planning` or raises | Preserve active status, path and permission; the live Plan projection remains available for retry |
-| `execute` / `clear-and-execute` | Exit to `acceptEdits`; clear-and-execute degrades to execute (no context reset) until re-homed |
-| Approval callback absent | Restore the entering mode without claiming user approval |
+| Base PermissionMode value | Only `default` / `acceptEdits` / `bypassPermissions` / `dontAsk`; never `plan` or `auto` |
+| Initial Plan activation | `--plan` / `/plan` / `enter_plan_mode` call a complete Plan command; Plan activation never changes the permission mode |
+| Approval returns `keep-planning` or raises | Preserve active status and path; the live Plan projection remains available for retry |
+| `execute` / `clear-and-execute` | End Plan state without changing the permission mode; clear-and-execute degrades to execute (no context reset) until re-homed |
+| Approval callback absent | Exit Plan state without claiming user approval |
 | Plan file missing / unreadable | Use `(No plan file found)` when absent; propagate read errors without partial exit |
 | Active Plan clear / restore | Clear generates a new-session path; restore retains the active path |
-| Active Plan new-session path generation fails | Surface the error and preserve the current Plan path, permission, and prompt |
-| Child construction | Inherit `plan` and `auto`; map every other parent mode to `bypassPermissions` |
+| Active Plan new-session path generation fails | Surface the error and preserve the current Plan path |
+| Child construction | Always `bypassPermissions` (PR4 removed plan/auto inheritance) |
 | Hook trust in `dontAsk` | Continue to deny trust without treating tool permission bypass as Hook trust |
 | Capability tool construction | Capture the narrow `ToolCommand`; do not look up an Agent/controller from `ToolContext` |
 | Inline Skill | Return the resolved activation prompt without constructing a child |
@@ -838,21 +840,26 @@ Usage has its own executable contract in
   recreates mirrored state and makes lifecycle transitions require manual sync.
 - Bad: resetting cancellation inside an async generator can erase a cancel command
   issued after generator construction but before its first iteration.
-- Good: an existing `ToolContext` observes `controller.set_mode("plan")` through its
-  live `PermissionView`, and middleware records a default approval through
-  `PermissionConfirmationSink.confirm()`.
-- Base: `Agent.permission_mode`, Application, TUI, Session Memory, and child-agent
+- Good: an existing `ToolContext` observes `controller.set_mode("acceptEdits")`
+  through its live `PermissionView`, and middleware records a default approval
+  through `PermissionConfirmationSink.confirm()`.
+- Base: `Agent.permission_mode`, Application, TUI, and child-agent
   construction read the current typed facade without receiving `PermissionState`.
 - Bad: assigning `Agent.permission_mode`, copying it into
   `ToolContext.permission_mode`, or mutating `confirmed_values` in middleware creates
   multiple writers and requires manual synchronization.
-- Good: `PlanRuntime.enter()` updates its state and permission; the existing
-  `ToolContext.plan` and `PlanPromptLayer` immediately observe the new `Path`.
+- Good: `PlanRuntime.enter()` updates its own Plan state and file path; the live
+  `Agent.plan` and `PlanPromptLayer` immediately observe the new `Path`, while the
+  permission mode stays untouched.
 - Good: clear-and-execute degrades to the `execute` transaction; the Runtime never
-  reads Plan state to drive a context transition.
+  reads Plan state to drive a context transition, and Permission never reads Plan
+  state to drive a decision.
 - Bad: copying the path, clearing pending early, or rebuilding Plan prompt in a
   lifecycle layer creates a second writer; prompt composition must read the live
   `PlanView` instead.
+- Bad: PermissionMiddleware/PermissionPolicy branching on `mode == "plan"` or
+  `mode == "auto"`, or reading `ToolContext.plan` / `auto_permission_fn`,
+  reintroduces product knowledge into Harness Permission.
 - Good: `Agent` composes `AutonomyRuntime` from separate conversation, transcript,
   query, notice, cancellation, registry, confirmation, usage, and budget objects.
 - Base: `LearningRuntime` receives only the canonical transcript View, one
@@ -914,11 +921,15 @@ also rejects patterns an import graph cannot express:
   `SessionLifecycle`.
 - `Agent.permission_mode` or `_confirmed_paths` instance fields,
   `ToolContext.permission_mode` or `confirmed_paths`, Permission state construction
-  outside the Agent composition root, direct state writes outside
-  `permission_state.py`, or `set_mode()` business calls outside `plan_runtime.py`.
-- Former Agent Plan fields/helpers; `ToolContext.plan_file_path`; PlanState
-  construction or mutation outside its owner; or lifecycle code rebuilding Plan
-  state, permission or prompt by hand.
+  outside the Agent composition root, or direct state writes outside
+  `permission_state.py`. PR4 起不存在任何 `set_mode()` 业务调用方。
+- Former Agent Plan fields/helpers; `ToolContext.plan_file_path` **以及
+  `ToolContext.plan` / `auto_permission_fn` 字段**; PlanState
+  construction or mutation outside its owner; lifecycle code rebuilding Plan
+  state or prompt by hand; PermissionMiddleware/PermissionPolicy 中的
+  `mode == "plan"` / `mode == "auto"` 分支; tooling 包 import
+  `plan_runtime` / `autonomy_runtime`; `ToolCapabilities.allowed_in_plan`;
+  `DeferredAutoPermission` 或任何同名 deferred 权限结构。
 - Usage single-writer, composition, projection, and reverse-import scanners follow
   [Usage Ownership](./usage-ownership.md).
 - Capability SPI source importing `agent` or
@@ -965,11 +976,13 @@ exception, or silently broaden an allowlist to make a regression pass.
   Session identity, ToolContext observes the live view, and a cancelled run can be
   followed by a successful turn.
 - `tests/tooling/test_permission_policy.py` and
-  `tests/tooling/test_permission_middleware.py`: explicit deny and Plan hard
-  boundaries, live mode reads, default confirmation caching, Auto non-caching, and
-  narrow confirmation writes.
-- `tests/test_plan_runtime.py`: initialization, permissions, approvals, file errors,
-  clear/restore, prompt refresh, and View identity.
+  `tests/tooling/test_permission_middleware.py`: explicit deny, dangerous
+  confirmation, `dontAsk` auto-deny, live mode reads, default confirmation
+  caching, and narrow confirmation writes (Plan hard boundaries and Auto
+  classifier moved out of Harness Permission by PR4).
+- `tests/test_plan_runtime.py`: activation toggles, approvals, file errors,
+  clear/restore, prompt refresh, and View identity — Plan state never touches
+  the permission mode.
 - `tests/tooling/test_agent_runtime.py` and
   `tests/integration/test_agent_core_runtime.py`: Agent facade delegation, existing
   live View, clear-and-execute degrade, and reset failure.
@@ -1032,6 +1045,8 @@ self._anthropic_messages = []
 self.tool_context.session_id = self.session_id
 self.tool_context.cancellation_fn = lambda: self._aborted
 self.permission_mode = "plan"
+self.tool_context.plan = self.plan
+self.tool_context.auto_permission_fn = self._classify_tool_call
 self.tool_context.permission_mode = self.permission_mode
 self._plan_file_path = self._generate_plan_file_path()
 self.tool_context.plan_file_path = self._plan_file_path
@@ -1069,7 +1084,8 @@ session_id = agent.tool_context.session.id
 cancelled = agent.tool_context.cancellation.cancelled
 permission_mode = agent.tool_context.permission.mode
 confirmed = agent.tool_context.permission.is_confirmed(reason)
-plan_path = agent.tool_context.plan.file_path
+plan_active = agent.plan.is_active
+plan_path = agent.plan.file_path
 outcome = agent.plan.enter()
 await agent.plan.exit()
 agent.plan.reset_for_new_session()

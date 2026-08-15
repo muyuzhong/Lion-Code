@@ -99,12 +99,12 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         )
         _ChildAgent.last_instance.close.assert_awaited_once_with()
 
-    async def test_subagent_inherits_current_api_configuration_and_auto_mode(self):
+    async def test_subagent_uses_current_api_configuration_and_bypass_permission(self):
         with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
             parent = Agent(
                 api_base="https://example.test/v1",
                 api_key="test-key",
-                permission_mode="auto",
+                permission_mode="default",
             )
 
         with (
@@ -131,10 +131,13 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             "https://example.test/v1",
         )
         self.assertEqual(_ChildAgent.created_with["api_key"], "test-key")
-        self.assertEqual(_ChildAgent.created_with["permission_mode"], "auto")
+        # PR4：Permission 不再有 plan/auto 模式，子 Agent 一律 bypassPermissions。
+        self.assertEqual(
+            _ChildAgent.created_with["permission_mode"], "bypassPermissions"
+        )
         self.assertTrue(_ChildAgent.created_with["is_sub_agent"])
 
-    async def test_fork_paths_read_api_and_permission_at_construction_time(self):
+    async def test_fork_paths_read_api_at_construction_time(self):
         with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
             parent = Agent(
                 api_base="https://old.example.test/v1",
@@ -145,7 +148,6 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             api_base="https://new.example.test/v1",
             api_key="new-key",
         )
-        parent._permission_controller.set_mode("auto")
         skill_result = {
             "context": "fork",
             "allowed_tools": ["read_file"],
@@ -157,11 +159,6 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             patch("lion_code.skills.execute_skill", return_value=skill_result),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
-            patch.object(
-                parent._autonomy,
-                "_classify_tool_call",
-                new=AsyncMock(return_value={"action": "allow"}),
-            ),
         ):
             await parent._execute_tool_call(
                 "agent",
@@ -173,7 +170,6 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             )
             agent_kwargs = dict(_ChildAgent.created_with)
 
-            parent._permission_controller.set_mode("plan")
             await parent._execute_tool_call(
                 "skill", {"skill_name": "research", "args": "find docs"}
             )
@@ -183,17 +179,17 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(kwargs["model"], "current-model")
             self.assertEqual(kwargs["api_base"], "https://new.example.test/v1")
             self.assertEqual(kwargs["api_key"], "new-key")
-        self.assertEqual(agent_kwargs["permission_mode"], "auto")
-        self.assertEqual(skill_kwargs["permission_mode"], "plan")
+        self.assertEqual(agent_kwargs["permission_mode"], "bypassPermissions")
+        self.assertEqual(skill_kwargs["permission_mode"], "bypassPermissions")
 
     async def test_permission_mode_is_a_read_only_facade(self):
         with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
-            parent = Agent(api_key="test-key", permission_mode="auto")
+            parent = Agent(api_key="test-key", permission_mode="dontAsk")
 
         with self.assertRaises(AttributeError):
-            setattr(parent, "permission_mode", "plan")
+            setattr(parent, "permission_mode", "bypassPermissions")
 
-        self.assertEqual(parent.permission_mode, "auto")
+        self.assertEqual(parent.permission_mode, "dontAsk")
 
     async def test_agent_tool_error_emits_end_before_closing_without_charging_usage(
         self,

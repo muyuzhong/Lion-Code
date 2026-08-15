@@ -24,6 +24,7 @@ class FakeCodingSessionBackend:
     provider_name: str = "fake"
     permission_mode: PermissionMode = "default"
     api_configured: bool = True
+    plan_mode: bool = False
     messages: tuple[AgentMessage, ...] = ()
     prompt_scripts: list[list[AgentEvent]] = field(default_factory=list)
     continue_scripts: list[list[AgentEvent]] = field(default_factory=list)
@@ -186,8 +187,8 @@ class FakeCodingSessionBackend:
         self.notice_fn = fn
 
     def toggle_plan_mode(self) -> str:
-        self.permission_mode = "default" if self.permission_mode == "plan" else "plan"
-        return self.permission_mode
+        self.plan_mode = not self.plan_mode
+        return "plan" if self.plan_mode else "default"
 
     def show_active_task(self) -> str:
         return "active task"

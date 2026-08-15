@@ -26,7 +26,7 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 | 层 | 契约内容 | 反例（不属于本层） |
 |---|---|---|
 | **Kernel** | Agent Loop / Turn / Session 语义、Canonical Conversation、Provider Port、ToolCall protocol、Context Window / Compaction / projection、Cancellation、Usage / Budget、Event Stream | read/write/edit/bash、MCP、Memory、Plan、Skill、SubAgent、Autonomy、Dream、Learning |
-| **Harness** | ProviderManager、ToolRegistry、ToolRuntime、Middleware、Permission、ExecutionBackend/Sandbox、SessionRepository、SessionRecorder、Trace/Event Sink | 具体 Coding Tool、能力路由 |
+| **Harness** | ProviderManager、ToolRegistry、ToolRuntime、Middleware、Permission、ExecutionBackend/Sandbox、SessionRepository、SessionRecorder、Trace/Event Sink | 具体 Coding Tool、能力路由、Plan/Autonomy 产品模式（Permission 只负责通用安全语义，PR4） |
 | **Capability** | Skill、MCP、Plan、Memory、SubAgent、Browser、ComputerUse | Agent 引擎门面（agent、agent_runtime） |
 | **Supervisor** | Autonomy、Scheduler、Checkpoint、Retry/Goal lifecycle、Dream、Learning | Agent 内部私有对象访问 |
 

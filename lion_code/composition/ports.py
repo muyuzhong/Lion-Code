@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
 from ..agent_runtime import AgentRuntimeCoordinator
@@ -227,25 +227,6 @@ class SessionStatePort:
     @property
     def session_state(self) -> SessionIdentityState:
         return self._session_state
-
-
-class DeferredAutoPermission:
-    """工具上下文构造早于 AutonomyRuntime 时使用的显式 deferred port。"""
-
-    def __init__(self) -> None:
-        self._classifier: Callable[[str, Mapping[str, Any]], Any] | None = None
-
-    def bind(self, classifier: Callable[[str, Mapping[str, Any]], Any]) -> None:
-        self._classifier = classifier
-
-    async def __call__(
-        self,
-        name: str,
-        arguments: Mapping[str, Any],
-    ) -> dict:
-        if self._classifier is None:
-            raise RuntimeError("Autonomy Runtime 尚未初始化")
-        return await self._classifier(name, arguments)
 
 
 class DeferredProviderRuntimePort(ProviderRuntimePort):

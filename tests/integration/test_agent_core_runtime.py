@@ -763,13 +763,13 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             agent = Agent(
-                permission_mode="plan",
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
                 terminal_output=False,
             )
+        agent.toggle_plan_mode()
         agent._mcp_initialized = True
         permission = agent.tool_context.permission
         agent.tool_registry.activate("exit_plan_mode")
@@ -789,8 +789,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(agent._core_runtime.messages[-1].text, "implemented")
         self.assertIs(agent.tool_context.permission, permission)
-        self.assertEqual(permission.mode, "acceptEdits")
-        self.assertEqual(agent.permission_mode, "acceptEdits")
+        self.assertEqual(permission.mode, "default")
+        self.assertEqual(agent.permission_mode, "default")
         usage = agent.get_token_usage()
         self.assertEqual((usage.input_tokens, usage.output_tokens), (18, 5))
         self.assertEqual(usage.responses, 2)
@@ -806,7 +806,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(state.entries), len(state.messages))
 
     async def test_plan_clear_and_execute_degrades_to_execute(self) -> None:
-        """clear-and-execute 不再清空上下文：退出到 acceptEdits，同一上下文继续。"""
+        """clear-and-execute 不再清空上下文：同一上下文继续；权限模式不受 Plan 影响。"""
 
         fake = FakeProvider(
             [
@@ -841,13 +841,13 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             agent = Agent(
-                permission_mode="plan",
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
                 terminal_output=False,
             )
+        agent.toggle_plan_mode()
         agent._mcp_initialized = True
         permission = agent.tool_context.permission
         agent.tool_registry.activate("exit_plan_mode")
@@ -866,7 +866,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(agent._core_runtime.messages[-1].text, "implemented")
         self.assertIs(agent.tool_context.permission, permission)
-        self.assertEqual(permission.mode, "acceptEdits")
+        # PR4：审批通过不再把权限切换到 acceptEdits。
+        self.assertEqual(permission.mode, "default")
         state = await self._session_repository.load(agent.session_id)
         self.assertEqual(len(state.compaction_entries), 0)
 

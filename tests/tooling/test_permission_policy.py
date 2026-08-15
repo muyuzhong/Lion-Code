@@ -43,40 +43,65 @@ class TestPermissionPolicy(unittest.TestCase):
                 tool=_tool("run_shell", executes_process=True),
                 arguments={"command": "echo ok"},
                 mode="bypassPermissions",
-                plan_file_path=None,
             )
 
         self.assertEqual(decision.action, "deny")
 
-    def test_plan_mode_blocks_mutating_tool(self):
-        decision = PermissionPolicy().check(
-            tool=_tool("write_file", mutates_workspace=True),
-            arguments={"file_path": "other.md"},
-            mode="plan",
-            plan_file_path=Path("plan.md"),
-        )
+    def test_explicit_allow_beats_dangerous_confirm(self):
+        with tempfile.TemporaryDirectory() as home_dir, tempfile.TemporaryDirectory() as cwd_dir:
+            settings = Path(cwd_dir) / ".claude" / "settings.json"
+            settings.parent.mkdir()
+            settings.write_text(
+                json.dumps(
+                    {"permissions": {"allow": ["run_shell(rm -rf cache)"]}}
+                ),
+                encoding="utf-8",
+            )
+            decision = PermissionPolicy(
+                home=Path(home_dir),
+                cwd=Path(cwd_dir),
+            ).check(
+                tool=_tool("run_shell", executes_process=True),
+                arguments={"command": "rm -rf cache"},
+                mode="default",
+            )
 
-        self.assertEqual(decision.action, "deny")
+        self.assertEqual(decision.action, "allow")
 
-    def test_plan_mode_allows_read_only_tool(self):
+    def test_read_only_tool_is_allowed(self):
         decision = PermissionPolicy().check(
-            tool=_tool("read_file", read_only=True, allowed_in_plan=True),
+            tool=_tool("read_file", read_only=True),
             arguments={"file_path": "README.md"},
-            mode="plan",
-            plan_file_path=Path("plan.md"),
+            mode="default",
         )
 
         self.assertEqual(decision.action, "allow")
 
-    def test_plan_file_is_only_mutating_exception(self):
-        with tempfile.TemporaryDirectory() as directory:
-            plan = Path(directory) / "plan.md"
-            decision = PermissionPolicy().check(
-                tool=_tool("write_file", mutates_workspace=True),
-                arguments={"file_path": str(plan)},
-                mode="plan",
-                plan_file_path=plan,
-            )
+    def test_dangerous_command_requires_confirmation(self):
+        decision = PermissionPolicy().check(
+            tool=_tool("run_shell", executes_process=True),
+            arguments={"command": "rm -rf /tmp/x"},
+            mode="default",
+        )
+
+        self.assertEqual(decision.action, "confirm")
+        self.assertEqual(decision.message, "rm -rf /tmp/x")
+
+    def test_dont_ask_auto_denies_confirmation(self):
+        decision = PermissionPolicy().check(
+            tool=_tool("run_shell", executes_process=True),
+            arguments={"command": "rm -rf /tmp/x"},
+            mode="dontAsk",
+        )
+
+        self.assertEqual(decision.action, "deny")
+
+    def test_bypass_skips_confirmation(self):
+        decision = PermissionPolicy().check(
+            tool=_tool("run_shell", executes_process=True),
+            arguments={"command": "rm -rf /tmp/x"},
+            mode="bypassPermissions",
+        )
 
         self.assertEqual(decision.action, "allow")
 

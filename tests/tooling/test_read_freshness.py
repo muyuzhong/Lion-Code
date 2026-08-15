@@ -5,7 +5,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.fakes import FakePlanView
 
 from lion_code.core.cancellation import CancellationToken
 from lion_code.permission_state import PermissionController, PermissionState
@@ -39,7 +38,6 @@ class TestReadFreshness(unittest.IsolatedAsyncioTestCase):
             cwd=Path(directory),
             registry=registry,
             permission=PermissionController(PermissionState("default")),
-            plan=FakePlanView(),
             read_file_state={},
         )
         return ToolRuntime(registry, context, [ReadFreshnessMiddleware()]), context

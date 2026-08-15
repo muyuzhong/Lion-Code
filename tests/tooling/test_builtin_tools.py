@@ -4,7 +4,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.fakes import FakePlanView
 
 from lion_code.core.cancellation import CancellationToken
 from lion_code.permission_state import PermissionController, PermissionState
@@ -42,7 +41,6 @@ class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
                 cwd=Path(directory),
                 registry=registry,
                 permission=PermissionController(PermissionState("default")),
-                plan=FakePlanView(),
                 read_file_state={},
             )
             result = await ToolRuntime(registry, context).execute(
@@ -59,7 +57,7 @@ class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
         tools = {tool.name: tool for tool in create_builtin_tools()}
 
         self.assertEqual(tools["read_file"].execution_mode, "parallel")
-        self.assertTrue(tools["read_file"].capabilities.allowed_in_plan)
+        self.assertTrue(tools["read_file"].capabilities.read_only)
         self.assertEqual(tools["write_file"].execution_mode, "sequential")
         self.assertTrue(
             tools["write_file"].capabilities.requires_read_before_write

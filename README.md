@@ -93,16 +93,19 @@ Lion Code 就是我对这些问题的回答。它是一个**可读、可验证�
 
 ### 1. Fail-Closed 工具执行边界
 
-权限系统是分层的——没有单一机制拥有最终决定权。六种模式提供渐进控制：
+权限系统是分层的——没有单一机制拥有最终决定权。四种模式提供渐进控制：
 
 | 模式 | CLI 参数 | 行为 |
 |------|----------|------|
 | **Default** | *(默认)* | 只读操作走快路径，敏感操作按规则确认或拒绝 |
-| **Plan** | `--plan` | 只读分析并生成计划，不直接修改项目 |
 | **Accept Edits** | `--accept-edits` | 自动批准文件编辑，危险 Shell 仍需确认 |
 | **Don't Ask** | `--dont-ask` | 自动拒绝所有需要人工确认的操作，适合非交互环境 |
-| **Auto** | `--auto` | 由两阶段 LLM 分类器判断操作 *(实验能力)* |
 | **Yolo** | `--yolo` | 跳过人工确认，仅建议在隔离环境中使用 |
+
+> PR4：Permission 只负责通用安全语义，不再包含 `plan`/`auto` 模式。Plan 是
+> Capability 层产品概念（`--plan` 通过 Plan 能力命令激活，期间读写限制由未来注入的
+> `PlanRestrictedPolicy` 负责）；Auto 分类器属于 Supervisor Plane
+> （`AutonomyRuntime`），由未来注入的 `LLMPermissionPolicy` 接线。
 
 这些模式与四层防御叠加：
 
@@ -396,7 +399,7 @@ Lion-Code/
 │   │   ├── runtime.py          # 统一执行入口（pre/post 中间件）
 │   │   ├── builtin.py          # 文件、Shell、搜索、Web 工具
 │   │   ├── mcp.py              # MCP 客户端集成
-│   │   ├── permission.py       # 静态权限规则 + Auto 分类器
+│   │   ├── permission.py       # 静态权限规则与危险操作判定
 │   │   ├── registry.py         # 工具注册与解析
 │   │   ├── middleware.py       # 拦截器链
 │   │   └── result_store.py     # 大结果持久化存储
@@ -480,7 +483,7 @@ lion-code --model "gpt-4o" "检查这个项目并运行测试"
 ### 常用命令
 
 ```bash
-lion-code --plan "设计一个重构方案"                   # 只读规划
+lion-code --plan "设计一个重构方案"                   # 只读规划（Plan 能力激活）
 lion-code --accept-edits "修复测试并说明原因"          # 自动批准编辑
 lion-code --max-cost 0.50 --max-turns 20 "完成任务 X"  # 预算控制
 lion-code --resume                                     # 恢复最近会话

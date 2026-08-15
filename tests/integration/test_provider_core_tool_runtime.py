@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from core.fakes import FakePlanView
 
 from lion_code.adapters import adapt_active_tools
 from lion_code.core import AgentHarness, AgentHarnessConfig
@@ -42,7 +41,6 @@ def _context(registry: ToolRegistry) -> ToolContext:
         cwd=Path.cwd(),
         registry=registry,
         permission=PermissionController(PermissionState("default")),
-        plan=FakePlanView(),
         read_file_state={},
     )
 
