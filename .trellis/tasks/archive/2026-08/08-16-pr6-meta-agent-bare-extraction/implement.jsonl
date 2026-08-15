@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/08-16-pr6-meta-agent-bare-extraction/prd.md","reason":"PR6 requirements, exclusions, and acceptance criteria"}
+{"file":".trellis/tasks/08-16-pr6-meta-agent-bare-extraction/design.md","reason":"Minimal object graph, facade, event, and PR2 deletion design"}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Kernel, Harness, Capability, Supervisor, and Event Stream contracts"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Existing runtime module placement and no-duplicate-path rules"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Typed events and session persistence are the existing outward channels"}
+{"file":".trellis/spec/backend/usage-ownership.md","reason":"Usage ledger and budget single-owner invariants"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Repository tests, comments, and validation rules"}
