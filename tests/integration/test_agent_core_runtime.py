@@ -34,6 +34,11 @@ from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 from lion_code.usage import UsageSnapshot
 
+_PLAN_REHOME = (
+    "PR3 Kernel 不含 Plan：clear-and-execute 上下文清空 + 自动 continue 的增强"
+    "依赖 Kernel 对 Plan 的特判，已随 Runtime 移除；待 Capability re-home PR 恢复"
+)
+
 
 class _LimitsFakeProvider(FakeProvider):
     def __init__(self, events: list, limits: RuntimeModelLimits) -> None:
@@ -721,6 +726,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sessions), 1)
         self.assertEqual(sessions[0]["format"], "jsonl")
 
+    @unittest.skip(_PLAN_REHOME)
     async def test_plan_clear_and_execute_compacts_without_deleting_history(
         self,
     ) -> None:
@@ -799,6 +805,72 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(state.compaction_entries[0].replaces_entry_ids), 3)
         self.assertGreater(len(state.entries), len(state.messages))
 
+    async def test_plan_clear_and_execute_degrades_to_execute(self) -> None:
+        """clear-and-execute 不再清空上下文：退出到 acceptEdits，同一上下文继续。"""
+
+        fake = FakeProvider(
+            [
+                AssistantDoneEvent(
+                    reason="toolUse",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[
+                            ToolCall(
+                                id="exit-plan",
+                                name="exit_plan_mode",
+                                arguments={},
+                            )
+                        ],
+                        stop_reason="toolUse",
+                        usage=Usage(input=11, output=2, total_tokens=13),
+                    ),
+                ),
+                _stop_event(
+                    "implemented",
+                    Usage(input=7, output=3, total_tokens=10),
+                ),
+            ]
+        )
+        plan_path = Path(self._temp_dir.name) / "approved-plan.md"
+        plan_path.write_text("1. change code\n2. run tests", encoding="utf-8")
+        with (
+            patch("lion_code.agent.create_provider", return_value=fake),
+            patch(
+                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                return_value=plan_path,
+            ),
+        ):
+            agent = Agent(
+                permission_mode="plan",
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+                terminal_output=False,
+            )
+        agent._mcp_initialized = True
+        permission = agent.tool_context.permission
+        agent.tool_registry.activate("exit_plan_mode")
+
+        async def approve(_plan: str) -> dict:
+            return {"choice": "clear-and-execute"}
+
+        agent.set_plan_approval_fn(approve)
+        await agent.chat("prepare the change")
+
+        self.assertEqual(fake.call_count, 2)
+        # 未清空上下文：第二次调用仍是完整历史，而不是摘要单条。
+        self.assertEqual(
+            [message.role for message in fake.received_messages[1]],
+            ["user", "assistant", "toolResult"],
+        )
+        self.assertEqual(agent._core_runtime.messages[-1].text, "implemented")
+        self.assertIs(agent.tool_context.permission, permission)
+        self.assertEqual(permission.mode, "acceptEdits")
+        state = await self._session_repository.load(agent.session_id)
+        self.assertEqual(len(state.compaction_entries), 0)
+
+    @unittest.skip(_PLAN_REHOME)
     async def test_plan_context_reset_failure_keeps_pending_command(self) -> None:
         fake = FakeProvider([])
         plan_path = Path(self._temp_dir.name) / "failing-reset-plan.md"

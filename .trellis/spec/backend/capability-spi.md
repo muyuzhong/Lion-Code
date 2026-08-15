@@ -260,8 +260,9 @@ The tool-bearing capabilities use construction-time command binding:
 - ``create_plan_capability(runtime: PlanRuntime)`` contributes the enter/exit
   ToolSource, a live ``PlanPromptLayer`` over ``PlanView``, and a
   ``PlanSessionParticipant`` for new/restore transitions.
-- The tools call the bound ``PlanRuntime`` directly and preserve the
-  ``ToolResult.terminate`` value returned by Plan approval.
+- The tools call the bound ``PlanRuntime`` directly. The tool adapter copies
+  ``terminate`` from ``PlanToolOutcome`` into ``ToolResult``; with PR3 the
+  clear-and-execute enhancement is removed, so Plan approval never terminates.
 - The prompt layer renders the current Plan state on every Composer request;
   it does not mutate Plan state or retain a prompt mirror.
 

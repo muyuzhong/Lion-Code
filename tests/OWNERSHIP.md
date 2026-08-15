@@ -112,7 +112,7 @@ layers:
 | tests/test_learning.py | supervisor | Learning |
 | tests/test_mcp_client.py | capability | MCP 客户端 |
 | tests/test_model_query.py | kernel | Provider 端口薄包装 |
-| tests/test_plan_runtime.py | capability | Plan（含 **Plan reset**） |
+| tests/test_plan_runtime.py | capability | Plan（事务/审批/View；pending reset 已随 PR3 移除） |
 | tests/test_project_identity.py | harness | identity/config |
 | tests/test_prompt.py | harness | prompt composition |
 | tests/test_provider_manager.py | harness | ProviderManager |
@@ -135,8 +135,9 @@ layers:
 4. `<relevant-memory>`（`tests/memory_runtime/test_injector.py`、`test_core_integration.py`）
    → **capability[Memory]**。由 `memory_runtime/injector.py::MemoryContextInjector` 产生，
    不是 Kernel 必须行为。
-5. Plan reset（`tests/test_plan_runtime.py`、`tests/tooling/test_agent_runtime.py` plan-mode 部分）
-   → **capability[Plan]**。
+5. Plan 事务（`tests/test_plan_runtime.py`、`tests/tooling/test_agent_runtime.py` plan-mode 部分）
+   → **capability[Plan]**。clear-and-execute 的 pending context reset 与
+   `apply_plan_context_reset` 已随 PR3 从 Kernel/Runtime 移除，集成测试标记 skip 待 re-home。
 6. MCP（`tests/test_mcp_client.py`、`tests/tooling/test_mcp_adapter.py`、
    `tests/tooling/test_tool_environment.py`）→ **capability[MCP]**。
 7. SubAgent/Skill（`tests/tooling/test_capability_runtimes.py`、

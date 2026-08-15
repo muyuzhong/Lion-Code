@@ -100,8 +100,8 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 - `<relevant-memory>`：由 `memory_runtime/injector.py::MemoryContextInjector._format` 产生，
   是 **Memory Capability**。相关测试：`tests/memory_runtime/test_injector.py`、
   `tests/memory_runtime/test_core_integration.py`。
-- **Plan reset**（`apply_plan_context_reset`、`PlanRuntime.reset_*`）：位于 `plan_runtime.py`
-  与 chat 编排中，是 **Plan Capability** 行为。相关测试：`tests/test_plan_runtime.py`、
+- **Plan reset**（`PlanRuntime.reset_*`）：位于 `plan_runtime.py`，是 **Plan Capability** 行为。
+  `apply_plan_context_reset` 与 chat 编排中的 pending 特判已随 PR3 从 Kernel/Runtime 移除。相关测试：`tests/test_plan_runtime.py`、
   `tests/tooling/test_agent_runtime.py`（plan-mode 部分）。
 - **MCP**：`capabilities/mcp.py` + `mcp_client.py`，是 **Capability**。相关测试：
   `tests/test_mcp_client.py`、`tests/tooling/test_mcp_adapter.py`、

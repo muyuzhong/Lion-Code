@@ -89,7 +89,6 @@ _PLAN_STATE_FIELDS = frozenset(
         "status",
         "file_path",
         "previous_permission_mode",
-        "pending_context_reset",
     }
 )
 _REMOVED_AGENT_PLAN_SYMBOLS = frozenset(
@@ -1301,7 +1300,6 @@ def test_usage_state_has_one_owner_and_command_only_writes() -> None:
     }
     assert context_reset_sites == {
         "agent_runtime.py": [
-            "AgentRuntimeCoordinator.apply_plan_context_reset",
             "AgentRuntimeCoordinator.compact_core_context_if_needed",
         ]
     }
@@ -1389,7 +1387,7 @@ def test_plan_state_has_one_owner_and_live_read_port() -> None:
 
     host_tree = _tree(SOURCE_ROOT / "agent_runtime.py")
     host_fields = _class_annotated_fields(host_tree, "SessionStateHost")
-    assert "plan" in host_fields
+    assert "plan" not in host_fields
     assert not _REMOVED_AGENT_PLAN_SYMBOLS & host_fields
 
     lifecycle_tree = _tree(SOURCE_ROOT / "session_lifecycle.py")
@@ -1712,7 +1710,7 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
         "    plan_state.file_path = path\n"
         "    renamed = plan_state\n"
         "    renamed.previous_permission_mode = 'default'\n"
-        "    setattr(plan_state, 'pending_context_reset', 'summary')\n"
+        "    setattr(plan_state, 'status', 'active')\n"
     )
     plan_path_mirror = ast.parse(
         "def sync(alias):\n    alias.plan_file_path = 'plan.md'\n"
@@ -1789,7 +1787,7 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
             "status",
             "file_path",
             "previous_permission_mode",
-            "setattr:pending_context_reset",
+            "setattr:status",
         }
     )
     assert _attribute_references(plan_path_mirror, "plan_file_path") == frozenset(
