@@ -20,6 +20,11 @@ from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 
+_REHOME = (
+    "PR1 Bare Agent Extraction: turn-driven Memory 自动行为已从 Core 生命周期移除，"
+    "待 Capability re-home PR 恢复"
+)
+
 
 class _QueryService:
     async def complete(
@@ -171,6 +176,7 @@ def _evidence_tool_event() -> AssistantDoneEvent:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason=_REHOME)
 async def test_overlay_reaches_provider_but_not_harness_or_jsonl(
     monkeypatch, tmp_path
 ) -> None:
@@ -181,13 +187,16 @@ async def test_overlay_reaches_provider_but_not_harness_or_jsonl(
     await agent.chat("question")
 
     assert "<relevant-memory>" in fake.received_messages[0][-1].text
-    assert all("<relevant-memory>" not in message.text for message in agent._core_runtime.messages)
+    assert all(
+        "<relevant-memory>" not in message.text
+        for message in agent._core_runtime.messages
+    )
     state = await repository.load(agent.session_id)
     assert state is not None
     assert all("<relevant-memory>" not in message.text for message in state.messages)
-    assert "<relevant-memory>" not in repository.storage_for(agent.session_id).path.read_text(
-        encoding="utf-8"
-    )
+    assert "<relevant-memory>" not in repository.storage_for(
+        agent.session_id
+    ).path.read_text(encoding="utf-8")
     assert agent._last_memory_injection.injected_paths == (
         str(agent._session_memory_repository.path),
         "project.md",
@@ -196,6 +205,7 @@ async def test_overlay_reaches_provider_but_not_harness_or_jsonl(
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason=_REHOME)
 async def test_project_overlay_reaches_provider_but_not_harness_or_jsonl(
     monkeypatch, tmp_path
 ) -> None:
@@ -213,7 +223,10 @@ async def test_project_overlay_reaches_provider_but_not_harness_or_jsonl(
     assert "<project-memory>" in provider_text
     assert "<session-memory>" in provider_text
     assert "run focused tests" in provider_text
-    assert all("<relevant-memory>" not in message.text for message in agent._core_runtime.messages)
+    assert all(
+        "<relevant-memory>" not in message.text
+        for message in agent._core_runtime.messages
+    )
     state = await repository.load(agent.session_id)
     assert state is not None
     assert all("<relevant-memory>" not in message.text for message in state.messages)
@@ -266,6 +279,7 @@ async def test_clear_and_restore_keep_current_project_session_memory(
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason=_REHOME)
 async def test_corrupt_session_memory_stays_visible_without_clear_overwrite(
     monkeypatch, tmp_path
 ) -> None:
@@ -298,14 +312,13 @@ async def test_corrupt_session_memory_stays_visible_without_clear_overwrite(
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason=_REHOME)
 async def test_turn_end_merges_tool_evidence_before_semantic_patch(
     monkeypatch, tmp_path
 ) -> None:
     registry = ToolRegistry()
     registry.register(_result_tool("write_file", "Successfully wrote file"))
-    registry.register(
-        _result_tool("run_shell", "Command failed (exit code 1)")
-    )
+    registry.register(_result_tool("run_shell", "Command failed (exit code 1)"))
     agent, _, _ = _make_agent(
         monkeypatch,
         tmp_path,
@@ -330,8 +343,7 @@ async def test_turn_end_merges_tool_evidence_before_semantic_patch(
     assert agent.session_memory.relevant_files == ("lion_code/session_memory.py",)
     assert agent.session_memory.verification == ("python -m pytest -q: failed",)
     assert any(
-        item.startswith("run_shell failed:")
-        for item in agent.session_memory.blockers
+        item.startswith("run_shell failed:") for item in agent.session_memory.blockers
     )
     assert agent.session_memory.current_goal == "完成短期记忆"
     assert agent.session_memory.active_task == "记录工具事实"
@@ -340,14 +352,13 @@ async def test_turn_end_merges_tool_evidence_before_semantic_patch(
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason=_REHOME)
 async def test_semantic_patch_failure_still_saves_tool_evidence(
     monkeypatch, tmp_path
 ) -> None:
     registry = ToolRegistry()
     registry.register(_result_tool("write_file", "Successfully wrote file"))
-    registry.register(
-        _result_tool("run_shell", "Command failed (exit code 1)")
-    )
+    registry.register(_result_tool("run_shell", "Command failed (exit code 1)"))
     agent, _, _ = _make_agent(
         monkeypatch,
         tmp_path,
@@ -373,6 +384,7 @@ async def test_semantic_patch_failure_still_saves_tool_evidence(
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason=_REHOME)
 async def test_current_turn_prefetch_waits_until_next_user_turn_and_snapshot_is_fixed(
     monkeypatch, tmp_path
 ) -> None:
@@ -399,8 +411,8 @@ async def test_current_turn_prefetch_waits_until_next_user_turn_and_snapshot_is_
 
     first_overlay = fake.received_messages[0][-1].text
     second_overlay = fake.received_messages[1][-1].text
-    first_overlay = first_overlay[first_overlay.index("<relevant-memory>"):]
-    second_overlay = second_overlay[second_overlay.index("<relevant-memory>"):]
+    first_overlay = first_overlay[first_overlay.index("<relevant-memory>") :]
+    second_overlay = second_overlay[second_overlay.index("<relevant-memory>") :]
     assert first_overlay == second_overlay
     assert "<auto-memory>" not in first_overlay
 
@@ -408,12 +420,17 @@ async def test_current_turn_prefetch_waits_until_next_user_turn_and_snapshot_is_
 
     assert "<auto-memory>" in fake.received_messages[2][-1].text
     assert "current memory" in fake.received_messages[2][-1].text
-    assert all("<relevant-memory>" not in message.text for message in agent._core_runtime.messages)
+    assert all(
+        "<relevant-memory>" not in message.text
+        for message in agent._core_runtime.messages
+    )
     await agent.close()
 
 
 @pytest.mark.asyncio
-async def test_prefetch_failure_does_not_interrupt_tool_loop(monkeypatch, tmp_path) -> None:
+async def test_prefetch_failure_does_not_interrupt_tool_loop(
+    monkeypatch, tmp_path
+) -> None:
     registry = ToolRegistry()
     registry.register(_echo_tool())
     agent, fake, _ = _make_agent(
@@ -441,6 +458,7 @@ async def test_prefetch_failure_does_not_interrupt_tool_loop(monkeypatch, tmp_pa
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason=_REHOME)
 async def test_clear_and_restore_drop_previous_overlay(monkeypatch, tmp_path) -> None:
     first, _, repository = _make_agent(monkeypatch, tmp_path, [_stop_event()])
     await first.chat("first question")

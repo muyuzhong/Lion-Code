@@ -77,7 +77,6 @@ from .ports import (
     DeferredProviderRuntimePort,
     McpLifecycleState,
     MemoryQuerySinkAdapter,
-    MemoryTurnPort,
     NoticeController,
     NoticeSinkAdapter,
     PlanHost,
@@ -127,7 +126,6 @@ class AgentComposition:
     model_query: ProviderModelQuery
     identity_port: RuntimeIdentityPort
     session_port: SessionStatePort
-    memory_port: MemoryTurnPort
     notices: NoticeController
     confirmation: ConfirmationController
     status_sink: SubagentStatusSink
@@ -211,7 +209,6 @@ class _ToolingGraph:
     result_store: ResultStore
     tool_runtime: ToolRuntime
     context_manager: ContextManager
-    memory_port: MemoryTurnPort
     session_port: SessionStatePort
 
 
@@ -277,7 +274,6 @@ def build_agent_composition(
     result_store = tooling_graph.result_store
     tool_runtime = tooling_graph.tool_runtime
     context_manager = tooling_graph.context_manager
-    memory_port = tooling_graph.memory_port
     session_port = tooling_graph.session_port
     runtime_coordinator = _build_runtime_coordinator(
         foundation,
@@ -286,7 +282,6 @@ def build_agent_composition(
         prompt_composer,
         identity_port,
         session_port,
-        memory_port,
         tool_runtime,
         context_manager,
     )
@@ -295,7 +290,6 @@ def build_agent_composition(
         foundation,
         provider_graph,
         prompt_composer,
-        memory_port,
         runtime_coordinator,
         deferred_auto_permission,
         child_config,
@@ -340,7 +334,6 @@ def build_agent_composition(
         model_query=query,
         identity_port=identity_port,
         session_port=session_port,
-        memory_port=memory_port,
         notices=notices,
         confirmation=confirmation,
         status_sink=status_sink,
@@ -665,7 +658,6 @@ def _build_tooling_graph(
             foundation.tool_registry, name
         )
     )
-    memory_port = MemoryTurnPort()
     session_port = SessionStatePort(
         session_state=foundation.session_state,
         session_repository=foundation.session_repository,
@@ -682,7 +674,6 @@ def _build_tooling_graph(
         result_store=result_store,
         tool_runtime=tool_runtime,
         context_manager=context_manager,
-        memory_port=memory_port,
         session_port=session_port,
     )
 
@@ -694,7 +685,6 @@ def _build_runtime_coordinator(
     prompt_composer: PromptComposer,
     identity_port: RuntimeIdentityPort,
     session_port: SessionStatePort,
-    memory_port: MemoryTurnPort,
     tool_runtime: ToolRuntime,
     context_manager: ContextManager,
 ) -> AgentRuntimeCoordinator:
@@ -703,7 +693,6 @@ def _build_runtime_coordinator(
         budget=foundation.budget,
         identity=identity_port,
         session=session_port,
-        memory=memory_port,
         execution=foundation.execution,
         capabilities=capability_runtime,
         get_system=prompt_composer.get_system,
@@ -732,7 +721,6 @@ def _build_session_graph(
     foundation: _FoundationGraph,
     provider_graph: _ProviderGraph,
     prompt_composer: PromptComposer,
-    memory_port: MemoryTurnPort,
     runtime_coordinator: AgentRuntimeCoordinator,
     deferred_auto_permission: DeferredAutoPermission,
     child_config: Any,
@@ -791,10 +779,6 @@ def _build_session_graph(
         is_sub_agent=config.is_sub_agent,
         status_callback=foundation.status_sink.emit,
         refresh_context=refresh_dynamic_context,
-    )
-    memory_port.bind(
-        session_memory_coord,
-        semantic_extractor=session_memory_coord._extract_session_memory_semantics,
     )
     provider_graph.memory_query_sink.bind(MemoryQuerySinkAdapter(session_memory_coord))
     autonomy = AutonomyRuntime(

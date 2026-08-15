@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/08-14-pr0-boundary-audit/prd.md", "reason": "任务需求与验收标准"}
+{"file": ".trellis/tasks/08-14-pr0-boundary-audit/design.md", "reason": "归属清单格式与 spec 更新设计"}
+{"file": ".trellis/tasks/08-14-pr0-boundary-audit/research/test-ownership-map.md", "reason": "全量测试审计归属数据（OWNERSHIP.md 输入）"}
+{"file": ".trellis/tasks/08-14-architecture-pr0-boundary-contract/design.md", "reason": "父任务四层契约共享设计"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "将被更新的现有 spec"}

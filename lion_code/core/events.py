@@ -72,6 +72,27 @@ class ToolExecutionEndEvent(WireModel):
     is_error: bool
 
 
+class CompactionStartedEvent(WireModel):
+    type: Literal["compaction_started"] = "compaction_started"
+    reason: Literal["threshold", "overflow", "manual"] = "threshold"
+
+
+class CompactionCompletedEvent(WireModel):
+    type: Literal["compaction_completed"] = "compaction_completed"
+    reason: Literal["threshold", "overflow", "manual"] = "threshold"
+    aborted: bool = False
+
+
+class TurnFailedEvent(WireModel):
+    type: Literal["turn_failed"] = "turn_failed"
+    message: AgentMessage
+
+
+class CancelledEvent(WireModel):
+    type: Literal["cancelled"] = "cancelled"
+    message: AgentMessage | None = None
+
+
 type AgentEvent = Annotated[
     AgentStartEvent
     | AgentEndEvent
@@ -82,6 +103,10 @@ type AgentEvent = Annotated[
     | MessageEndEvent
     | ToolExecutionStartEvent
     | ToolExecutionUpdateEvent
-    | ToolExecutionEndEvent,
+    | ToolExecutionEndEvent
+    | CompactionStartedEvent
+    | CompactionCompletedEvent
+    | TurnFailedEvent
+    | CancelledEvent,
     Field(discriminator="type"),
 ]

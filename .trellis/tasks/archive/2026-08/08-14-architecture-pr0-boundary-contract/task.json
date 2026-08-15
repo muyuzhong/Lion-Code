@@ -1,0 +1,30 @@
+{
+  "id": "architecture-pr0-boundary-contract",
+  "name": "architecture-pr0-boundary-contract",
+  "title": "PR0 四层架构 Contract 固化（Kernel/Harness/Capability/Supervisor）",
+  "description": "Lion-Code 从 Full Agent 架构重构为 Agent Kernel + Harness Runtime + Capability Plane + Supervisor Plane。本 PR0 只固化架构 Contract 与测试分类，不改造生产对象图。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P0",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-14",
+  "completedAt": "2026-08-14",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-14-pr0-boundary-audit",
+    "08-14-pr0-event-stream-contract",
+    "08-14-pr0-architecture-gates"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
