@@ -435,10 +435,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 "recent answer",
             ],
         )
-        self.assertTrue(
-            projected[3].startswith("trigger overflow\n\n<relevant-memory>")
-        )
-        self.assertIn("<session-memory>", projected[3])
+        self.assertEqual(projected[3], "trigger overflow")
 
         entries = await self._session_repository.storage_for(
             agent.session_id

@@ -46,11 +46,6 @@ from lion_code.core.messages import AssistantMessage, UserMessage, message_text
 from lion_code.core.provider import ModelProvider
 from lion_code.core.provider_events import TextDeltaEvent
 from lion_code.execution_control import ExecutionControl
-from lion_code.memory_runtime import (
-    MemoryContextInjector,
-    MemoryInjectionReport,
-    MemoryOverlay,
-)
 from lion_code.observers import TerminalRenderer, UsageObserver
 from lion_code.plan_runtime import PlanRuntime
 from lion_code.provider_manager import ProviderManager
@@ -274,35 +269,10 @@ class SessionStateHost(Protocol):
     def session_state(self) -> SessionIdentityState: ...
 
 
-class MemoryTurnHost(Protocol):
-    """Memory 注入、Overlay 与轮次快照所需的宿主边界。"""
-
-    _memory_coordinator: Any
-    _turn_memory_overlays: tuple[MemoryOverlay, ...]
-    _last_memory_injection: MemoryInjectionReport
-
-    @property
-    def _memory_injector(self) -> MemoryContextInjector: ...
-
-    def _prepare_turn_memory_snapshot(self, user_message: str) -> None: ...
-
-    def _build_turn_memory_overlays(self) -> tuple[MemoryOverlay, ...]: ...
-
-    async def _update_session_memory_after_turn(
-        self,
-        user_message: str,
-        turn_start_index: int,
-    ) -> None: ...
-
-    def _reload_project_memory(self) -> None: ...
-
-    def _reload_session_memory(self) -> None: ...
-
-
 class AgentRuntimeCoordinator:
     """拥有一个 Agent 的 Core 生命周期，但不反向依赖 Agent 实现。
 
-    通过三个窄端口访问宿主能力，并直接接收 Usage Owner 与预算规则：
+    通过两个窄端口访问宿主能力，并直接接收 Usage Owner 与预算规则：
     - ``identity`` -- 模型标识、终端渲染、中止/通知与 MCP 初始化
     - ``session`` -- 会话标识、仓库、Plan 模式与工具环境
     - ``memory`` -- Memory 注入、Overlay 与轮次快照
@@ -315,7 +285,6 @@ class AgentRuntimeCoordinator:
         budget: BudgetPolicy,
         identity: RuntimeIdentityHost,
         session: SessionStateHost,
-        memory: MemoryTurnHost,
         execution: ExecutionControl,
         capabilities: CapabilityLifecycle,
         get_system: Callable[[], str],
@@ -331,7 +300,6 @@ class AgentRuntimeCoordinator:
         self._budget = budget
         self._identity = identity
         self._session = session
-        self._memory = memory
         self._execution = execution
         self._capabilities = capabilities
         self._context_manager = context_manager
@@ -460,15 +428,9 @@ class AgentRuntimeCoordinator:
 
         state = self.context_runtime_state()
         prepared = self._context_manager.prepare(messages, state)
-        projected, memory_report = self._memory._memory_injector.inject(
-            tuple(prepared.messages),
-            self._memory._turn_memory_overlays,
-            max_tokens=state.effective_window_tokens,
-        )
         self._last_context_actions = prepared.actions
-        self._memory._last_memory_injection = memory_report
         self._core_compaction_required = prepared.compaction_required
-        return projected
+        return list(prepared.messages)
 
     async def capture_core_text(self, event: AgentEvent) -> None:
         """为 run_once/run 捕获本次助手文本，不参与终端或 TUI 渲染。"""
@@ -748,19 +710,17 @@ class AgentRuntimeCoordinator:
         identity._terminal_output = False
 
     def abort(self) -> None:
-        """同时取消 Memory 预取、Core 流和可能在运行的压缩任务。"""
+        """同时取消 Core 流和可能在运行的压缩任务。"""
 
         self._execution.cancel()
         self._identity._last_stop_reason = "aborted"
-        self._memory._memory_coordinator.cancel_pending()
         if self._core_compaction_task is not None:
             self._core_compaction_task.cancel()
 
     async def chat(self, user_message: str) -> None:
-        """执行一次完整用户轮，保持 MCP/Memory/Core/JSONL 的既有时序。"""
+        """执行一次完整用户轮，保持 MCP/Core/JSONL 的既有时序。"""
 
         identity = self._identity
-        memory = self._memory
         self._execution.begin()
         identity._last_stop_reason = None
         try:
@@ -778,30 +738,17 @@ class AgentRuntimeCoordinator:
             await self.compact_core_context_if_needed()
             if self._execution.cancelled:
                 return
-            turn_start_index = len(self._runtime.messages)
-            memory._prepare_turn_memory_snapshot(user_message)
-            try:
-                await self._runtime.prompt(user_message)
-                while (
-                    not self._execution.cancelled
-                    and await self.apply_plan_context_reset()
-                ):
-                    if self._execution.cancelled:
-                        break
-                    await self._runtime.continue_()
-                self.sync_core_outcome()
-                self._core_compaction_required = self._context_manager.should_compact(
-                    self.context_runtime_state()
-                )
-            finally:
-                try:
-                    if not identity.is_sub_agent:
-                        await memory._update_session_memory_after_turn(
-                            user_message,
-                            turn_start_index,
-                        )
-                finally:
-                    memory._turn_memory_overlays = memory._build_turn_memory_overlays()
+            await self._runtime.prompt(user_message)
+            while (
+                not self._execution.cancelled and await self.apply_plan_context_reset()
+            ):
+                if self._execution.cancelled:
+                    break
+                await self._runtime.continue_()
+            self.sync_core_outcome()
+            self._core_compaction_required = self._context_manager.should_compact(
+                self.context_runtime_state()
+            )
         finally:
             await self._capabilities.after_turn()
 

@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/08-14-pr1-bare-agent-extraction/prd.md", "reason": "PR1 需求与验收"}
+{"file": ".trellis/tasks/08-14-pr1-bare-agent-extraction/design.md", "reason": "逐文件改动与 re-home 策略"}
+{"file": "lion_code/agent_runtime.py", "reason": "Coordinator 核心文件"}
+{"file": "lion_code/session_lifecycle.py", "reason": "Lifecycle 核心文件"}
+{"file": "lion_code/composition/agent_builder.py", "reason": "Composition 接线"}

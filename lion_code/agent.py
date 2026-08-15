@@ -131,23 +131,15 @@ class Agent:
 
     def __setattr__(self, name: str, value: Any) -> None:
         object.__setattr__(self, name, value)
-        if name != "_extract_session_memory_semantics":
-            if name != "_emit_notice":
-                return
-            notices = self.__dict__.get("_notice_controller")
-            if notices is None:
-                return
-            if getattr(value, "__self__", None) is self:
-                notices.set_notice_fn(None)
-            else:
-                notices.set_notice_fn(value)
+        if name != "_emit_notice":
             return
-        memory_port = self.__dict__.get("_memory_port")
-        if memory_port is not None:
-            if getattr(value, "__self__", None) is self:
-                memory_port.set_semantic_extractor(None)
-            else:
-                memory_port.set_semantic_extractor(value)
+        notices = self.__dict__.get("_notice_controller")
+        if notices is None:
+            return
+        if getattr(value, "__self__", None) is self:
+            notices.set_notice_fn(None)
+        else:
+            notices.set_notice_fn(value)
 
     def __init__(
         self,
@@ -248,7 +240,6 @@ class Agent:
         self._current_task: asyncio.Task | None = None
         self._identity_port = composition.identity_port
         self._session_port = composition.session_port
-        self._memory_port = composition.memory_port
         self._notice_controller = composition.notices
         self._confirmation = composition.confirmation
         self._status_sink = composition.status_sink
@@ -285,16 +276,6 @@ class Agent:
         self._learning = composition.learning
         self._model_query = composition.model_query
         self.confirm_fn = resolved_dependencies.confirm_fn
-        # 生产路径只让 MemoryTurnPort 使用 coordinator 自己的窄实现。只有
-        # 测试替换了类级 AsyncMock 时才把这个无状态替身传入，避免 runtime
-        # 通过回调反向持有整个 Agent。
-        patched_extractor = type(self).__dict__.get("_extract_session_memory_semantics")
-        if (
-            patched_extractor is not None
-            and patched_extractor is not _ORIGINAL_AGENT_SEMANTIC_EXTRACTOR
-            and callable(patched_extractor)
-        ):
-            self._memory_port.set_semantic_extractor(patched_extractor)
 
     def _resolve_thinking_mode(self) -> str:
         return self._provider_manager.view.thinking_mode

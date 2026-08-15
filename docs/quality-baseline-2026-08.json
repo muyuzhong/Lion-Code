@@ -297,7 +297,7 @@
         "lion_code/__main__.py:69:run_repl:F:44",
         "lion_code/agent_lifecycle.py:83:AgentLifecycle.configure_api:D:28",
         "lion_code/application/session.py:345:LionCodingSession._drive:D:28",
-        "lion_code/core/loop.py:64:run_agent_loop:F:44",
+        "lion_code/core/loop.py:73:run_agent_loop:F:44",
         "lion_code/core/session/jsonl.py:59:_migrate_message:D:24",
         "lion_code/dream.py:365:parse_dream_plan:D:26",
         "lion_code/providers/stream.py:90:canonicalize_provider_stream:D:29",

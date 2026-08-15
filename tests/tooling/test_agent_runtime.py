@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from lion_code.agent import Agent
-from lion_code.session_memory import SessionMemoryRepository
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.types import ToolResult
 
@@ -104,7 +103,6 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             session_repository = SessionRepository(root / "sessions")
-            memory_repository = SessionMemoryRepository(storage_dir=root / "memory")
             with patch(
                 "lion_code.plan_runtime.PlanRuntime._generate_file_path",
                 return_value=root / "plan.md",
@@ -112,7 +110,6 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
                 agent = self._agent(
                     permission_mode="plan",
                     session_repository=session_repository,
-                    session_memory_repository=memory_repository,
                     terminal_output=False,
                 )
                 permission = agent.tool_context.permission
@@ -131,7 +128,6 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             session_repository = SessionRepository(root / "sessions")
-            memory_repository = SessionMemoryRepository(storage_dir=root / "memory")
             plan_path = root / "plan.md"
             with patch(
                 "lion_code.plan_runtime.PlanRuntime._generate_file_path",
@@ -140,7 +136,6 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
                 agent = self._agent(
                     permission_mode="plan",
                     session_repository=session_repository,
-                    session_memory_repository=memory_repository,
                     terminal_output=False,
                 )
                 await agent._ensure_core_session_ready()

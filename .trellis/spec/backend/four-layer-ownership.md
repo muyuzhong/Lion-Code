@@ -112,6 +112,15 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 
 "core runtime 必须行为"措辞废弃，替换为 **Kernel 不变量**。
 
+> **PR1（Bare Agent Extraction）状态**：`AgentRuntimeCoordinator` 与 `SessionLifecycle`
+> 已完全移除 Memory 认知（`MemoryTurnHost`/`MemoryTurnPort` 桥、memory 构造参数、
+> turn/abort/clear/restore/close 中的 memory 编排全部删除）。turn 驱动的 Memory 自动行为
+> （`<relevant-memory>` 召回、overlay 注入、turn 后自动抽取）当前在 Core 生命周期中消失，
+> 属于迁移阶段问题，待 Capability re-home PR 恢复。相关测试
+> （`tests/memory_runtime/test_core_integration.py` 等）已标记 `skip` + re-home 理由。
+> `SessionMemoryCoordinator` 类保留，但不再桥接进 coordinator，仅服务独立于 turn 循环的
+> Memory 能力（持久化、命令、Dream）。
+
 ## 5. "不是 Kernel" 边界清单
 
 以下符号/行为在真实代码中属于 Kernel 之外；Kernel 契约不覆盖它们：
