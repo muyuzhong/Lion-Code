@@ -9,20 +9,24 @@ from ..mcp_client import McpManager
 
 @dataclass(slots=True)
 class ToolEnvironment:
-    """持有共享 MCP Manager，并只允许根环境负责关闭。"""
+    """持有共享 MCP Manager，并只允许根环境负责关闭。
 
-    mcp_manager: McpManager = field(default_factory=McpManager)
+    ``mcp_manager`` 可为空：Bare Composition 不选择 MCP 能力时，环境只提供
+    工具执行所需的最小边界，不创建 McpManager。
+    """
+
+    mcp_manager: McpManager | None = None
     owns_mcp_manager: bool = True
     _closed: bool = field(default=False, init=False, repr=False)
 
     async def close(self) -> None:
         """由根环境幂等地释放 MCP 连接；子视图关闭不影响父环境。"""
-        if not self.owns_mcp_manager or self._closed:
+        if not self.owns_mcp_manager or self._closed or self.mcp_manager is None:
             return
         self._closed = True
         await self.mcp_manager.disconnect_all()
 
-    def child_view(self) -> "ToolEnvironment":
+    def child_view(self) -> ToolEnvironment:
         """创建复用连接但不拥有关闭权的子环境。"""
         return ToolEnvironment(
             mcp_manager=self.mcp_manager,

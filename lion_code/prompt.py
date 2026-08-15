@@ -11,10 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .memory import build_memory_prompt_section
 from .project_identity import ProjectIdentity, resolve_project_identity
-from .skills import build_skill_descriptions
-from .subagent import build_agent_descriptions
 
 if TYPE_CHECKING:
     from .capabilities.types import PromptLayer
@@ -97,7 +94,7 @@ IMPORTANT: You must NEVER generate or guess URLs for the user unless you are con
    - Don't add error handling, fallbacks, or validation for scenarios that can't happen. Trust internal code and framework guarantees. Only validate at system boundaries (user input, external APIs). Don't use feature flags or backwards-compatibility shims when you can just change the code.
    - Don't create helpers, utilities, or abstractions for one-time operations. Don't design for hypothetical future requirements. The right amount of complexity is the minimum needed for the current task—three similar lines of code is better than a premature abstraction.
  - Avoid backwards-compatibility hacks like renaming unused _vars, re-exporting types, adding // removed comments for removed code, etc. If you are certain that something is unused, you can delete it completely.
- - If the user asks for help, inform them they can type "exit" to quit or use REPL commands like /clear, /cost, /compact, /memory, /skills.
+ - If the user asks for help, inform them they can type "exit" to quit or use REPL commands like /clear, /cost, /compact.
 
 # Executing actions with care
 
@@ -119,7 +116,6 @@ When you encounter an obstacle, do not use destructive actions as a shortcut to 
    - To search the content of files, use grep_search instead of grep or rg
    - Reserve using the run_shell exclusively for system commands and terminal operations that require shell execution. If you are unsure and there is a relevant dedicated tool, default to using the dedicated tool and only fallback on using the run_shell tool for these if it is absolutely necessary.
  - You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially. For instance, if one operation must complete before another starts, run these operations sequentially instead.
- - Use the `agent` tool with specialized agents when the task at hand matches the agent's description. Subagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but they should not be used excessively when not needed. Importantly, avoid duplicating work that subagents are already doing - if you delegate research to a subagent, do not also perform the same searches yourself.
 
 # Tone and style
  - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.
@@ -308,7 +304,11 @@ def build_static_system_prompt() -> str:
 def build_dynamic_system_context(
     deferred_tool_names: list[str] | None = None,
 ) -> str:
-    """返回会话内稳定、但随机器和项目变化的未缓存上下文。"""
+    """返回会话内稳定、但随机器和项目变化的未缓存上下文。
+
+    只包含核心环境与 Git 信息；Memory/Skill/Agent 等 Feature 说明由对应
+    PromptLayer 贡献，不进入基础 MetaAgent Prompt。
+    """
     plat = f"{platform.system()} {platform.machine()}"
     shell = (
         (os.environ.get("ComSpec") or "cmd.exe")
@@ -316,9 +316,6 @@ def build_dynamic_system_context(
         else os.environ.get("SHELL", "/bin/sh")
     )
     git_context = get_git_context()
-    memory_section = build_memory_prompt_section()
-    skills_section = build_skill_descriptions()
-    agent_section = build_agent_descriptions()
 
     if deferred_tool_names is None:
         from .tooling.builtin import create_builtin_tools
@@ -342,7 +339,7 @@ def build_dynamic_system_context(
         f"Working directory: {Path.cwd()}\n"
         f"Platform: {plat}\n"
         f"Shell: {shell}"
-        f"{git_context}{memory_section}{skills_section}{agent_section}{deferred_section}"
+        f"{git_context}{deferred_section}"
     )
 
 

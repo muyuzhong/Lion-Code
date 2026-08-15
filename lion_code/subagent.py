@@ -169,29 +169,3 @@ def get_sub_agent_config(agent_type: str) -> SubAgentConfig:
                 exclude_names=frozenset({"agent", "schedule_wakeup"}),
             ),
         )
-
-
-# ─── 可写入系统提示词的 Agent 类型 ─────────────────────────
-
-
-def get_available_agent_types() -> list[dict[str, str]]:
-    types = [
-        {"name": "explore", "description": "Fast, read-only codebase search and exploration"},
-        {"name": "plan", "description": "Read-only analysis with structured implementation plans"},
-        {"name": "general", "description": "Full tools for independent tasks"},
-    ]
-    for name, defn in _discover_custom_agents().items():
-        types.append({"name": name, "description": defn["description"]})
-    return types
-
-
-def build_agent_descriptions() -> str:
-    types = get_available_agent_types()
-    if len(types) <= 3:
-        return ""  # 内置类型已在主提示词中说明，无需重复占用上下文。
-
-    custom = types[3:]
-    lines = ["\n# Custom Agent Types", ""]
-    for t in custom:
-        lines.append(f"- **{t['name']}**: {t['description']}")
-    return "\n".join(lines)

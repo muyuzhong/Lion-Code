@@ -278,10 +278,25 @@ The tool-bearing capabilities use construction-time command binding:
 
 ### Agent Composition Changes
 
-- ``composition/agent_builder.py`` creates ``SkillRuntime``,
-  ``SubagentExecutor``, and ``PlanRuntime`` before registering the corresponding
-  capabilities. ``Agent.__init__`` only normalizes the public configuration,
-  invokes the composition root, and exposes the resulting facade delegates.
+- ``composition/agent_builder.py`` is capability-driven: ``build_agent_composition()``
+  takes an explicit ``capabilities: frozenset[str]`` selection. The default empty
+  set is the **Bare graph** — it creates no Memory/Plan/MCP/SubAgent/Skill/
+  Autonomy/Dream/Learning objects. ``PRODUCT_CAPABILITIES`` selects the Full
+  Product set; ``Agent.__init__`` uses it explicitly.
+- Feature construction is gated by the selection: ``_build_foundation`` creates
+  ``McpManager``/``PlanRuntime`` only when the corresponding capability is
+  selected; ``_build_capability_graph`` and ``_build_session_graph`` construct
+  each runtime only for selected capabilities. `CapabilityRegistry` may be empty
+  and an empty registry remains a legal object graph.
+- ``ToolEnvironment.mcp_manager`` is optional (``None`` when MCP is not
+  selected), so the Bare graph never creates an ``McpManager`` just to build
+  ``ToolRuntime``. ``McpCapability`` tolerates a ``None`` manager (discovery
+  only runs when ``is_root`` is true).
+- For the Full Product, ``composition/agent_builder.py`` creates
+  ``SkillRuntime``, ``SubagentExecutor``, and ``PlanRuntime`` before registering
+  the corresponding capabilities. ``Agent.__init__`` only normalizes the public
+  configuration, invokes the composition root, and exposes the resulting facade
+  delegates.
 - Capability-provided tools are registered into fresh root registries. When a
   child receives a filtered registry, the composition root replaces the
   inherited capability tool objects with tools bound to the child runtimes;
