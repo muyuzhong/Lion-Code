@@ -1219,3 +1219,61 @@ evaluator 不支持 dataset revision 参数后，改为只接受哈希校验的�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 39: PR5 Bare Composition
+
+**Date**: 2026-08-15
+**Task**: PR5 Bare Composition：Minimal graph + explicitly selected capabilities
+**Branch**: `pr5/bare-composition`
+
+### Summary
+
+第一次让「没有高级 Feature 的对象图」真实出现。Composition Root 从
+FullAgent + optional extras 反转为 Minimal graph + explicitly selected
+capabilities（不建复杂 Profile 系统，build_meta_agent 留给 PR6）。
+
+### Main Changes
+
+- `build_agent_composition(config, deps, *, capabilities=frozenset())` 默认
+  Bare 图：不创建 Memory/Plan/MCP/SubAgent/Skill/Autonomy/Dream/Learning。
+- `PRODUCT_CAPABILITIES` 显式选择 Full Product；`Agent.__init__` 显式传入并
+  断言 Feature 字段存在。
+- `ToolEnvironment.mcp_manager` 改为可选，Bare 图不再为建 ToolRuntime 顺便
+  创建 McpManager；`McpCapability` 容忍 None manager。
+- 基础 MetaAgent Prompt 移除 agent tool / memory / skills / MCP / plan 引用，
+  删除三个死代码提示词片段构建函数。
+- 附带清理 PR3/PR4 未同步基线的既有违规：SessionMemoryCoordinator 死
+  permission 参数、8 个测试文件 import 排序、radon/vulture 基线行号漂移。
+- 新增 `tests/architecture/test_bare_composition.py`（8 例验收测试）。
+
+### 真实 Bare object graph
+
+```
+AgentComposition (Bare)
+├── permission_controller / session_state / session_repository
+├── execution / usage / budget / read_file_state
+├── tool_environment (mcp_manager=None) / tool_registry / tool_context
+├── tool_runtime (ToolRuntime) ── 不依赖 McpManager
+├── context_manager / prompt_composer (clean base prompt)
+├── provider_manager / runtime_coordinator (AgentRuntimeCoordinator)
+├── capability_registry (names == ()) / capability_runtime
+└── Feature 字段全部为 None：
+    mcp_manager / mcp_state / plan / subagent_factory / subagent_executor
+    / skill_runtime / mcp_capability / session_memory_coordinator
+    / autonomy / learning / model_query
+```
+
+Full Product（PRODUCT_CAPABILITIES）恢复：mcp/skill/subagent/plan 四个
+Capability + PlanRuntime/SubagentFactory/SkillRuntime/McpCapability/
+SessionMemoryCoordinator/AutonomyRuntime/LearningRuntime/McpManager。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ff6f086` | PR5 Bare Composition：Minimal graph + 显式选择能力 |
+
+### Status
+
+[OK] **Completed**
