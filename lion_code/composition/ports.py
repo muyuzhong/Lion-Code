@@ -9,12 +9,10 @@ from ..agent_runtime import AgentRuntimeCoordinator
 from ..context import ContextCompactor
 from ..core.provider import ModelProvider
 from ..domain_ports import NoticeSink
-from ..memory_runtime import ProviderTextQueryService
 from ..observers import TerminalRenderer
 from ..permission_state import PermissionController
 from ..provider_manager import (
     ConfigurationRecorder,
-    MemoryQuerySink,
     ModelContextControl,
     ProviderRuntimePort,
     ProviderView,
@@ -217,7 +215,7 @@ class SessionStatePort:
         session_state: SessionIdentityState,
         session_repository: SessionRepository,
         tool_context: Any,
-        tool_environment: ToolEnvironment,
+        tool_environment: ToolEnvironment | None,
     ) -> None:
         self._session_state = session_state
         self._session_repository = session_repository
@@ -273,31 +271,6 @@ class DeferredModelContextControl(ModelContextControl):
         if self._runtime is None:
             raise RuntimeError("Provider Runtime 尚未初始化")
         self._runtime.invalidate_model_limit_cache(model)
-
-
-class MemoryQuerySinkAdapter(MemoryQuerySink):
-    """只向 Session Memory 暴露 query service 写入端口。"""
-
-    def __init__(self, coordinator: Any) -> None:
-        self._coordinator = coordinator
-
-    def set_query_service(self, service: ProviderTextQueryService) -> None:
-        self._coordinator.set_query_service(service)
-
-
-class DeferredMemoryQuerySink(MemoryQuerySink):
-    """ProviderManager 构造早于 Session Memory 时使用的 deferred sink。"""
-
-    def __init__(self) -> None:
-        self._sink: MemoryQuerySink | None = None
-
-    def bind(self, sink: MemoryQuerySink) -> None:
-        self._sink = sink
-
-    def set_query_service(self, service: ProviderTextQueryService) -> None:
-        if self._sink is None:
-            raise RuntimeError("Session Memory query sink 尚未初始化")
-        self._sink.set_query_service(service)
 
 
 class SessionMemorySnapshotView:

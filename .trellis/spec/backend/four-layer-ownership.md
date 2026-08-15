@@ -49,8 +49,8 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 | ModelDelta | `TextDeltaEvent` / `ThinkingDeltaEvent` | 已发射 |
 | ToolCallRequested | `ToolCallEndEvent` / `ToolExecutionStartEvent` | 已发射 |
 | ToolCallCompleted | `ToolExecutionEndEvent` | 已发射 |
-| CompactionStarted | `CompactionStartedEvent` | 契约声明（会话级事件在 `application/events.py::CompactionStartEvent`，Kernel 级发射为后续 PR） |
-| CompactionCompleted | `CompactionCompletedEvent` | 契约声明（同上） |
+| CompactionStarted | `CompactionStartedEvent` | 已发射（threshold/manual/overflow 的真实压缩执行点） |
+| CompactionCompleted | `CompactionCompletedEvent` | 已发射（成功或取消；取消时 `aborted=True`） |
 | TurnCompleted | `TurnEndEvent` | 已发射 |
 | TurnFailed | `TurnFailedEvent` | 已发射（stop_reason="error"） |
 | Cancelled | `CancelledEvent` | 已发射（stop_reason="aborted"） |
@@ -73,7 +73,7 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 | **Harness** | `lion_code/composition/`、`provider_manager.py`、`providers/`、`tooling/`、`agent_runtime.py`（LionAgentRuntime）、`session_runtime/`、`application/`（部分）、`observers/` | Provider/ToolRuntime/Middleware/SessionRecorder/Event Sink |
 | **Capability** | `capabilities/`、`memory_runtime/`、`session_memory*.py`、`plan_runtime.py`、`subagent_runtime.py`、`subagent_factory.py`、`skill_runtime.py`、`mcp_client.py` | Skill/MCP/Plan/Memory/SubAgent |
 | **Supervisor** | `autonomy_runtime.py`、`dream*.py`、`dream_adapter.py`、`learning_runtime.py` | Autonomy/Dream/Learning |
-| **Facade** | `agent.py`、`application/` | Agent 门面 + 应用端口（门面组装各层，不属于任何一层） |
+| **Facade** | `agent.py`、`meta_agent.py`、`application/` | Agent 门面 + 应用端口（门面组装各层，不属于任何一层） |
 
 > 注：`agent.py` / `composition/agent_builder.py` 是门面与 Composition Root，把 Foundation /
 > Provider / Capability / Tooling / Coordinator / Session 一次性组装；它不是 Kernel。
@@ -120,6 +120,14 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 > （`tests/memory_runtime/test_core_integration.py` 等）已标记 `skip` + re-home 理由。
 > `SessionMemoryCoordinator` 类保留，但不再桥接进 coordinator，仅服务独立于 turn 循环的
 > Memory 能力（持久化、命令、Dream）。
+
+> **PR2 / PR6 状态**：PR2 没有形成独立 PR，遗留的
+> `ProviderManager -> MemoryQuerySink` 依赖由 PR6 直接删除，不保留 deferred sink、兼容层
+> 或 fallback。Memory 在 Provider replacement 后刷新 query service 的行为不在 Bare 路径
+> 恢复，留给下一阶段 Feature Re-home。PR6 同时提供 `build_meta_agent()`：空
+> `CapabilityRegistry` 与空 `ToolRegistry` 都是可运行状态，Coding tools 只能由调用方显式
+> 传入。`MetaAgent` facade 只暴露通用运行、对话、事件、上下文、会话、Provider、用量与
+> 关闭契约，不暴露任何 Feature-specific API。
 
 ## 5. "不是 Kernel" 边界清单
 

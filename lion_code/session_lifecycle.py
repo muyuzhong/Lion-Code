@@ -100,7 +100,7 @@ class SessionLifecycle:
     async def compact(self) -> None:
         coord = self._coord
         await coord.ensure_core_session_ready()
-        if await coord.compact_core_context_if_needed(force=True):
+        if await coord.compact_core_context_if_needed(force=True, reason="manual"):
             self._identity._emit_notice("Conversation compacted.")
 
     async def close(self) -> None:
@@ -116,4 +116,5 @@ class SessionLifecycle:
                 try:
                     await self._capabilities.close()
                 finally:
-                    await self._session.tool_environment.close()
+                    if self._session.tool_environment is not None:
+                        await self._session.tool_environment.close()

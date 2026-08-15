@@ -53,6 +53,7 @@ class AgentDependencies:
     context_manager: ContextManager | None = None
     context_compactor: ContextCompactor | None = None
     model_limits_resolver: ModelLimitsResolver | None = None
+    provider: ModelProvider | None = None
     provider_factory: Callable[..., ModelProvider] | None = None
     pre_tool_use_hooks_loader: Callable[[], list[Any]] | None = None
     project_identity_resolver: Callable[[Any], ProjectIdentity] | None = None

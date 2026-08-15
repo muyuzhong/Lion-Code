@@ -40,7 +40,13 @@ from lion_code.core import (
     QueueSnapshot,
 )
 from lion_code.core.cancellation import CancellationView
-from lion_code.core.events import AgentEvent, MessageEndEvent, MessageUpdateEvent
+from lion_code.core.events import (
+    AgentEvent,
+    CompactionCompletedEvent,
+    CompactionStartedEvent,
+    MessageEndEvent,
+    MessageUpdateEvent,
+)
 from lion_code.core.loop import BeforeToolCalls, PrepareContext
 from lion_code.core.messages import AssistantMessage, UserMessage, message_text
 from lion_code.core.provider import ModelProvider
@@ -139,6 +145,11 @@ class LionAgentRuntime:
     def subscribe(self, listener: EventListener) -> Callable[[], None]:
         """注册一个同步或异步的 Agent 事件监听器，返回取消订阅回调。"""
         return self.harness.subscribe(listener)
+
+    async def emit(self, event: AgentEvent) -> None:
+        """通过 Harness 的同一订阅流发布运行时事件。"""
+
+        await self.harness.emit(event)
 
     async def prompt(self, content: str) -> None:
         """驱动一次完整对话：消费完 harness 产生的全部事件。"""
@@ -560,6 +571,7 @@ class AgentRuntimeCoordinator:
         *,
         force: bool = False,
         keep_user_boundaries: int = 1,
+        reason: Literal["threshold", "overflow", "manual"] = "threshold",
     ) -> bool:
         """在新用户轮次前写入 CompactionEntry 并回放唯一活跃上下文。"""
 
@@ -589,30 +601,40 @@ class AgentRuntimeCoordinator:
         if not replaced_ids:
             return False
 
-        if self._execution.cancelled:
-            raise asyncio.CancelledError
-        task = asyncio.create_task(self._context_compactor.summarize(summary_messages))
-        self._core_compaction_task = task
+        await self._runtime.emit(CompactionStartedEvent(reason=reason))
         try:
-            summary = await task
-        finally:
-            if self._core_compaction_task is task:
-                self._core_compaction_task = None
-        if self._execution.cancelled:
-            raise asyncio.CancelledError
-        await self._session_recorder.record_compaction(
-            summary=summary,
-            replaces_entry_ids=replaced_ids,
-        )
-        state = await self._session._session_repository.load(
-            self._session.session_state.id
-        )
-        if state is None:
-            raise RuntimeError("Session disappeared after compaction")
-        await self._runtime.replace_active_context(state.messages)
-        self._usage.reset_context_tracking()
-        self._last_context_actions = ()
-        self._core_compaction_required = False
+            if self._execution.cancelled:
+                raise asyncio.CancelledError
+            task = asyncio.create_task(
+                self._context_compactor.summarize(summary_messages)
+            )
+            self._core_compaction_task = task
+            try:
+                summary = await task
+            finally:
+                if self._core_compaction_task is task:
+                    self._core_compaction_task = None
+            if self._execution.cancelled:
+                raise asyncio.CancelledError
+            await self._session_recorder.record_compaction(
+                summary=summary,
+                replaces_entry_ids=replaced_ids,
+            )
+            state = await self._session._session_repository.load(
+                self._session.session_state.id
+            )
+            if state is None:
+                raise RuntimeError("Session disappeared after compaction")
+            await self._runtime.replace_active_context(state.messages)
+            self._usage.reset_context_tracking()
+            self._last_context_actions = ()
+            self._core_compaction_required = False
+        except asyncio.CancelledError:
+            await self._runtime.emit(
+                CompactionCompletedEvent(reason=reason, aborted=True)
+            )
+            raise
+        await self._runtime.emit(CompactionCompletedEvent(reason=reason))
         return True
 
     async def compact_core_context_for_overflow(self) -> bool:
@@ -621,6 +643,7 @@ class AgentRuntimeCoordinator:
         return await self.compact_core_context_if_needed(
             force=True,
             keep_user_boundaries=2,
+            reason="overflow",
         )
 
     def schedule_background_operation(

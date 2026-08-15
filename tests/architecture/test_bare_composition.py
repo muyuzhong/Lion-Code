@@ -1,4 +1,4 @@
-"""PR5 Bare Composition：无高级 Feature 的真实对象图。
+"""PR5/PR6 Bare Composition：无高级 Feature 的真实对象图。
 
 验收：
 1. CapabilityRegistry() 为空是合法状态。
@@ -30,6 +30,70 @@ from lion_code.tooling.registry import ToolRegistry
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
+
+_BARE_GENERIC_FILES = (
+    SOURCE_ROOT / "meta_agent.py",
+    SOURCE_ROOT / "agent_runtime.py",
+    SOURCE_ROOT / "provider_manager.py",
+    SOURCE_ROOT / "session_lifecycle.py",
+    SOURCE_ROOT / "execution_control.py",
+    SOURCE_ROOT / "permission_state.py",
+    SOURCE_ROOT / "usage.py",
+    *sorted((SOURCE_ROOT / "core").rglob("*.py")),
+    *sorted((SOURCE_ROOT / "context").rglob("*.py")),
+    *sorted((SOURCE_ROOT / "session_runtime").rglob("*.py")),
+    *(
+        SOURCE_ROOT / "tooling" / name
+        for name in (
+            "context.py",
+            "middleware.py",
+            "permission.py",
+            "registry.py",
+            "result_store.py",
+            "runtime.py",
+            "selection.py",
+            "types.py",
+        )
+    ),
+)
+_FEATURE_MODULE_PREFIXES = (
+    "lion_code.autonomy_runtime",
+    "lion_code.capabilities.mcp",
+    "lion_code.capabilities.plan",
+    "lion_code.capabilities.skill",
+    "lion_code.capabilities.subagent",
+    "lion_code.dream",
+    "lion_code.learning_runtime",
+    "lion_code.mcp_client",
+    "lion_code.memory",
+    "lion_code.memory_runtime",
+    "lion_code.plan_runtime",
+    "lion_code.session_memory",
+    "lion_code.skill_runtime",
+    "lion_code.subagent_factory",
+    "lion_code.subagent_runtime",
+)
+_FEATURE_SYMBOLS = {
+    "AutonomyRuntime",
+    "ChildAgentConfig",
+    "DreamCoordinator",
+    "LearningRuntime",
+    "McpCapability",
+    "McpManager",
+    "MemoryContextInjector",
+    "MemoryCoordinator",
+    "MemoryQuerySink",
+    "PlanRuntime",
+    "PlanState",
+    "ProviderModelQuery",
+    "ProviderTextQueryService",
+    "RelevantMemory",
+    "RestrictedDreamAgentFactory",
+    "SessionMemoryCoordinator",
+    "SkillRuntime",
+    "SubagentExecutor",
+    "SubagentFactory",
+}
 
 # Bare 图禁止出现的 Feature 字段（AgentComposition 中应为 None）。
 _FEATURE_FIELDS = (
@@ -80,13 +144,14 @@ def test_bare_graph_creates_no_feature_objects(tmp_path, monkeypatch) -> None:
     composition = _bare_composition(tmp_path, monkeypatch)
     for field in _FEATURE_FIELDS:
         assert getattr(composition, field) is None, field
+    assert composition.status_sink is None
 
 
 def test_bare_graph_has_no_mcp_manager(tmp_path, monkeypatch) -> None:
-    """Bare 图不创建 McpManager：ToolEnvironment 也不持有一个。"""
+    """Bare 图不创建 McpManager 或 ToolEnvironment 替身。"""
     composition = _bare_composition(tmp_path, monkeypatch)
     assert composition.mcp_manager is None
-    assert composition.tool_environment.mcp_manager is None
+    assert composition.tool_environment is None
 
 
 def test_full_product_has_all_features(tmp_path, monkeypatch) -> None:
@@ -145,3 +210,51 @@ def test_base_prompt_does_not_reference_features() -> None:
 def test_prompt_template_declaration_matches_static_builder() -> None:
     """静态模板即 build_static_system_prompt 的内容，Feature 引用同样被拒绝。"""
     assert SYSTEM_PROMPT_TEMPLATE == build_static_system_prompt()
+
+
+def test_bare_kernel_and_harness_paths_have_no_feature_references() -> None:
+    """只扫描 Bare 通用路径，不误伤 Product/Capability 的具体实现。"""
+
+    violations = []
+    for path in _BARE_GENERIC_FILES:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if node.level:
+                    module = f"lion_code.{module}"
+                if module.startswith(_FEATURE_MODULE_PREFIXES):
+                    violations.append((path.name, node.lineno, module))
+                for alias in node.names:
+                    if alias.name in _FEATURE_SYMBOLS:
+                        violations.append((path.name, node.lineno, alias.name))
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith(_FEATURE_MODULE_PREFIXES):
+                        violations.append((path.name, node.lineno, alias.name))
+            elif isinstance(node, ast.Name) and node.id in _FEATURE_SYMBOLS:
+                violations.append((path.name, node.lineno, node.id))
+            elif isinstance(node, ast.Attribute) and node.attr in _FEATURE_SYMBOLS:
+                violations.append((path.name, node.lineno, node.attr))
+
+    assert not violations, f"Bare 通用路径引用高级 Feature: {violations}"
+
+
+def test_meta_agent_does_not_import_concrete_coding_tools() -> None:
+    """Coding tools 只能由调用方显式传入。"""
+
+    source = (SOURCE_ROOT / "meta_agent.py").read_text(encoding="utf-8")
+    tree = ast.parse(source, filename="meta_agent.py")
+    imported_modules = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+    assert not imported_modules & {"tooling.builtin", "tooling.internal"}
+
+
+def test_provider_manager_has_no_memory_reference() -> None:
+    """ProviderManager 只刷新通用 Provider/Context/Recorder 状态。"""
+
+    source = (SOURCE_ROOT / "provider_manager.py").read_text(encoding="utf-8")
+    assert "memory" not in source.casefold()

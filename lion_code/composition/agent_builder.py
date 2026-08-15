@@ -72,11 +72,9 @@ from .config import AgentConfig, AgentDependencies
 from .ports import (
     ConfirmationController,
     DeferredBackgroundScheduler,
-    DeferredMemoryQuerySink,
     DeferredModelContextControl,
     DeferredProviderRuntimePort,
     McpLifecycleState,
-    MemoryQuerySinkAdapter,
     NoticeController,
     NoticeSinkAdapter,
     PlanHost,
@@ -127,7 +125,7 @@ class AgentComposition:
     budget: BudgetPolicy
     read_file_state: dict[str, float]
     pre_tool_use_hooks: list[Any]
-    tool_environment: ToolEnvironment
+    tool_environment: ToolEnvironment | None
     tool_registry: ToolRegistry
     mcp_manager: Any | None
     mcp_state: McpLifecycleState | None
@@ -155,7 +153,7 @@ class AgentComposition:
     session_port: SessionStatePort
     notices: NoticeController
     confirmation: ConfirmationController
-    status_sink: SubagentStatusSink
+    status_sink: SubagentStatusSink | None
 
 
 @dataclass(slots=True)
@@ -171,7 +169,7 @@ class _FoundationGraph:
     notices: NoticeController
     confirmation: ConfirmationController
     permission_controller: PermissionController
-    status_sink: SubagentStatusSink
+    status_sink: SubagentStatusSink | None
     execution: ExecutionControl
     usage: UsageLedger
     budget: BudgetPolicy
@@ -179,12 +177,12 @@ class _FoundationGraph:
     session_repository: SessionRepository
     read_file_state: dict[str, float]
     mcp_state: McpLifecycleState | None
-    tool_environment: ToolEnvironment
+    tool_environment: ToolEnvironment | None
     mcp_manager: Any | None
     tool_registry: ToolRegistry
     created_own_registry: bool
     selected_tool_names: set[str] | None
-    notice_sink: NoticeSinkAdapter
+    notice_sink: NoticeSinkAdapter | None
     plan: PlanRuntime | None
 
 
@@ -201,14 +199,13 @@ class _ResolvedDependencies:
     notices: NoticeController
     confirmation: ConfirmationController
     permission_controller: PermissionController
-    status_sink: SubagentStatusSink
+    status_sink: SubagentStatusSink | None
 
 
 @dataclass(slots=True)
 class _ProviderGraph:
     provider_runtime_port: DeferredProviderRuntimePort
     model_context_control: DeferredModelContextControl
-    memory_query_sink: DeferredMemoryQuerySink
     configuration_recorder: SessionRecorderConfigurationRecorder
     background_scheduler: DeferredBackgroundScheduler
     provider_manager: ProviderManager
@@ -376,6 +373,7 @@ def build_agent_composition(
 def _resolve_dependencies(
     config: AgentConfig,
     dependencies: AgentDependencies | None,
+    capabilities: frozenset[str],
 ) -> _ResolvedDependencies:
     deps = dependencies or AgentDependencies()
     cwd = Path.cwd()
@@ -389,11 +387,13 @@ def _resolve_dependencies(
         print_confirmation=deps.print_confirmation or _noop_print,
         confirm_fn=deps.confirm_fn,
     )
-    status_sink = SubagentStatusSink(
-        terminal_output=config.terminal_output,
-        start=deps.print_sub_agent_start or _noop_status,
-        end=deps.print_sub_agent_end or _noop_status,
-    )
+    status_sink = None
+    if capabilities & {CAP_SUBAGENT, CAP_SKILL, CAP_MEMORY}:
+        status_sink = SubagentStatusSink(
+            terminal_output=config.terminal_output,
+            start=deps.print_sub_agent_start or _noop_status,
+            end=deps.print_sub_agent_end or _noop_status,
+        )
     return _ResolvedDependencies(
         dependencies=deps,
         cwd=cwd,
@@ -417,7 +417,7 @@ def _build_foundation(
     dependencies: AgentDependencies | None,
     capabilities: frozenset[str],
 ) -> _FoundationGraph:
-    resolved = _resolve_dependencies(config, dependencies)
+    resolved = _resolve_dependencies(config, dependencies, capabilities)
     deps = resolved.dependencies
     cwd = resolved.cwd
     provider_factory = resolved.provider_factory
@@ -452,6 +452,9 @@ def _build_foundation(
         if config.custom_tools is not None
         else None
     )
+    needs_tool_environment = bool(
+        capabilities & {CAP_MCP, CAP_SUBAGENT, CAP_SKILL, CAP_MEMORY, CAP_DREAM}
+    )
     if deps.tool_environment is not None:
         tool_environment = deps.tool_environment
     elif CAP_MCP in capabilities:
@@ -459,19 +462,25 @@ def _build_foundation(
             mcp_manager=McpManager(),
             owns_mcp_manager=not config.is_sub_agent,
         )
-    else:
+    elif needs_tool_environment:
         tool_environment = ToolEnvironment(
             mcp_manager=None,
             owns_mcp_manager=False,
         )
-    mcp_manager = tool_environment.mcp_manager
+    else:
+        tool_environment = None
+    mcp_manager = tool_environment.mcp_manager if tool_environment is not None else None
     tool_registry = deps.tool_registry or ToolRegistry()
     if created_own_registry:
         for tool in [*create_builtin_tools(), *create_internal_tools()]:
             if selected_tool_names is None or tool.name in selected_tool_names:
                 tool_registry.register(tool)
 
-    notice_sink = NoticeSinkAdapter(notices)
+    notice_sink = (
+        NoticeSinkAdapter(notices)
+        if capabilities & {CAP_MEMORY, CAP_AUTONOMY}
+        else None
+    )
     if CAP_PLAN in capabilities:
         plan: PlanRuntime | None = PlanRuntime(
             PlanHost(session_state, notices),
@@ -525,7 +534,6 @@ def _build_provider_graph(
     initial_thinking_level: ThinkingLevel = "medium" if config.thinking else "off"
     provider_runtime_port = DeferredProviderRuntimePort()
     model_context_control = DeferredModelContextControl()
-    memory_query_sink = DeferredMemoryQuerySink()
     configuration_recorder = SessionRecorderConfigurationRecorder()
     background_scheduler = DeferredBackgroundScheduler()
     provider_manager = ProviderManager(
@@ -540,19 +548,20 @@ def _build_provider_graph(
         ),
         runtime=provider_runtime_port,
         context=model_context_control,
-        memory=memory_query_sink,
         recorder=configuration_recorder,
         provider_factory=foundation.provider_factory,
         schedule_background_operation=background_scheduler,
     )
+    provider = foundation.dependencies.provider
+    if provider is None:
+        provider = provider_manager.build_provider()
     return _ProviderGraph(
         provider_runtime_port=provider_runtime_port,
         model_context_control=model_context_control,
-        memory_query_sink=memory_query_sink,
         configuration_recorder=configuration_recorder,
         background_scheduler=background_scheduler,
         provider_manager=provider_manager,
-        provider=provider_manager.build_provider(),
+        provider=provider,
     )
 
 
@@ -565,7 +574,10 @@ def _build_identity_port(
         is_sub_agent=config.is_sub_agent,
         terminal_output=config.terminal_output,
         effective_window=effective_window_tokens(fallback_model_limits(config.model)),
-        api_configured=lambda: provider_manager.api_configured,
+        api_configured=lambda: (
+            foundation.dependencies.provider is not None
+            or provider_manager.api_configured
+        ),
         is_aborted=lambda: foundation.execution.cancelled,
         terminal_renderer_factory=foundation.renderer_factory,
         notices=foundation.notices,
@@ -586,6 +598,8 @@ def _build_capability_graph(
     subagent_factory: SubagentFactory | None = None
     subagent_executor: SubagentExecutor | None = None
     if CAP_SUBAGENT in capabilities or CAP_SKILL in capabilities:
+        if foundation.tool_environment is None or foundation.status_sink is None:
+            raise RuntimeError("subagent capability requires tooling environment")
         subagent_factory = SubagentFactory(
             registry=foundation.tool_registry,
             environment=foundation.tool_environment,
@@ -606,6 +620,8 @@ def _build_capability_graph(
     if CAP_MCP in capabilities:
         mcp_manager = foundation.mcp_manager
         mcp_state = foundation.mcp_state
+        if foundation.tool_environment is None:
+            raise RuntimeError("mcp capability requires tooling environment")
         mcp_capability = McpCapability(
             mcp_manager=mcp_manager,
             tool_registry=foundation.tool_registry,
@@ -809,6 +825,8 @@ def _build_session_graph(
             return session_memory_coord.session_memory
 
     if needs_dream:
+        if foundation.tool_environment is None:
+            raise RuntimeError("dream capability requires tooling environment")
         dream_factory = RestrictedDreamAgentFactory(
             registry=foundation.tool_registry,
             environment=foundation.tool_environment,
@@ -838,7 +856,11 @@ def _build_session_graph(
                     )
                 )
 
-        if dream is None:
+        if (
+            dream is None
+            or foundation.notice_sink is None
+            or foundation.status_sink is None
+        ):
             raise RuntimeError("memory capability requires dream runner")
         session_memory_coord = SessionMemoryCoordinator(
             identity=identity,
@@ -855,12 +877,8 @@ def _build_session_graph(
             status_callback=foundation.status_sink.emit,
             refresh_context=refresh_dynamic_context,
         )
-        provider_graph.memory_query_sink.bind(
-            MemoryQuerySinkAdapter(session_memory_coord)
-        )
-
     if CAP_AUTONOMY in capabilities:
-        if query is None:
+        if query is None or foundation.notice_sink is None:
             raise RuntimeError("autonomy capability requires query")
         autonomy = AutonomyRuntime(
             conversation=runtime_coordinator,

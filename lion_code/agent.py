@@ -251,6 +251,8 @@ class Agent:
         assert composition.autonomy is not None
         assert composition.learning is not None
         assert composition.model_query is not None
+        assert composition.tool_environment is not None
+        assert composition.status_sink is not None
 
         self.is_sub_agent = resolved_config.is_sub_agent
         self._mcp_enabled = resolved_config.mcp_enabled
