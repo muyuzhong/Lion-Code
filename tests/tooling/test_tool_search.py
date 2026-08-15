@@ -4,8 +4,6 @@ import json
 import unittest
 from pathlib import Path
 
-from core.fakes import FakePlanView
-
 from lion_code.core.cancellation import CancellationToken
 from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.session_identity import SessionIdentityState
@@ -39,7 +37,6 @@ class TestToolSearch(unittest.IsolatedAsyncioTestCase):
             cwd=Path.cwd(),
             registry=registry,
             permission=PermissionController(PermissionState("default")),
-            plan=FakePlanView(),
             read_file_state={},
         )
         return registry, ToolRuntime(registry, context)

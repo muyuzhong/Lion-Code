@@ -11,7 +11,7 @@ from typing import Literal, Protocol
 from ..hooks import HookOutcome, run_pre_tool_use_hooks
 from ..permission_state import PermissionConfirmationSink
 from .context import ToolContext
-from .permission import PermissionDecision, PermissionPolicy
+from .permission import PermissionPolicy
 from .result_store import ResultStore
 from .types import JSONValue, LionTool, ToolResult
 
@@ -111,42 +111,6 @@ class PermissionMiddleware:
         self.policy = policy
         self.confirmations = confirmations
 
-    async def _decision(
-        self,
-        tool: LionTool,
-        context: ToolContext,
-        arguments: Mapping[str, JSONValue],
-    ) -> PermissionDecision:
-        hard = self.policy.check_hard_boundaries(
-            tool=tool,
-            arguments=arguments,
-            mode=context.permission.mode,
-            plan_file_path=context.plan.file_path,
-        )
-        if hard is not None:
-            return hard
-
-        if context.permission.mode != "auto":
-            return self.policy.check(
-                tool=tool,
-                arguments=arguments,
-                mode=context.permission.mode,
-                plan_file_path=context.plan.file_path,
-            )
-
-        if is_auto_fast_path(tool):
-            return PermissionDecision("allow")
-        if context.auto_permission_fn is None:
-            return PermissionDecision(
-                "deny",
-                f"{tool.name} (auto-mode classifier unavailable)",
-            )
-        raw = await context.auto_permission_fn(tool.name, arguments)
-        action = raw.get("action") if isinstance(raw, dict) else None
-        if action not in {"allow", "deny", "confirm"}:
-            return PermissionDecision("deny", "Invalid auto-mode permission result")
-        return PermissionDecision(action, str(raw.get("message", "")))
-
     async def handle(
         self,
         *,
@@ -156,7 +120,20 @@ class PermissionMiddleware:
         arguments: Mapping[str, JSONValue],
         call_next: NextCall,
     ) -> ToolResult:
-        decision = await self._decision(tool, context, arguments)
+        hard = self.policy.check_hard_boundaries(
+            tool=tool,
+            arguments=arguments,
+            mode=context.permission.mode,
+        )
+        decision = (
+            hard
+            if hard is not None
+            else self.policy.check(
+                tool=tool,
+                arguments=arguments,
+                mode=context.permission.mode,
+            )
+        )
         if decision.action == "deny":
             return ToolResult(
                 content=f"Action denied: {decision.message}",
@@ -169,16 +146,14 @@ class PermissionMiddleware:
                     content="Confirmation unavailable.",
                     is_error=True,
                 )
-            cacheable = context.permission.mode != "auto"
-            if not cacheable or not context.permission.is_confirmed(decision.message):
+            if not context.permission.is_confirmed(decision.message):
                 approved = await context.confirm_fn(decision.message)
                 if not approved:
                     return ToolResult(
                         content="User denied this action.",
                         is_error=True,
                     )
-                if cacheable:
-                    self.confirmations.confirm(decision.message)
+                self.confirmations.confirm(decision.message)
 
         return await call_next()
 
@@ -293,8 +268,3 @@ def can_run_parallel(tool: LionTool) -> bool:
         and tool.capabilities.concurrency_safe
         and tool.capabilities.read_only
     )
-
-
-def is_auto_fast_path(tool: LionTool) -> bool:
-    """Auto Mode 仅跳过无外部副作用的只读工具分类。"""
-    return tool.capabilities.read_only and not tool.capabilities.external_side_effect

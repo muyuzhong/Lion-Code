@@ -263,6 +263,9 @@ The tool-bearing capabilities use construction-time command binding:
 - The tools call the bound ``PlanRuntime`` directly. The tool adapter copies
   ``terminate`` from ``PlanToolOutcome`` into ``ToolResult``; with PR3 the
   clear-and-execute enhancement is removed, so Plan approval never terminates.
+- PR4：PlanRuntime 不再持有或写入 PermissionController。enter/exit/toggle 只
+  管理 Plan 状态与审批事务；Plan 期间的读写限制由未来的
+  ``PlanRestrictedPolicy`` 注入，Capability 自身不把 ``plan`` 当作权限模式。
 - The prompt layer renders the current Plan state on every Composer request;
   it does not mutate Plan state or retain a prompt mirror.
 

@@ -293,13 +293,11 @@
         "F"
       ],
       "fingerprints": [
-        "lion_code/__main__.py:258:main:D:30",
-        "lion_code/__main__.py:69:run_repl:F:44",
-        "lion_code/agent_lifecycle.py:83:AgentLifecycle.configure_api:D:28",
+        "lion_code/__main__.py:253:main:E:31",
+        "lion_code/__main__.py:64:run_repl:F:44",
         "lion_code/application/session.py:345:LionCodingSession._drive:D:28",
         "lion_code/core/loop.py:73:run_agent_loop:F:44",
         "lion_code/core/session/jsonl.py:59:_migrate_message:D:24",
-        "lion_code/dream.py:365:parse_dream_plan:D:26",
         "lion_code/providers/stream.py:90:canonicalize_provider_stream:D:29",
         "lion_code/session_runtime/legacy.py:123:_anthropic_messages:D:24",
         "lion_code/tui/adapter.py:24:TuiEventAdapter.apply:D:21",
@@ -312,7 +310,7 @@
       "version": "vulture==2.16",
       "max_count": 5,
       "fingerprints": [
-        "lion_code/__main__.py:109:unused variable 'sig':100",
+        "lion_code/__main__.py:104:unused variable 'sig':100",
         "lion_code/providers/thinking.py:104:unused variable 'provider_kind':100",
         "lion_code/providers/thinking.py:113:unused variable 'provider_kind':100",
         "tests/benchmarks/test_external_anchor.py:65:unused variable 'output_dir':100",

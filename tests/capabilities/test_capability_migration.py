@@ -510,39 +510,13 @@ class TestAgentCompositionWithCapabilities:
 
 
 # ---------------------------------------------------------------------------
-# SubAgent permission inheritance (unchanged behavior)
+# SubAgent permission (PR4: Permission 不再有 plan/auto 模式，子 Agent 一律 bypassPermissions)
 # ---------------------------------------------------------------------------
 
 
 class TestSubAgentPermissionInheritance:
-    def test_subagent_inherits_plan_permission_mode(self) -> None:
-        """SubAgent created from a plan-mode parent should inherit 'plan'."""
-        from lion_code.agent import Agent
-
-        agent = Agent(
-            api_key="test-key",
-            terminal_output=False,
-            mcp_enabled=False,
-            permission_mode="plan",
-        )
-
-        assert agent._subagent_factory._child_permission_mode() == "plan"  # noqa: SLF001
-
-    def test_subagent_inherits_auto_permission_mode(self) -> None:
-        """SubAgent created from an auto-mode parent should inherit 'auto'."""
-        from lion_code.agent import Agent
-
-        agent = Agent(
-            api_key="test-key",
-            terminal_output=False,
-            mcp_enabled=False,
-            permission_mode="auto",
-        )
-
-        assert agent._subagent_factory._child_permission_mode() == "auto"  # noqa: SLF001
-
-    def test_subagent_defaults_to_bypass_for_other_modes(self) -> None:
-        """Non-plan, non-auto modes should map to bypassPermissions."""
+    def test_subagent_uses_bypass_permission_mode(self) -> None:
+        """子 Agent 始终以 bypassPermissions 构造（无父模式继承）。"""
         from lion_code.agent import Agent
 
         agent = Agent(
@@ -552,10 +526,11 @@ class TestSubAgentPermissionInheritance:
             permission_mode="default",
         )
 
-        assert (
-            agent._subagent_factory._child_permission_mode()  # noqa: SLF001
-            == "bypassPermissions"
-        )
+        child = agent._subagent_factory.create_for_agent_type("general")  # noqa: SLF001
+        try:
+            assert child.permission_mode == "bypassPermissions"
+        finally:
+            asyncio.run(child.close())
 
     def test_subagent_inherits_parent_tool_registry_filtered(self) -> None:
         """SubAgent should receive a filtered view of the parent's registry,

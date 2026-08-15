@@ -37,12 +37,16 @@ from .domain_ports import ConversationRunner, ModelQuery, NoticeSink, Transcript
 from .model_query import ModelQueryUnavailableError
 from .prompt import load_claude_md
 from .tooling.internal import create_wakeup_tool
-from .tooling.middleware import is_auto_fast_path
 from .tooling.registry import ToolRegistry
-from .tooling.types import JSONValue, ToolResult
+from .tooling.types import JSONValue, LionTool, ToolResult
 from .usage import BudgetPolicy, UsageLedger
 
 ConfirmCallback = Callable[[str], Awaitable[bool]]
+
+
+def is_auto_fast_path(tool: LionTool) -> bool:
+    """Auto Mode 仅跳过无外部副作用的只读工具分类。"""
+    return tool.capabilities.read_only and not tool.capabilities.external_side_effect
 
 
 class AutonomyRuntime:

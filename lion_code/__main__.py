@@ -37,10 +37,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("prompt", nargs="*", help="One-shot prompt")
     parser.add_argument("--yolo", "-y", action="store_true", help="Skip all confirmation prompts")
-    parser.add_argument("--plan", action="store_true", help="Plan mode: read-only")
+    parser.add_argument("--plan", action="store_true", help="Start in Plan mode: read-only planning phase")
     parser.add_argument("--accept-edits", action="store_true", help="Auto-approve file edits")
     parser.add_argument("--dont-ask", action="store_true", help="Auto-deny confirmations (for CI)")
-    parser.add_argument("--auto", action="store_true", help="Auto Mode: LLM classifier judges each action")
     parser.add_argument("--thinking", action="store_true", help="Enable extended thinking")
     parser.add_argument("--model", "-m", default=None, help="Model to use")
     parser.add_argument("--api-base", default=None, help="OpenAI-compatible API base URL")
@@ -55,14 +54,10 @@ def parse_args() -> argparse.Namespace:
 def _resolve_permission_mode(args: argparse.Namespace) -> PermissionMode:
     if args.yolo:
         return "bypassPermissions"
-    if args.plan:
-        return "plan"
     if args.accept_edits:
         return "acceptEdits"
     if args.dont_ask:
         return "dontAsk"
-    if args.auto:
-        return "auto"
     return "default"
 
 
@@ -264,10 +259,9 @@ Usage: lion-code [options] [prompt]
 
 Options:
   --yolo, -y          Skip all confirmation prompts (bypassPermissions mode)
-  --plan              Plan mode: read-only, describe changes without executing
+  --plan              Start in Plan mode: read-only planning phase
   --accept-edits      Auto-approve file edits, still confirm dangerous shell
   --dont-ask          Auto-deny anything needing confirmation (for CI)
-  --auto              Auto Mode: an LLM classifier judges each action instead of asking
   --thinking          Enable extended thinking for supported models
   --model, -m         Model to use (default: claude-opus-4-6, or LION_CODE_MODEL env)
   --api-base URL      Use OpenAI-compatible API endpoint (key via env var)
@@ -372,6 +366,9 @@ Examples:
         anthropic_base_url=resolved_api_base if not resolved_use_openai else None,
         api_key=resolved_api_key,
     )
+    if args.plan:
+        # Plan 激活是 Plan Capability 命令（PR4 起 Permission 不再有 plan 模式）。
+        agent.toggle_plan_mode()
 
     if use_tui:
         # TUI 内自带输入循环，one-shot prompt 不适用。

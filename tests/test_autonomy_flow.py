@@ -22,7 +22,7 @@ HAVE_DEPS = HAVE_AGENT and (_ROOT / "assets" / "auto-mode-rules.json").is_file()
 
 
 def _make_agent(responses):
-    agent = Agent(api_key="test-key", permission_mode="auto")
+    agent = Agent(api_key="test-key")
     calls = {"count": 0}
 
     async def stub(*, system, user, max_output_tokens):

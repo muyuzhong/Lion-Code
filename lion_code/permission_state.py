@@ -10,8 +10,6 @@ PermissionMode = Literal[
     "acceptEdits",
     "bypassPermissions",
     "dontAsk",
-    "plan",
-    "auto",
 ]
 
 

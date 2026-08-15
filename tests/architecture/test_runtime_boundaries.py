@@ -88,7 +88,6 @@ _PLAN_STATE_FIELDS = frozenset(
     {
         "status",
         "file_path",
-        "previous_permission_mode",
     }
 )
 _REMOVED_AGENT_PLAN_SYMBOLS = frozenset(
@@ -1336,29 +1335,61 @@ def test_permission_state_has_one_owner_and_live_read_ports() -> None:
     }
     assert not mutations, f"PermissionState writes must use its Controller: {mutations}"
 
+    # PR4：Plan 不再是 Permission 模式，没有任何业务方调用 set_mode。
     set_mode_sites = {
         _source_key(path): sorted(_attribute_call_sites(_tree(path), "set_mode"))
         for path in _source_files()
         if _source_key(path) != "permission_state.py"
         and _attribute_call_sites(_tree(path), "set_mode")
     }
-    assert set_mode_sites == {
-        "plan_runtime.py": ["PlanRuntime._enter", "PlanRuntime._leave"]
-    }
+    assert not set_mode_sites, (
+        f"set_mode 只允许在 permission_state.py 内部出现: {set_mode_sites}"
+    )
 
     middleware_tree = _tree(SOURCE_ROOT / "tooling" / "middleware.py")
     assert not _contains_attr_call(middleware_tree, "set_mode")
     assert _type_annotation_mentions(middleware_tree, "PermissionConfirmationSink")
     assert not _type_annotation_mentions(middleware_tree, "PermissionController")
 
+    # PR4：基础 PermissionMode 只含通用安全语义，不允许 plan/auto 业务概念。
+    permission_source = (SOURCE_ROOT / "permission_state.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"plan"' not in permission_source
+    assert '"auto"' not in permission_source
+
+    # ToolCapabilities 不得再携带 plan 专用能力位。
+    capabilities_source = (SOURCE_ROOT / "tooling" / "types.py").read_text(
+        encoding="utf-8"
+    )
+    assert "allowed_in_plan" not in capabilities_source
+
+    # PermissionPolicy 的通用判定接口不接受 plan 文件路径。
+    policy_tree = _tree(SOURCE_ROOT / "tooling" / "permission.py")
+    assert not _attribute_references(policy_tree, "plan_file_path")
+
+
+def test_tooling_does_not_import_product_runtimes() -> None:
+    """tooling 包不得 import PlanRuntime / AutonomyRuntime（Harness 不认识产品运行时）。"""
+    violations: dict[str, tuple[str, ...]] = {}
+    for path in _source_files("tooling"):
+        imported = _product_import_roots(path, _tree(path))
+        bad = sorted(imported & {"plan_runtime", "autonomy_runtime"})
+        if bad:
+            violations[_source_key(path)] = tuple(bad)
+    assert not violations, f"tooling 包反向绑定产品运行时: {violations}"
+
+    context_tree = _tree(SOURCE_ROOT / "tooling" / "context.py")
+    context_fields = _class_annotated_fields(context_tree, "ToolContext")
+    assert not {"plan", "auto_permission_fn"} & context_fields
+
 
 def test_plan_state_has_one_owner_and_live_read_port() -> None:
     context_path = SOURCE_ROOT / "tooling" / "context.py"
     context_tree = _tree(context_path)
     context_fields = _class_annotated_fields(context_tree, "ToolContext")
-    assert "plan" in context_fields
+    assert "plan" not in context_fields
     assert "plan_file_path" not in context_fields
-    assert _type_annotation_mentions(context_tree, "PlanView")
 
     plan_tree = _tree(SOURCE_ROOT / "plan_runtime.py")
     assert _class_annotated_fields(plan_tree, "PlanState") == _PLAN_STATE_FIELDS
@@ -1422,11 +1453,19 @@ def test_plan_state_has_one_owner_and_live_read_port() -> None:
     }
     assert not mutations, f"PlanState writes must stay in PlanRuntime: {mutations}"
 
+    # PR4：PermissionMiddleware 不得读取 Plan 视图或执行 plan/auto 特判。
     middleware_source = (SOURCE_ROOT / "tooling" / "middleware.py").read_text(
         encoding="utf-8"
     )
     assert "context.plan_file_path" not in middleware_source
-    assert middleware_source.count("context.plan.file_path") == 2
+    assert "context.plan" not in middleware_source
+    assert 'mode == "plan"' not in middleware_source
+    assert 'mode != "auto"' not in middleware_source
+
+    # PlanRuntime 不再依赖 PermissionController（PR4）。
+    plan_runtime_source = (SOURCE_ROOT / "plan_runtime.py").read_text(encoding="utf-8")
+    assert "PermissionController" not in plan_runtime_source
+    assert "permission_state" not in plan_runtime_source
 
 
 def test_prompt_and_capability_lifecycle_boundaries() -> None:
@@ -1709,7 +1748,6 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
         "    plan_state.status = 'active'\n"
         "    plan_state.file_path = path\n"
         "    renamed = plan_state\n"
-        "    renamed.previous_permission_mode = 'default'\n"
         "    setattr(plan_state, 'status', 'active')\n"
     )
     plan_path_mirror = ast.parse(
@@ -1786,7 +1824,6 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
         {
             "status",
             "file_path",
-            "previous_permission_mode",
             "setattr:status",
         }
     )

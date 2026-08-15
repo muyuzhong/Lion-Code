@@ -37,7 +37,6 @@ def create_agent_tool(command: ToolCommand) -> LionTool:
         },
         execute_fn=execute,
         capabilities=ToolCapabilities(
-            allowed_in_plan=True,
             result_policy="persist_large",
         ),
     )
@@ -68,7 +67,6 @@ def create_skill_tool(command: ToolCommand) -> LionTool:
         },
         execute_fn=execute,
         capabilities=ToolCapabilities(
-            allowed_in_plan=True,
             result_policy="persist_large",
         ),
     )
@@ -87,7 +85,6 @@ def create_enter_plan_tool(command: ToolCommand) -> LionTool:
         execute_fn=execute,
         capabilities=ToolCapabilities(
             read_only=True,
-            allowed_in_plan=True,
             deferred=True,
         ),
     )
@@ -106,7 +103,6 @@ def create_exit_plan_tool(command: ToolCommand) -> LionTool:
         execute_fn=execute,
         capabilities=ToolCapabilities(
             read_only=True,
-            allowed_in_plan=True,
             deferred=True,
         ),
     )
@@ -153,7 +149,6 @@ def create_tool_search_tool() -> LionTool:
         capabilities=ToolCapabilities(
             read_only=True,
             concurrency_safe=True,
-            allowed_in_plan=True,
         ),
         execution_mode="parallel",
     )
@@ -192,7 +187,7 @@ def create_wakeup_tool(command: ToolCommand) -> LionTool:
             "required": ["delaySeconds", "reason", "prompt"],
         },
         execute_fn=execute,
-        capabilities=ToolCapabilities(allowed_in_plan=True),
+        capabilities=ToolCapabilities(),
     )
 
 

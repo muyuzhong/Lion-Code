@@ -24,7 +24,6 @@ class ToolCapabilities:
     executes_process: bool = False
     external_side_effect: bool = False
     concurrency_safe: bool = False
-    allowed_in_plan: bool = False
     requires_read_before_write: bool = False
     tracks_read_freshness: bool = False
     requires_confirmation: bool = False

@@ -60,8 +60,8 @@ layers:
 | tests/tooling/test_registry.py | harness | ToolRegistry |
 | tests/tooling/test_runtime.py | harness | ToolRuntime 执行循环 |
 | tests/tooling/test_hook_middleware.py | harness | Hook middleware |
-| tests/tooling/test_permission_middleware.py | harness | Permission middleware |
-| tests/tooling/test_permission_policy.py | harness | Permission policy |
+| tests/tooling/test_permission_middleware.py | harness | Permission middleware（通用安全语义；PR4 移除 Plan/Auto 特判） |
+| tests/tooling/test_permission_policy.py | harness | Permission policy（通用规则；PR4 移除 plan_file_path） |
 | tests/tooling/test_concurrency_policy.py | harness | execution policy |
 | tests/tooling/test_result_policy.py | harness | execution policy |
 | tests/tooling/test_read_freshness.py | harness | 读取新鲜度 |
@@ -112,7 +112,7 @@ layers:
 | tests/test_learning.py | supervisor | Learning |
 | tests/test_mcp_client.py | capability | MCP 客户端 |
 | tests/test_model_query.py | kernel | Provider 端口薄包装 |
-| tests/test_plan_runtime.py | capability | Plan（事务/审批/View；pending reset 已随 PR3 移除） |
+| tests/test_plan_runtime.py | capability | Plan（事务/审批/View；PR3 移除 pending reset，PR4 移除权限模式耦合） |
 | tests/test_project_identity.py | harness | identity/config |
 | tests/test_prompt.py | harness | prompt composition |
 | tests/test_provider_manager.py | harness | ProviderManager |
@@ -138,6 +138,10 @@ layers:
 5. Plan 事务（`tests/test_plan_runtime.py`、`tests/tooling/test_agent_runtime.py` plan-mode 部分）
    → **capability[Plan]**。clear-and-execute 的 pending context reset 与
    `apply_plan_context_reset` 已随 PR3 从 Kernel/Runtime 移除，集成测试标记 skip 待 re-home。
+   PR4 进一步移除 Plan 与 Permission 的耦合：PermissionMode 不含 plan/auto，
+   ToolContext 无 plan / auto_permission_fn，PermissionMiddleware/Policy 无 plan/auto 特判，
+   PlanRuntime 不再写 PermissionController；产品策略（PlanRestrictedPolicy /
+   LLMPermissionPolicy）留待后续 PR 由 Composition 注入。
 6. MCP（`tests/test_mcp_client.py`、`tests/tooling/test_mcp_adapter.py`、
    `tests/tooling/test_tool_environment.py`）→ **capability[MCP]**。
 7. SubAgent/Skill（`tests/tooling/test_capability_runtimes.py`、

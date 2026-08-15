@@ -808,6 +808,8 @@ class Agent:
 
     async def dream(self) -> str:
         """显式整合当前项目 Memory，并返回本次文件变更摘要。"""
+        if self.plan.is_active:
+            raise RuntimeError("Plan 模式为只读，退出后才能执行 /dream")
         return await self._session_memory_coord.dream()
 
     def _refresh_dynamic_system_context(self) -> None:

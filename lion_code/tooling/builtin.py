@@ -76,7 +76,6 @@ def create_builtin_tools() -> list[LionTool]:
             capabilities=ToolCapabilities(
                 read_only=True,
                 concurrency_safe=True,
-                allowed_in_plan=True,
                 tracks_read_freshness=True,
                 result_policy="snippable",
             ),
@@ -152,7 +151,6 @@ def create_builtin_tools() -> list[LionTool]:
             capabilities=ToolCapabilities(
                 read_only=True,
                 concurrency_safe=True,
-                allowed_in_plan=True,
                 result_policy="snippable",
             ),
         ),
@@ -181,7 +179,6 @@ def create_builtin_tools() -> list[LionTool]:
             capabilities=ToolCapabilities(
                 read_only=True,
                 concurrency_safe=True,
-                allowed_in_plan=True,
                 result_policy="snippable",
             ),
         ),
@@ -227,7 +224,6 @@ def create_builtin_tools() -> list[LionTool]:
                 read_only=True,
                 external_side_effect=True,
                 concurrency_safe=True,
-                allowed_in_plan=True,
                 result_policy="persist_large",
             ),
         ),

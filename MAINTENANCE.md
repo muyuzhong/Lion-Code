@@ -15,6 +15,7 @@
 | --- | --- | --- |
 | 候选 | 5 个 vulture 高置信候选 | 纳入 `docs/quality-baseline-2026-08.*`，CI 不允许新增指纹；后续按模块消减。 |
 | 环境缺陷 | Windows GBK spinner `UnicodeEncodeError` | 已记录为本机/编码环境警告；未在 Linux/UTF-8 CI 复现，后续若继续复现应单独修输出编码。 |
+| 环境缺陷 | WSL 网络栈不可用 / drvfs stat 假阳性 | 本机 WSL 无网络（无 `/etc/resolv.conf`）：网络操作走 Windows 侧 `D:\Git\cmd\git.exe` / `D:\gh_cli\gh.exe`（经 cmd，bat 需 GBK+CRLF）；drvfs 下 `git status` 对内容未变文件有假阳性，以 `git diff` 为准。属本机环境，不误记为产品路径。 |
 | 兼容性保留 | `providers/provider.py` 重导出 shim | 保留旧 provider 实现的相对导入兼容；不得重新承载实现。 |
 | 已接受债务 | `core/session/memory.py` 命名歧义 | 第二套路径扫描确认它是 JSONL session replay state，与项目级 Session Memory 异概念；暂不改名。 |
 | 功能路线图 | `/skill:` TUI 接线预留任务 | 旧半成品入口已删除；新接线必须走 `lion_code.skills.resolve_skill_prompt`，见 `08-01-tui-skill-wiring`。 |

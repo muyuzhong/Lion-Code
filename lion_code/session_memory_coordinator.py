@@ -22,7 +22,6 @@ from .memory_runtime import (
     MemoryOverlay,
     TextQueryService,
 )
-from .permission_state import PermissionView
 from .project_identity import ProjectIdentity
 from .prompt import ProjectContextFile
 from .session_memory import (
@@ -102,7 +101,6 @@ class SessionMemoryCoordinator:
         repository: SessionMemoryRepository | None = None,
         transcript: TranscriptView,
         cancellation: CancellationView,
-        permission: PermissionView,
         load_project_context: Callable[
             [ProjectIdentity], tuple[ProjectContextFile, ...]
         ],
@@ -122,7 +120,6 @@ class SessionMemoryCoordinator:
 
         self._transcript = transcript
         self._cancellation = cancellation
-        self._permission = permission
         self._load_project_context = load_project_context
         self._notices = notices
         self._query = query
@@ -396,9 +393,7 @@ class SessionMemoryCoordinator:
     async def dream(self) -> str:
         """显式整合当前项目 Memory，并返回本次文件变更摘要。"""
 
-        if self._permission.mode == "plan":
-            raise RuntimeError("Plan 模式为只读，退出后才能执行 /dream")
-
+        # 只读约束由 Agent 门面按 Plan 激活状态执行（PR4 起 Permission 不再认识 Plan）。
         self._reload_session_memory()
         self._report_session_memory_error()
         self._status_callback("dream", "consolidate project memory", started=True)

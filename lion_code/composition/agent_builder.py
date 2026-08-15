@@ -70,7 +70,6 @@ from ..usage import BudgetPolicy, UsageLedger
 from .config import AgentConfig, AgentDependencies
 from .ports import (
     ConfirmationController,
-    DeferredAutoPermission,
     DeferredBackgroundScheduler,
     DeferredMemoryQuerySink,
     DeferredModelContextControl,
@@ -203,7 +202,6 @@ class _CapabilityGraph:
 class _ToolingGraph:
     refresh_dynamic_context_enabled: bool
     prompt_composer: PromptComposer
-    deferred_auto_permission: DeferredAutoPermission
     tool_context: ToolContext
     permission_policy: PermissionPolicy
     result_store: ResultStore
@@ -268,7 +266,6 @@ def build_agent_composition(
     )
     refresh_dynamic_context_enabled = tooling_graph.refresh_dynamic_context_enabled
     prompt_composer = tooling_graph.prompt_composer
-    deferred_auto_permission = tooling_graph.deferred_auto_permission
     tool_context = tooling_graph.tool_context
     permission_policy = tooling_graph.permission_policy
     result_store = tooling_graph.result_store
@@ -291,7 +288,6 @@ def build_agent_composition(
         provider_graph,
         prompt_composer,
         runtime_coordinator,
-        deferred_auto_permission,
         child_config,
     )
     query = session_graph.query
@@ -431,10 +427,8 @@ def _build_foundation(
     notice_sink = NoticeSinkAdapter(notices)
     plan = PlanRuntime(
         PlanHost(session_state, notices),
-        permission_controller,
         PlanState(),
     )
-    plan.initialize()
     return _FoundationGraph(
         dependencies=deps,
         cwd=cwd,
@@ -541,7 +535,6 @@ def _build_capability_graph(
         registry=foundation.tool_registry,
         environment=foundation.tool_environment,
         child_config=child_config,
-        permission=foundation.permission_controller,
     )
     subagent_executor = SubagentExecutor(
         subagent_factory,
@@ -622,19 +615,16 @@ def _build_tooling_graph(
         ),
         layers=lambda: capability_registry.prompt_layers,
     )
-    deferred_auto_permission = DeferredAutoPermission()
     tool_context = ToolContext(
         session=foundation.session_state,
         cancellation=foundation.execution.cancellation,
         cwd=foundation.cwd,
         registry=foundation.tool_registry,
         permission=foundation.permission_controller,
-        plan=foundation.plan,
         read_file_state=foundation.read_file_state,
         confirm_fn=foundation.confirmation.confirm,
         hooks=foundation.hooks_loader(),
         confirm_hook_trust=foundation.confirmation.confirm_hook_trust,
-        auto_permission_fn=deferred_auto_permission,
     )
     permission_policy = PermissionPolicy(cwd=foundation.cwd)
     result_store = ResultStore()
@@ -667,7 +657,6 @@ def _build_tooling_graph(
     return _ToolingGraph(
         refresh_dynamic_context_enabled=refresh_dynamic_context_enabled,
         prompt_composer=prompt_composer,
-        deferred_auto_permission=deferred_auto_permission,
         tool_context=tool_context,
         permission_policy=permission_policy,
         result_store=result_store,
@@ -721,7 +710,6 @@ def _build_session_graph(
     provider_graph: _ProviderGraph,
     prompt_composer: PromptComposer,
     runtime_coordinator: AgentRuntimeCoordinator,
-    deferred_auto_permission: DeferredAutoPermission,
     child_config: Any,
 ) -> _SessionGraph:
     query = ProviderModelQuery(
@@ -768,7 +756,6 @@ def _build_session_graph(
         repository=foundation.dependencies.session_memory_repository,
         transcript=runtime_coordinator.core_runtime,
         cancellation=foundation.execution.cancellation,
-        permission=foundation.permission_controller,
         load_project_context=lambda project_identity: tuple(
             foundation.context_loader(foundation.cwd, project_identity)
         ),
@@ -790,9 +777,6 @@ def _build_session_graph(
         confirm=foundation.dependencies.confirm_fn,
         usage=foundation.usage,
         budget=foundation.budget,
-    )
-    deferred_auto_permission.bind(
-        lambda name, arguments: autonomy._classify_tool_call(name, arguments)
     )
     return _SessionGraph(
         query=query,

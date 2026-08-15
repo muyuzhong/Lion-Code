@@ -21,7 +21,6 @@ from lion_code.core import (
 )
 from lion_code.dream_adapter import RestrictedDreamAgentFactory
 from lion_code.frontmatter import format_frontmatter, parse_frontmatter
-from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.plan_runtime import PlanRuntime, PlanState
 from lion_code.project_identity import ProjectIdentity
 from lion_code.prompt import PromptComposer
@@ -488,7 +487,6 @@ class TestAgentDreamRefresh(unittest.TestCase):
         )
         host.plan = PlanRuntime(
             host,
-            PermissionController(PermissionState("default")),
             PlanState(),
         )
         host._refresh_dynamic_system_context = (

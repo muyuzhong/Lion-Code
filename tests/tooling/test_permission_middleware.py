@@ -6,8 +6,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from core.fakes import FakePlanView
-
 from lion_code.core.cancellation import CancellationToken
 from lion_code.permission_state import (
     PermissionController,
@@ -44,7 +42,6 @@ def _runtime(
     mode: PermissionMode,
     policy,
     confirm_fn=None,
-    auto_permission_fn=None,
 ):
     registry = ToolRegistry()
     registry.register(tool)
@@ -53,12 +50,10 @@ def _runtime(
         session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
         cancellation=CancellationToken(),
         cwd=policy.cwd,
-            registry=registry,
+        registry=registry,
         permission=permission,
-        plan=FakePlanView(),
         read_file_state={},
         confirm_fn=confirm_fn,
-        auto_permission_fn=auto_permission_fn,
     )
     return (
         ToolRuntime(
@@ -100,25 +95,6 @@ class TestPermissionMiddleware(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_error)
         self.assertEqual(executed, [])
 
-    async def test_plan_mode_blocks_mutating_tool(self):
-        executed = []
-        policy = PermissionPolicy()
-        runtime, context, _ = _runtime(
-            _tool("write_file", ToolCapabilities(mutates_workspace=True), executed),
-            mode="plan",
-            policy=policy,
-        )
-        context.plan.file_path = Path("plan.md")
-
-        result = await runtime.execute(
-            tool_call_id="call-1",
-            name="write_file",
-            arguments={"file_path": "other.md"},
-        )
-
-        self.assertTrue(result.is_error)
-        self.assertEqual(executed, [])
-
     async def test_confirmation_runs_once_for_cached_reason(self):
         executed = []
         confirm = AsyncMock(return_value=True)
@@ -146,36 +122,49 @@ class TestPermissionMiddleware(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(permission.is_confirmed("use tool: external"))
         self.assertEqual(executed, ["external", "external"])
 
-    async def test_auto_confirmation_is_not_cached(self):
+    async def test_dangerous_shell_reconfirmation_is_cached(self):
         executed = []
         confirm = AsyncMock(return_value=True)
-        classify = AsyncMock(
-            return_value={"action": "confirm", "message": "use external"}
-        )
+        policy = PermissionPolicy()
         runtime, _, permission = _runtime(
-            _tool(
-                "external",
-                ToolCapabilities(requires_confirmation=True),
-                executed,
-            ),
-            mode="auto",
-            policy=PermissionPolicy(),
+            _tool("run_shell", ToolCapabilities(executes_process=True), executed),
+            mode="default",
+            policy=policy,
             confirm_fn=confirm,
-            auto_permission_fn=classify,
         )
 
         for call_id in ("call-1", "call-2"):
             result = await runtime.execute(
                 tool_call_id=call_id,
-                name="external",
-                arguments={},
+                name="run_shell",
+                arguments={"command": "rm -rf /tmp/x"},
             )
             self.assertFalse(result.is_error)
 
-        self.assertEqual(confirm.await_count, 2)
-        self.assertEqual(classify.await_count, 2)
-        self.assertFalse(permission.is_confirmed("use external"))
-        self.assertEqual(executed, ["external", "external"])
+        # 同一会话内重复的相同确认原因只询问一次（Controller 缓存）。
+        confirm.assert_awaited_once()
+        self.assertTrue(permission.is_confirmed("rm -rf /tmp/x"))
+        self.assertEqual(executed, ["run_shell", "run_shell"])
+
+    async def test_user_denial_blocks_tool(self):
+        executed = []
+        confirm = AsyncMock(return_value=False)
+        policy = PermissionPolicy()
+        runtime, _, _ = _runtime(
+            _tool("run_shell", ToolCapabilities(executes_process=True), executed),
+            mode="default",
+            policy=policy,
+            confirm_fn=confirm,
+        )
+
+        result = await runtime.execute(
+            tool_call_id="call-1",
+            name="run_shell",
+            arguments={"command": "rm -rf /tmp/x"},
+        )
+
+        self.assertTrue(result.is_error)
+        self.assertEqual(executed, [])
 
     async def test_existing_context_observes_live_mode_change(self):
         executed = []

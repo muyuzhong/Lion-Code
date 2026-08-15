@@ -6,7 +6,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .permission_state import PermissionMode, PermissionView
 from .subagent import get_sub_agent_config
 from .tooling import ToolEnvironment, ToolRegistry
 from .tooling.selection import ToolSelectionPolicy, select_tools
@@ -35,12 +34,10 @@ class SubagentFactory:
         registry: ToolRegistry,
         environment: ToolEnvironment,
         child_config: Callable[[], ChildAgentConfig],
-        permission: PermissionView,
     ) -> None:
         self._registry = registry
         self._environment = environment
         self._child_config = child_config
-        self._permission = permission
 
     def create_for_agent_type(self, agent_type: str) -> Agent:
         """按内置或自定义 Agent 类型创建子实例。"""
@@ -91,9 +88,5 @@ class SubagentFactory:
             tool_registry=select_tools(self._registry, tool_policy),
             tool_environment=self._environment.child_view(),
             is_sub_agent=True,
-            permission_mode=self._child_permission_mode(),
+            permission_mode="bypassPermissions",
         )
-
-    def _child_permission_mode(self) -> PermissionMode:
-        mode = self._permission.mode
-        return mode if mode in {"plan", "auto"} else "bypassPermissions"

@@ -56,10 +56,10 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertIn("must read this file", denied)
         self.assertIn("Successfully wrote", allowed)
 
-    async def test_toggle_plan_mode_preserves_live_permission_view(self):
+    async def test_toggle_plan_mode_preserves_live_plan_view(self):
         agent = self._agent(permission_mode="acceptEdits", terminal_output=False)
         permission = agent.tool_context.permission
-        plan = agent.tool_context.plan
+        plan = agent.plan
 
         with patch.object(
             agent.plan,
@@ -68,20 +68,22 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertEqual(agent.toggle_plan_mode(), "plan")
             self.assertIs(agent.tool_context.permission, permission)
-            self.assertIs(agent.tool_context.plan, plan)
-            self.assertEqual(permission.mode, "plan")
+            self.assertIs(agent.plan, plan)
+            self.assertEqual(permission.mode, "acceptEdits")
+            self.assertTrue(plan.is_active)
             self.assertEqual(plan.file_path, Path("plan.md"))
 
-            self.assertEqual(agent.toggle_plan_mode(), "acceptEdits")
+            self.assertEqual(agent.toggle_plan_mode(), "default")
             self.assertIs(agent.tool_context.permission, permission)
-            self.assertIs(agent.tool_context.plan, plan)
+            self.assertIs(agent.plan, plan)
             self.assertEqual(permission.mode, "acceptEdits")
+            self.assertFalse(plan.is_active)
             self.assertIsNone(plan.file_path)
 
         await agent.close()
 
-    async def test_plan_tools_preserve_live_permission_view(self):
-        agent = self._agent(permission_mode="auto", terminal_output=False)
+    async def test_plan_tools_toggle_state_without_touching_permission(self):
+        agent = self._agent(permission_mode="acceptEdits", terminal_output=False)
         permission = agent.tool_context.permission
 
         with patch.object(
@@ -91,15 +93,17 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
         ):
             await agent._execute_tool_call("enter_plan_mode", {})
             self.assertIs(agent.tool_context.permission, permission)
-            self.assertEqual(permission.mode, "plan")
+            self.assertEqual(permission.mode, "acceptEdits")
+            self.assertTrue(agent.plan.is_active)
 
             await agent._execute_tool_call("exit_plan_mode", {})
             self.assertIs(agent.tool_context.permission, permission)
-            self.assertEqual(permission.mode, "auto")
+            self.assertEqual(permission.mode, "acceptEdits")
+            self.assertFalse(agent.plan.is_active)
 
         await agent.close()
 
-    async def test_clear_in_plan_mode_preserves_live_permission_view(self):
+    async def test_clear_in_plan_mode_preserves_live_plan_view(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             session_repository = SessionRepository(root / "sessions")
@@ -108,20 +112,21 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
                 return_value=root / "plan.md",
             ) as generate_path:
                 agent = self._agent(
-                    permission_mode="plan",
                     session_repository=session_repository,
                     terminal_output=False,
                 )
+                agent.toggle_plan_mode()
                 permission = agent.tool_context.permission
-                plan = agent.tool_context.plan
+                plan = agent.plan
 
                 await agent.clear_history()
 
             self.assertEqual(generate_path.call_count, 2)
             self.assertIs(agent.tool_context.permission, permission)
-            self.assertIs(agent.tool_context.plan, plan)
-            self.assertEqual(permission.mode, "plan")
-            self.assertEqual(agent.tool_context.plan.file_path, root / "plan.md")
+            self.assertIs(agent.plan, plan)
+            self.assertEqual(permission.mode, "default")
+            self.assertTrue(plan.is_active)
+            self.assertEqual(agent.plan.file_path, root / "plan.md")
             await agent.close()
 
     async def test_restore_in_plan_mode_keeps_live_plan_path(self):
@@ -134,20 +139,21 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
                 return_value=plan_path,
             ) as generate_path:
                 agent = self._agent(
-                    permission_mode="plan",
                     session_repository=session_repository,
                     terminal_output=False,
                 )
+                agent.toggle_plan_mode()
                 await agent._ensure_core_session_ready()
                 session_id = agent.session_id
-                plan = agent.tool_context.plan
+                plan = agent.plan
 
                 self.assertTrue(await agent.restore_core_session(session_id))
 
             self.assertEqual(generate_path.call_count, 1)
-            self.assertIs(agent.tool_context.plan, plan)
+            self.assertIs(agent.plan, plan)
             self.assertEqual(plan.file_path, plan_path)
-            self.assertEqual(agent.permission_mode, "plan")
+            self.assertTrue(plan.is_active)
+            self.assertEqual(agent.permission_mode, "default")
             await agent.close()
 
     def test_model_schema_comes_from_agent_registry(self):

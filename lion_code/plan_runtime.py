@@ -1,4 +1,10 @@
-"""Plan 模式状态与跨层事务的唯一运行时 Owner。"""
+"""Plan 模式状态与审批事务的唯一运行时 Owner。
+
+Plan 是 Capability 层产品概念：本运行时只拥有 Plan 自身状态（激活状态与文件
+路径）与审批流程，不再读写 Harness 的权限模式。Plan 期间的读写限制属于未来
+``PlanRestrictedPolicy``（由 Composition / Profile 注入）的职责，PR4 起 Harness
+Permission 只负责通用安全语义。
+"""
 
 from __future__ import annotations
 
@@ -6,8 +12,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
-
-from .permission_state import PermissionController, PermissionMode
 
 PlanStatus = Literal["inactive", "active"]
 PlanApprovalFn = Callable[[str], Awaitable[dict[str, Any]]]
@@ -41,7 +45,6 @@ class PlanRuntimeHost(Protocol):
 class PlanState:
     status: PlanStatus = "inactive"
     file_path: Path | None = None
-    previous_permission_mode: PermissionMode | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,16 +54,14 @@ class PlanToolOutcome:
 
 
 class PlanRuntime:
-    """拥有 Plan 状态、权限事务、审批和上下文重置命令。"""
+    """拥有 Plan 状态、审批与上下文重置命令。"""
 
     def __init__(
         self,
         host: PlanRuntimeHost,
-        permission: PermissionController,
         state: PlanState,
     ) -> None:
         self._host = host
-        self._permission = permission
         self._state = state
         self._approval_fn: PlanApprovalFn | None = None
 
@@ -72,25 +73,14 @@ class PlanRuntime:
     def file_path(self) -> Path | None:
         return self._state.file_path
 
-    def initialize(self) -> None:
-        """初始权限为 Plan 时建立激活事务。"""
-
-        if self._permission.mode != "plan":
-            return
-        path = self._generate_file_path()
-        self._state.status = "active"
-        self._state.file_path = path
-        self._state.previous_permission_mode = None
-
     def set_approval_fn(self, fn: PlanApprovalFn | None) -> None:
         self._approval_fn = fn
 
-    def toggle(self) -> PermissionMode:
+    def toggle(self) -> str:
         if self.is_active:
-            target_mode = self._state.previous_permission_mode or "default"
-            self._leave(target_mode)
-            self._host._emit_notice(f"Exited plan mode → {self._permission.mode} mode")
-            return self._permission.mode
+            self._leave()
+            self._host._emit_notice("Exited plan mode.")
+            return "default"
 
         self._enter()
         self._host._emit_notice(
@@ -118,14 +108,10 @@ class PlanRuntime:
 
         plan_content = self._read_plan_content()
         if self._approval_fn is None:
-            restore_mode = self._state.previous_permission_mode or "default"
-            self._leave(restore_mode)
-            self._host._emit_notice(
-                f"Exited plan mode. Restored to {self._permission.mode} mode."
-            )
+            self._leave()
+            self._host._emit_notice("Exited plan mode.")
             return PlanToolOutcome(
-                "Exited plan mode. Permission mode restored to: "
-                f"{self._permission.mode}\n\n## Your Plan:\n{plan_content}"
+                f"Exited plan mode.\n\n## Your Plan:\n{plan_content}"
             )
 
         result = await self._approval_fn(plan_content)
@@ -139,19 +125,14 @@ class PlanRuntime:
                 "call exit_plan_mode again."
             )
 
-        # clear-and-execute 的上下文清空增强（清空 + 自动 continue）依赖 Kernel
-        # 对 Plan 的特判，PR3 已移除；迁移分支暂时降级为 execute 的事务。
-        target_mode: PermissionMode = (
-            "acceptEdits"
-            if choice in {"execute", "clear-and-execute"}
-            else self._state.previous_permission_mode or "default"
-        )
-        self._leave(target_mode)
-
-        self._host._emit_notice(f"Plan approved. Executing in {target_mode} mode.")
+        # PR4：审批通过后不再切换权限模式。执行阶段的权限由未来的
+        # PlanRestrictedPolicy / Composition 注入决定；clear-and-execute 的
+        # 上下文清空增强同样依赖 Kernel 特判（PR3 已移除），保持降级。
+        self._leave()
+        self._host._emit_notice("Plan approved. Exited plan mode.")
         return PlanToolOutcome(
-            f"User approved the plan. Permission mode: {target_mode}\n\n"
-            f"## Approved Plan:\n{plan_content}\n\nProceed with implementation."
+            f"User approved the plan.\n\n## Approved Plan:\n{plan_content}\n\n"
+            "Proceed with implementation."
         )
 
     def reset_for_new_session(self) -> None:
@@ -162,17 +143,12 @@ class PlanRuntime:
 
     def _enter(self) -> None:
         path = self._generate_file_path()
-        previous_mode = self._permission.mode
-        self._permission.set_mode("plan")
         self._state.status = "active"
         self._state.file_path = path
-        self._state.previous_permission_mode = previous_mode
 
-    def _leave(self, target_mode: PermissionMode) -> None:
-        self._permission.set_mode(target_mode)
+    def _leave(self) -> None:
         self._state.status = "inactive"
         self._state.file_path = None
-        self._state.previous_permission_mode = None
 
     def _generate_file_path(self) -> Path:
         directory = Path.home() / ".claude" / "plans"
