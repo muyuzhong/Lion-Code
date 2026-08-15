@@ -31,6 +31,12 @@ from lion_code.core.events import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
+from lion_code.core.events import (
+    CompactionCompletedEvent as KernelCompactionCompletedEvent,
+)
+from lion_code.core.events import (
+    CompactionStartedEvent as KernelCompactionStartedEvent,
+)
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 from lion_code.project_identity import resolve_project_identity
 from lion_code.session_memory import SessionMemory, SessionMemoryRepository
@@ -391,6 +397,8 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             ]
         )
         await self._prime_overflow_history(session)
+        kernel_events = []
+        agent.subscribe(kernel_events.append)
 
         events = [event async for event in session.prompt("trigger overflow")]
 
@@ -443,6 +451,22 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         compactions = [entry for entry in entries if entry.type == "compaction"]
         self.assertEqual(len(compactions), 1)
         self.assertEqual(compactions[0].summary, "recovery summary")
+        self.assertEqual(
+            [
+                event.reason
+                for event in kernel_events
+                if isinstance(event, KernelCompactionStartedEvent)
+            ],
+            ["overflow"],
+        )
+        self.assertEqual(
+            [
+                (event.reason, event.aborted)
+                for event in kernel_events
+                if isinstance(event, KernelCompactionCompletedEvent)
+            ],
+            [("overflow", False)],
+        )
         self.assertEqual(
             sum(
                 entry.type == "message"

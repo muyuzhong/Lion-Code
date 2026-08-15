@@ -9,9 +9,8 @@ from lion_code.core.messages import AgentMessage, UserMessage
 from lion_code.core.provider import ModelProvider
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 
-
 SUMMARY_SYSTEM_PROMPT = (
-    "You summarize coding-agent conversations. Preserve decisions, constraints, "
+    "You summarize conversations. Preserve decisions, constraints, "
     "file paths, commands, unfinished work, and facts needed to continue. Be concise."
 )
 SUMMARY_USER_PROMPT = (
@@ -23,8 +22,7 @@ SUMMARY_USER_PROMPT = (
 class ContextCompactor(Protocol):
     """把一段 canonical 历史压缩为可继续工作的文本摘要。"""
 
-    async def summarize(self, messages: tuple[AgentMessage, ...]) -> str:
-        ...
+    async def summarize(self, messages: tuple[AgentMessage, ...]) -> str: ...
 
 
 class ProviderContextCompactor:

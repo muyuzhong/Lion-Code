@@ -84,6 +84,7 @@ layers:
 | tests/integration/test_agent_core_runtime.py | mixed | **名字误导**：Kernel(loop/compaction/usage/budget/cancellation/tool-call) + Harness(ToolRegistry/ToolRuntime/SessionRepository/SessionRecorder/ProviderManager) + Capability[Plan/SubAgent] + Supervisor 重试，非纯 Kernel |
 | tests/integration/test_application_coding_session.py | mixed | kernel+harness+supervisor：LionCodingSession，含 overflow auto-retry/recovery 编排 |
 | tests/integration/test_core_tool_runtime.py | mixed | kernel+harness：AgentHarness→ToolRuntime→LionTool |
+| tests/integration/test_meta_agent.py | mixed | kernel+harness：zero-extension MetaAgent、Event Stream、Session 与显式 Coding Tool composition |
 | tests/integration/test_provider_core_tool_runtime.py | mixed | kernel+harness：真实 OpenAICompatibleProvider + httpx.MockTransport |
 
 ### tests/tui/

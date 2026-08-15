@@ -12,7 +12,6 @@ from lion_code.context import (
     ProviderContextCompactor,
 )
 from lion_code.core.provider import ModelProvider
-from lion_code.memory_runtime import ProviderTextQueryService
 from lion_code.providers.thinking import (
     ThinkingLevel,
     coerce_thinking_level,
@@ -81,12 +80,6 @@ class ModelContextControl(Protocol):
     def invalidate_model_limit_cache(self, model: str) -> None: ...
 
 
-class MemoryQuerySink(Protocol):
-    """当前 Session Memory 的 Provider query service 写入口。"""
-
-    def set_query_service(self, service: ProviderTextQueryService) -> None: ...
-
-
 class ConfigurationRecorder(Protocol):
     """已有 SessionRecorder 的配置变更适配器。"""
 
@@ -126,7 +119,6 @@ class ProviderManager:
         state: ProviderState,
         runtime: ProviderRuntimePort,
         context: ModelContextControl,
-        memory: MemoryQuerySink,
         recorder: ConfigurationRecorder,
         provider_factory: ProviderFactory,
         schedule_background_operation: BackgroundScheduler,
@@ -134,7 +126,6 @@ class ProviderManager:
         self._state = state
         self._runtime = runtime
         self._context = context
-        self._memory = memory
         self._recorder = recorder
         self._provider_factory = provider_factory
         self._schedule_background_operation = schedule_background_operation
@@ -418,16 +409,11 @@ class ProviderManager:
         model_changed = previous.model != target.model
         provider: ModelProvider | None = None
         compactor: ProviderContextCompactor | None = None
-        query_service: ProviderTextQueryService | None = None
         if provider_changed:
             provider = self._build_provider_for_state(target, target.thinking_level)
             compactor = ProviderContextCompactor(
                 provider=provider,
                 get_model=lambda: self.model,
-            )
-            query_service = ProviderTextQueryService(
-                provider=provider,
-                model=lambda: self.model,
             )
 
         previous_provider: ModelProvider | None = None
@@ -446,10 +432,9 @@ class ProviderManager:
 
         self._state = target
         if provider_changed:
-            assert compactor is not None and query_service is not None
+            assert compactor is not None
             self._context.replace_context_compactor(compactor)
             self._context.invalidate_model_limit_cache(target.model)
-            self._memory.set_query_service(query_service)
         elif model_changed:
             self._context.invalidate_model_limit_cache(target.model)
 
@@ -525,7 +510,6 @@ class ProviderManager:
 
 __all__ = [
     "ConfigurationRecorder",
-    "MemoryQuerySink",
     "ModelContextControl",
     "ProviderFactory",
     "ProviderKind",

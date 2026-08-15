@@ -198,6 +198,24 @@ class ProviderManager:
         level: ThinkingLevel | str | None = None,
     ) -> ModelProvider: ...
 
+def build_meta_agent(
+    *,
+    provider: ModelProvider,
+    tools: Sequence[LionTool] = (),
+    model: str = "meta",
+    permission_mode: PermissionMode = "default",
+    system_prompt: str = "You are a helpful assistant.",
+    thinking: bool = False,
+    max_cost_usd: float | None = None,
+    max_turns: int | None = None,
+    confirm_fn: Callable[[str], Awaitable[bool]] | None = None,
+    session_repository: SessionRepository | None = None,
+    context_manager: ContextManager | None = None,
+    context_compactor: ContextCompactor | None = None,
+    model_limits_resolver: ModelLimitsResolver | None = None,
+    provider_factory: ProviderFactory | None = None,
+) -> MetaAgent: ...
+
 def Agent.set_terminal_output(enabled: bool) -> None: ...
 
 class LionCodingSession:
@@ -573,19 +591,28 @@ Usage has its own executable contract in
   Provider, or JSONL writer.
 - `Agent.configure_api()` is an idle-only transaction. Build the replacement Provider
   first, replace it without clearing canonical history, update stored credentials and
-  model, refresh the compactor, query service, and model-limit cache, then schedule
-  the old Provider for closing.
+  model, refresh the compactor and model-limit cache, then schedule the old Provider
+  for closing. Provider replacement no longer refreshes a Memory query service in
+  Bare Harness; that Capability-owned behavior waits for Feature Re-home.
 - `ProviderManager` owns that configuration transaction and all Provider/Thinking commands.
   `ProviderView` is the only provider/model/thinking projection exposed to consumers;
   credentials and base URLs stay inside the manager.
 - `ProviderManager` receives only `ProviderRuntimePort`, `ModelContextControl`,
-  `MemoryQuerySink`, `ConfigurationRecorder`, the provider factory Callable and a
-  background scheduler. It never imports or accepts `Agent`, Core history or a
-  runtime host aggregate.
+  `ConfigurationRecorder`, the provider factory Callable and a background scheduler.
+  It never imports or accepts Memory, `Agent`, Core history or a runtime host aggregate.
 - Replacement commands build every Provider and derived service before mutating
   Runtime or State. They then replace Runtime, commit State, refresh Context and
-  Memory services, record the change, and schedule old Provider closure. A
+  model-limit projections, record the change, and schedule old Provider closure. A
   model-only change uses Runtime `set_model()` without rebuilding the Provider.
+- `build_meta_agent()` always composes the supplied `provider`, an empty
+  `CapabilityRegistry`, and a `ToolRegistry` containing exactly the supplied `tools`.
+  Empty tools and an empty system prompt are valid; an empty prompt is normalized to
+  the neutral Meta prompt. The builder disables project pre-tool hooks and does not
+  create `ToolEnvironment`, MCP state, status/notice adapters, or any advanced Feature.
+- `MetaAgent` exposes only generic run/conversation/event/context/session/Provider/
+  usage/close operations. Concrete Coding tools are caller-supplied Harness inputs;
+  Feature-specific methods or state are forbidden. A Provider replacement that needs
+  construction uses the explicit `provider_factory` seam when supplied.
 - `Agent` exposes facade delegates and does not retain Provider credentials,
   backend kind, Thinking mode or Thinking level as mutable fields. Session restore
   calls `ProviderManager.restore_configuration()`.
@@ -804,6 +831,9 @@ Usage has its own executable contract in
 | Dream plan is invalid, conflicts, or the Memory snapshot changed | Reject it; atomic apply restores every touched file and index on failure |
 | Plan exit approval with clear-and-execute | Copy `terminate` from `PlanToolOutcome` into `ToolResult`; clear-and-execute no longer terminates |
 | Dynamic wakeup command | Clamp delay, update `AutonomyRuntime.pending_wakeup`, and expose the tool only in the dynamic loop scope |
+| `build_meta_agent(provider=p, tools=[])` | Construct and run with the supplied Provider; send an empty tool schema |
+| MetaAgent receives `system_prompt=""` | Normalize to the neutral Meta prompt; never fall back to the Coding prompt |
+| Bare construction reaches a Feature/helper/default-tool factory | Fail the architecture and strong-negative tests |
 
 ## 5. Good / Base / Bad Cases
 
@@ -812,9 +842,15 @@ Usage has its own executable contract in
   services use the replacement.
 - Base: changing only the model updates the live Core model and records one model
   change without rebuilding the Provider.
-- Good: `ProviderManager` receives narrow runtime/context/memory/recorder ports,
+- Good: `ProviderManager` receives narrow runtime/context/recorder ports,
   builds a replacement through its injected factory, and only commits State after
   Runtime replacement succeeds.
+- Good: `build_meta_agent(provider=p, tools=[])` completes a user-to-provider-to-
+  assistant turn without constructing a Feature object or a substitute for one.
+- Base: explicitly supplied Coding tools participate in the normal tool-call loop;
+  they do not become a Kernel contract or a MetaAgent default.
+- Bad: letting an empty Meta prompt select the Coding prompt, loading project hooks,
+  or constructing an empty Feature facade makes the Bare graph product-specific.
 - Bad: importing `create_provider` inside the lifecycle module bypasses the
   established test and compatibility patch point.
 - Bad: keeping `_openai_messages` and `_anthropic_messages` beside Core history makes
@@ -1029,6 +1065,11 @@ exception, or silently broaden an allowlist to make a regression pass.
   optional SDK and every dataset source snapshot exists.
 - Before completion run the full test suite, `compileall`, changed-scope lint/type
   checks, dependency/import residual scans, and `git diff --check`.
+- `tests/integration/test_meta_agent.py`: zero-extension/zero-tool smoke, explicit
+  Coding tool loop, exact feature-neutral public surface, direct Provider ownership,
+  compaction/session/cancellation/close, and full-flow constructor monkeypatching.
+- `tests/architecture/test_bare_composition.py`: scoped Kernel/generic Harness source
+  has no concrete advanced-Feature references and MetaAgent imports no Coding tools.
 
 ## 8. Wrong vs Correct
 
@@ -1054,6 +1095,7 @@ self._pending_core_context_reset = None
 self.tool_context.confirmed_paths.add(reason)
 ui.set_sink(tui_sink)
 legacy_path.replace(jsonl_path)
+agent = build_meta_agent(provider=provider, tools=create_builtin_tools())
 # ProviderManager receives Agent._create_provider as a Callable factory seam.
 ```
 
@@ -1093,6 +1135,7 @@ agent.plan.exit()
 session = LionCodingSession(backend, terminal_output=False)
 session.set_notice_fn(app_notice)
 storage = repository.storage_for(session_id)
+agent = build_meta_agent(provider=provider, tools=[])
 # ProviderManager calls its injected factory after replacement validation.
 # Legacy input is read-only; SessionRecorder appends canonical entries to storage.
 ```

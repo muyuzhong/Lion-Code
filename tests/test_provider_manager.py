@@ -57,16 +57,6 @@ class _Context:
         self.invalidated.append(model)
 
 
-class _Memory:
-    def __init__(self) -> None:
-        self.service = None
-        self.events: list[str] = []
-
-    def set_query_service(self, service) -> None:
-        self.events.append("set_query_service")
-        self.service = service
-
-
 class _Recorder:
     def __init__(self) -> None:
         self.changes = []
@@ -80,13 +70,11 @@ def _manager(
     factory,
     runtime: _Runtime | None = None,
     context: _Context | None = None,
-    memory: _Memory | None = None,
     recorder: _Recorder | None = None,
     scheduled: list[Any] | None = None,
-) -> tuple[ProviderManager, _Runtime, _Context, _Memory, _Recorder, list[Any]]:
+) -> tuple[ProviderManager, _Runtime, _Context, _Recorder, list[Any]]:
     runtime = runtime or _Runtime(_Provider("old"))
     context = context or _Context()
-    memory = memory or _Memory()
     recorder = recorder or _Recorder()
     scheduled = [] if scheduled is None else scheduled
     manager = ProviderManager(
@@ -101,12 +89,11 @@ def _manager(
         ),
         runtime=runtime,
         context=context,
-        memory=memory,
         recorder=recorder,
         provider_factory=factory,
         schedule_background_operation=scheduled.append,
     )
-    return manager, runtime, context, memory, recorder, scheduled
+    return manager, runtime, context, recorder, scheduled
 
 
 def test_view_is_read_only_and_state_has_no_derived_fields() -> None:
@@ -129,7 +116,7 @@ def test_replacement_transaction_refreshes_derived_services_before_old_close() -
         factory_calls.append(kwargs)
         return _Provider("new")
 
-    manager, runtime, context, memory, recorder, scheduled = _manager(factory=factory)
+    manager, runtime, context, recorder, scheduled = _manager(factory=factory)
     old_provider = runtime.provider
     manager.configure(
         model="model-b",
@@ -149,7 +136,6 @@ def test_replacement_transaction_refreshes_derived_services_before_old_close() -
         "replace_context_compactor",
         "invalidate_model_limit_cache",
     ]
-    assert memory.events == ["set_query_service"]
     assert recorder.changes[0][1].model == "model-b"
     assert runtime.provider.closed is False
     assert old_provider.closed is False
@@ -167,7 +153,7 @@ def test_factory_failure_keeps_runtime_and_view_unchanged() -> None:
         raise RuntimeError("bad provider")
 
     runtime = _Runtime(old_provider)
-    manager, _, context, memory, recorder, scheduled = _manager(
+    manager, _, context, recorder, scheduled = _manager(
         factory=factory,
         runtime=runtime,
     )
@@ -180,7 +166,6 @@ def test_factory_failure_keeps_runtime_and_view_unchanged() -> None:
     assert runtime.provider is old_provider
     assert runtime.events == []
     assert context.events == []
-    assert memory.events == []
     assert recorder.changes == []
     assert scheduled == []
     assert old_provider.closed is False
@@ -188,7 +173,7 @@ def test_factory_failure_keeps_runtime_and_view_unchanged() -> None:
 
 def test_model_only_change_uses_runtime_command_without_provider_rebuild() -> None:
     factory_calls: list[dict] = []
-    manager, runtime, context, memory, recorder, _ = _manager(
+    manager, runtime, context, recorder, _ = _manager(
         factory=lambda **kwargs: factory_calls.append(kwargs) or _Provider("unused")
     )
 
@@ -197,13 +182,12 @@ def test_model_only_change_uses_runtime_command_without_provider_rebuild() -> No
     assert factory_calls == []
     assert runtime.events == ["set_model"]
     assert context.events == ["invalidate_model_limit_cache"]
-    assert memory.events == []
     assert recorder.changes[0][1].model == "model-b"
 
 
 def test_thinking_and_restore_are_manager_commands() -> None:
     factory_calls: list[dict] = []
-    manager, runtime, _context, memory, recorder, scheduled = _manager(
+    manager, runtime, _context, recorder, scheduled = _manager(
         factory=lambda **kwargs: (
             factory_calls.append(kwargs) or _Provider("replacement")
         )
@@ -228,6 +212,5 @@ def test_thinking_and_restore_are_manager_commands() -> None:
     assert manager.view.model == "model-restored"
     assert manager.view.thinking_level == "medium"
     assert runtime.model == "model-restored"
-    assert len(memory.events) == 2
     assert len(recorder.changes) == 1
     assert len(scheduled) == 2

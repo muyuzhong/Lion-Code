@@ -126,6 +126,11 @@ class AgentHarness:
 
         return unsubscribe
 
+    async def emit(self, event: AgentEvent) -> None:
+        """向当前实例的订阅者发布一个 Kernel 事件。"""
+
+        await self._notify(event)
+
     def cancel(self) -> None:
         if self._owned_cancellation is not None:
             self._owned_cancellation.cancel()

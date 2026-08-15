@@ -20,6 +20,8 @@ from lion_code.agent import Agent
 from lion_code.context import SUMMARY_SYSTEM_PROMPT
 from lion_code.core import (
     AssistantMessage,
+    CompactionCompletedEvent,
+    CompactionStartedEvent,
     TextContent,
     ToolCall,
     TurnEndEvent,
@@ -37,6 +39,10 @@ from lion_code.usage import UsageSnapshot
 _PLAN_REHOME = (
     "PR3 Kernel 不含 Plan：clear-and-execute 上下文清空 + 自动 continue 的增强"
     "依赖 Kernel 对 Plan 的特判，已随 Runtime 移除；待 Capability re-home PR 恢复"
+)
+_MEMORY_PROVIDER_REHOME = (
+    "PR6 ProviderManager 不再拥有 Memory query refresh；待 Feature Re-home 由"
+    " Memory Capability 重新接入 Provider replacement 观察"
 )
 
 
@@ -413,6 +419,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             ],
             registry,
         )
+        events = []
+        agent.subscribe(events.append)
 
         await agent.chat("first question")
         await agent.chat("second question")
@@ -459,6 +467,22 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(usage.input_tokens, 160_000)
         self.assertEqual(usage.responses, 3)
         self.assertFalse(agent._core_compaction_required)
+        self.assertEqual(
+            [
+                event.reason
+                for event in events
+                if isinstance(event, CompactionStartedEvent)
+            ],
+            ["threshold"],
+        )
+        self.assertEqual(
+            [
+                (event.reason, event.aborted)
+                for event in events
+                if isinstance(event, CompactionCompletedEvent)
+            ],
+            [("threshold", False)],
+        )
 
         restored, _ = self._make_agent([], registry)
         self.assertTrue(await restored.restore_core_session(agent.session_id))
@@ -924,7 +948,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         await agent.chat("hello")
         old_runtime = agent._core_runtime
         old_compactor = agent._context_compactor
-        old_query = agent._memory_coordinator._query_service
 
         new_fake = FakeProvider([_stop_event("again")])
         with patch(
@@ -941,8 +964,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNot(agent._context_compactor, old_compactor)
         self.assertIs(agent._context_compactor._provider, new_fake)
-        self.assertIsNot(agent._memory_coordinator._query_service, old_query)
-        self.assertIs(agent._memory_coordinator._query_service._provider, new_fake)
         self.assertIsNone(agent._resolved_model_limits_for)
 
         # 新 Provider 接管后续请求。
@@ -953,6 +974,18 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent._core_runtime.messages[-1].text, "again")
         await agent.close()
         self.assertTrue(new_fake.closed)
+
+    @unittest.skip(_MEMORY_PROVIDER_REHOME)
+    async def test_configure_api_refreshes_memory_query_provider(self) -> None:
+        agent, _old_fake = self._make_agent([], ToolRegistry())
+        old_query = agent._memory_coordinator._query_service
+        new_fake = FakeProvider([])
+
+        with patch("lion_code.agent.create_provider", return_value=new_fake):
+            agent.configure_api(api_key="new-key", api_base="https://new.test/v1")
+
+        self.assertIsNot(agent._memory_coordinator._query_service, old_query)
+        self.assertIs(agent._memory_coordinator._query_service._provider, new_fake)
 
     async def test_configure_api_failure_keeps_complete_state(self) -> None:
         agent, provider = self._make_agent([], ToolRegistry())
