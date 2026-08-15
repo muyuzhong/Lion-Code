@@ -13,7 +13,12 @@ from .agent_runtime import (
     AgentRunResult,
     LionAgentRuntime,
 )
-from .composition import AgentConfig, AgentDependencies, build_agent_composition
+from .composition import (
+    PRODUCT_CAPABILITIES,
+    AgentConfig,
+    AgentDependencies,
+    build_agent_composition,
+)
 from .context import (
     ContextCompactor,
     ContextManager,
@@ -233,7 +238,19 @@ class Agent:
         composition = build_agent_composition(
             resolved_config,
             resolved_dependencies,
+            capabilities=PRODUCT_CAPABILITIES,
         )
+        # Agent 是 Full Product：显式选择全部内置能力，Feature 字段必然存在。
+        assert composition.mcp_state is not None
+        assert composition.plan is not None
+        assert composition.subagent_factory is not None
+        assert composition.subagent_executor is not None
+        assert composition.skill_runtime is not None
+        assert composition.mcp_capability is not None
+        assert composition.session_memory_coordinator is not None
+        assert composition.autonomy is not None
+        assert composition.learning is not None
+        assert composition.model_query is not None
 
         self.is_sub_agent = resolved_config.is_sub_agent
         self._mcp_enabled = resolved_config.mcp_enabled

@@ -137,38 +137,6 @@ def execute_skill(
     }
 
 
-# ─── 系统提示词片段 ─────────────────────────────────────────
-
-
-def build_skill_descriptions() -> str:
-    skills = discover_skills()
-    if not skills:
-        return ""
-
-    lines = ["# Available Skills", ""]
-    invocable = [s for s in skills if s.user_invocable]
-    auto_only = [s for s in skills if not s.user_invocable]
-
-    if invocable:
-        lines.append("User-invocable skills (user types /<name> to invoke):")
-        for s in invocable:
-            lines.append(f"- **/{s.name}**: {s.description}")
-            if s.when_to_use:
-                lines.append(f"  When to use: {s.when_to_use}")
-        lines.append("")
-
-    if auto_only:
-        lines.append("Auto-invocable skills (use the skill tool when appropriate):")
-        for s in auto_only:
-            lines.append(f"- **{s.name}**: {s.description}")
-            if s.when_to_use:
-                lines.append(f"  When to use: {s.when_to_use}")
-        lines.append("")
-
-    lines.append("To invoke a skill programmatically, use the `skill` tool with the skill name and optional arguments.")
-    return "\n".join(lines)
-
-
 def reset_skill_cache() -> None:
     global _cached_skills
     _cached_skills = None

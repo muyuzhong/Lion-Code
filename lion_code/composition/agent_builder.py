@@ -31,6 +31,7 @@ from ..dream_adapter import RestrictedDreamAgentFactory
 from ..execution_control import ExecutionControl
 from ..hooks import load_pre_tool_use_hooks
 from ..learning_runtime import LearningRuntime
+from ..mcp_client import McpManager
 from ..memory_runtime import ProviderTextQueryService
 from ..model_query import ProviderModelQuery
 from ..observers import TerminalRenderer
@@ -86,10 +87,37 @@ from .ports import (
     SubagentStatusSink,
 )
 
+# 内置能力名：Composition Root 的显式选择集合，Bare 图默认空集。
+CAP_MCP = "mcp"
+CAP_SKILL = "skill"
+CAP_SUBAGENT = "subagent"
+CAP_PLAN = "plan"
+CAP_MEMORY = "memory"
+CAP_DREAM = "dream"
+CAP_AUTONOMY = "autonomy"
+CAP_LEARNING = "learning"
+
+PRODUCT_CAPABILITIES = frozenset(
+    {
+        CAP_MCP,
+        CAP_SKILL,
+        CAP_SUBAGENT,
+        CAP_PLAN,
+        CAP_MEMORY,
+        CAP_DREAM,
+        CAP_AUTONOMY,
+        CAP_LEARNING,
+    }
+)
+
 
 @dataclass(slots=True)
 class AgentComposition:
-    """Composition Root 完成后交给 facade 的显式对象集合。"""
+    """Composition Root 完成后交给 facade 的显式对象集合。
+
+    Feature 字段（plan / subagent / mcp / memory / autonomy / learning）在
+    Bare 图中为 ``None``：调用方按所选 capabilities 判空，不创建 Null 对象。
+    """
 
     permission_controller: PermissionController
     session_state: SessionIdentityState
@@ -101,14 +129,14 @@ class AgentComposition:
     pre_tool_use_hooks: list[Any]
     tool_environment: ToolEnvironment
     tool_registry: ToolRegistry
-    mcp_manager: Any
-    mcp_state: McpLifecycleState
-    plan: PlanRuntime
-    subagent_factory: SubagentFactory
-    subagent_executor: SubagentExecutor
-    skill_runtime: SkillRuntime
+    mcp_manager: Any | None
+    mcp_state: McpLifecycleState | None
+    plan: PlanRuntime | None
+    subagent_factory: SubagentFactory | None
+    subagent_executor: SubagentExecutor | None
+    skill_runtime: SkillRuntime | None
     capability_registry: CapabilityRegistry
-    mcp_capability: McpCapability
+    mcp_capability: McpCapability | None
     capability_runtime: CapabilityRuntime
     refresh_dynamic_context_enabled: bool
     prompt_composer: PromptComposer
@@ -119,10 +147,10 @@ class AgentComposition:
     context_manager: ContextManager
     provider_manager: ProviderManager
     runtime_coordinator: AgentRuntimeCoordinator
-    session_memory_coordinator: SessionMemoryCoordinator
-    autonomy: AutonomyRuntime
-    learning: LearningRuntime
-    model_query: ProviderModelQuery
+    session_memory_coordinator: SessionMemoryCoordinator | None
+    autonomy: AutonomyRuntime | None
+    learning: LearningRuntime | None
+    model_query: ProviderModelQuery | None
     identity_port: RuntimeIdentityPort
     session_port: SessionStatePort
     notices: NoticeController
@@ -150,14 +178,14 @@ class _FoundationGraph:
     session_state: SessionIdentityState
     session_repository: SessionRepository
     read_file_state: dict[str, float]
-    mcp_state: McpLifecycleState
+    mcp_state: McpLifecycleState | None
     tool_environment: ToolEnvironment
-    mcp_manager: Any
+    mcp_manager: Any | None
     tool_registry: ToolRegistry
     created_own_registry: bool
     selected_tool_names: set[str] | None
     notice_sink: NoticeSinkAdapter
-    plan: PlanRuntime
+    plan: PlanRuntime | None
 
 
 @dataclass(slots=True)
@@ -190,11 +218,11 @@ class _ProviderGraph:
 @dataclass(slots=True)
 class _CapabilityGraph:
     child_config: Any
-    subagent_factory: SubagentFactory
-    subagent_executor: SubagentExecutor
-    skill_runtime: SkillRuntime
+    subagent_factory: SubagentFactory | None
+    subagent_executor: SubagentExecutor | None
+    skill_runtime: SkillRuntime | None
     capability_registry: CapabilityRegistry
-    mcp_capability: McpCapability
+    mcp_capability: McpCapability | None
     capability_runtime: CapabilityRuntime
 
 
@@ -212,19 +240,26 @@ class _ToolingGraph:
 
 @dataclass(slots=True)
 class _SessionGraph:
-    query: ProviderModelQuery
-    session_memory_coordinator: SessionMemoryCoordinator
-    autonomy: AutonomyRuntime
-    learning: LearningRuntime
+    query: ProviderModelQuery | None
+    session_memory_coordinator: SessionMemoryCoordinator | None
+    autonomy: AutonomyRuntime | None
+    learning: LearningRuntime | None
 
 
 def build_agent_composition(
     config: AgentConfig,
     dependencies: AgentDependencies | None = None,
+    *,
+    capabilities: frozenset[str] = frozenset(),
 ) -> AgentComposition:
-    """按固定顺序创建 Agent object graph，并返回一次性 composition result。"""
+    """按固定顺序创建 Agent object graph，并返回一次性 composition result。
 
-    foundation = _build_foundation(config, dependencies)
+    ``capabilities`` 显式选择内置能力；默认空集即 Bare 图：不创建
+    Memory/Plan/MCP/SubAgent/Skill/Autonomy/Dream/Learning。Full Product
+    由 ``PRODUCT_CAPABILITIES`` 显式选择。
+    """
+
+    foundation = _build_foundation(config, dependencies, capabilities)
     notices = foundation.notices
     confirmation = foundation.confirmation
     permission_controller = foundation.permission_controller
@@ -250,6 +285,7 @@ def build_agent_composition(
         foundation,
         provider_manager,
         identity_port,
+        capabilities,
     )
     child_config = capability_graph.child_config
     subagent_factory = capability_graph.subagent_factory
@@ -289,6 +325,7 @@ def build_agent_composition(
         prompt_composer,
         runtime_coordinator,
         child_config,
+        capabilities,
     )
     query = session_graph.query
     session_memory_coord = session_graph.session_memory_coordinator
@@ -378,6 +415,7 @@ def _resolve_dependencies(
 def _build_foundation(
     config: AgentConfig,
     dependencies: AgentDependencies | None,
+    capabilities: frozenset[str],
 ) -> _FoundationGraph:
     resolved = _resolve_dependencies(config, dependencies)
     deps = resolved.dependencies
@@ -404,7 +442,7 @@ def _build_foundation(
     )
     session_repository = deps.session_repository or SessionRepository()
     read_file_state: dict[str, float] = {}
-    mcp_state = McpLifecycleState()
+    mcp_state = McpLifecycleState() if CAP_MCP in capabilities else None
 
     if deps.tool_registry is not None and config.custom_tools is not None:
         raise ValueError("tool_registry and custom_tools cannot be combined")
@@ -414,9 +452,18 @@ def _build_foundation(
         if config.custom_tools is not None
         else None
     )
-    tool_environment = deps.tool_environment or ToolEnvironment(
-        owns_mcp_manager=not config.is_sub_agent
-    )
+    if deps.tool_environment is not None:
+        tool_environment = deps.tool_environment
+    elif CAP_MCP in capabilities:
+        tool_environment = ToolEnvironment(
+            mcp_manager=McpManager(),
+            owns_mcp_manager=not config.is_sub_agent,
+        )
+    else:
+        tool_environment = ToolEnvironment(
+            mcp_manager=None,
+            owns_mcp_manager=False,
+        )
     mcp_manager = tool_environment.mcp_manager
     tool_registry = deps.tool_registry or ToolRegistry()
     if created_own_registry:
@@ -425,10 +472,13 @@ def _build_foundation(
                 tool_registry.register(tool)
 
     notice_sink = NoticeSinkAdapter(notices)
-    plan = PlanRuntime(
-        PlanHost(session_state, notices),
-        PlanState(),
-    )
+    if CAP_PLAN in capabilities:
+        plan: PlanRuntime | None = PlanRuntime(
+            PlanHost(session_state, notices),
+            PlanState(),
+        )
+    else:
+        plan = None
     return _FoundationGraph(
         dependencies=deps,
         cwd=cwd,
@@ -527,38 +577,60 @@ def _build_capability_graph(
     foundation: _FoundationGraph,
     provider_manager: ProviderManager,
     identity_port: RuntimeIdentityPort,
+    capabilities: frozenset[str],
 ) -> _CapabilityGraph:
     def child_config() -> ChildAgentConfig:
         return _child_config(provider_manager, identity_port)
 
-    subagent_factory = SubagentFactory(
-        registry=foundation.tool_registry,
-        environment=foundation.tool_environment,
-        child_config=child_config,
-    )
-    subagent_executor = SubagentExecutor(
-        subagent_factory,
-        foundation.usage,
-        foundation.status_sink.emit,
-    )
-    skill_runtime = SkillRuntime(subagent_executor)
     capability_registry = CapabilityRegistry()
-    mcp_capability = McpCapability(
-        mcp_manager=foundation.mcp_manager,
-        tool_registry=foundation.tool_registry,
-        emit_notice=foundation.notices.emit,
-        is_already_initialized=lambda: foundation.mcp_state.initialized,
-        mark_initialized=lambda: setattr(foundation.mcp_state, "initialized", True),
-        is_root=(
-            config.mcp_enabled
-            and not config.is_sub_agent
-            and foundation.tool_environment.owns_mcp_manager
-        ),
-    )
-    capability_registry.register(mcp_capability.spec)
-    capability_registry.register(create_skill_capability(skill_runtime))
-    capability_registry.register(create_subagent_capability(subagent_executor))
-    capability_registry.register(create_plan_capability(foundation.plan))
+    subagent_factory: SubagentFactory | None = None
+    subagent_executor: SubagentExecutor | None = None
+    if CAP_SUBAGENT in capabilities or CAP_SKILL in capabilities:
+        subagent_factory = SubagentFactory(
+            registry=foundation.tool_registry,
+            environment=foundation.tool_environment,
+            child_config=child_config,
+        )
+        subagent_executor = SubagentExecutor(
+            subagent_factory,
+            foundation.usage,
+            foundation.status_sink.emit,
+        )
+    skill_runtime: SkillRuntime | None = None
+    if CAP_SKILL in capabilities:
+        if subagent_executor is None:
+            raise RuntimeError("skill capability requires subagent machinery")
+        skill_runtime = SkillRuntime(subagent_executor)
+
+    mcp_capability: McpCapability | None = None
+    if CAP_MCP in capabilities:
+        mcp_manager = foundation.mcp_manager
+        mcp_state = foundation.mcp_state
+        mcp_capability = McpCapability(
+            mcp_manager=mcp_manager,
+            tool_registry=foundation.tool_registry,
+            emit_notice=foundation.notices.emit,
+            is_already_initialized=lambda: (
+                mcp_state.initialized if mcp_state is not None else False
+            ),
+            mark_initialized=lambda: (
+                setattr(mcp_state, "initialized", True)
+                if mcp_state is not None
+                else None
+            ),
+            is_root=(
+                config.mcp_enabled
+                and not config.is_sub_agent
+                and foundation.tool_environment.owns_mcp_manager
+            ),
+        )
+        capability_registry.register(mcp_capability.spec)
+    if CAP_SKILL in capabilities and skill_runtime is not None:
+        capability_registry.register(create_skill_capability(skill_runtime))
+    if CAP_SUBAGENT in capabilities and subagent_executor is not None:
+        capability_registry.register(create_subagent_capability(subagent_executor))
+    if CAP_PLAN in capabilities and foundation.plan is not None:
+        capability_registry.register(create_plan_capability(foundation.plan))
     for spec in foundation.dependencies.extra_capabilities:
         capability_registry.register(spec)
     _install_capability_tools(foundation, capability_registry)
@@ -711,80 +783,107 @@ def _build_session_graph(
     prompt_composer: PromptComposer,
     runtime_coordinator: AgentRuntimeCoordinator,
     child_config: Any,
+    capabilities: frozenset[str],
 ) -> _SessionGraph:
-    query = ProviderModelQuery(
-        provider=lambda: runtime_coordinator.core_runtime.provider,
-        model=lambda: provider_graph.provider_manager.model,
-        available=lambda: provider_graph.provider_manager.api_configured,
-    )
-    memory_query = ProviderTextQueryService(
-        provider=provider_graph.provider,
-        model=lambda: provider_graph.provider_manager.model,
-    )
-    identity = foundation.resolve_identity(foundation.cwd)
+    query: ProviderModelQuery | None = None
+    if CAP_AUTONOMY in capabilities or CAP_LEARNING in capabilities:
+        query = ProviderModelQuery(
+            provider=lambda: runtime_coordinator.core_runtime.provider,
+            model=lambda: provider_graph.provider_manager.model,
+            available=lambda: provider_graph.provider_manager.api_configured,
+        )
+
     session_memory_coord: SessionMemoryCoordinator | None = None
+    autonomy: AutonomyRuntime | None = None
+    learning: LearningRuntime | None = None
 
-    def load_session_memory() -> Any:
-        if session_memory_coord is None:
-            return None
-        if session_memory_coord.session_memory_error is not None:
-            return None
-        return session_memory_coord.session_memory
+    needs_dream = CAP_MEMORY in capabilities or CAP_DREAM in capabilities
+    if needs_dream:
+        identity = foundation.resolve_identity(foundation.cwd)
 
-    def refresh_dynamic_context() -> None:
-        if not config.custom_system_prompt:
-            prompt_composer.set_dynamic_context(
-                foundation.dynamic_context_builder(
-                    foundation.tool_registry.deferred_tool_names()
+        def load_session_memory() -> Any:
+            if session_memory_coord is None:
+                return None
+            if session_memory_coord.session_memory_error is not None:
+                return None
+            return session_memory_coord.session_memory
+
+    if needs_dream:
+        dream_factory = RestrictedDreamAgentFactory(
+            registry=foundation.tool_registry,
+            environment=foundation.tool_environment,
+            child_config=child_config,
+        )
+        dream = DreamCoordinator(
+            repository=foundation.session_repository,
+            identity=identity,
+            session_memory=SessionMemorySnapshotView(load_session_memory),
+            factory=dream_factory,
+            usage=foundation.usage,
+        )
+    else:
+        dream = None
+
+    if CAP_MEMORY in capabilities:
+        memory_query = ProviderTextQueryService(
+            provider=provider_graph.provider,
+            model=lambda: provider_graph.provider_manager.model,
+        )
+
+        def refresh_dynamic_context() -> None:
+            if not config.custom_system_prompt:
+                prompt_composer.set_dynamic_context(
+                    foundation.dynamic_context_builder(
+                        foundation.tool_registry.deferred_tool_names()
+                    )
                 )
-            )
 
-    dream_factory = RestrictedDreamAgentFactory(
-        registry=foundation.tool_registry,
-        environment=foundation.tool_environment,
-        child_config=child_config,
-    )
-    dream = DreamCoordinator(
-        repository=foundation.session_repository,
-        identity=identity,
-        session_memory=SessionMemorySnapshotView(load_session_memory),
-        factory=dream_factory,
-        usage=foundation.usage,
-    )
-    session_memory_coord = SessionMemoryCoordinator(
-        identity=identity,
-        repository=foundation.dependencies.session_memory_repository,
-        transcript=runtime_coordinator.core_runtime,
-        cancellation=foundation.execution.cancellation,
-        load_project_context=lambda project_identity: tuple(
-            foundation.context_loader(foundation.cwd, project_identity)
-        ),
-        notices=foundation.notice_sink,
-        query=memory_query,
-        dream_runner=dream,
-        is_sub_agent=config.is_sub_agent,
-        status_callback=foundation.status_sink.emit,
-        refresh_context=refresh_dynamic_context,
-    )
-    provider_graph.memory_query_sink.bind(MemoryQuerySinkAdapter(session_memory_coord))
-    autonomy = AutonomyRuntime(
-        conversation=runtime_coordinator,
-        transcript=runtime_coordinator.core_runtime,
-        query=query,
-        notices=foundation.notice_sink,
-        cancellation=foundation.execution.cancellation,
-        tool_registry=foundation.tool_registry,
-        confirm=foundation.dependencies.confirm_fn,
-        usage=foundation.usage,
-        budget=foundation.budget,
-    )
+        if dream is None:
+            raise RuntimeError("memory capability requires dream runner")
+        session_memory_coord = SessionMemoryCoordinator(
+            identity=identity,
+            repository=foundation.dependencies.session_memory_repository,
+            transcript=runtime_coordinator.core_runtime,
+            cancellation=foundation.execution.cancellation,
+            load_project_context=lambda project_identity: tuple(
+                foundation.context_loader(foundation.cwd, project_identity)
+            ),
+            notices=foundation.notice_sink,
+            query=memory_query,
+            dream_runner=dream,
+            is_sub_agent=config.is_sub_agent,
+            status_callback=foundation.status_sink.emit,
+            refresh_context=refresh_dynamic_context,
+        )
+        provider_graph.memory_query_sink.bind(
+            MemoryQuerySinkAdapter(session_memory_coord)
+        )
+
+    if CAP_AUTONOMY in capabilities:
+        if query is None:
+            raise RuntimeError("autonomy capability requires query")
+        autonomy = AutonomyRuntime(
+            conversation=runtime_coordinator,
+            transcript=runtime_coordinator.core_runtime,
+            query=query,
+            notices=foundation.notice_sink,
+            cancellation=foundation.execution.cancellation,
+            tool_registry=foundation.tool_registry,
+            confirm=foundation.dependencies.confirm_fn,
+            usage=foundation.usage,
+            budget=foundation.budget,
+        )
+    if CAP_LEARNING in capabilities:
+        if query is None:
+            raise RuntimeError("learning capability requires query")
+        learning = LearningRuntime(
+            runtime_coordinator.core_runtime, query, foundation.cwd
+        )
     return _SessionGraph(
         query=query,
         session_memory_coordinator=session_memory_coord,
         autonomy=autonomy,
-        learning=LearningRuntime(
-            runtime_coordinator.core_runtime, query, foundation.cwd
-        ),
+        learning=learning,
     )
 
 

@@ -33,7 +33,7 @@ class McpCapability(TurnParticipant):
     def __init__(
         self,
         *,
-        mcp_manager: McpManager,
+        mcp_manager: McpManager | None,
         tool_registry: ToolRegistry,
         emit_notice: Callable[[str], None],
         is_already_initialized: Callable[[], bool],
@@ -50,6 +50,8 @@ class McpCapability(TurnParticipant):
     async def before_turn(self) -> None:
         """Discover and register MCP tools once; fail-soft on error."""
         if not self._is_root or self._is_already_initialized():
+            return
+        if self._mcp_manager is None:
             return
         self._mark_initialized()
         try:
