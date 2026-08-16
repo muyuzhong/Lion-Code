@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-16-pr7b-mcp-total-removal/prd.md","reason":"PR7b full MCP deletion scope, acceptance, and rollback boundary"}
+{"file":".trellis/tasks/08-16-pr7b-mcp-total-removal/design.md","reason":"MCP object graph deletion and ToolEnvironment lifecycle simplification"}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Preserve Kernel Harness Capability ownership while deleting one capability"}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Composition Root, session close, facade, and child runtime contracts"}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"Preserve generic Capability slots after removing MCP implementation"}

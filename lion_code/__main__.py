@@ -216,7 +216,7 @@ async def run_repl(agent: Agent) -> None:
             if "abort" not in str(e).lower():
                 print_error(str(e))
 
-    # REPL 退出时必须回收 MCP 子进程，否则终端进程可能无法正常结束（issue #8）。
+    # REPL 退出时必须回收 Capability 外部资源，否则终端进程可能无法正常结束（issue #8）。
     await agent.close()
 
 

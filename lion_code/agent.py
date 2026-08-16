@@ -60,7 +60,7 @@ from .session_runtime import (
     list_legacy_sessions,
     load_legacy_session,
 )
-from .tooling import ToolEnvironment, ToolRegistry
+from .tooling import ToolRegistry
 from .tools import ToolDef
 from .ui import (
     print_confirmation,
@@ -156,7 +156,6 @@ class Agent:
         custom_system_prompt: str | None = None,
         custom_tools: list[ToolDef] | None = None,
         tool_registry: ToolRegistry | None = None,
-        tool_environment: ToolEnvironment | None = None,
         session_repository: SessionRepository | None = None,
         session_memory_repository: SessionMemoryRepository | None = None,
         context_manager: ContextManager | None = None,
@@ -164,7 +163,6 @@ class Agent:
         model_limits_resolver: ModelLimitsResolver | None = None,
         is_sub_agent: bool = False,
         terminal_output: bool = True,
-        mcp_enabled: bool = True,
         config: AgentConfig | None = None,
         dependencies: AgentDependencies | None = None,
     ) -> None:
@@ -181,7 +179,6 @@ class Agent:
             custom_tools=tuple(custom_tools) if custom_tools is not None else None,
             is_sub_agent=is_sub_agent,
             terminal_output=terminal_output,
-            mcp_enabled=mcp_enabled,
         )
         if config is not None:
             if legacy_config != AgentConfig():
@@ -197,7 +194,6 @@ class Agent:
             for value in (
                 confirm_fn,
                 tool_registry,
-                tool_environment,
                 session_repository,
                 session_memory_repository,
                 context_manager,
@@ -212,7 +208,6 @@ class Agent:
         resolved_dependencies = dependencies or AgentDependencies(
             confirm_fn=confirm_fn,
             tool_registry=tool_registry,
-            tool_environment=tool_environment,
             session_repository=session_repository,
             session_memory_repository=session_memory_repository,
             context_manager=context_manager,
@@ -236,25 +231,20 @@ class Agent:
             capabilities=PRODUCT_CAPABILITIES,
         )
         # Agent 是 Full Product：显式选择全部内置能力，Feature 字段必然存在。
-        assert composition.mcp_state is not None
         assert composition.plan is not None
         assert composition.subagent_factory is not None
         assert composition.subagent_executor is not None
         assert composition.skill_runtime is not None
-        assert composition.mcp_capability is not None
         assert composition.session_memory_coordinator is not None
-        assert composition.tool_environment is not None
         assert composition.status_sink is not None
 
         self.is_sub_agent = resolved_config.is_sub_agent
-        self._mcp_enabled = resolved_config.mcp_enabled
         self._current_task: asyncio.Task | None = None
         self._identity_port = composition.identity_port
         self._session_port = composition.session_port
         self._notice_controller = composition.notices
         self._confirmation = composition.confirmation
         self._status_sink = composition.status_sink
-        self._mcp_state = composition.mcp_state
         self._permission_controller = composition.permission_controller
         self._session_state = composition.session_state
         self._session_repository = composition.session_repository
@@ -262,15 +252,12 @@ class Agent:
         self._budget = composition.budget
         self._read_file_state = composition.read_file_state
         self._pre_tool_use_hooks = composition.pre_tool_use_hooks
-        self.tool_environment = composition.tool_environment
-        self._mcp_manager = composition.mcp_manager
         self.plan = composition.plan
         self.tool_registry = composition.tool_registry
         self._subagent_factory = composition.subagent_factory
         self._subagent_executor = composition.subagent_executor
         self._skill_runtime = composition.skill_runtime
         self._capability_registry = composition.capability_registry
-        self._mcp_capability = composition.mcp_capability
         self._capability_runtime = composition.capability_runtime
         self._prompt_composer = composition.prompt_composer
         self.tool_context = composition.tool_context
@@ -364,14 +351,6 @@ class Agent:
         self._status_sink.terminal_output = enabled
 
     @property
-    def _mcp_initialized(self) -> bool:
-        return self._mcp_state.initialized
-
-    @_mcp_initialized.setter
-    def _mcp_initialized(self, value: bool) -> None:
-        self._mcp_state.initialized = value
-
-    @property
     def effective_window(self) -> int:
         return self._identity_port.effective_window
 
@@ -432,12 +411,6 @@ class Agent:
     def core_runtime(self) -> LionAgentRuntime:
         """返回供应用会话层订阅事件与读取消息快照的 Core Runtime。"""
         return self._core_runtime
-
-    @property
-    def mcp_enabled(self) -> bool:
-        """返回当前根 Agent 是否允许首次对话时发现 MCP 工具。"""
-
-        return self._mcp_enabled
 
     @property
     def _project_identity(self) -> ProjectIdentity:
@@ -774,12 +747,12 @@ class Agent:
 
         与 chat() 的差异：捕获最终文本、轮次、token、成本与停止原因，并在模型异常
         或超时时返回结构化结果而非抛出。turns 口径与 max_turns 一致，只计执行了工具
-        的轮次，不含末尾纯文本轮。timeout 到期后直接取消承载 chat() 的任务，因此首次
-        MCP 初始化也受同一超时约束；chat() 可能吞掉 CancelledError，这里统一改写原因。
+        的轮次，不含末尾纯文本轮。timeout 到期后直接取消承载 chat() 的任务。
+        chat() 可能吞掉 CancelledError，这里统一改写原因。
 
         注意：tool_error 当前不会触发——工具异常由 ToolRuntime 转成错误内容回传，
         Agent 会继续运行直到 completed 或其他边界；该枚举值保留供未来需要时使用。
-        调用方负责在结束时 await agent.close() 释放 MCP 等外部资源。
+        调用方负责在结束时 await agent.close() 释放 Capability 等外部资源。
         """
         return await self._runtime_coordinator.run(prompt, timeout=timeout)
 
@@ -942,7 +915,7 @@ class Agent:
     # ─── 外部资源与 Memory 预取 ──────────────────────────────
 
     async def close(self) -> None:
-        """释放 Capability、MCP 子进程等外部资源，确保进程正常退出（issue #8）。"""
+        """释放 Capability 等外部资源，确保进程正常退出（issue #8）。"""
         await self._runtime_coordinator.close()
 
     async def _confirm_hook_trust(self, message: str) -> bool:

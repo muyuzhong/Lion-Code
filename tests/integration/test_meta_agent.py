@@ -209,9 +209,6 @@ async def test_strong_negative_flow_never_constructs_advanced_features(
 
     for name in (
         "ChildAgentConfig",
-        "McpCapability",
-        "McpLifecycleState",
-        "McpManager",
         "NoticeSinkAdapter",
         "PlanHost",
         "PlanRuntime",
@@ -222,7 +219,6 @@ async def test_strong_negative_flow_never_constructs_advanced_features(
         "SubagentStatusSink",
         "SubagentExecutor",
         "SubagentFactory",
-        "ToolEnvironment",
         "create_builtin_tools",
         "create_internal_tools",
         "create_plan_capability",
@@ -393,7 +389,6 @@ def test_meta_agent_public_surface_is_feature_neutral() -> None:
         "dream",
         "goal",
         "learn",
-        "mcp",
         "memory",
         "plan",
         "skill",

@@ -129,7 +129,6 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
                 api_key="test-key",
                 custom_system_prompt="test",
                 terminal_output=False,
-                mcp_enabled=False,
             )
         self.assertIsInstance(agent._runtime_coordinator, AgentRuntimeCoordinator)
         self.assertIs(agent.core_runtime, agent._runtime_coordinator.core_runtime)

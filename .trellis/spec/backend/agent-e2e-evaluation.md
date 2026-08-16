@@ -18,7 +18,7 @@ evaluation isolation boundary.
 
 ```python
 class Agent:
-    def __init__(..., mcp_enabled: bool = True) -> None: ...
+    def __init__(...) -> None: ...
 
 async def run_agent_worker(
     request: AgentExecutionRequest,
@@ -142,9 +142,9 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 - Freeze tasks with `CatalogLock` before execution. `ExperimentManifest` must
   repeat the profile fingerprint, code SHA, seed, repeat count, timeout, and
   budget exactly; a selected task must belong to the lock.
-- An evaluation worker must call `Agent.run()` with `mcp_enabled=False`, subscribe
-  through `agent.core_runtime`, and construct `SessionRepository` under a path
-  outside the Agent workspace. The product default remains `mcp_enabled=True`.
+- An evaluation worker must call `Agent.run()`, subscribe through
+  `agent.core_runtime`, and construct `SessionRepository` under a path outside
+  the Agent workspace.
 - `IsolationReport.official_safe` requires workspaces that do not overlap in
   either direction and `private_assets_visible_to_agent=False`. Equal or nested
   Agent/verifier paths are unsafe because the Agent could read verifier files.
@@ -242,7 +242,6 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 | Trace has a loop/context/tool/premature candidate | `FailureRecord` with only redacted metadata, stable signature, and evidence offsets; require human triage |
 | Blocked, invalid, or offline task is classified | `FailureMode.INFRASTRUCTURE`; do not attribute it to the Agent |
 | A reproduced Agent failure originated from holdout | retire the source ID before admitting a distinct regression feedback task |
-| `mcp_enabled=True` reaches `run_agent_worker` | Raise `ValueError`; a worker must not discover machine/project MCP servers |
 | Docker/backend unavailable | `TaskResult(verdict=blocked, validity=blocked, official=False)` |
 | Fake backend completes worker/verifier lifecycle | `TaskResult(verdict=blocked, validity=offline_only, official=False)` |
 | Agent/verifier workspaces overlap or private assets are visible | `TaskResult(verdict=invalid, validity=invalid, official=False)` before worker execution |
@@ -292,8 +291,8 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   catalog/lock mismatches, and official verdict/score consistency.
 - `tests/benchmarks/test_orchestrator.py`: unavailable/fake backend, worker and
   verifier errors, cleanup, checkpoint resume, equal/nested workspace rejection.
-- `tests/benchmarks/test_agent_worker.py`: real `Agent` worker has MCP disabled,
-  Core output is captured, and the JSONL session remains outside the task workspace.
+- `tests/benchmarks/test_agent_worker.py`: real `Agent` worker captures Core
+  output and keeps the JSONL session outside the task workspace.
 - `tests/benchmarks/test_trace.py`: secret/path/session/prompt redaction and loop
   fingerprint evidence.
 - `tests/benchmarks/test_evaluation_cli.py`: the online command remains explicitly blocked

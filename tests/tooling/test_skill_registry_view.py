@@ -57,11 +57,11 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    async def test_subagent_uses_parent_registry_view_and_shared_environment(self):
+    async def test_subagent_uses_parent_registry_view(self):
         with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
             parent = Agent(api_key="test-key")
-        mcp_name = "mcp__docs__search"
-        parent.tool_registry.register(_tool(mcp_name))
+        custom_name = "custom__docs__search"
+        parent.tool_registry.register(_tool(custom_name))
 
         with (
             patch("lion_code.agent.Agent", _ChildAgent),
@@ -84,14 +84,10 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
         self.assertEqual((usage.responses, usage.turns), (0, 0))
         self.assertIs(
-            child_registry.resolve(mcp_name), parent.tool_registry.resolve(mcp_name)
+            child_registry.resolve(custom_name), parent.tool_registry.resolve(custom_name)
         )
         with self.assertRaises(LookupError):
             child_registry.resolve("agent")
-        self.assertIs(
-            kwargs["tool_environment"].mcp_manager,
-            parent.tool_environment.mcp_manager,
-        )
         _ChildAgent.last_instance.close.assert_awaited_once_with()
 
     async def test_subagent_uses_current_api_configuration_and_bypass_permission(self):
@@ -228,16 +224,16 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         )
         child.close.assert_awaited_once_with()
 
-    async def test_fork_skill_selects_parent_registry_including_mcp(self):
+    async def test_fork_skill_selects_parent_registry_including_custom_tools(self):
         with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
             parent = Agent(api_key="test-key")
-        mcp_name = "mcp__docs__search"
-        mcp_tool = _tool(mcp_name)
-        parent.tool_registry.register(mcp_tool)
+        custom_name = "custom__docs__search"
+        custom_tool = _tool(custom_name)
+        parent.tool_registry.register(custom_tool)
         skill_result = {
             "context": "fork",
-            "allowed_tools": [mcp_name],
-            "prompt": "Use the MCP search tool.",
+            "allowed_tools": [custom_name],
+            "prompt": "Use the custom search tool.",
         }
 
         with (
@@ -255,14 +251,9 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "skill result")
         self.assertEqual(
             [tool.name for tool in child_registry.all_tools()],
-            [mcp_name],
+            [custom_name],
         )
-        self.assertIs(child_registry.resolve(mcp_name), mcp_tool)
-        self.assertIs(
-            kwargs["tool_environment"].mcp_manager,
-            parent.tool_environment.mcp_manager,
-        )
-        self.assertFalse(kwargs["tool_environment"].owns_mcp_manager)
+        self.assertIs(child_registry.resolve(custom_name), custom_tool)
         usage = parent.get_token_usage()
         self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
         self.assertEqual((usage.responses, usage.turns), (0, 0))

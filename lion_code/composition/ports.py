@@ -19,7 +19,6 @@ from ..provider_manager import (
 )
 from ..session_identity import SessionIdentityState
 from ..session_runtime import SessionRecorder, SessionRepository
-from ..tooling import ToolEnvironment
 
 
 class NoticeController:
@@ -131,13 +130,6 @@ class SubagentStatusSink:
             self._end(agent_type, description)
 
 
-class McpLifecycleState:
-    """MCP Capability 的初始化标志所有者。"""
-
-    def __init__(self) -> None:
-        self.initialized = False
-
-
 class PlanHost:
     """PlanRuntime 所需的 session id 与通知结构端口。"""
 
@@ -214,12 +206,10 @@ class SessionStatePort:
         session_state: SessionIdentityState,
         session_repository: SessionRepository,
         tool_context: Any,
-        tool_environment: ToolEnvironment | None,
     ) -> None:
         self._session_state = session_state
         self._session_repository = session_repository
         self.tool_context = tool_context
-        self.tool_environment = tool_environment
 
     @property
     def session_state(self) -> SessionIdentityState:

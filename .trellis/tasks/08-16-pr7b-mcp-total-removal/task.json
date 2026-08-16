@@ -1,0 +1,28 @@
+{
+  "id": "pr7b-mcp-total-removal",
+  "name": "pr7b-mcp-total-removal",
+  "title": "PR7b MCP total removal",
+  "description": "彻底删除 MCP client、Capability、ToolEnvironment、产品接线、测试与文档链路。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-16",
+  "completedAt": "2026-08-16",
+  "branch": "muyuzhong/pr7b-mcp-total-removal",
+  "base_branch": "muyuzhong/pr7a-supervisor-product-detachment",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-16-pr7-composition-profile-layer",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "commit": "3a9c60e"
+  }
+}

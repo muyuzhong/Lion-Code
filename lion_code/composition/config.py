@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from ..project_identity import ProjectIdentity
     from ..session_memory import SessionMemoryRepository
     from ..session_runtime import SessionRepository
-    from ..tooling import ToolEnvironment, ToolRegistry
+    from ..tooling import ToolRegistry
     from ..tools import ToolDef
 
 
@@ -34,7 +34,6 @@ class AgentConfig:
     custom_tools: tuple[ToolDef, ...] | None = None
     is_sub_agent: bool = False
     terminal_output: bool = True
-    mcp_enabled: bool = True
 
     def __post_init__(self) -> None:
         if self.custom_tools is not None:
@@ -47,7 +46,6 @@ class AgentDependencies:
 
     confirm_fn: Callable[[str], Awaitable[bool]] | None = None
     tool_registry: ToolRegistry | None = None
-    tool_environment: ToolEnvironment | None = None
     session_repository: SessionRepository | None = None
     session_memory_repository: SessionMemoryRepository | None = None
     context_manager: ContextManager | None = None

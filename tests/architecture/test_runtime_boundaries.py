@@ -37,7 +37,8 @@ REMOVED_SKILL_COMMAND_SYMBOLS = frozenset(
         "parse_skill_invocation",
     }
 )
-MCP_LIFECYCLE_CLASS_NAMES = frozenset({"McpConnection", "McpManager"})
+# PR7b 删除的外部工具协议 token；拼接构造以避免测试自身成为残留。
+_REMOVED_PROTOCOL_TOKEN = "m" + "cp"
 PROVIDER_SHIM_EXPORTS = ("ModelProvider",)
 REMOVED_RUNTIME_SYMBOLS = frozenset(
     {
@@ -758,24 +759,6 @@ def _removed_skill_command_symbols(tree: ast.Module) -> frozenset[str]:
         if name in REMOVED_SKILL_COMMAND_SYMBOLS:
             symbols.add(name)
     return frozenset(symbols)
-
-
-def _mcp_lifecycle_classes(tree: ast.Module) -> frozenset[str]:
-    classes: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ClassDef):
-            continue
-        name = node.name
-        lowered = name.casefold()
-        if name in MCP_LIFECYCLE_CLASS_NAMES or (
-            "mcp" in lowered
-            and any(
-                marker in lowered
-                for marker in ("client", "connection", "lifecycle", "manager")
-            )
-        ):
-            classes.add(name)
-    return frozenset(classes)
 
 
 class _AttributeCallSites(ast.NodeVisitor):
@@ -1667,26 +1650,31 @@ def test_removed_skill_command_symbols_do_not_return() -> None:
     assert not violations, f"旧 /skill: 半成品入口不得重新进入产品代码: {violations}"
 
 
-def test_mcp_lifecycle_management_has_single_owner() -> None:
-    lifecycle_classes = {
-        _source_key(path): sorted(_mcp_lifecycle_classes(_tree(path)))
-        for path in _source_files()
-        if _mcp_lifecycle_classes(_tree(path))
-    }
-    disconnect_calls = {
-        _source_key(path): sorted(_attribute_call_sites(_tree(path), "disconnect_all"))
-        for path in _source_files()
-        if _attribute_call_sites(_tree(path), "disconnect_all")
-    }
+def test_removed_external_tool_protocol_stays_deleted() -> None:
+    """PR7b 强否定：被删除的外部工具协议不得以文件、import、配置字段、
+    capability name 或 ``.json`` 配置加载逻辑的任何形式回归。"""
+    token = _REMOVED_PROTOCOL_TOKEN.casefold()
+    hits: list[str] = []
+    for path in SOURCE_ROOT.rglob("*.py"):
+        relative = path.relative_to(REPOSITORY_ROOT).as_posix()
+        source = path.read_text(encoding="utf-8")
+        if token in relative.casefold() or token in source.casefold():
+            hits.append(relative)
+    assert not hits, f"已删除的外部工具协议出现残留: {hits}"
 
-    assert lifecycle_classes == {
-        "composition/ports.py": ["McpLifecycleState"],
-        "mcp_client.py": ["McpConnection", "McpManager"],
-    }
-    assert disconnect_calls == {"tooling/environment.py": ["ToolEnvironment.close"]}, (
-        "MCP disconnect lifecycle must remain owned by ToolEnvironment: "
-        f"{disconnect_calls}"
+
+def test_removed_environment_field_stays_out_of_composition() -> None:
+    """PR7b 强否定：配置/依赖/组合结果不得重新携带外部工具环境字段。"""
+    from dataclasses import fields as dataclass_fields
+
+    from lion_code.composition import AgentComposition, AgentConfig, AgentDependencies
+
+    field_names = (
+        {field.name for field in dataclass_fields(AgentConfig)}
+        | {field.name for field in dataclass_fields(AgentDependencies)}
+        | {field.name for field in dataclass_fields(AgentComposition)}
     )
+    assert not field_names & {"tool_environment"}
 
 
 def test_provider_shim_remains_reexport_only() -> None:
@@ -1725,8 +1713,6 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
         "def rebuild(root):\n    (root / 'MEMORY.md').write_text('')\n"
     )
     old_skill = ast.parse("def parse_skill_invocation():\n    return '/skill:'\n")
-    mcp_lifecycle = ast.parse("class McpClient:\n    pass\n")
-    mcp_disconnect = ast.parse("def close(manager):\n    manager.disconnect_all()\n")
     dynamic_importlib = ast.parse(
         "import importlib\ndef load(name):\n    return importlib.import_module(name)\n"
     )
@@ -1796,10 +1782,6 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     assert _memory_index_write_sites(memory_index_writer) == frozenset({"rebuild"})
     assert _removed_skill_command_symbols(old_skill) == frozenset(
         {"/skill:", "parse_skill_invocation"}
-    )
-    assert _mcp_lifecycle_classes(mcp_lifecycle) == frozenset({"McpClient"})
-    assert _attribute_call_sites(mcp_disconnect, "disconnect_all") == frozenset(
-        {"close"}
     )
     assert _dynamic_import_calls(dynamic_importlib) == frozenset({"import_module"})
     assert _dynamic_import_calls(dynamic_builtin) == frozenset({"__import__"})
@@ -2037,7 +2019,6 @@ def test_dream_domain_has_typed_runner_factory_and_no_agent_field() -> None:
     assert not agent_fields
 
     adapter = (SOURCE_ROOT / "dream_adapter.py").read_text(encoding="utf-8")
-    assert "mcp_enabled=False" in adapter
     assert 'permission_mode="bypassPermissions"' in adapter
     assert "DREAM_MAX_TURNS" in adapter
     assert "require_read_only=True" in adapter

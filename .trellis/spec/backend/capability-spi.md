@@ -211,10 +211,10 @@ AST tests in ``tests/architecture/test_runtime_boundaries.py``:
   integration lifecycle.
 - ``tests/architecture/test_runtime_boundaries.py``: capability boundary
   import, AgentHarness reference, and god-context prevention tests.
-- ``tests/capabilities/test_capability_migration.py``: MCP/Skill/SubAgent
-  capability installation, disabled-capability tool absence, MCP fail-soft
-  semantics, SubAgent permission inheritance, Skill tool delegation,
-  close-does-not-double-release, and architecture boundary compliance.
+- ``tests/capabilities/test_capability_migration.py``: Skill/SubAgent
+  capability installation, SubAgent permission inheritance, Skill tool
+  delegation, close-does-not-double-release, and architecture boundary
+  compliance.
 - ``tests/tooling/test_capability_runtimes.py``: Skill inline/unknown/fork
   routing plus Subagent success/error conversion, status ordering, usage
   aggregation, and child closure.
@@ -224,17 +224,6 @@ AST tests in ``tests/architecture/test_runtime_boundaries.py``:
 ## 7. Capability Contributions and Tool Bindings
 
 The tool-bearing capabilities use construction-time command binding:
-
-### McpCapability (``capabilities/mcp.py``)
-
-- Implements ``TurnParticipant``: discovers and registers MCP tools on the
-  first ``before_turn()``.
-- Does **not** implement ``AsyncCloseable``: MCP process lifecycle
-  (``disconnect_all``) remains owned by ``ToolEnvironment``.
-- Receives narrow dependencies: ``McpManager``, ``ToolRegistry``, notice
-  emitter, and init-flag accessors (callables, not a god-context).
-- The init flag (``agent._mcp_initialized``) is shared via callables so
-  tests and lifecycle code that check it continue to work.
 
 ### SkillCapability (``capabilities/skill.py``)
 
@@ -280,19 +269,15 @@ The tool-bearing capabilities use construction-time command binding:
 
 - ``composition/agent_builder.py`` is capability-driven: ``build_agent_composition()``
   takes an explicit ``capabilities: frozenset[str]`` selection. The default empty
-  set is the **Bare graph** — it creates no Memory/Plan/MCP/SubAgent/Skill
-  objects. ``PRODUCT_CAPABILITIES`` selects the Full Product set (MCP/Skill/
-  SubAgent/Plan/Memory since PR7a removed the Supervisor capabilities);
-  ``Agent.__init__`` uses it explicitly.
+  set is the **Bare graph** — it creates no Memory/Plan/SubAgent/Skill objects.
+  ``PRODUCT_CAPABILITIES`` selects the Full Product set (Skill/SubAgent/Plan/
+  Memory after PR7a removed the Supervisor capabilities and PR7b removed the
+  external-tool protocol capability); ``Agent.__init__`` uses it explicitly.
 - Feature construction is gated by the selection: ``_build_foundation`` creates
-  ``McpManager``/``PlanRuntime`` only when the corresponding capability is
-  selected; ``_build_capability_graph`` and ``_build_session_graph`` construct
+  ``PlanRuntime`` only when the corresponding capability is selected;
+  ``_build_capability_graph`` and ``_build_session_graph`` construct
   each runtime only for selected capabilities. `CapabilityRegistry` may be empty
   and an empty registry remains a legal object graph.
-- ``ToolEnvironment.mcp_manager`` is optional (``None`` when MCP is not
-  selected), so the Bare graph never creates an ``McpManager`` just to build
-  ``ToolRuntime``. ``McpCapability`` tolerates a ``None`` manager (discovery
-  only runs when ``is_root`` is true).
 - For the Full Product, ``composition/agent_builder.py`` creates
   ``SkillRuntime``, ``SubagentExecutor``, and ``PlanRuntime`` before registering
   the corresponding capabilities. ``Agent.__init__`` only normalizes the public
@@ -301,7 +286,7 @@ The tool-bearing capabilities use construction-time command binding:
 - Capability-provided tools are registered into fresh root registries. When a
   child receives a filtered registry, the composition root replaces the
   inherited capability tool objects with tools bound to the child runtimes;
-  MCP and ordinary built-in tools remain shared by registry view.
+  ordinary built-in and caller tools remain shared by registry view.
 - ``CapabilityRuntime`` is the only generic lifecycle adapter. It dispatches
   turn and session participants from the registry and closes registry resources
   once; it does not expose capability lookup or kernel state.
@@ -309,8 +294,8 @@ The tool-bearing capabilities use construction-time command binding:
   ``before_turn()`` and invokes ``after_turn()`` from a ``finally`` block
   covering early exits, cancellation, and Provider/tool failures.
 - ``SessionLifecycle`` receives the same lifecycle port for new/restore
-  callbacks and close. MCP process ownership remains with
-  ``ToolEnvironment``.
+  callbacks and close; capability resources are released once by
+  ``CapabilityRuntime.close()``.
 - ``tooling/internal.py``'s ``create_internal_tools()`` no longer includes
   ``create_skill_tool()`` or ``create_agent_tool()``; they are provided by
   capabilities. Plan tools are provided by ``PlanCapability`` and the wakeup

@@ -3,9 +3,9 @@
 验收：
 1. CapabilityRegistry() 为空是合法状态。
 2. registry names == () 时对象图仍能构造。
-3. Bare composition 不创建 Memory/Plan/MCP/SubAgent/Skill。
+3. Bare composition 不创建 Memory/Plan/SubAgent/Skill。
 4. 不存在为了构造通过而增加的 Null Feature（缺失即 None，不造假对象）。
-5. Tool Runtime 不依赖 McpManager。
+5. Tool Runtime 不依赖外部工具协议实现。
 6. Meta base prompt 不引用不存在的 Feature。
 """
 
@@ -58,13 +58,11 @@ _BARE_GENERIC_FILES = (
 )
 _FEATURE_MODULE_PREFIXES = (
     "lion_code.autonomy_runtime",
-    "lion_code.capabilities.mcp",
     "lion_code.capabilities.plan",
     "lion_code.capabilities.skill",
     "lion_code.capabilities.subagent",
     "lion_code.dream",
     "lion_code.learning_runtime",
-    "lion_code.mcp_client",
     "lion_code.memory",
     "lion_code.memory_runtime",
     "lion_code.plan_runtime",
@@ -78,8 +76,6 @@ _FEATURE_SYMBOLS = {
     "ChildAgentConfig",
     "DreamCoordinator",
     "LearningRuntime",
-    "McpCapability",
-    "McpManager",
     "MemoryContextInjector",
     "MemoryCoordinator",
     "MemoryQuerySink",
@@ -97,13 +93,10 @@ _FEATURE_SYMBOLS = {
 
 # Bare 图禁止出现的 Feature 字段（AgentComposition 中应为 None）。
 _FEATURE_FIELDS = (
-    "mcp_manager",
-    "mcp_state",
     "plan",
     "subagent_factory",
     "subagent_executor",
     "skill_runtime",
-    "mcp_capability",
     "session_memory_coordinator",
 )
 
@@ -137,18 +130,11 @@ def test_bare_graph_constructs_with_empty_registry(tmp_path, monkeypatch) -> Non
 
 
 def test_bare_graph_creates_no_feature_objects(tmp_path, monkeypatch) -> None:
-    """Bare composition 不创建 Memory/Plan/MCP/SubAgent/Skill。"""
+    """Bare composition 不创建 Memory/Plan/SubAgent/Skill。"""
     composition = _bare_composition(tmp_path, monkeypatch)
     for field in _FEATURE_FIELDS:
         assert getattr(composition, field) is None, field
     assert composition.status_sink is None
-
-
-def test_bare_graph_has_no_mcp_manager(tmp_path, monkeypatch) -> None:
-    """Bare 图不创建 McpManager 或 ToolEnvironment 替身。"""
-    composition = _bare_composition(tmp_path, monkeypatch)
-    assert composition.mcp_manager is None
-    assert composition.tool_environment is None
 
 
 def test_full_product_has_all_features(tmp_path, monkeypatch) -> None:
@@ -168,10 +154,9 @@ def test_full_product_has_all_features(tmp_path, monkeypatch) -> None:
         assert getattr(composition, field) is not None, field
 
 
-def test_tool_runtime_does_not_import_mcp() -> None:
-    """Tool Runtime 不依赖 McpManager（无 import、无构造参数）。"""
+def test_tool_runtime_does_not_import_external_tool_protocol() -> None:
+    """Tool Runtime 不依赖任何外部工具协议实现（无 import、无构造参数）。"""
     source = (SOURCE_ROOT / "tooling" / "runtime.py").read_text(encoding="utf-8")
-    assert "mcp" not in source.casefold()
     tree = ast.parse(source, filename="runtime.py")
     init = next(
         node
@@ -179,7 +164,7 @@ def test_tool_runtime_does_not_import_mcp() -> None:
         if isinstance(node, ast.FunctionDef) and node.name == "__init__"
     )
     args = [*init.args.posonlyargs, *init.args.args, *init.args.kwonlyargs]
-    assert not any("mcp" in arg.arg for arg in args)
+    assert not any("environment" in arg.arg for arg in args)
 
 
 def test_base_prompt_does_not_reference_features() -> None:
@@ -188,13 +173,11 @@ def test_base_prompt_does_not_reference_features() -> None:
     dynamic = build_dynamic_system_context(deferred_tool_names=[])
     combined = static + dynamic
 
-    # 使用 agent tool / memory / skills / MCP / Plan 的显式指引词。
+    # 使用 agent tool / memory / skills / Plan 的显式指引词。
     for marker in (
         "Use the `agent` tool",
         "Auto Memory",
         "Available Skills",
-        "mcp__",
-        "MCP tools",
         "plan mode",
         "Plan mode",
         "REPL commands like /clear, /cost, /compact, /memory",

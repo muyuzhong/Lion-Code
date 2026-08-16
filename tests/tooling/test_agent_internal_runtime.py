@@ -74,7 +74,6 @@ class TestAgentInternalRuntime(unittest.IsolatedAsyncioTestCase):
             'name == "skill"',
             'name == "schedule_wakeup"',
             'name in ("enter_plan_mode", "exit_plan_mode")',
-            "is_mcp_tool(name)",
             "run_pre_tool_use_hooks",
             "check_permission",
         ):
