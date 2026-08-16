@@ -37,6 +37,12 @@ class SkillComposition:
     """Coding 可选 Skill 组合的存在值（presence value，非 bool 开关）。"""
 
 
+def _normalize_blank_prompt(profile) -> None:
+    """空串 prompt 等价未提供：避免空串静默关闭动态上下文。"""
+    if profile.system_prompt == "":
+        object.__setattr__(profile, "system_prompt", None)
+
+
 @dataclass(frozen=True, slots=True)
 class MinimalProfile:
     """零内置 Capability 的最小产品：只注册调用方 tools 与 Meta facade。"""
@@ -50,6 +56,7 @@ class MinimalProfile:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tools", tuple(self.tools))
+        _normalize_blank_prompt(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +80,7 @@ class CodingProfile:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "extra_tools", tuple(self.extra_tools))
+        _normalize_blank_prompt(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +104,7 @@ class FullProfile:
     def __post_init__(self) -> None:
         object.__setattr__(self, "extra_tools", tuple(self.extra_tools))
         object.__setattr__(self, "extension_specs", tuple(self.extension_specs))
+        _normalize_blank_prompt(self)
 
 
 Profile = MinimalProfile | CodingProfile | FullProfile

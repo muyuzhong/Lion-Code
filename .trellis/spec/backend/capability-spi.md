@@ -273,11 +273,16 @@ The tool-bearing capabilities use construction-time command binding:
   Memory/Plan/SubAgent/Skill objects and registers only caller tools.
   ``CodingProfile`` binds the Coding tool suite to the profile-selected
   ``CommandExecutionBackend`` and composes Skill only when a
-  ``SkillComposition`` value is present. ``FullProfile`` fixes the Full Product
+  ``SkillComposition`` value is present (composing Skill also registers the
+  ``agent`` tool via the shared Subagent machinery; it is model-visible, not
+  hidden). ``FullProfile`` fixes the Full Product
   shape (Coding form + Memory/Plan/SubAgent/default Skill + ``CapabilitySpec``
   extensions with the full ``Agent`` facade). Public profiles accept no
   capability-name set and expose no feature bools; the capability construction
-  branch lives only in ``_normalize_profile``.
+  branch lives only in the composition-root helpers (``_normalize_profile``,
+  ``_resolve_dependencies``, ``_build_foundation``, ``_build_capability_graph``,
+  ``_build_session_graph``), enforced by
+  ``tests/architecture/test_composition_profiles.py``.
 - Feature construction is gated by the normalized selection: ``_build_foundation``
   creates ``PlanRuntime`` only when the corresponding capability is selected;
   ``_build_capability_graph`` and ``_build_session_graph`` construct

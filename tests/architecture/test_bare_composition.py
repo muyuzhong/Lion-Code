@@ -108,7 +108,10 @@ def _bare_composition(tmp_path, monkeypatch):
     dependencies = AgentDependencies(tool_registry=ToolRegistry())
     provider = Mock()
     provider.aclose = AsyncMock()
-    with patch("lion_code.agent.create_provider", return_value=provider):
+    with patch(
+        "lion_code.composition.agent_builder.create_provider",
+        return_value=provider,
+    ):
         return build_agent_composition(
             MinimalProfile(config=config, dependencies=dependencies)
         )

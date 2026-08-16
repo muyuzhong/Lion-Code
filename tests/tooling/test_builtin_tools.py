@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -100,7 +101,14 @@ class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(backend.run("echo hi"), "hi\n")
         self.assertIn("Command failed (exit code 1)", backend.run("exit 1"))
-        self.assertIn("timed out", backend.run("ping -n 5 127.0.0.1", timeout_ms=100))
+        # 跨平台的长命令：宿主 Python 一定存在，避免 ping 参数差异。
+        self.assertIn(
+            "timed out",
+            backend.run(
+                f'"{sys.executable}" -c "import time; time.sleep(2)"',
+                timeout_ms=100,
+            ),
+        )
 
 
 if __name__ == "__main__":
