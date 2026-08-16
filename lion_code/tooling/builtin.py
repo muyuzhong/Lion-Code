@@ -6,8 +6,8 @@ import inspect
 from collections.abc import Callable, Mapping
 
 from .. import tools as tool_handlers
+from .execution import DEFAULT_TIMEOUT_MS, CommandExecutionBackend
 from .types import JSONValue, LionTool, ToolCapabilities, ToolResult
-
 
 BUILTIN_TOOL_NAMES = frozenset(
     {
@@ -20,6 +20,10 @@ BUILTIN_TOOL_NAMES = frozenset(
         "web_fetch",
     }
 )
+
+# 内置工具当前均非 deferred；若未来出现 deferred 内置工具，需同步维护此清单
+# 供动态 prompt 枚举，避免为枚举名称而构造 backend 绑定的工具对象。
+DEFERRED_BUILTIN_TOOL_NAMES: tuple[str, ...] = ()
 
 
 def create_builtin_tool(
@@ -56,8 +60,27 @@ def create_builtin_tool(
     )
 
 
-def create_builtin_tools() -> list[LionTool]:
-    """创建文件、搜索、Shell 与网页工具的统一定义。"""
+def create_run_shell_handler(
+    backend: CommandExecutionBackend,
+) -> Callable[[dict], str]:
+    """把 backend 绑定为 run_shell 的同步处理函数。"""
+
+    def handler(inp: dict) -> str:
+        return backend.run(
+            str(inp["command"]),
+            timeout_ms=float(inp.get("timeout", DEFAULT_TIMEOUT_MS)),
+        )
+
+    return handler
+
+
+def create_builtin_tools(
+    backend: CommandExecutionBackend,
+) -> list[LionTool]:
+    """创建文件、搜索、Shell 与网页工具的统一定义。
+
+    ``run_shell`` 显式绑定调用方（Profile）选择的命令执行 backend。
+    """
     return [
         create_builtin_tool(
             name="read_file",
@@ -199,7 +222,7 @@ def create_builtin_tools() -> list[LionTool]:
                 },
                 "required": ["command"],
             },
-            handler=tool_handlers._run_shell,
+            handler=create_run_shell_handler(backend),
             capabilities=ToolCapabilities(
                 executes_process=True,
                 result_policy="snippable",

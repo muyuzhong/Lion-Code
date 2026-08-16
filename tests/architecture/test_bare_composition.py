@@ -16,9 +16,10 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 from lion_code.composition import (
-    PRODUCT_CAPABILITIES,
     AgentConfig,
     AgentDependencies,
+    FullProfile,
+    MinimalProfile,
     build_agent_composition,
 )
 from lion_code.prompt import (
@@ -107,8 +108,13 @@ def _bare_composition(tmp_path, monkeypatch):
     dependencies = AgentDependencies(tool_registry=ToolRegistry())
     provider = Mock()
     provider.aclose = AsyncMock()
-    with patch("lion_code.agent.create_provider", return_value=provider):
-        return build_agent_composition(config, dependencies)
+    with patch(
+        "lion_code.composition.agent_builder.create_provider",
+        return_value=provider,
+    ):
+        return build_agent_composition(
+            MinimalProfile(config=config, dependencies=dependencies)
+        )
 
 
 def test_capability_registry_empty_is_legal_state(tmp_path, monkeypatch) -> None:
@@ -138,7 +144,7 @@ def test_bare_graph_creates_no_feature_objects(tmp_path, monkeypatch) -> None:
 
 
 def test_full_product_has_all_features(tmp_path, monkeypatch) -> None:
-    """PRODUCT_CAPABILITIES 显式选择后，Full Product 恢复全部 Feature。"""
+    """FullProfile 显式选择后，Full Product 恢复全部 Feature。"""
     monkeypatch.chdir(tmp_path)
     config = AgentConfig(model="claude-opus-4-6", terminal_output=False)
     dependencies = AgentDependencies(tool_registry=ToolRegistry())
@@ -146,9 +152,7 @@ def test_full_product_has_all_features(tmp_path, monkeypatch) -> None:
     provider.aclose = AsyncMock()
     with patch("lion_code.agent.create_provider", return_value=provider):
         composition = build_agent_composition(
-            config,
-            dependencies,
-            capabilities=PRODUCT_CAPABILITIES,
+            FullProfile(config=config, dependencies=dependencies)
         )
     for field in _FEATURE_FIELDS:
         assert getattr(composition, field) is not None, field

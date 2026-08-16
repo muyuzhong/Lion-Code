@@ -126,8 +126,13 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 > 行为测试统一以 `_REHOME` 原因 skip。
 
 > **PR7b 状态**：外部工具协议（client、Capability、tool adapter 与共享 Tool
-> Environment）已整体删除，不再作为产品、Composition 或测试的可达能力；
-> `PRODUCT_CAPABILITIES` 只含 Skill/SubAgent/Plan/Memory。
+> Environment）已整体删除，不再作为产品、Composition 或测试的可达能力。
+>
+> **PR7c 状态**：组合选择由不可变 Profile 承载——`MinimalProfile`（Bare）、
+> `CodingProfile`（Coding 工具形态 + 可选 Skill）、`FullProfile`（Coding 形态 +
+> Memory/Plan/SubAgent/默认 Skill + 扩展 specs + 完整 Agent facade）。
+> capability 集合 API 已删除，Feature branch 只在 Composition Root 的
+> `_normalize_profile` 与各 `_build_*` 构造 helper（由架构测试强制）。
 
 > **PR2 / PR6 状态**：PR2 没有形成独立 PR，遗留的
 > `ProviderManager -> MemoryQuerySink` 依赖由 PR6 直接删除，不保留 deferred sink、兼容层

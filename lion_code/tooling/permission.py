@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from ..permission_state import PermissionMode
 from .types import JSONValue, LionTool
@@ -41,6 +41,30 @@ def is_dangerous(command: str) -> bool:
 class PermissionDecision:
     action: Literal["allow", "deny", "confirm"]
     message: str = ""
+
+
+class ToolPermissionStrategy(Protocol):
+    """权限策略的最窄契约；PermissionMiddleware 只依赖本协议。
+
+    ``PermissionPolicy`` 是现有结构化实现；Profile 提供的 strategy 实例由
+    Composition Root 原样交给 middleware，middleware 不认识 Profile 或 Capability。
+    """
+
+    def check_hard_boundaries(
+        self,
+        *,
+        tool: LionTool,
+        arguments: Mapping[str, JSONValue],
+        mode: PermissionMode,
+    ) -> PermissionDecision | None: ...
+
+    def check(
+        self,
+        *,
+        tool: LionTool,
+        arguments: Mapping[str, JSONValue],
+        mode: PermissionMode,
+    ) -> PermissionDecision: ...
 
 
 _cached_rules: dict[tuple[str, str], dict[str, list[dict[str, str | None]]]] = {}

@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-16-pr7c-composition-profile-layer/prd.md","reason":"PR7c Profile requirements, fixed product shapes, and acceptance criteria"}
+{"file":".trellis/tasks/08-16-pr7c-composition-profile-layer/design.md","reason":"Profile values, single Composition Root, backend, strategy, facade, and graph design"}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Kernel Harness Capability Supervisor dependency direction"}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Composition Root, Provider, permission, session, and facade contracts"}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"Capability registry and prompt lifecycle extension slots"}

@@ -28,6 +28,7 @@ from lion_code.session_memory import SessionMemory
 from lion_code.session_runtime import SessionRepository
 from lion_code.subagent_factory import ChildAgentConfig
 from lion_code.tooling.builtin import create_builtin_tools
+from lion_code.tooling.execution import LocalCommandExecutionBackend
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.usage import UsageLedger
 
@@ -361,7 +362,7 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
             root = Path(tmp)
             context = dream.DreamContext(root, root, "", [], [], {})
             registry = ToolRegistry()
-            for tool in create_builtin_tools():
+            for tool in create_builtin_tools(LocalCommandExecutionBackend()):
                 registry.register(tool)
             factory = RestrictedDreamAgentFactory(
                 registry=registry,

@@ -40,8 +40,14 @@ class _ChildAgent:
         self.close = AsyncMock()
 
 
+def _patched_child():
+    return patch("lion_code.meta_agent.build_coding_agent", _ChildAgent)
+
+
 class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
     def test_factory_import_defers_agent_module(self):
+        # meta_agent 由 lion_code 包 __init__ 预先导入；此处只验证 factory
+        # 不再把 Agent 引擎门面拖进 import 图。
         result = subprocess.run(
             [
                 sys.executable,
@@ -64,7 +70,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         parent.tool_registry.register(_tool(custom_name))
 
         with (
-            patch("lion_code.agent.Agent", _ChildAgent),
+            _patched_child(),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
         ):
@@ -99,7 +105,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             )
 
         with (
-            patch("lion_code.agent.Agent", _ChildAgent),
+            _patched_child(),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
         ):
@@ -141,7 +147,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         }
 
         with (
-            patch("lion_code.agent.Agent", _ChildAgent),
+            _patched_child(),
             patch("lion_code.skills.execute_skill", return_value=skill_result),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
@@ -238,7 +244,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("lion_code.skills.execute_skill", return_value=skill_result),
-            patch("lion_code.agent.Agent", _ChildAgent),
+            _patched_child(),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
         ):
@@ -254,6 +260,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             [custom_name],
         )
         self.assertIs(child_registry.resolve(custom_name), custom_tool)
+        self.assertEqual(kwargs["system_prompt"], skill_result["prompt"])
         usage = parent.get_token_usage()
         self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
         self.assertEqual((usage.responses, usage.turns), (0, 0))

@@ -31,7 +31,7 @@ def _read_file(inp: dict) -> str:
         # 这也与 TypeScript 版本的 readFileSync("utf-8") 行为保持一致。
         content = Path(inp["file_path"]).read_text(encoding="utf-8", errors="replace")
         lines = content.split("\n")
-        numbered = "\n".join(f"{i+1:4d} | {line}" for i, line in enumerate(lines))
+        numbered = "\n".join(f"{i + 1:4d} | {line}" for i, line in enumerate(lines))
         return numbered
     except Exception as e:
         return f"Error reading file: {e}"
@@ -45,7 +45,7 @@ def _write_file(inp: dict) -> str:
         rebuild_memory_index_if_needed(str(path))
         lines = inp["content"].split("\n")
         line_count = len(lines)
-        preview = "\n".join(f"{i+1:4d} | {l}" for i, l in enumerate(lines[:30]))
+        preview = "\n".join(f"{i + 1:4d} | {l}" for i, l in enumerate(lines[:30]))
         trunc = f"\n  ... ({line_count} lines total)" if line_count > 30 else ""
         return f"Successfully wrote to {inp['file_path']} ({line_count} lines)\n\n{preview}{trunc}"
     except Exception as e:
@@ -57,7 +57,7 @@ def _write_file(inp: dict) -> str:
 
 def _normalize_quotes(s: str) -> str:
     s = re.sub("[\u2018\u2019\u2032]", "'", s)
-    s = re.sub('[\u201c\u201d\u2033]', '"', s)
+    s = re.sub("[\u201c\u201d\u2033]", '"', s)
     return s
 
 
@@ -68,7 +68,7 @@ def _find_actual_string(file_content: str, search_string: str) -> str | None:
     norm_file = _normalize_quotes(file_content)
     idx = norm_file.find(norm_search)
     if idx != -1:
-        return file_content[idx:idx + len(search_string)]
+        return file_content[idx : idx + len(search_string)]
     return None
 
 
@@ -103,7 +103,9 @@ def _edit_file(inp: dict) -> str:
         path.write_text(new_content, encoding="utf-8")
 
         diff = _generate_diff(content, actual, inp["new_string"])
-        quote_note = " (matched via quote normalization)" if actual != inp["old_string"] else ""
+        quote_note = (
+            " (matched via quote normalization)" if actual != inp["old_string"] else ""
+        )
         return f"Successfully edited {inp['file_path']}{quote_note}\n\n{diff}"
     except Exception as e:
         return f"Error editing file: {e}"
@@ -120,7 +122,10 @@ def _list_files(inp: dict) -> str:
                 rel = str(p.relative_to(base) if base != Path(".") else p)
                 # 按路径段精确排除 node_modules 和隐藏目录，避免误伤名称中仅包含
                 # `node_modules` 的普通文件；忽略 dotfile 与 TS 的 `dot:false` 一致。
-                if any(part == "node_modules" or part.startswith(".") for part in Path(rel).parts):
+                if any(
+                    part == "node_modules" or part.startswith(".")
+                    for part in Path(rel).parts
+                ):
                     continue
                 # 返回值最多保留 200 项，但继续计数，让模型知道结果是否被截断。
                 if len(files) < 200:
@@ -149,9 +154,7 @@ def _grep_search(inp: dict) -> str:
             if include:
                 args.append(f"--include={include}")
             args.extend(["--", pattern, path])
-            result = subprocess.run(
-                args, capture_output=True, text=True, timeout=10
-            )
+            result = subprocess.run(args, capture_output=True, text=True, timeout=10)
             if result.returncode == 1:
                 return "No matches found."
             if result.returncode == 0:
@@ -201,7 +204,7 @@ def _grep_python(pattern: str, directory: str, include: str | None) -> str:
                     if regex.search(line):
                         # 最多展示 100 个匹配，同时保留遗漏数量供模型判断完整性。
                         if len(matches) < 100:
-                            matches.append(f"{full}:{i+1}:{line}")
+                            matches.append(f"{full}:{i + 1}:{line}")
                         else:
                             extra += 1
             except Exception:
@@ -216,32 +219,9 @@ def _grep_python(pattern: str, directory: str, include: str | None) -> str:
     return output
 
 
-def _run_shell(inp: dict) -> str:
-    try:
-        timeout_ms = inp.get("timeout", 30000)
-        timeout_s = timeout_ms / 1000
-        result = subprocess.run(
-            inp["command"],
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
-        output = result.stdout or ""
-        if result.returncode != 0:
-            stderr = f"\nStderr: {result.stderr}" if result.stderr else ""
-            stdout = f"\nStdout: {result.stdout}" if result.stdout else ""
-            return f"Command failed (exit code {result.returncode}){stdout}{stderr}"
-        return output or "(no output)"
-    except subprocess.TimeoutExpired:
-        return f"Command timed out after {inp.get('timeout', 30000)}ms"
-    except Exception as e:
-        return f"Error: {e}"
-
-
 def _web_fetch(inp: dict) -> str:
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     url = inp.get("url", "")
     max_length = inp.get("max_length", 50000)

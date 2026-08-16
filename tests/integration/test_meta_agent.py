@@ -31,6 +31,7 @@ from lion_code.core.provider_events import (
 )
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.builtin import create_builtin_tools
+from lion_code.tooling.execution import LocalCommandExecutionBackend
 
 
 def _done(text: str) -> AssistantDoneEvent:
@@ -163,7 +164,9 @@ async def test_coding_harness_is_explicit_tool_composition(
         "run_shell",
     }
     coding_tools = [
-        tool for tool in create_builtin_tools() if tool.name in coding_names
+        tool
+        for tool in create_builtin_tools(LocalCommandExecutionBackend())
+        if tool.name in coding_names
     ]
     provider = FakeProvider(
         [_tool_call("read_file", {"file_path": "sample.txt"}), _done("finished")]
@@ -230,7 +233,9 @@ async def test_strong_negative_flow_never_constructs_advanced_features(
         monkeypatch.setattr(builder, name, forbidden)
 
     read_file = next(
-        tool for tool in create_builtin_tools() if tool.name == "read_file"
+        tool
+        for tool in create_builtin_tools(LocalCommandExecutionBackend())
+        if tool.name == "read_file"
     )
     (tmp_path / "sample.txt").write_text("negative flow", encoding="utf-8")
     provider = _FlowProvider(
@@ -370,11 +375,13 @@ def test_meta_agent_public_surface_is_feature_neutral() -> None:
         "messages",
         "model",
         "new_session",
+        "permission_mode",
         "prompt",
         "provider",
         "provider_config",
         "restore",
         "run",
+        "run_once",
         "session_id",
         "set_thinking",
         "set_thinking_level",

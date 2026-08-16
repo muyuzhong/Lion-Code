@@ -14,9 +14,9 @@ from .agent_runtime import (
     LionAgentRuntime,
 )
 from .composition import (
-    PRODUCT_CAPABILITIES,
     AgentConfig,
     AgentDependencies,
+    FullProfile,
     build_agent_composition,
 )
 from .context import (
@@ -61,7 +61,6 @@ from .session_runtime import (
     load_legacy_session,
 )
 from .tooling import ToolRegistry
-from .tools import ToolDef
 from .ui import (
     print_confirmation,
     print_error,
@@ -154,7 +153,6 @@ class Agent:
         max_turns: int | None = None,
         confirm_fn: Callable[[str], Awaitable[bool]] | None = None,
         custom_system_prompt: str | None = None,
-        custom_tools: list[ToolDef] | None = None,
         tool_registry: ToolRegistry | None = None,
         session_repository: SessionRepository | None = None,
         session_memory_repository: SessionMemoryRepository | None = None,
@@ -175,13 +173,14 @@ class Agent:
             thinking=thinking,
             max_cost_usd=max_cost_usd,
             max_turns=max_turns,
-            custom_system_prompt=custom_system_prompt,
-            custom_tools=tuple(custom_tools) if custom_tools is not None else None,
             is_sub_agent=is_sub_agent,
             terminal_output=terminal_output,
         )
         if config is not None:
-            if legacy_config != AgentConfig():
+            if (
+                legacy_config != AgentConfig()
+                or custom_system_prompt is not None
+            ):
                 raise ValueError(
                     "config cannot be combined with legacy configuration arguments"
                 )
@@ -225,11 +224,14 @@ class Agent:
             print_sub_agent_start=_agent_print_subagent_start,
             print_sub_agent_end=_agent_print_subagent_end,
         )
-        composition = build_agent_composition(
-            resolved_config,
-            resolved_dependencies,
-            capabilities=PRODUCT_CAPABILITIES,
+        # Agent 是 Full Product：prompt/tools 等组合选择只经由 FullProfile 进入
+        # Composition Root，facade 不再拼接 capability 集合。
+        profile = FullProfile(
+            config=resolved_config,
+            dependencies=resolved_dependencies,
+            system_prompt=custom_system_prompt,
         )
+        composition = build_agent_composition(profile)
         # Agent 是 Full Product：显式选择全部内置能力，Feature 字段必然存在。
         assert composition.plan is not None
         assert composition.subagent_factory is not None

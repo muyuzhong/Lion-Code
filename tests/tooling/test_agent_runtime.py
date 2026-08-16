@@ -168,25 +168,19 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(core_tools["read_file"].description, schema["description"])
         self.assertEqual(dict(core_tools["read_file"].parameters), schema["input_schema"])
 
-    def test_custom_tools_limit_registry(self):
-        agent = self._agent(
-            custom_tools=[
-                {
-                    "name": "read_file",
-                    "description": "compat",
-                    "input_schema": {"type": "object", "properties": {}},
-                }
-            ]
-        )
+    def test_builtin_and_capability_tools_register_together(self):
+        """PR7c：Full 图固定注册 builtin Coding 工具与 Capability 工具。"""
+        agent = self._agent()
 
-        self.assertEqual(
-            [tool.name for tool in agent.tool_registry.active_tools()],
-            ["read_file"],
-        )
-        self.assertEqual(
-            [tool.name for tool in agent.core_runtime.harness.config.get_tools()],
-            ["read_file"],
-        )
+        active_names = {tool.name for tool in agent.tool_registry.active_tools()}
+        self.assertIn("read_file", active_names)
+        self.assertIn("run_shell", active_names)
+        self.assertIn("tool_search", active_names)
+        self.assertIn("skill", active_names)
+        # Plan 工具按 Capability 定义注册为 deferred，经 tool_search 激活。
+        all_names = {tool.name for tool in agent.tool_registry.all_tools()}
+        self.assertIn("enter_plan_mode", all_names)
+        self.assertNotIn("enter_plan_mode", active_names)
 
     def test_context_snipping_uses_registry_result_policy(self):
         agent = self._agent()

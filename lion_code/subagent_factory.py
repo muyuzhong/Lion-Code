@@ -11,7 +11,7 @@ from .tooling import ToolRegistry
 from .tooling.selection import ToolSelectionPolicy, select_tools
 
 if TYPE_CHECKING:
-    from .agent import Agent
+    from .meta_agent import MetaAgent
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +26,11 @@ class ChildAgentConfig:
 
 
 class SubagentFactory:
-    """为父 Agent 创建受限工具视图的子 Agent。"""
+    """为父 Agent 创建受限工具视图的 Coding 形态子 Agent。
+
+    child graph 使用 CodingProfile：不递归构造 Memory/Plan/SubAgent 等
+    Full-only Capability，只共享经选择的 ToolRegistry 与 Provider 快照。
+    """
 
     def __init__(
         self,
@@ -37,7 +41,7 @@ class SubagentFactory:
         self._registry = registry
         self._child_config = child_config
 
-    def create_for_agent_type(self, agent_type: str) -> Agent:
+    def create_for_agent_type(self, agent_type: str) -> MetaAgent:
         """按内置或自定义 Agent 类型创建子实例。"""
 
         config = get_sub_agent_config(agent_type)
@@ -51,7 +55,7 @@ class SubagentFactory:
         *,
         system_prompt: str,
         allowed_tools: list[str] | None,
-    ) -> Agent:
+    ) -> MetaAgent:
         """按 Skill 声明的工具范围创建 fork 子实例。"""
 
         if allowed_tools:
@@ -69,20 +73,20 @@ class SubagentFactory:
         *,
         system_prompt: str,
         tool_policy: ToolSelectionPolicy,
-    ) -> Agent:
-        """在真正构造时才导入 Agent，避免模块级循环依赖。"""
+    ) -> MetaAgent:
+        """在真正构造时才导入 Coding 构造入口，避免模块级循环依赖。"""
 
-        from .agent import Agent
+        from .meta_agent import build_coding_agent
 
         config = self._child_config()
-        return Agent(
+        return build_coding_agent(
             model=config.model,
             api_key=config.api_key,
             api_base=config.api_base,
             anthropic_base_url=config.anthropic_base_url,
             terminal_output=config.terminal_output,
-            custom_system_prompt=system_prompt,
+            permission_mode="bypassPermissions",
+            system_prompt=system_prompt,
             tool_registry=select_tools(self._registry, tool_policy),
             is_sub_agent=True,
-            permission_mode="bypassPermissions",
         )

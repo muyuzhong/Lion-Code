@@ -267,22 +267,32 @@ The tool-bearing capabilities use construction-time command binding:
 
 ### Agent Composition Changes
 
-- ``composition/agent_builder.py`` is capability-driven: ``build_agent_composition()``
-  takes an explicit ``capabilities: frozenset[str]`` selection. The default empty
-  set is the **Bare graph** — it creates no Memory/Plan/SubAgent/Skill objects.
-  ``PRODUCT_CAPABILITIES`` selects the Full Product set (Skill/SubAgent/Plan/
-  Memory after PR7a removed the Supervisor capabilities and PR7b removed the
-  external-tool protocol capability); ``Agent.__init__`` uses it explicitly.
-- Feature construction is gated by the selection: ``_build_foundation`` creates
-  ``PlanRuntime`` only when the corresponding capability is selected;
+- ``composition/agent_builder.py`` is profile-driven (PR7c):
+  ``build_agent_composition(profile)`` takes a single immutable Profile value.
+  ``MinimalProfile`` is the **Bare graph** — it creates no
+  Memory/Plan/SubAgent/Skill objects and registers only caller tools.
+  ``CodingProfile`` binds the Coding tool suite to the profile-selected
+  ``CommandExecutionBackend`` and composes Skill only when a
+  ``SkillComposition`` value is present (composing Skill also registers the
+  ``agent`` tool via the shared Subagent machinery; it is model-visible, not
+  hidden). ``FullProfile`` fixes the Full Product
+  shape (Coding form + Memory/Plan/SubAgent/default Skill + ``CapabilitySpec``
+  extensions with the full ``Agent`` facade). Public profiles accept no
+  capability-name set and expose no feature bools; the capability construction
+  branch lives only in the composition-root helpers (``_normalize_profile``,
+  ``_resolve_dependencies``, ``_build_foundation``, ``_build_capability_graph``,
+  ``_build_session_graph``), enforced by
+  ``tests/architecture/test_composition_profiles.py``.
+- Feature construction is gated by the normalized selection: ``_build_foundation``
+  creates ``PlanRuntime`` only when the corresponding capability is selected;
   ``_build_capability_graph`` and ``_build_session_graph`` construct
   each runtime only for selected capabilities. `CapabilityRegistry` may be empty
   and an empty registry remains a legal object graph.
 - For the Full Product, ``composition/agent_builder.py`` creates
   ``SkillRuntime``, ``SubagentExecutor``, and ``PlanRuntime`` before registering
   the corresponding capabilities. ``Agent.__init__`` only normalizes the public
-  configuration, invokes the composition root, and exposes the resulting facade
-  delegates.
+  configuration, builds a ``FullProfile``, invokes the composition root, and
+  exposes the resulting facade delegates.
 - Capability-provided tools are registered into fresh root registries. When a
   child receives a filtered registry, the composition root replaces the
   inherited capability tool objects with tools bound to the child runtimes;

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from unittest.mock import Mock, patch
 
 from lion_code.capabilities import (
     CapabilityRegistry,
@@ -276,11 +277,14 @@ class TestSubAgentPermissionInheritance:
             permission_mode="default",
         )
 
-        child = agent._subagent_factory.create_for_agent_type("general")  # noqa: SLF001
-        try:
-            assert child.permission_mode == "bypassPermissions"
-        finally:
-            asyncio.run(child.close())
+        with patch(
+            "lion_code.meta_agent.build_coding_agent",
+        ) as build_child:
+            child = agent._subagent_factory.create_for_agent_type("general")  # noqa: SLF001
+
+        assert build_child.call_args.kwargs["permission_mode"] == "bypassPermissions"
+        assert build_child.call_args.kwargs["is_sub_agent"] is True
+        assert child is build_child.return_value
 
     def test_subagent_inherits_parent_tool_registry_filtered(self) -> None:
         """SubAgent should receive a filtered view of the parent's registry,
@@ -292,12 +296,14 @@ class TestSubAgentPermissionInheritance:
             terminal_output=False,
         )
 
-        sub_agent = agent._subagent_factory.create_for_agent_type("general")  # noqa: SLF001
+        with patch(
+            "lion_code.meta_agent.build_coding_agent",
+            return_value=Mock(),
+        ) as build_child:
+            agent._subagent_factory.create_for_agent_type("general")  # noqa: SLF001
 
-        try:
-            sub_tools = {t.name for t in sub_agent.tool_registry.all_tools()}
-            # general type excludes 'agent' but includes 'skill'.
-            assert "skill" in sub_tools
-            assert "agent" not in sub_tools
-        finally:
-            asyncio.run(sub_agent.close())
+        child_registry = build_child.call_args.kwargs["tool_registry"]
+        sub_tools = {t.name for t in child_registry.all_tools()}
+        # general type excludes 'agent' but includes 'skill'.
+        assert "skill" in sub_tools
+        assert "agent" not in sub_tools

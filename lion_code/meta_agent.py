@@ -6,19 +6,35 @@ from collections.abc import Awaitable, Callable, Sequence
 
 from .agent_runtime import AgentRunResult, AgentRuntimeCoordinator
 from .capabilities.registry import CapabilityRegistry
-from .composition import AgentConfig, AgentDependencies, build_agent_composition
+from .composition import (
+    NEUTRAL_SYSTEM_PROMPT,
+    AgentConfig,
+    AgentDependencies,
+    CodingProfile,
+    MinimalProfile,
+    Profile,
+    SkillComposition,
+    build_agent_composition,
+)
+from .composition.agent_builder import AgentComposition
 from .context import ContextCompactor, ContextManager, ModelLimitsResolver
 from .core import AgentMessage, EventListener, QueueSnapshot
 from .core.provider import ModelProvider
+from .hooks import load_pre_tool_use_hooks
 from .permission_state import PermissionMode
 from .provider_manager import ProviderFactory, ProviderManager
 from .providers.thinking import ThinkingLevel
 from .session_identity import SessionIdentityState
 from .session_runtime import SessionRepository
-from .tooling import LionTool, ToolRegistry
+from .tooling import (
+    CommandExecutionBackend,
+    LionTool,
+    LocalCommandExecutionBackend,
+    ToolRegistry,
+)
 from .usage import BudgetPolicy, UsageLedger, UsageSnapshot
 
-_META_SYSTEM_PROMPT = "You are a helpful assistant."
+_META_SYSTEM_PROMPT = NEUTRAL_SYSTEM_PROMPT
 
 
 class MetaAgent:
@@ -28,6 +44,7 @@ class MetaAgent:
         "_budget",
         "_capability_registry",
         "_closed",
+        "_permission_mode",
         "_provider_manager",
         "_runtime",
         "_session_state",
@@ -43,6 +60,7 @@ class MetaAgent:
         usage: UsageLedger,
         budget: BudgetPolicy,
         capability_registry: CapabilityRegistry,
+        permission_mode: PermissionMode,
     ) -> None:
         self._runtime = runtime
         self._provider_manager = provider_manager
@@ -50,6 +68,7 @@ class MetaAgent:
         self._usage = usage
         self._budget = budget
         self._capability_registry = capability_registry
+        self._permission_mode = permission_mode
         self._closed = False
 
     async def run(
@@ -59,6 +78,10 @@ class MetaAgent:
         timeout: float | None = None,
     ) -> AgentRunResult:
         return await self._runtime.run(prompt, timeout=timeout)
+
+    async def run_once(self, prompt: str) -> dict:
+        """执行单轮 fork 语义；供 SubAgent/Skill child runtime 使用。"""
+        return await self._runtime.run_once(prompt)
 
     async def chat(self, prompt: str) -> None:
         await self._runtime.chat(prompt)
@@ -113,6 +136,11 @@ class MetaAgent:
     @property
     def model(self) -> str:
         return self._provider_manager.model
+
+    @property
+    def permission_mode(self) -> PermissionMode:
+        """构造时确定的权限模式只读投影。"""
+        return self._permission_mode
 
     def provider_config(self) -> dict[str, bool | str]:
         return self._provider_manager.get_api_config()
@@ -170,6 +198,21 @@ class MetaAgent:
         self._closed = True
 
 
+def _build_meta_facade(
+    composition: AgentComposition,
+    permission_mode: PermissionMode,
+) -> MetaAgent:
+    return MetaAgent(
+        runtime=composition.runtime_coordinator,
+        provider_manager=composition.provider_manager,
+        session_state=composition.session_state,
+        usage=composition.usage,
+        budget=composition.budget,
+        capability_registry=composition.capability_registry,
+        permission_mode=permission_mode,
+    )
+
+
 def build_meta_agent(
     *,
     provider: ModelProvider,
@@ -189,22 +232,17 @@ def build_meta_agent(
 ) -> MetaAgent:
     """构建固定空 CapabilityRegistry、只注册调用方工具的 MetaAgent。"""
 
-    tool_registry = ToolRegistry()
-    for tool in tools:
-        tool_registry.register(tool)
-    composition = build_agent_composition(
-        AgentConfig(
+    profile = MinimalProfile(
+        config=AgentConfig(
             model=model,
             permission_mode=permission_mode,
-            custom_system_prompt=system_prompt or _META_SYSTEM_PROMPT,
             thinking=thinking,
             max_cost_usd=max_cost_usd,
             max_turns=max_turns,
             terminal_output=False,
         ),
-        AgentDependencies(
+        dependencies=AgentDependencies(
             confirm_fn=confirm_fn,
-            tool_registry=tool_registry,
             session_repository=session_repository,
             context_manager=context_manager,
             context_compactor=context_compactor,
@@ -213,16 +251,59 @@ def build_meta_agent(
             provider_factory=provider_factory,
             pre_tool_use_hooks_loader=lambda: [],
         ),
-        capabilities=frozenset(),
+        tools=tuple(tools),
+        system_prompt=system_prompt or _META_SYSTEM_PROMPT,
     )
-    return MetaAgent(
-        runtime=composition.runtime_coordinator,
-        provider_manager=composition.provider_manager,
-        session_state=composition.session_state,
-        usage=composition.usage,
-        budget=composition.budget,
-        capability_registry=composition.capability_registry,
-    )
+    return _build_meta_facade(build_agent_composition(profile), permission_mode)
 
 
-__all__ = ["MetaAgent", "build_meta_agent"]
+def build_coding_agent(
+    *,
+    model: str = "claude-opus-4-6",
+    api_base: str | None = None,
+    anthropic_base_url: str | None = None,
+    api_key: str | None = None,
+    permission_mode: PermissionMode = "default",
+    thinking: bool = False,
+    max_cost_usd: float | None = None,
+    max_turns: int | None = None,
+    terminal_output: bool = True,
+    is_sub_agent: bool = False,
+    system_prompt: str | None = None,
+    command_backend: CommandExecutionBackend | None = None,
+    extra_tools: Sequence[LionTool] = (),
+    tool_registry: ToolRegistry | None = None,
+    skill: SkillComposition | None = None,
+) -> MetaAgent:
+    """构建 Coding 产品形态：backend 绑定的 Coding 工具与 Meta facade。
+
+    子 Agent/Skill child graph 也走本入口；调用方可注入 caller-owned
+    registry view 与 fake command backend 隔离副作用。
+    """
+    backend = command_backend or LocalCommandExecutionBackend()
+    profile: Profile = CodingProfile(
+        config=AgentConfig(
+            model=model,
+            api_base=api_base,
+            anthropic_base_url=anthropic_base_url,
+            api_key=api_key,
+            permission_mode=permission_mode,
+            thinking=thinking,
+            max_cost_usd=max_cost_usd,
+            max_turns=max_turns,
+            is_sub_agent=is_sub_agent,
+            terminal_output=terminal_output,
+        ),
+        dependencies=AgentDependencies(
+            tool_registry=tool_registry,
+            pre_tool_use_hooks_loader=load_pre_tool_use_hooks,
+        ),
+        command_backend=backend,
+        extra_tools=tuple(extra_tools),
+        system_prompt=system_prompt,
+        skill=skill,
+    )
+    return _build_meta_facade(build_agent_composition(profile), permission_mode)
+
+
+__all__ = ["MetaAgent", "build_coding_agent", "build_meta_agent"]

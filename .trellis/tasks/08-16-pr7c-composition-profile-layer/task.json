@@ -1,8 +1,8 @@
 {
-  "id": "pr7b-mcp-total-removal",
-  "name": "pr7b-mcp-total-removal",
-  "title": "PR7b MCP total removal",
-  "description": "彻底删除 MCP client、Capability、ToolEnvironment、产品接线、测试与文档链路。",
+  "id": "pr7c-composition-profile-layer",
+  "name": "pr7c-composition-profile-layer",
+  "title": "PR7c Composition Profile layer",
+  "description": "建立 Minimal、Coding、Full 三种不可变 Composition Profile 与真实产品对象图。",
   "status": "completed",
   "dev_type": null,
   "scope": null,
@@ -12,8 +12,8 @@
   "assignee": "zhangcx",
   "createdAt": "2026-08-16",
   "completedAt": "2026-08-16",
-  "branch": "muyuzhong/pr7b-mcp-total-removal",
-  "base_branch": "muyuzhong/pr7a-supervisor-product-detachment",
+  "branch": "muyuzhong/pr7c-composition-profile-layer",
+  "base_branch": "muyuzhong/pr7b-mcp-total-removal",
   "worktree_path": null,
   "commit": null,
   "pr_url": null,
@@ -23,6 +23,6 @@
   "relatedFiles": [],
   "notes": "",
   "meta": {
-    "commit": "75962d9"
+    "commit": "b1c93c2"
   }
 }

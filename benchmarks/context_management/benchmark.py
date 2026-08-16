@@ -42,6 +42,7 @@ from lion_code.core import (  # noqa: E402
     message_text,
 )
 from lion_code.tooling.builtin import create_builtin_tools  # noqa: E402
+from lion_code.tooling.execution import LocalCommandExecutionBackend  # noqa: E402
 from lion_code.tooling.internal import create_internal_tools  # noqa: E402
 from lion_code.tooling.result_store import ResultStore  # noqa: E402
 from lion_code.tooling.types import ToolResult  # noqa: E402
@@ -77,7 +78,10 @@ class BenchmarkContext:
         effective_window: int,
         result_root: Path | None = None,
     ) -> "BenchmarkContext":
-        tools = [*create_builtin_tools(), *create_internal_tools()]
+        tools = [
+            *create_builtin_tools(LocalCommandExecutionBackend()),
+            *create_internal_tools(),
+        ]
         tools_by_name = {tool.name: tool for tool in tools}
 
         def is_snippable(name: str) -> bool:

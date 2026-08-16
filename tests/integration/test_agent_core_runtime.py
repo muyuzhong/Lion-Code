@@ -1117,8 +1117,10 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         )
         sub_fake = FakeProvider([_stop_event("sub says hi")])
         with (
+            patch("lion_code.agent.create_provider", return_value=parent_fake),
             patch(
-                "lion_code.agent.create_provider", side_effect=[parent_fake, sub_fake]
+                "lion_code.composition.agent_builder.create_provider",
+                return_value=sub_fake,
             ) as create,
             patch("lion_code.agent.TerminalRenderer") as terminal_renderer,
         ):
@@ -1134,7 +1136,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sub_fake.call_count, 1)
         terminal_renderer.assert_not_called()
         self.assertEqual(
-            create.call_args_list[1].kwargs,
+            create.call_args.kwargs,
             {
                 "api_key": "test-key",
                 "api_base": "https://example.test/v1",
