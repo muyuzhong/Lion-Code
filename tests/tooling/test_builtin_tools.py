@@ -9,13 +9,23 @@ from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.session_identity import SessionIdentityState
 from lion_code.tooling.builtin import BUILTIN_TOOL_NAMES, create_builtin_tools
 from lion_code.tooling.context import ToolContext
+from lion_code.tooling.execution import LocalCommandExecutionBackend
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
 
 
+class _FakeCommandBackend:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, float]] = []
+
+    def run(self, command: str, *, timeout_ms: float = 30000.0) -> str:
+        self.calls.append((command, timeout_ms))
+        return f"ran: {command}"
+
+
 class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
     def test_builtin_schema_has_single_object_source(self):
-        tools = create_builtin_tools()
+        tools = create_builtin_tools(_FakeCommandBackend())
 
         self.assertEqual({tool.name for tool in tools}, BUILTIN_TOOL_NAMES)
         schemas = {tool.name: tool.to_anthropic_schema() for tool in tools}
@@ -27,7 +37,7 @@ class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
 
     async def test_read_file_runs_through_runtime(self):
         registry = ToolRegistry()
-        for tool in create_builtin_tools():
+        for tool in create_builtin_tools(_FakeCommandBackend()):
             registry.register(tool)
 
         with tempfile.TemporaryDirectory() as directory:
@@ -53,7 +63,7 @@ class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2 | second", result.content)
 
     def test_capabilities_drive_execution_mode(self):
-        tools = {tool.name: tool for tool in create_builtin_tools()}
+        tools = {tool.name: tool for tool in create_builtin_tools(_FakeCommandBackend())}
 
         self.assertEqual(tools["read_file"].execution_mode, "parallel")
         self.assertTrue(tools["read_file"].capabilities.read_only)
@@ -61,6 +71,36 @@ class TestBuiltinTools(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             tools["write_file"].capabilities.requires_read_before_write
         )
+
+    async def test_run_shell_binds_profile_selected_backend(self):
+        backend = _FakeCommandBackend()
+        registry = ToolRegistry()
+        for tool in create_builtin_tools(backend):
+            registry.register(tool)
+
+        context = ToolContext(
+            session=SessionIdentityState("session", "2026-08-09T00:00:00Z"),
+            cancellation=CancellationToken(),
+            cwd=Path.cwd(),
+            registry=registry,
+            permission=PermissionController(PermissionState("bypassPermissions")),
+            read_file_state={},
+        )
+        result = await ToolRuntime(registry, context).execute(
+            tool_call_id="call-1",
+            name="run_shell",
+            arguments={"command": "echo hi", "timeout": 1500},
+        )
+
+        self.assertEqual(backend.calls, [("echo hi", 1500.0)])
+        self.assertEqual(result.content, "ran: echo hi")
+
+    def test_local_backend_keeps_shell_output_contract(self):
+        backend = LocalCommandExecutionBackend()
+
+        self.assertEqual(backend.run("echo hi"), "hi\n")
+        self.assertIn("Command failed (exit code 1)", backend.run("exit 1"))
+        self.assertIn("timed out", backend.run("ping -n 5 127.0.0.1", timeout_ms=100))
 
 
 if __name__ == "__main__":

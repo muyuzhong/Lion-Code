@@ -1,4 +1,9 @@
-"""Agent Composition Root：一次性组装所有 concrete runtime。"""
+"""Agent Composition Root：一次性组装所有 concrete runtime。
+
+唯一入口是 ``build_agent_composition(profile)``：Profile 提供不可变组合选择，
+builder 一次性创建 graph。Feature-specific construction branch 只存在于
+``_normalize_profile``，不进入 Kernel/Harness。
+"""
 
 from __future__ import annotations
 
@@ -14,6 +19,7 @@ from ..agent_runtime import AgentRuntimeCoordinator
 from ..capabilities import (
     CapabilityRegistry,
     CapabilityRuntime,
+    CapabilitySpec,
     create_plan_capability,
     create_skill_capability,
     create_subagent_capability,
@@ -46,7 +52,13 @@ from ..session_runtime import SessionRepository
 from ..skill_runtime import SkillRuntime
 from ..subagent_factory import ChildAgentConfig, SubagentFactory
 from ..subagent_runtime import SubagentExecutor
-from ..tooling import ToolRegistry, ToolRuntime
+from ..tooling import (
+    CommandExecutionBackend,
+    LocalCommandExecutionBackend,
+    ToolPermissionStrategy,
+    ToolRegistry,
+    ToolRuntime,
+)
 from ..tooling.builtin import create_builtin_tools
 from ..tooling.context import ToolContext
 from ..tooling.internal import create_internal_tools
@@ -60,6 +72,7 @@ from ..tooling.middleware import (
 )
 from ..tooling.permission import PermissionPolicy
 from ..tooling.result_store import ResultStore
+from ..tooling.types import LionTool
 from ..usage import BudgetPolicy, UsageLedger
 from .config import AgentConfig, AgentDependencies
 from .ports import (
@@ -75,22 +88,20 @@ from .ports import (
     SessionStatePort,
     SubagentStatusSink,
 )
-
-# 内置能力名：Composition Root 的显式选择集合，Bare 图默认空集。
-# 短生命周期常量：PR7c 将由 Profile 取代。
-CAP_SKILL = "skill"
-CAP_SUBAGENT = "subagent"
-CAP_PLAN = "plan"
-CAP_MEMORY = "memory"
-
-PRODUCT_CAPABILITIES = frozenset(
-    {
-        CAP_SKILL,
-        CAP_SUBAGENT,
-        CAP_PLAN,
-        CAP_MEMORY,
-    }
+from .profiles import (
+    NEUTRAL_SYSTEM_PROMPT,
+    CodingProfile,
+    FullProfile,
+    MinimalProfile,
+    ProductFacadeKind,
+    Profile,
 )
+
+# 内置 Capability 选择名：只在 Composition Root 内部使用，Profile 不接受该集合。
+_CAP_SKILL = "skill"
+_CAP_SUBAGENT = "subagent"
+_CAP_PLAN = "plan"
+_CAP_MEMORY = "memory"
 
 
 @dataclass(slots=True)
@@ -118,7 +129,7 @@ class AgentComposition:
     capability_runtime: CapabilityRuntime
     prompt_composer: PromptComposer
     tool_context: ToolContext
-    permission_policy: PermissionPolicy
+    permission_policy: ToolPermissionStrategy
     result_store: ResultStore
     tool_runtime: ToolRuntime
     context_manager: ContextManager
@@ -130,6 +141,24 @@ class AgentComposition:
     notices: NoticeController
     confirmation: ConfirmationController
     status_sink: SubagentStatusSink | None
+    facade: ProductFacadeKind
+
+
+@dataclass(slots=True)
+class _ProfileSelection:
+    """Profile 归一化结果；builder 内部的一次性值，不导出。"""
+
+    config: AgentConfig
+    dependencies: AgentDependencies
+    facade: ProductFacadeKind
+    capabilities: frozenset[str]
+    builtin_tools: bool
+    caller_tools: tuple[LionTool, ...]
+    base_prompt: str
+    dynamic_prompt_enabled: bool
+    permission_strategy: ToolPermissionStrategy | None
+    command_backend: CommandExecutionBackend | None
+    extension_specs: tuple[CapabilitySpec, ...]
 
 
 @dataclass(slots=True)
@@ -154,7 +183,6 @@ class _FoundationGraph:
     read_file_state: dict[str, float]
     tool_registry: ToolRegistry
     created_own_registry: bool
-    selected_tool_names: set[str] | None
     notice_sink: NoticeSinkAdapter | None
     plan: PlanRuntime | None
 
@@ -198,7 +226,7 @@ class _CapabilityGraph:
 class _ToolingGraph:
     prompt_composer: PromptComposer
     tool_context: ToolContext
-    permission_policy: PermissionPolicy
+    permission_policy: ToolPermissionStrategy
     result_store: ResultStore
     tool_runtime: ToolRuntime
     context_manager: ContextManager
@@ -210,20 +238,17 @@ class _SessionGraph:
     session_memory_coordinator: SessionMemoryCoordinator | None
 
 
-def build_agent_composition(
-    config: AgentConfig,
-    dependencies: AgentDependencies | None = None,
-    *,
-    capabilities: frozenset[str] = frozenset(),
-) -> AgentComposition:
+def build_agent_composition(profile: Profile) -> AgentComposition:
     """按固定顺序创建 Agent object graph，并返回一次性 composition result。
 
-    ``capabilities`` 显式选择内置能力；默认空集即 Bare 图：不创建
-    Memory/Plan/SubAgent/Skill。Full Product 由 ``PRODUCT_CAPABILITIES``
-    显式选择。
+    Profile 是组合选择的唯一来源：``MinimalProfile`` 构造零内置 Capability 的
+    Bare 图，``CodingProfile`` 构造 backend 绑定的 Coding 工具形态，
+    ``FullProfile`` 固定组合 Memory/Plan/SubAgent/默认 Skill。
     """
 
-    foundation = _build_foundation(config, dependencies, capabilities)
+    selection = _normalize_profile(profile)
+    config = selection.config
+    foundation = _build_foundation(selection)
     notices = foundation.notices
     confirmation = foundation.confirmation
     permission_controller = foundation.permission_controller
@@ -245,7 +270,7 @@ def build_agent_composition(
         foundation,
         provider_manager,
         identity_port,
-        capabilities,
+        selection,
     )
     subagent_factory = capability_graph.subagent_factory
     subagent_executor = capability_graph.subagent_executor
@@ -253,11 +278,7 @@ def build_agent_composition(
     capability_registry = capability_graph.capability_registry
     capability_runtime = capability_graph.capability_runtime
 
-    tooling_graph = _build_tooling_graph(
-        config,
-        foundation,
-        capability_registry,
-    )
+    tooling_graph = _build_tooling_graph(selection, foundation, capability_registry)
     prompt_composer = tooling_graph.prompt_composer
     tool_context = tooling_graph.tool_context
     permission_policy = tooling_graph.permission_policy
@@ -280,7 +301,7 @@ def build_agent_composition(
         foundation,
         provider_graph,
         runtime_coordinator,
-        capabilities,
+        selection.capabilities,
     )
     session_memory_coord = session_graph.session_memory_coordinator
 
@@ -314,15 +335,75 @@ def build_agent_composition(
         notices=notices,
         confirmation=confirmation,
         status_sink=status_sink,
+        facade=selection.facade,
     )
 
 
+def _normalize_profile(profile: Profile) -> _ProfileSelection:
+    """把 Profile value 归一化为 builder 内部的一次性选择。
+
+    Feature-specific construction branch 只存在于本函数：Profile 类型本身
+    表达内置 Capability 组合，不暴露任意 capability-name set。
+    """
+    if isinstance(profile, MinimalProfile):
+        return _ProfileSelection(
+            config=profile.config,
+            dependencies=profile.dependencies,
+            facade=profile.facade,
+            capabilities=frozenset(),
+            builtin_tools=False,
+            caller_tools=profile.tools,
+            base_prompt=profile.system_prompt or NEUTRAL_SYSTEM_PROMPT,
+            dynamic_prompt_enabled=False,
+            permission_strategy=profile.permission_strategy,
+            command_backend=None,
+            extension_specs=(),
+        )
+    if isinstance(profile, CodingProfile):
+        capabilities = (
+            frozenset(
+                {_CAP_SKILL, _CAP_SUBAGENT},
+            )
+            if profile.skill is not None
+            else frozenset()
+        )
+        return _ProfileSelection(
+            config=profile.config,
+            dependencies=profile.dependencies,
+            facade=profile.facade,
+            capabilities=capabilities,
+            builtin_tools=True,
+            caller_tools=profile.extra_tools,
+            base_prompt=profile.system_prompt or build_static_system_prompt(),
+            dynamic_prompt_enabled=profile.system_prompt is None,
+            permission_strategy=profile.permission_strategy,
+            command_backend=profile.command_backend,
+            extension_specs=(),
+        )
+    if isinstance(profile, FullProfile):
+        return _ProfileSelection(
+            config=profile.config,
+            dependencies=profile.dependencies,
+            facade=profile.facade,
+            capabilities=frozenset(
+                {_CAP_SKILL, _CAP_SUBAGENT, _CAP_PLAN, _CAP_MEMORY},
+            ),
+            builtin_tools=True,
+            caller_tools=profile.extra_tools,
+            base_prompt=profile.system_prompt or build_static_system_prompt(),
+            dynamic_prompt_enabled=profile.system_prompt is None,
+            permission_strategy=profile.permission_strategy,
+            command_backend=profile.command_backend,
+            extension_specs=profile.extension_specs,
+        )
+    raise TypeError(f"unsupported profile: {type(profile).__name__}")
+
+
 def _resolve_dependencies(
-    config: AgentConfig,
-    dependencies: AgentDependencies | None,
-    capabilities: frozenset[str],
+    selection: _ProfileSelection,
 ) -> _ResolvedDependencies:
-    deps = dependencies or AgentDependencies()
+    config = selection.config
+    deps = selection.dependencies
     cwd = Path.cwd()
     notices = NoticeController(
         print_info=deps.print_info or _noop_print,
@@ -335,7 +416,7 @@ def _resolve_dependencies(
         confirm_fn=deps.confirm_fn,
     )
     status_sink = None
-    if capabilities & {CAP_SUBAGENT, CAP_SKILL}:
+    if selection.capabilities & {_CAP_SUBAGENT, _CAP_SKILL}:
         status_sink = SubagentStatusSink(
             terminal_output=config.terminal_output,
             start=deps.print_sub_agent_start or _noop_status,
@@ -359,12 +440,9 @@ def _resolve_dependencies(
     )
 
 
-def _build_foundation(
-    config: AgentConfig,
-    dependencies: AgentDependencies | None,
-    capabilities: frozenset[str],
-) -> _FoundationGraph:
-    resolved = _resolve_dependencies(config, dependencies, capabilities)
+def _build_foundation(selection: _ProfileSelection) -> _FoundationGraph:
+    resolved = _resolve_dependencies(selection)
+    config = selection.config
     deps = resolved.dependencies
     cwd = resolved.cwd
     provider_factory = resolved.provider_factory
@@ -390,22 +468,22 @@ def _build_foundation(
     session_repository = deps.session_repository or SessionRepository()
     read_file_state: dict[str, float] = {}
 
-    if deps.tool_registry is not None and config.custom_tools is not None:
-        raise ValueError("tool_registry and custom_tools cannot be combined")
     created_own_registry = deps.tool_registry is None
-    selected_tool_names = (
-        {str(tool["name"]) for tool in config.custom_tools}
-        if config.custom_tools is not None
-        else None
-    )
+    if not created_own_registry and selection.caller_tools:
+        raise ValueError("tool_registry cannot be combined with profile tools")
     tool_registry = deps.tool_registry or ToolRegistry()
     if created_own_registry:
-        for tool in [*create_builtin_tools(), *create_internal_tools()]:
-            if selected_tool_names is None or tool.name in selected_tool_names:
+        for tool in selection.caller_tools:
+            tool_registry.register(tool)
+        if selection.builtin_tools:
+            backend = selection.command_backend or LocalCommandExecutionBackend()
+            for tool in [*create_builtin_tools(backend), *create_internal_tools()]:
                 tool_registry.register(tool)
 
-    notice_sink = NoticeSinkAdapter(notices) if CAP_MEMORY in capabilities else None
-    if CAP_PLAN in capabilities:
+    notice_sink = (
+        NoticeSinkAdapter(notices) if _CAP_MEMORY in selection.capabilities else None
+    )
+    if _CAP_PLAN in selection.capabilities:
         plan: PlanRuntime | None = PlanRuntime(
             PlanHost(session_state, notices),
             PlanState(),
@@ -433,7 +511,6 @@ def _build_foundation(
         read_file_state=read_file_state,
         tool_registry=tool_registry,
         created_own_registry=created_own_registry,
-        selected_tool_names=selected_tool_names,
         notice_sink=notice_sink,
         plan=plan,
     )
@@ -509,15 +586,17 @@ def _build_capability_graph(
     foundation: _FoundationGraph,
     provider_manager: ProviderManager,
     identity_port: RuntimeIdentityPort,
-    capabilities: frozenset[str],
+    selection: _ProfileSelection,
 ) -> _CapabilityGraph:
+    capabilities = selection.capabilities
+
     def child_config() -> ChildAgentConfig:
         return _child_config(provider_manager, identity_port)
 
     capability_registry = CapabilityRegistry()
     subagent_factory: SubagentFactory | None = None
     subagent_executor: SubagentExecutor | None = None
-    if CAP_SUBAGENT in capabilities or CAP_SKILL in capabilities:
+    if _CAP_SUBAGENT in capabilities or _CAP_SKILL in capabilities:
         if foundation.status_sink is None:
             raise RuntimeError("subagent capability requires status sink")
         subagent_factory = SubagentFactory(
@@ -530,18 +609,18 @@ def _build_capability_graph(
             foundation.status_sink.emit,
         )
     skill_runtime: SkillRuntime | None = None
-    if CAP_SKILL in capabilities:
+    if _CAP_SKILL in capabilities:
         if subagent_executor is None:
             raise RuntimeError("skill capability requires subagent machinery")
         skill_runtime = SkillRuntime(subagent_executor)
 
-    if CAP_SKILL in capabilities and skill_runtime is not None:
+    if _CAP_SKILL in capabilities and skill_runtime is not None:
         capability_registry.register(create_skill_capability(skill_runtime))
-    if CAP_SUBAGENT in capabilities and subagent_executor is not None:
+    if _CAP_SUBAGENT in capabilities and subagent_executor is not None:
         capability_registry.register(create_subagent_capability(subagent_executor))
-    if CAP_PLAN in capabilities and foundation.plan is not None:
+    if _CAP_PLAN in capabilities and foundation.plan is not None:
         capability_registry.register(create_plan_capability(foundation.plan))
-    for spec in foundation.dependencies.extra_capabilities:
+    for spec in selection.extension_specs:
         capability_registry.register(spec)
     _install_capability_tools(foundation, capability_registry)
     return _CapabilityGraph(
@@ -560,11 +639,7 @@ def _install_capability_tools(
     for source in capability_registry.tool_sources:
         for tool in source.tools():
             if foundation.created_own_registry:
-                if (
-                    foundation.selected_tool_names is None
-                    or tool.name in foundation.selected_tool_names
-                ):
-                    foundation.tool_registry.register(tool)
+                foundation.tool_registry.register(tool)
                 continue
             try:
                 was_active = foundation.tool_registry.is_active(tool.name)
@@ -579,18 +654,17 @@ def _install_capability_tools(
 
 
 def _build_tooling_graph(
-    config: AgentConfig,
+    selection: _ProfileSelection,
     foundation: _FoundationGraph,
     capability_registry: CapabilityRegistry,
 ) -> _ToolingGraph:
-    refresh_dynamic_context_enabled = not bool(config.custom_system_prompt)
     prompt_composer = PromptComposer(
-        stable_base_prompt=config.custom_system_prompt or build_static_system_prompt(),
+        stable_base_prompt=selection.base_prompt,
         dynamic_context=(
             foundation.dynamic_context_builder(
                 foundation.tool_registry.deferred_tool_names()
             )
-            if refresh_dynamic_context_enabled
+            if selection.dynamic_prompt_enabled
             else ""
         ),
         layers=lambda: capability_registry.prompt_layers,
@@ -606,7 +680,9 @@ def _build_tooling_graph(
         hooks=foundation.hooks_loader(),
         confirm_hook_trust=foundation.confirmation.confirm_hook_trust,
     )
-    permission_policy = PermissionPolicy(cwd=foundation.cwd)
+    permission_policy = selection.permission_strategy or PermissionPolicy(
+        cwd=foundation.cwd
+    )
     result_store = ResultStore()
     tool_runtime = ToolRuntime(
         foundation.tool_registry,
@@ -690,7 +766,7 @@ def _build_session_graph(
     capabilities: frozenset[str],
 ) -> _SessionGraph:
     session_memory_coord: SessionMemoryCoordinator | None = None
-    if CAP_MEMORY in capabilities:
+    if _CAP_MEMORY in capabilities:
         # notice_sink 与 CAP_MEMORY 同条件创建，此处仅为类型收窄的不变量断言。
         assert foundation.notice_sink is not None
         identity = foundation.resolve_identity(foundation.cwd)

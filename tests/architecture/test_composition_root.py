@@ -9,9 +9,15 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from lion_code.agent import Agent
 from lion_code.capabilities.types import CapabilitySpec
-from lion_code.composition import AgentComposition, AgentConfig, AgentDependencies
+from lion_code.composition import (
+    AgentComposition,
+    AgentConfig,
+    AgentDependencies,
+    FullProfile,
+    MinimalProfile,
+    build_agent_composition,
+)
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool
 
@@ -76,21 +82,29 @@ def _called_names(node: ast.AST) -> set[str]:
     return names
 
 
-def test_config_and_dependencies_are_separate_frozen_values() -> None:
+def test_config_dependencies_and_profiles_are_separate_frozen_values() -> None:
     config = AgentConfig()
     dependencies = AgentDependencies()
+    profile = MinimalProfile(config=config, dependencies=dependencies)
 
     with pytest.raises(FrozenInstanceError):
         setattr(config, "model", "mutated")
     with pytest.raises(FrozenInstanceError):
-        setattr(dependencies, "extra_capabilities", ())
+        setattr(dependencies, "context_manager", None)
+    with pytest.raises(FrozenInstanceError):
+        setattr(profile, "system_prompt", "mutated")
 
     config_fields = {field.name for field in fields(config)}
     dependency_fields = {field.name for field in fields(dependencies)}
+    profile_fields = {field.name for field in fields(profile)}
     assert "tool_registry" not in config_fields
     assert "context_manager" not in config_fields
+    assert "custom_system_prompt" not in config_fields
+    assert "custom_tools" not in config_fields
+    assert "extra_capabilities" not in dependency_fields
     assert "model" not in dependency_fields
     assert "permission_mode" not in dependency_fields
+    assert "capabilities" not in profile_fields
 
 
 @pytest.mark.asyncio
@@ -112,20 +126,23 @@ async def test_example_capability_needs_only_spec_registration_and_tests(
         api_key="test-key",
         terminal_output=False,
     )
-    dependencies = AgentDependencies(
-        tool_registry=ToolRegistry(),
-        extra_capabilities=(spec,),
-    )
+    dependencies = AgentDependencies(tool_registry=ToolRegistry())
     provider = Mock()
     provider.aclose = AsyncMock()
     with patch("lion_code.agent.create_provider", return_value=provider):
-        agent = Agent(config=config, dependencies=dependencies)
+        composition = build_agent_composition(
+            FullProfile(
+                config=config,
+                dependencies=dependencies,
+                extension_specs=(spec,),
+            )
+        )
 
-    assert "example" in agent._capability_registry.names
-    assert "example capability prompt" in agent._prompt_composer.get_system()
-    await agent.clear_history()
+    assert "example" in composition.capability_registry.names
+    assert "example capability prompt" in composition.prompt_composer.get_system()
+    await composition.capability_runtime.on_new_session()
     assert participant.new_sessions == 1
-    await agent.close()
+    await composition.capability_runtime.close()
 
 
 def test_agent_constructor_delegates_to_the_composition_root():

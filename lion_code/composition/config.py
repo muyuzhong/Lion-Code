@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..capabilities.types import CapabilitySpec
     from ..context import ContextCompactor, ContextManager, ModelLimitsResolver
     from ..core.provider import ModelProvider
     from ..permission_state import PermissionMode
@@ -15,12 +14,14 @@ if TYPE_CHECKING:
     from ..session_memory import SessionMemoryRepository
     from ..session_runtime import SessionRepository
     from ..tooling import ToolRegistry
-    from ..tools import ToolDef
 
 
 @dataclass(frozen=True, slots=True)
 class AgentConfig:
-    """只描述用户可见的 Agent 运行配置，不保存运行时对象。"""
+    """只描述用户可见的 Agent 运行配置，不保存运行时对象。
+
+    prompt、tools 等组合选择由 Profile 承载，不在本配置中。
+    """
 
     model: str = "claude-opus-4-6"
     api_base: str | None = None
@@ -30,14 +31,8 @@ class AgentConfig:
     thinking: bool = False
     max_cost_usd: float | None = None
     max_turns: int | None = None
-    custom_system_prompt: str | None = None
-    custom_tools: tuple[ToolDef, ...] | None = None
     is_sub_agent: bool = False
     terminal_output: bool = True
-
-    def __post_init__(self) -> None:
-        if self.custom_tools is not None:
-            object.__setattr__(self, "custom_tools", tuple(self.custom_tools))
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +60,3 @@ class AgentDependencies:
     print_confirmation: Callable[[str], None] | None = None
     print_sub_agent_start: Callable[[str, str], None] | None = None
     print_sub_agent_end: Callable[[str, str], None] | None = None
-    extra_capabilities: tuple[CapabilitySpec, ...] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "extra_capabilities", tuple(self.extra_capabilities))

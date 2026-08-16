@@ -318,14 +318,9 @@ def build_dynamic_system_context(
     git_context = get_git_context()
 
     if deferred_tool_names is None:
-        from .tooling.builtin import create_builtin_tools
-        from .tooling.internal import create_internal_tools
+        from .tooling.builtin import DEFERRED_BUILTIN_TOOL_NAMES
 
-        deferred_names = [
-            tool.name
-            for tool in [*create_builtin_tools(), *create_internal_tools()]
-            if tool.capabilities.deferred
-        ]
+        deferred_names = list(DEFERRED_BUILTIN_TOOL_NAMES)
     else:
         deferred_names = deferred_tool_names
     deferred_section = (

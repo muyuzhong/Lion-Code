@@ -13,8 +13,13 @@ or process-global output bridge is an architecture regression.
 
 `AgentConfig` is a frozen value object containing only user/runtime settings;
 `AgentDependencies` separately contains repositories, structural seams, supplied
-tool registries/environments, and test factories. Neither type owns mutable
-runtime state. `composition/agent_builder.py::build_agent_composition()` is the
+tool registries, and test factories. Neither type owns mutable runtime state.
+Composition selection lives in the immutable Profile values
+(``MinimalProfile`` / ``CodingProfile`` / ``FullProfile`` in
+``composition/profiles.py``): caller tools, prompt, permission strategy,
+command backend, optional Skill composition, and extension specs are Profile
+fields, never config/dependency fields.
+`composition/agent_builder.py::build_agent_composition(profile)` is the
 one-shot Composition Root: it constructs state owners, Provider and permission
 ports, tools, domain runtimes, capabilities, Core runtime, and the coordinator,
 then returns an explicit `AgentComposition` value.
@@ -22,7 +27,7 @@ then returns an explicit `AgentComposition` value.
 `Agent` does not retain the builder or a service registry. It remains the public
 facade and implements application ports through delegates and a small amount of
 use-case orchestration. New built-in capability wiring belongs in the composition
-root; an injected capability can use `AgentDependencies.extra_capabilities`.
+root; an injected capability uses ``FullProfile.extension_specs``.
 
 ## 2. Signatures
 
@@ -647,9 +652,11 @@ Usage has its own executable contract in
 - Child agents inherit the parent's stored Provider configuration and
   `terminal_output` setting. They must not infer credentials from a transport client.
 - `SubagentFactory` owns child tool selection and construction from the concrete
-  registry/environment and typed child-config provider. It imports `Agent` only
-  while constructing a child to avoid a module-level cycle; children are always
-  built with `bypassPermissions` (PR4 removed plan/auto inheritance).
+  registry and typed child-config provider. It imports the Coding construction
+  entry (`meta_agent.build_coding_agent`) only while constructing a child to
+  avoid a module-level cycle; children are Coding-profile `MetaAgent` instances
+  (PR7c: they never construct Memory/Plan/SubAgent Full-only capabilities) and
+  are always built with `bypassPermissions` (PR4 removed plan/auto inheritance).
   `SubagentExecutor` owns child execution, status
   presentation, usage accounting, expected error text, and resource closure;
   `Agent` supplies the composition-time factory, ledger, and status callback.

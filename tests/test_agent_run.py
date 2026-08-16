@@ -12,7 +12,12 @@ from core.fakes import FakeProvider
 
 from lion_code.agent import Agent, AgentRunResult
 from lion_code.capabilities.types import CapabilitySpec
-from lion_code.composition import AgentDependencies
+from lion_code.composition import (
+    AgentConfig,
+    AgentDependencies,
+    FullProfile,
+    build_agent_composition,
+)
 from lion_code.core import AssistantMessage, TextContent, ToolCall, Usage
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 from lion_code.session_runtime import SessionRepository
@@ -253,24 +258,33 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
             name="slow-init",
             turn_participants=(SlowTurnParticipant(),),
         )
-        with patch("lion_code.agent.create_provider", return_value=provider):
-            agent = Agent(
-                api_key="test-key",
-                dependencies=AgentDependencies(
-                    session_repository=self._session_repository,
-                    extra_capabilities=(spec,),
-                ),
+        with patch(
+            "lion_code.composition.agent_builder.create_provider",
+            return_value=provider,
+        ):
+            composition = build_agent_composition(
+                FullProfile(
+                    config=AgentConfig(
+                        api_key="test-key",
+                        terminal_output=False,
+                    ),
+                    dependencies=AgentDependencies(
+                        session_repository=self._session_repository,
+                    ),
+                    extension_specs=(spec,),
+                )
             )
+        runtime = composition.runtime_coordinator
 
         with (
             patch("lion_code.observers.terminal.start_spinner"),
             patch("lion_code.observers.terminal.stop_spinner"),
         ):
-            result = await agent.run("hi", timeout=0.01)
-        await agent.close()
+            result = await runtime.run("hi", timeout=0.01)
+        await runtime.close()
 
         self.assertEqual(result.stop_reason, "timeout")
-        self.assertTrue(agent.is_aborted)
+        self.assertTrue(runtime.execution.cancelled)
         self.assertLess(result.wall_time_seconds, 0.2)
 
 

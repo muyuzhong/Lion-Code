@@ -11,7 +11,7 @@ from typing import Literal, Protocol
 from ..hooks import HookOutcome, run_pre_tool_use_hooks
 from ..permission_state import PermissionConfirmationSink
 from .context import ToolContext
-from .permission import PermissionPolicy
+from .permission import ToolPermissionStrategy
 from .result_store import ResultStore
 from .types import JSONValue, LionTool, ToolResult
 
@@ -105,7 +105,7 @@ class PermissionMiddleware:
 
     def __init__(
         self,
-        policy: PermissionPolicy,
+        policy: ToolPermissionStrategy,
         confirmations: PermissionConfirmationSink,
     ) -> None:
         self.policy = policy
