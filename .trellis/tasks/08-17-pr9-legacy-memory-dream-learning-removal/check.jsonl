@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"检查旧 Memory/Dream/Learning 对象图是否已从 facade、composition、session 和 active contract 中消失，同时 Session/Provider/Context 边界未退化。"}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"检查 CapabilityRegistry zero-extension、Plan/Skill/SubAgent generic slots 和 ProjectionLayer 完整删除。"}
+{"file":".trellis/spec/backend/usage-ownership.md","reason":"检查删除 Dream/Learning 后 UsageLedger 单一 owner、child/Skill usage 聚合和 retained Autonomy query seam 的契约。"}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"检查 Kernel/Harness/Capability/Supervisor 的 PR9 层归属与负向架构门禁一致。"}
