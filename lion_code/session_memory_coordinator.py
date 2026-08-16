@@ -1,4 +1,4 @@
-"""Session Memory、Memory Overlay 与 Dream 的运行时协调层。
+"""Session Memory 与 Memory Overlay 的运行时协调层。
 
 协调器只接收 canonical transcript、query、状态只读视图和具名命令，不持有
 Agent、Provider、Tool Runtime 或界面实现。
@@ -9,12 +9,10 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from typing import Protocol
 
 from .core.cancellation import CancellationView
 from .core.messages import AgentMessage, AssistantMessage
 from .domain_ports import NoticeSink, TranscriptView
-from .dream import DreamResult
 from .memory_runtime import (
     MemoryContextInjector,
     MemoryCoordinator,
@@ -44,20 +42,6 @@ SESSION_MEMORY_EXTRACTION_SYSTEM = """You maintain a coding agent's short-lived 
 You may use only these optional keys: currentGoal, activeTask, completed, pending, decisions, blockers, previousHandoff, nextStep.
 
 Use concise strings. completed, pending, decisions, and blockers must be arrays of strings. Do not include relevantFiles or verification: they are extracted deterministically. Do not invent test outcomes, file changes, or work that is not supported by the supplied evidence."""
-
-
-class DreamRunner(Protocol):
-    async def run(self) -> DreamResult: ...
-
-
-class StatusCallback(Protocol):
-    def __call__(
-        self,
-        agent_type: str,
-        description: str,
-        *,
-        started: bool,
-    ) -> None: ...
 
 
 def _turn_assistant_text(messages: tuple[AgentMessage, ...]) -> str:
@@ -106,10 +90,7 @@ class SessionMemoryCoordinator:
         ],
         notices: NoticeSink,
         query: TextQueryService | None,
-        dream_runner: DreamRunner,
         is_sub_agent: bool,
-        status_callback: StatusCallback,
-        refresh_context: Callable[[], None],
     ) -> None:
         self._project_identity = identity
         self._session_memory_repository = repository or SessionMemoryRepository(
@@ -123,10 +104,7 @@ class SessionMemoryCoordinator:
         self._load_project_context = load_project_context
         self._notices = notices
         self._query = query
-        self._dream_runner = dream_runner
         self._is_sub_agent = is_sub_agent
-        self._status_callback = status_callback
-        self._refresh_context = refresh_context
         self._project_context_files: tuple[ProjectContextFile, ...] = ()
         self._project_memory_overlays: tuple[MemoryOverlay, ...] = ()
         self._session_memory: SessionMemory | None = None
@@ -239,10 +217,7 @@ class SessionMemoryCoordinator:
         self._save_session_memory(memory)
         candidate_count = len(extract_long_term_candidates(memory))
         if candidate_count:
-            return (
-                f"已结束任务：{finished}；已准备 {candidate_count} 条长期候选，"
-                "可用 /dream 复核整理。"
-            )
+            return f"已结束任务：{finished}；已准备 {candidate_count} 条长期候选。"
         return f"已结束任务：{finished}；没有可安全沉淀的长期候选。"
 
     def create_session_handoff(self) -> str:
@@ -389,29 +364,6 @@ class SessionMemoryCoordinator:
             max_output_tokens=512,
         )
         return _parse_session_memory_patch(raw)
-
-    async def dream(self) -> str:
-        """显式整合当前项目 Memory，并返回本次文件变更摘要。"""
-
-        # 只读约束由 Agent 门面按 Plan 激活状态执行（PR4 起 Permission 不再认识 Plan）。
-        self._reload_session_memory()
-        self._report_session_memory_error()
-        self._status_callback("dream", "consolidate project memory", started=True)
-        try:
-            result = await self._dream_runner.run()
-        finally:
-            self._status_callback("dream", "consolidate project memory", started=False)
-        if result.created or result.updated or result.deleted:
-            self._refresh_memory_context_after_dream(
-                result.created + result.updated + result.deleted
-            )
-        return result.summary()
-
-    def _refresh_memory_context_after_dream(self, filenames: list[str]) -> None:
-        """丢弃旧预取，并让后续请求看到 Dream 后的索引和文件内容。"""
-
-        self._memory_coordinator.invalidate(filenames)
-        self._refresh_context()
 
     async def close(self) -> None:
         """关闭 Memory 预取，避免退出时留下异步任务。"""

@@ -67,11 +67,6 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             patch("lion_code.agent.Agent", _ChildAgent),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
-            patch.object(
-                parent._autonomy,
-                "_classify_tool_call",
-                new=AsyncMock(return_value={"action": "allow"}),
-            ),
         ):
             result = await parent._execute_tool_call(
                 "agent",
@@ -111,11 +106,6 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             patch("lion_code.agent.Agent", _ChildAgent),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
-            patch.object(
-                parent._autonomy,
-                "_classify_tool_call",
-                new=AsyncMock(return_value={"action": "allow"}),
-            ),
         ):
             await parent._execute_tool_call(
                 "agent",
@@ -219,11 +209,6 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
                 "_status_callback",
                 side_effect=record_status,
             ),
-            patch.object(
-                parent._autonomy,
-                "_classify_tool_call",
-                new=AsyncMock(return_value={"action": "allow"}),
-            ),
         ):
             result = await parent._execute_tool_call(
                 "agent",
@@ -260,11 +245,6 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             patch("lion_code.agent.Agent", _ChildAgent),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
-            patch.object(
-                parent._autonomy,
-                "_classify_tool_call",
-                new=AsyncMock(return_value={"action": "allow"}),
-            ),
         ):
             result = await parent._execute_tool_call(
                 "skill", {"skill_name": "research", "args": "find docs"}

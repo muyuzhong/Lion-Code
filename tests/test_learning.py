@@ -11,14 +11,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from lion_code import skills
-from lion_code.agent import LEARN_META_SKILL_PROMPT
 from lion_code.core.messages import AssistantMessage, TextContent, UserMessage
-from lion_code.learning_runtime import (
-    LEARN_META_SKILL_PROMPT as RUNTIME_LEARN_META_SKILL_PROMPT,
-)
-from lion_code.learning_runtime import (
-    LearningRuntime,
-)
+from lion_code.learning_runtime import LEARN_META_SKILL_PROMPT, LearningRuntime
 
 
 class TestCreateSkill(unittest.TestCase):
@@ -65,9 +59,6 @@ class TestLearnFromSession(unittest.IsolatedAsyncioTestCase):
             Path("/project"),
         )
         return runtime
-
-    def test_agent_reexports_meta_skill_prompt(self):
-        self.assertIs(LEARN_META_SKILL_PROMPT, RUNTIME_LEARN_META_SKILL_PROMPT)
 
     def test_learning_runtime_import_does_not_import_agent(self):
         subprocess.run(

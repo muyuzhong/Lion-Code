@@ -136,8 +136,6 @@ class SessionMemoryPort(Protocol):
 
     def create_session_handoff(self) -> str: ...
 
-    async def dream(self) -> str: ...
-
 
 class CodingSessionBackend(
     ConversationPort,

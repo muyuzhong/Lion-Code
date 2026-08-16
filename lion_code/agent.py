@@ -5,7 +5,7 @@ Plan 模式、子 Agent、权限与预算控制。整体分层参考 Claude Code
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
@@ -29,9 +29,6 @@ from .core.harness import EventListener
 from .core.messages import AgentMessage
 from .core.provider import ModelProvider
 from .hooks import load_pre_tool_use_hooks
-from .learning_runtime import (
-    LEARN_META_SKILL_PROMPT,  # noqa: F401
-)
 from .memory_runtime import (
     MemoryContextInjector,
     MemoryCoordinator,
@@ -63,9 +60,7 @@ from .session_runtime import (
     list_legacy_sessions,
     load_legacy_session,
 )
-from .subagent_factory import ChildAgentConfig
 from .tooling import ToolEnvironment, ToolRegistry
-from .tooling.types import JSONValue
 from .tools import ToolDef
 from .ui import (
     print_confirmation,
@@ -248,9 +243,6 @@ class Agent:
         assert composition.skill_runtime is not None
         assert composition.mcp_capability is not None
         assert composition.session_memory_coordinator is not None
-        assert composition.autonomy is not None
-        assert composition.learning is not None
-        assert composition.model_query is not None
         assert composition.tool_environment is not None
         assert composition.status_sink is not None
 
@@ -280,9 +272,6 @@ class Agent:
         self._capability_registry = composition.capability_registry
         self._mcp_capability = composition.mcp_capability
         self._capability_runtime = composition.capability_runtime
-        self._refresh_dynamic_context_enabled = (
-            composition.refresh_dynamic_context_enabled
-        )
         self._prompt_composer = composition.prompt_composer
         self.tool_context = composition.tool_context
         self._permission_policy = composition.permission_policy
@@ -291,9 +280,6 @@ class Agent:
         self._provider_manager = composition.provider_manager
         self._runtime_coordinator = composition.runtime_coordinator
         self._session_memory_coord = composition.session_memory_coordinator
-        self._autonomy = composition.autonomy
-        self._learning = composition.learning
-        self._model_query = composition.model_query
         self.confirm_fn = resolved_dependencies.confirm_fn
 
     def _resolve_thinking_mode(self) -> str:
@@ -695,7 +681,6 @@ class Agent:
 
     def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]] | None) -> None:
         self.confirm_fn = fn
-        self._autonomy.set_confirm(fn)
 
     def set_plan_approval_fn(self, fn: Callable[[str], Awaitable[dict]] | None) -> None:
         self.plan.set_approval_fn(fn)
@@ -824,142 +809,6 @@ class Agent:
 
     async def compact(self) -> None:
         await self._runtime_coordinator.compact()
-
-    async def dream(self) -> str:
-        """显式整合当前项目 Memory，并返回本次文件变更摘要。"""
-        if self.plan.is_active:
-            raise RuntimeError("Plan 模式为只读，退出后才能执行 /dream")
-        return await self._session_memory_coord.dream()
-
-    def _refresh_dynamic_system_context(self) -> None:
-        """刷新 Dream 修改 Auto Memory 后的动态系统提示词尾部。"""
-
-        if not self._refresh_dynamic_context_enabled:
-            return
-        self._prompt_composer.set_dynamic_context(
-            build_dynamic_system_context(self.tool_registry.deferred_tool_names())
-        )
-
-    def _refresh_memory_context_after_dream(self, filenames: list[str]) -> None:
-        """丢弃旧预取，并让本会话后续请求看到 Dream 后的索引和文件内容。"""
-        self._session_memory_coord._refresh_memory_context_after_dream(filenames)
-
-    async def learn_from_current_session(self) -> str:
-        """运行一次内置 Meta-Skill，并按其结论直接沉淀当前会话经验。"""
-        return await self._learning.learn_from_current_session()
-
-    # ─── /goal 追踪 ──────────────────────────────────────────
-    # 每轮结束后由独立评估模型检查 Stop-hook 条件；未满足的原因进入下一轮，
-    # 满足或判定不可能时停止。评估契约集中在 autonomy.py。
-
-    @property
-    def active_goal(self) -> dict | None:
-        """活动目标(状态由 AutonomyRuntime 拥有)。"""
-        return self._autonomy.active_goal
-
-    @property
-    def goal_stop(self) -> bool:
-        return self._autonomy.goal_stop
-
-    @property
-    def pending_wakeup(self) -> dict | None:
-        return self._autonomy.pending_wakeup
-
-    @property
-    def loop_stop(self) -> bool:
-        return self._autonomy.loop_stop
-
-    @property
-    def auto_consecutive_denials(self) -> int:
-        """Auto Mode 连续拒绝计数(状态由 AutonomyRuntime 拥有)。"""
-        return self._autonomy.auto_consecutive_denials
-
-    @property
-    def auto_total_denials(self) -> int:
-        return self._autonomy.auto_total_denials
-
-    def set_goal(self, condition: str) -> str:
-        """设置活动目标并返回首轮执行指令。"""
-        return self._autonomy.set_goal(condition)
-
-    def show_goal(self) -> None:
-        """处理无参数 /goal,显示当前目标状态。"""
-        self._autonomy.show_goal()
-
-    async def pursue_goal(self, directive: str) -> None:
-        """持续执行运行->评估->反馈,直到目标终止条件出现。"""
-        await self._autonomy.pursue_goal(directive)
-
-    async def _run_evaluator_query(
-        self,
-        system: str,
-        messages: list[AgentMessage],
-        max_tokens: int = 512,
-    ) -> str:
-        """兼容内部测试 seam；实际查询由 live ModelQuery 执行。"""
-
-        return await self._model_query.complete_messages(
-            system=system,
-            messages=messages,
-            max_output_tokens=max_tokens,
-        )
-
-    async def _run_classifier_query(
-        self, system: str, user: str, max_tokens: int
-    ) -> str:
-        """兼容内部测试 seam；实际查询由 live ModelQuery 执行。"""
-        return await self._model_query.complete_text(
-            system=system,
-            user=user,
-            max_output_tokens=max_tokens,
-        )
-
-    def _extract_last_assistant_text(self) -> str:
-        """提取最近一轮 assistant 文本;实现在 AutonomyRuntime。"""
-        return self._autonomy._extract_last_assistant_text()
-
-    # ─── /loop：定时或自主节奏 ───────────────────────────────
-    # /goal 被动决定是否继续，/loop 则用固定间隔或 schedule_wakeup 主动安排下一轮。
-
-    async def run_loop(self, raw_input: str) -> None:
-        """解析 /loop 输入并驱动对应模式;格式错误时直接返回。"""
-        await self._autonomy.run_loop(raw_input)
-
-    async def _run_loop_dynamic(self, spec: dict) -> None:
-        """动态 /loop 驱动;实现在 AutonomyRuntime,保留入口供内部测试。"""
-        await self._autonomy._run_loop_dynamic(spec)
-
-    def stop_loop(self) -> None:
-        """通知正在运行的 /loop 在最近的检查点停止。"""
-        self._autonomy.stop_loop()
-
-    def stop_goal(self) -> None:
-        """通知 /goal 在下一轮边界停止;正在进行的调用由 abort() 单独取消。"""
-        self._autonomy.stop_goal()
-
-    # ─── Auto Mode：transcript 分类器权限门 ───────────────────
-    # auto 模式用分类器替代人工确认：deny 仍是硬边界，只读工具走快路径，
-    # 其余动作由 LLM 根据不含推理的 transcript 投影判断。
-
-    async def _classify_tool_call(
-        self,
-        tool_name: str,
-        inp: Mapping[str, JSONValue],
-    ) -> dict:
-        """以两阶段分类器决定工具调用,返回 allow/deny/confirm。"""
-        return await self._autonomy._classify_tool_call(tool_name, inp)
-
-    def _child_agent_config(self) -> ChildAgentConfig:
-        """返回 typed 子 Agent 配置，不把 ProviderManager 传入 child factory。"""
-
-        kwargs = self._provider_manager.child_api_kwargs()
-        return ChildAgentConfig(
-            model=str(kwargs["model"]),
-            api_key=str(kwargs["api_key"]),
-            api_base=kwargs.get("api_base"),
-            anthropic_base_url=kwargs.get("anthropic_base_url"),
-            terminal_output=self._terminal_output,
-        )
 
     # ─── 会话持久化 ──────────────────────────────────────────
 

@@ -16,7 +16,7 @@ The ownership rule is strict:
 - One `UsageLedger` owns every mutable usage value for one Agent session.
 - One `BudgetPolicy` evaluates frozen Ledger projections.
 - `Agent` is the only production composition root for both objects and passes
-  those exact instances to Runtime and Autonomy.
+  those exact instances to the Runtime.
 - There is no compatibility layer, migration path, mirror, synchronization
   cursor, fallback total, or second writer.
 - `lion_code.core` and `lion_code.providers` remain unaware of Usage ownership.
@@ -116,10 +116,10 @@ and returns the existing user-facing reason. When both limits are reached,
 
 At the Core tool boundary, Runtime must call `record_turn()` before taking the
 snapshot and checking the Policy. Therefore the tool call at the exact turn
-limit is stopped. Pure final-text responses do not increment turns. Runtime,
-`/goal`, and `/loop` evaluate the same Ledger through the same Policy; autonomy
-may retain its documented tick ceiling for text-only loops but may not create a
-second usage budget state. The Coordinator must not pass `BudgetPolicy.max_turns`
+limit is stopped. Pure final-text responses do not increment turns. Runtime
+evaluates the Ledger through the same Policy; the retained Autonomy runtime
+(no production caller after PR7a) must not create a second usage budget state
+when re-homed. The Coordinator must not pass `BudgetPolicy.max_turns`
 to the generic Harness loop: that loop counts provider iterations, including
 final-text responses and queued follow-ups, rather than Core tool boundaries.
 

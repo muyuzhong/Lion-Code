@@ -119,7 +119,14 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 > 属于迁移阶段问题，待 Capability re-home PR 恢复。相关测试
 > （`tests/memory_runtime/test_core_integration.py` 等）已标记 `skip` + re-home 理由。
 > `SessionMemoryCoordinator` 类保留，但不再桥接进 coordinator，仅服务独立于 turn 循环的
-> Memory 能力（持久化、命令、Dream）。
+> Memory 能力（持久化、命令）；Dream 委托已随 PR7a 删除。
+
+> **PR7a 状态**：Supervisor 对象（Autonomy/Dream/Learning 及其 model query）已从
+> Composition Root、`Agent` facade 与 CLI/Application/TUI 产品路径移除；
+> `PRODUCT_CAPABILITIES` 只含 MCP/Skill/SubAgent/Plan/Memory。独立 runtime 模块
+> （`autonomy_runtime.py`、`dream*.py`、`learning_runtime.py`、`model_query.py`）保留
+> 但无生产调用者，等待未来 Supervisor composition re-home；Agent 驱动的 Supervisor
+> 行为测试统一以 `_REHOME` 原因 skip。
 
 > **PR2 / PR6 状态**：PR2 没有形成独立 PR，遗留的
 > `ProviderManager -> MemoryQuerySink` 依赖由 PR6 直接删除，不保留 deferred sink、兼容层
@@ -139,7 +146,8 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 - TerminalRenderer / UsageObserver（trace/event sink）→ Harness（observers/）
 - MCP、Skill、SubAgent、Plan、Memory（含 `<relevant-memory>`）→ Capability
 - Autonomy、Scheduler、Retry/Goal lifecycle、Dream、Learning → Supervisor
-- `/dream`、`/learn`、`/handoff`、`/session-memory` 命令编排 → Capability/Supervisor（按符号归属）
+- `/handoff`、`/session-memory` 命令编排 → Capability/Supervisor（按符号归属）；
+  `/dream`、`/learn`、`/goal`、`/loop` 已随 PR7a 从产品命令面删除
 
 ## 6. 与现有 spec 的关系（交叉引用）
 

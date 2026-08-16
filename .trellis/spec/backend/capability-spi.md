@@ -280,9 +280,10 @@ The tool-bearing capabilities use construction-time command binding:
 
 - ``composition/agent_builder.py`` is capability-driven: ``build_agent_composition()``
   takes an explicit ``capabilities: frozenset[str]`` selection. The default empty
-  set is the **Bare graph** — it creates no Memory/Plan/MCP/SubAgent/Skill/
-  Autonomy/Dream/Learning objects. ``PRODUCT_CAPABILITIES`` selects the Full
-  Product set; ``Agent.__init__`` uses it explicitly.
+  set is the **Bare graph** — it creates no Memory/Plan/MCP/SubAgent/Skill
+  objects. ``PRODUCT_CAPABILITIES`` selects the Full Product set (MCP/Skill/
+  SubAgent/Plan/Memory since PR7a removed the Supervisor capabilities);
+  ``Agent.__init__`` uses it explicitly.
 - Feature construction is gated by the selection: ``_build_foundation`` creates
   ``McpManager``/``PlanRuntime`` only when the corresponding capability is
   selected; ``_build_capability_graph`` and ``_build_session_graph`` construct

@@ -1184,7 +1184,7 @@ class LionTuiApp(App):
     def _dispatch(self, result: CommandResult) -> None:
         if not result.handled:
             self._notice(
-                "未知命令 — 可用: /task /session-memory /handoff /dream "
+                "未知命令 — 可用: /task /session-memory /handoff "
                 "/model /clear /plan /cost /compact /theme /thinking /quit /skills"
             )
             return
@@ -1212,7 +1212,6 @@ class LionTuiApp(App):
             result.task_action is not None
             or result.session_memory_requested
             or result.handoff_requested
-            or result.dream_requested
         ):
             self.run_worker(
                 self._execute_session_memory_command(result),

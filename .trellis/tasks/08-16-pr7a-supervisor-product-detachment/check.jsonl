@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/08-16-pr7a-supervisor-product-detachment/prd.md","reason":"Independent acceptance checklist and explicit exclusions"}
+{"file":".trellis/tasks/08-16-pr7a-supervisor-product-detachment/design.md","reason":"Expected deletion boundaries, re-home policy, and rollback shape"}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Check that no Supervisor object remains in Capability or product graph"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Project quality and verification requirements"}

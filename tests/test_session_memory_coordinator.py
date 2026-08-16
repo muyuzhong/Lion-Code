@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 
 from lion_code.agent import Agent
 from lion_code.memory_runtime import ProviderTextQueryService
@@ -67,17 +67,18 @@ class TestSessionMemoryCoordinator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._agent.show_active_task(), "# Current Task")
         self._agent._session_memory_coord.show_active_task.assert_called_once_with()
 
-    async def test_dream_public_entry_delegates_to_coordinator(self) -> None:
-        original = self._agent._session_memory_coord
-        coordinator = Mock()
-        coordinator.dream = AsyncMock(return_value="Dream 完成")
-        self._agent._session_memory_coord = coordinator
+    async def test_finish_task_without_candidates_reports_none(self) -> None:
+        self._agent._session_memory = self._repository.save(
+            SessionMemory(
+                project_root=str(self._repository.identity.root),
+                active_task="无沉淀任务",
+            )
+        )
 
-        try:
-            self.assertEqual(await self._agent.dream(), "Dream 完成")
-            coordinator.dream.assert_awaited_once_with()
-        finally:
-            self._agent._session_memory_coord = original
+        message = self._agent.finish_session_task()
+
+        self.assertIn("没有可安全沉淀的长期候选", message)
+        self.assertIsNone(self._agent.session_memory.active_task)
 
 
 if __name__ == "__main__":
