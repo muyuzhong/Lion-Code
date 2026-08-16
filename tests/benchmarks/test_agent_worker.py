@@ -1,4 +1,4 @@
-"""评测 Agent worker 的 MCP 与会话隔离回归测试。"""
+"""评测 Agent worker 的会话隔离回归测试。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import hashlib
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from benchmarks.agent_e2e.agent_worker import run_agent_worker
 from benchmarks.agent_e2e.backend import AgentExecutionRequest
@@ -98,18 +98,14 @@ def _completed_event() -> AssistantDoneEvent:
 
 
 class TestAgentWorker(unittest.IsolatedAsyncioTestCase):
-    async def test_worker_disables_mcp_and_keeps_session_outside_workspace(self) -> None:
+    async def test_worker_keeps_session_outside_workspace(self) -> None:
         task = _task()
         manifest = _manifest(task)
         created_agents: list[Agent] = []
-        discoveries: list[AsyncMock] = []
 
         def factory(**kwargs) -> Agent:
             agent = Agent(api_key="test-key", **kwargs)
-            discovery = AsyncMock(return_value=[])
-            agent._mcp_manager.discover_tools = discovery
             created_agents.append(agent)
-            discoveries.append(discovery)
             return agent
 
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -123,7 +119,6 @@ class TestAgentWorker(unittest.IsolatedAsyncioTestCase):
                 attempt=1,
                 agent_workspace=agent_workspace,
                 session_root=session_root,
-                mcp_enabled=False,
             )
             with patch(
                 "lion_code.agent.create_provider",
@@ -138,29 +133,8 @@ class TestAgentWorker(unittest.IsolatedAsyncioTestCase):
                 hashlib.sha256("完成".encode("utf-8")).hexdigest(),
             )
             self.assertEqual(len(created_agents), 1)
-            self.assertFalse(created_agents[0].mcp_enabled)
-            discoveries[0].assert_not_awaited()
             self.assertTrue(any(session_root.rglob("*.jsonl")))
             self.assertFalse(any(agent_workspace.rglob("*.jsonl")))
-
-    async def test_worker_rejects_any_enabled_mcp_request(self) -> None:
-        task = _task()
-        manifest = _manifest(task)
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            workspace = root / "agent-workspace"
-            workspace.mkdir()
-            request = AgentExecutionRequest(
-                manifest=manifest,
-                task=task,
-                attempt=1,
-                agent_workspace=workspace,
-                session_root=root / "evaluation-sessions",
-                mcp_enabled=True,
-            )
-
-            with self.assertRaisesRegex(ValueError, "mcp_enabled=False"):
-                await run_agent_worker(request)
 
 
 if __name__ == "__main__":

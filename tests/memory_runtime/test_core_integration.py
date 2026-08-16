@@ -134,7 +134,6 @@ def _make_agent(
         return {}
 
     monkeypatch.setattr(agent, "_extract_session_memory_semantics", no_semantic_patch)
-    agent._mcp_initialized = True
     agent._memory_coordinator = MemoryCoordinator(query_service=None)
     return agent, fake, repository
 
@@ -489,7 +488,6 @@ async def test_sub_agent_on_core_skips_memory_prefetch(monkeypatch, tmp_path) ->
             is_sub_agent=True,
             session_repository=SessionRepository(tmp_path),
         )
-    agent._mcp_initialized = True
 
     with patch.object(
         agent._memory_coordinator,

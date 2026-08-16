@@ -201,7 +201,6 @@ def app_factory():
                 session_repository=repository,
                 session_memory_repository=session_memory_repository,
         )
-        agent._mcp_initialized = True
         agent._extract_session_memory_semantics = _no_session_memory_semantics
         return LionTuiApp(LionCodingSession(backend=agent))
 

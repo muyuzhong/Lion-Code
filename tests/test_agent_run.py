@@ -11,6 +11,8 @@ from unittest.mock import patch
 from core.fakes import FakeProvider
 
 from lion_code.agent import Agent, AgentRunResult
+from lion_code.capabilities.types import CapabilitySpec
+from lion_code.composition import AgentDependencies
 from lion_code.core import AssistantMessage, TextContent, ToolCall, Usage
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 from lion_code.session_runtime import SessionRepository
@@ -101,7 +103,6 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
                 session_repository=self._session_repository,
                 **kwargs,
             )
-        agent._mcp_initialized = True
         return agent
 
     async def test_completed_run_returns_structured_core_result(self) -> None:
@@ -239,19 +240,28 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.stop_reason, "aborted")
         self.assertTrue(agent.is_aborted)
 
-    async def test_timeout_covers_initial_mcp_discovery(self) -> None:
+    async def test_timeout_covers_initial_capability_turn(self) -> None:
+        class SlowTurnParticipant:
+            async def before_turn(self) -> None:
+                await asyncio.sleep(0.2)
+
+            async def after_turn(self) -> None:
+                return None
+
         provider = FakeProvider([_stop_event()])
+        spec = CapabilitySpec(
+            name="slow-init",
+            turn_participants=(SlowTurnParticipant(),),
+        )
         with patch("lion_code.agent.create_provider", return_value=provider):
             agent = Agent(
                 api_key="test-key",
-                session_repository=self._session_repository,
+                dependencies=AgentDependencies(
+                    session_repository=self._session_repository,
+                    extra_capabilities=(spec,),
+                ),
             )
 
-        async def slow_discovery():
-            await asyncio.sleep(0.2)
-            return []
-
-        agent._mcp_manager.discover_tools = slow_discovery
         with (
             patch("lion_code.observers.terminal.start_spinner"),
             patch("lion_code.observers.terminal.stop_spinner"),

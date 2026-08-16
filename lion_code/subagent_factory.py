@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .subagent import get_sub_agent_config
-from .tooling import ToolEnvironment, ToolRegistry
+from .tooling import ToolRegistry
 from .tooling.selection import ToolSelectionPolicy, select_tools
 
 if TYPE_CHECKING:
@@ -26,17 +26,15 @@ class ChildAgentConfig:
 
 
 class SubagentFactory:
-    """为父 Agent 创建受限工具与共享环境的子 Agent。"""
+    """为父 Agent 创建受限工具视图的子 Agent。"""
 
     def __init__(
         self,
         *,
         registry: ToolRegistry,
-        environment: ToolEnvironment,
         child_config: Callable[[], ChildAgentConfig],
     ) -> None:
         self._registry = registry
-        self._environment = environment
         self._child_config = child_config
 
     def create_for_agent_type(self, agent_type: str) -> Agent:
@@ -85,7 +83,6 @@ class SubagentFactory:
             terminal_output=config.terminal_output,
             custom_system_prompt=system_prompt,
             tool_registry=select_tools(self._registry, tool_policy),
-            tool_environment=self._environment.child_view(),
             is_sub_agent=True,
             permission_mode="bypassPermissions",
         )

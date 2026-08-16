@@ -33,8 +33,6 @@ async def run_agent_worker(
     否则拒绝运行，避免 JSONL 进入待验收 patch。
     """
 
-    if request.mcp_enabled:
-        raise ValueError("Evaluation worker requires mcp_enabled=False")
     workspace = request.agent_workspace.resolve()
     if not workspace.is_dir():
         raise ValueError(f"Agent workspace does not exist: {workspace}")
@@ -59,7 +57,6 @@ async def run_agent_worker(
                 confirm_fn=_auto_confirm,
                 session_repository=session_repository,
                 terminal_output=False,
-                mcp_enabled=False,
             )
             unsubscribe = agent.core_runtime.subscribe(recorder.record)
             run_result = await agent.run(

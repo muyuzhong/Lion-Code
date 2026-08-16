@@ -12,7 +12,7 @@
     "ruff_check": {
       "command": "python -m ruff check lion_code tests scripts --output-format=json",
       "version": "ruff==0.16.0",
-      "max_count": 82,
+      "max_count": 79,
       "fingerprints": [
         "lion_code/adapters/tool_adapter.py:3:1:I001",
         "lion_code/context/__init__.py:26:11:RUF022",
@@ -45,8 +45,6 @@
         "lion_code/tooling/builtin.py:3:1:I001",
         "lion_code/tooling/context.py:47:15:UP037",
         "lion_code/tooling/context.py:61:10:UP037",
-        "lion_code/tooling/environment.py:25:29:UP037",
-        "lion_code/tooling/mcp.py:15:14:UP037",
         "lion_code/tooling/middleware.py:3:1:I001",
         "lion_code/tooling/permission.py:3:1:I001",
         "lion_code/tooling/registry.py:77:10:UP037",
@@ -79,7 +77,7 @@
         "lion_code/tui/widgets.py:3:1:I001",
         "lion_code/ui.py:60:36:E741",
         "tests/application/test_coding_session.py:42:27:UP037",
-        "tests/benchmarks/test_agent_worker.py:138:32:UP012",
+        "tests/benchmarks/test_agent_worker.py:133:32:UP012",
         "tests/benchmarks/test_corpus.py:3:1:I001",
         "tests/benchmarks/test_trace.py:3:1:I001",
         "tests/context/test_compaction.py:1:1:I001",
@@ -89,7 +87,6 @@
         "tests/test_context_formal_benchmark.py:115:13:RUF021",
         "tests/test_context_formal_benchmark.py:117:16:RUF021",
         "tests/test_context_formal_benchmark.py:1:1:I001",
-        "tests/tooling/test_mcp_adapter.py:1:1:I001",
         "tests/tui/test_tui_adapter.py:1:1:I001",
         "tests/tui/test_tui_themes.py:105:45:RUF043",
         "tests/tui/test_tui_themes.py:116:45:RUF043",
@@ -101,7 +98,7 @@
     "ruff_format": {
       "command": "python -m ruff format --check lion_code tests scripts",
       "version": "ruff==0.16.0",
-      "max_count": 103,
+      "max_count": 102,
       "fingerprints": [
         "lion_code/__main__.py",
         "lion_code/adapters/tool_adapter.py",
@@ -121,7 +118,6 @@
         "lion_code/dream.py",
         "lion_code/frontmatter.py",
         "lion_code/hooks.py",
-        "lion_code/mcp_client.py",
         "lion_code/memory.py",
         "lion_code/memory_runtime/__init__.py",
         "lion_code/memory_runtime/coordinator.py",
@@ -314,7 +310,7 @@
         "lion_code/providers/thinking.py:104:unused variable 'provider_kind':100",
         "lion_code/providers/thinking.py:113:unused variable 'provider_kind':100",
         "tests/benchmarks/test_external_anchor.py:65:unused variable 'output_dir':100",
-        "tests/test_agent_run.py:67:unsatisfiable 'if' condition:100"
+        "tests/test_agent_run.py:69:unsatisfiable 'if' condition:100"
       ]
     }
   },

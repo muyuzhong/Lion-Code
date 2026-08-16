@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from .mcp import McpCapability
 from .plan import PlanPromptLayer, PlanSessionParticipant, create_plan_capability
 from .registry import (
     CapabilityRegistry,
@@ -30,7 +29,6 @@ __all__ = [
     "CapabilitySpec",
     "CircularDependencyError",
     "DuplicateCapabilityError",
-    "McpCapability",
     "MissingDependencyError",
     "PlanPromptLayer",
     "PlanSessionParticipant",

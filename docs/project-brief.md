@@ -31,7 +31,7 @@ CLI / Textual TUI
                  └─ provider.py   ModelProvider 抽象
             ├─ providers/       anthropic / openai_compatible / fake（纯 httpx）
             ├─ context/         上下文管理管线（预算/裁剪/摘要/Token 估算）
-            ├─ tooling/         权限、Hook、MCP 客户端、大结果落盘
+            ├─ tooling/         权限、Hook、大结果落盘
             ├─ memory + dream   项目记忆与隔离式整合
             └─ tui/             Textual 终端 UI（约 5K 行）
 ```
@@ -54,7 +54,7 @@ CLI / Textual TUI
 
 ### 3. 隔离式记忆整合（/dream）
 
-记忆整合用一个受限子 Agent：只有只读权限，不能写文件/执行 Shell/调 MCP。它输出结构化 JSON 计划（created/updated/deleted），**主进程校验**文件名、类型、内容大小和运行前快照之后才集中落盘。模型自始至终碰不到记忆文件系统的写权限。
+记忆整合用一个受限子 Agent：只有只读权限，不能写文件/执行 Shell。它输出结构化 JSON 计划（created/updated/deleted），**主进程校验**文件名、类型、内容大小和运行前快照之后才集中落盘。模型自始至终碰不到记忆文件系统的写权限。
 
 ### 4. 会话持久化
 

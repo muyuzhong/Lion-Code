@@ -81,7 +81,6 @@ class SingleTaskOrchestrator:
             attempt=attempt,
             agent_workspace=agent_workspace,
             session_root=session_root,
-            mcp_enabled=False,
         )
         result: TaskResult | None = None
         try:

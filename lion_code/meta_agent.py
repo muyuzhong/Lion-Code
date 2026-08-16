@@ -201,7 +201,6 @@ def build_meta_agent(
             max_cost_usd=max_cost_usd,
             max_turns=max_turns,
             terminal_output=False,
-            mcp_enabled=False,
         ),
         AgentDependencies(
             confirm_fn=confirm_fn,

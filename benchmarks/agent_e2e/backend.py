@@ -33,7 +33,6 @@ class AgentExecutionRequest:
     attempt: int
     agent_workspace: Path
     session_root: Path
-    mcp_enabled: bool = False
 
 
 @dataclass(frozen=True, slots=True)

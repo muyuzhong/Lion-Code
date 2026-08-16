@@ -86,12 +86,12 @@ class TestToolSelection(unittest.TestCase):
             ["read_file"],
         )
 
-    def test_custom_agent_allowed_tools_support_mcp_names(self):
-        mcp_name = "mcp__docs__search"
-        self.registry.register(_tool(mcp_name))
+    def test_custom_agent_allowed_tools_support_namespaced_names(self):
+        namespaced_name = "custom__docs__search"
+        self.registry.register(_tool(namespaced_name))
         custom = {
             "custom": {
-                "allowed_tools": [mcp_name],
+                "allowed_tools": [namespaced_name],
                 "system_prompt": "custom prompt",
             }
         }
@@ -102,7 +102,7 @@ class TestToolSelection(unittest.TestCase):
 
         self.assertEqual(
             [tool.name for tool in child.all_tools()],
-            [mcp_name],
+            [namespaced_name],
         )
 
 

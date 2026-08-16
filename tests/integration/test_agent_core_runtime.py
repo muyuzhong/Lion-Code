@@ -195,8 +195,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 terminal_output=False,
                 **agent_kwargs,
             )
-        # 跳过 MCP 发现，避免测试环境副作用。
-        agent._mcp_initialized = True
         return agent, fake
 
     async def test_chat_always_uses_core_runtime(self) -> None:
@@ -212,7 +210,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 session_repository=self._session_repository,
                 terminal_output=False,
             )
-        agent._mcp_initialized = True
 
         await agent.chat("hello")
 
@@ -246,7 +243,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 session_repository=self._session_repository,
                 terminal_output=False,
             )
-        agent._mcp_initialized = True
 
         await agent.chat("hello")
 
@@ -793,7 +789,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 terminal_output=False,
             )
         agent.toggle_plan_mode()
-        agent._mcp_initialized = True
         permission = agent.tool_context.permission
         agent.tool_registry.activate("exit_plan_mode")
 
@@ -871,7 +866,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 terminal_output=False,
             )
         agent.toggle_plan_mode()
-        agent._mcp_initialized = True
         permission = agent.tool_context.permission
         agent.tool_registry.activate("exit_plan_mode")
 
@@ -1066,7 +1060,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 session_repository=self._session_repository,
                 terminal_output=False,
             )
-        agent._mcp_initialized = True
 
         self.assertFalse(agent.use_openai)
         self.assertIsNotNone(agent.core_runtime)
@@ -1136,7 +1129,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 session_repository=self._session_repository,
                 terminal_output=False,
             )
-            agent._mcp_initialized = True
             await agent.chat("hello")
 
         self.assertEqual(sub_fake.call_count, 1)

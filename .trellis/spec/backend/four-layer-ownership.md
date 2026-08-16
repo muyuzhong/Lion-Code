@@ -25,14 +25,14 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 
 | 层 | 契约内容 | 反例（不属于本层） |
 |---|---|---|
-| **Kernel** | Agent Loop / Turn / Session 语义、Canonical Conversation、Provider Port、ToolCall protocol、Context Window / Compaction / projection、Cancellation、Usage / Budget、Event Stream | read/write/edit/bash、MCP、Memory、Plan、Skill、SubAgent、Autonomy、Dream、Learning |
+| **Kernel** | Agent Loop / Turn / Session 语义、Canonical Conversation、Provider Port、ToolCall protocol、Context Window / Compaction / projection、Cancellation、Usage / Budget、Event Stream | read/write/edit/bash、Memory、Plan、Skill、SubAgent、Autonomy、Dream、Learning |
 | **Harness** | ProviderManager、ToolRegistry、ToolRuntime、Middleware、Permission、ExecutionBackend/Sandbox、SessionRepository、SessionRecorder、Trace/Event Sink | 具体 Coding Tool、能力路由、Plan/Autonomy 产品模式（Permission 只负责通用安全语义，PR4） |
-| **Capability** | Skill、MCP、Plan、Memory、SubAgent、Browser、ComputerUse | Agent 引擎门面（agent、agent_runtime） |
+| **Capability** | Skill、Plan、Memory、SubAgent、Browser、ComputerUse | Agent 引擎门面（agent、agent_runtime） |
 | **Supervisor** | Autonomy、Scheduler、Checkpoint、Retry/Goal lifecycle、Dream、Learning | Agent 内部私有对象访问 |
 
 ### 1.3 Kernel 边界规则（契约化）
 
-- Kernel 可认识 ToolCall，但不得 import 具体 Coding Tool（tooling/builtin、tooling/internal、tooling/mcp）。
+- Kernel 可认识 ToolCall，但不得 import 具体 Coding Tool（tooling/builtin、tooling/internal）。
 - Kernel 可认识 Session 语义，但不得依赖 SessionRepository / JsonlSessionStorage / SessionRecorder。
 - Kernel 可调用 Provider Port（协议），但不得绑定 ProviderManager / 具体 provider。
 - Kernel 的 Event Stream 必须能被 Supervisor 订阅，且暴露的仅是契约事件，不是 `Agent._xxx` 私有字段。
@@ -71,7 +71,7 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 | **Kernel** | `lion_code/core/`（loop, conversation, messages, events, provider_events, provider, tools, types, cancellation, session/） | Loop/Turn/Session/ToolCall/Provider Port/Cancellation |
 | **Kernel（部分）** | `lion_code/context/`（limits, estimator, projector, policy, compaction, manager） | Context Window / Compaction 原型 |
 | **Harness** | `lion_code/composition/`、`provider_manager.py`、`providers/`、`tooling/`、`agent_runtime.py`（LionAgentRuntime）、`session_runtime/`、`application/`（部分）、`observers/` | Provider/ToolRuntime/Middleware/SessionRecorder/Event Sink |
-| **Capability** | `capabilities/`、`memory_runtime/`、`session_memory*.py`、`plan_runtime.py`、`subagent_runtime.py`、`subagent_factory.py`、`skill_runtime.py`、`mcp_client.py` | Skill/MCP/Plan/Memory/SubAgent |
+| **Capability** | `capabilities/`、`memory_runtime/`、`session_memory*.py`、`plan_runtime.py`、`subagent_runtime.py`、`subagent_factory.py`、`skill_runtime.py` | Skill/Plan/Memory/SubAgent |
 | **Supervisor** | `autonomy_runtime.py`、`dream*.py`、`dream_adapter.py`、`learning_runtime.py` | Autonomy/Dream/Learning |
 | **Facade** | `agent.py`、`meta_agent.py`、`application/` | Agent 门面 + 应用端口（门面组装各层，不属于任何一层） |
 
@@ -87,13 +87,13 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 |---|---|---|
 | tests/core/、tests/context/、tests/providers/、test_usage.py、test_agent_run.py、test_model_query.py | kernel | Kernel 契约测试 |
 | tests/adapters/、tests/session_runtime/、tests/runtime/、tests/tooling/（大部）、tests/application/（facade）、test_hooks.py、test_provider_manager.py、test_project_identity.py、test_prompt.py、tests/tui/（大部） | harness | Harness 契约测试 |
-| tests/capabilities/、tests/memory_runtime/、test_plan_runtime.py、test_mcp_client.py、test_session_memory*.py、application/test_skill_commands.py、tests/tooling/（skill/subagent/mcp/plan-tools 文件） | capability | Capability 契约测试 |
+| tests/capabilities/、tests/memory_runtime/、test_plan_runtime.py、test_session_memory*.py、application/test_skill_commands.py、tests/tooling/（skill/subagent/plan-tools 文件） | capability | Capability 契约测试 |
 | test_autonomy*.py、test_dream.py、test_learning.py、integration/test_application_coding_session.py + application/test_coding_session_ports.py（overflow-retry 部分） | supervisor | Supervisor 契约测试 |
 | tests/tui/test_tui_app.py、test_cli.py | product | 完整应用集成 |
 | tests/architecture/、tests/benchmarks/、test_context_formal_benchmark.py、test_quality_baseline.py | eval | 门禁/评测/质量工具（层外） |
 | tests/tooling/、tests/integration/、tests/memory_runtime/（test_core_integration）、tests/application/（test_coding_session_ports） | mixed | 跨层；混合文件按文件标注主层 |
 
-## 4. 归属声明：`<relevant-memory>` / Plan reset / MCP / SubAgent 是 Capability
+## 4. 归属声明：`<relevant-memory>` / Plan reset / SubAgent 是 Capability
 
 以下行为**不得**定义为 Kernel / Core Runtime 必须行为，其测试归 **capability**：
 
@@ -103,9 +103,6 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 - **Plan reset**（`PlanRuntime.reset_*`）：位于 `plan_runtime.py`，是 **Plan Capability** 行为。
   `apply_plan_context_reset` 与 chat 编排中的 pending 特判已随 PR3 从 Kernel/Runtime 移除。相关测试：`tests/test_plan_runtime.py`、
   `tests/tooling/test_agent_runtime.py`（plan-mode 部分）。
-- **MCP**：`capabilities/mcp.py` + `mcp_client.py`，是 **Capability**。相关测试：
-  `tests/test_mcp_client.py`、`tests/tooling/test_mcp_adapter.py`、
-  `tests/tooling/test_tool_environment.py`。
 - **SubAgent / Skill**：`subagent_runtime.py`、`skill_runtime.py`，是 **Capability**。
   相关测试：`tests/tooling/test_capability_runtimes.py`、`tests/tooling/test_tool_selection.py`、
   `tests/tooling/test_skill_registry_view.py`、`tests/tooling/test_agent_internal_runtime.py`（部分）。
@@ -122,11 +119,15 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 > Memory 能力（持久化、命令）；Dream 委托已随 PR7a 删除。
 
 > **PR7a 状态**：Supervisor 对象（Autonomy/Dream/Learning 及其 model query）已从
-> Composition Root、`Agent` facade 与 CLI/Application/TUI 产品路径移除；
-> `PRODUCT_CAPABILITIES` 只含 MCP/Skill/SubAgent/Plan/Memory。独立 runtime 模块
+> Composition Root、`Agent` facade 与 CLI/Application/TUI 产品路径移除。
+> 独立 runtime 模块
 > （`autonomy_runtime.py`、`dream*.py`、`learning_runtime.py`、`model_query.py`）保留
 > 但无生产调用者，等待未来 Supervisor composition re-home；Agent 驱动的 Supervisor
 > 行为测试统一以 `_REHOME` 原因 skip。
+
+> **PR7b 状态**：外部工具协议（client、Capability、tool adapter 与共享 Tool
+> Environment）已整体删除，不再作为产品、Composition 或测试的可达能力；
+> `PRODUCT_CAPABILITIES` 只含 Skill/SubAgent/Plan/Memory。
 
 > **PR2 / PR6 状态**：PR2 没有形成独立 PR，遗留的
 > `ProviderManager -> MemoryQuerySink` 依赖由 PR6 直接删除，不保留 deferred sink、兼容层
@@ -144,7 +145,7 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 - ToolRegistry / ToolRuntime / Middleware / Permission / ExecutionBackend → Harness（tooling/）
 - ProviderManager / providers / SessionRepository / SessionRecorder / JsonlSessionStorage → Harness
 - TerminalRenderer / UsageObserver（trace/event sink）→ Harness（observers/）
-- MCP、Skill、SubAgent、Plan、Memory（含 `<relevant-memory>`）→ Capability
+- Skill、SubAgent、Plan、Memory（含 `<relevant-memory>`）→ Capability
 - Autonomy、Scheduler、Retry/Goal lifecycle、Dream、Learning → Supervisor
 - `/handoff`、`/session-memory` 命令编排 → Capability/Supervisor（按符号归属）；
   `/dream`、`/learn`、`/goal`、`/loop` 已随 PR7a 从产品命令面删除

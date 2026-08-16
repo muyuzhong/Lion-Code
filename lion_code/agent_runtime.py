@@ -268,11 +268,10 @@ class RuntimeIdentityHost(Protocol):
 
 
 class SessionStateHost(Protocol):
-    """会话标识、仓库与工具环境所需的宿主边界。"""
+    """会话标识、仓库与工具上下文所需的宿主边界。"""
 
     _session_repository: SessionRepository
     tool_context: Any
-    tool_environment: Any
 
     @property
     def session_state(self) -> SessionIdentityState: ...
@@ -282,8 +281,8 @@ class AgentRuntimeCoordinator:
     """拥有一个 Agent 的 Core 生命周期，但不反向依赖 Agent 实现。
 
     通过两个窄端口访问宿主能力，并直接接收 Usage Owner 与预算规则：
-    - ``identity`` -- 模型标识、终端渲染、中止/通知与 MCP 初始化
-    - ``session`` -- 会话标识、仓库与工具环境
+    - ``identity`` -- 模型标识、终端渲染、中止与通知
+    - ``session`` -- 会话标识、仓库与工具上下文
     """
 
     def __init__(
@@ -709,7 +708,7 @@ class AgentRuntimeCoordinator:
             self._core_compaction_task.cancel()
 
     async def chat(self, user_message: str) -> None:
-        """执行一次完整用户轮，保持 MCP/Core/JSONL 的既有时序。"""
+        """执行一次完整用户轮，保持 Capability/Core/JSONL 的既有时序。"""
 
         identity = self._identity
         self._execution.begin()

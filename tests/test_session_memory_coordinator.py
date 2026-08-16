@@ -23,7 +23,6 @@ class TestSessionMemoryCoordinator(unittest.IsolatedAsyncioTestCase):
         self._agent = Agent(
             api_key="test-key",
             session_memory_repository=self._repository,
-            mcp_enabled=False,
             terminal_output=False,
         )
 

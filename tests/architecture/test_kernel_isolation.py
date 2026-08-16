@@ -1,11 +1,10 @@
-"""PR0 四层边界门禁：Kernel 隔离 / Supervisor 订阅契约 / zero-extension 可配置性。
+"""PR0 四层边界门禁：Kernel 隔离 / Supervisor 订阅契约。
 
 与 ``_boundaries.py`` 的 import 方向契约互补：本文件用 AST 扫描 Kernel 与 Supervisor
 模块，确保：
 
 - Kernel 代码不引用 Capability/Supervisor 专属符号（"不是 Kernel" 清单）。
 - Supervisor 模块只消费 Kernel 事件契约，不触碰 Agent 内部私有对象。
-- Capability 是可配置移除的（MCP 关闭后不安装 mcp__ 工具），装配不硬要求某能力。
 """
 
 from __future__ import annotations
@@ -13,12 +12,6 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
-
-from lion_code.agent import Agent
-from lion_code.composition import AgentConfig, AgentDependencies
-from lion_code.tooling.environment import ToolEnvironment
-from lion_code.tooling.registry import ToolRegistry
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
@@ -30,8 +23,6 @@ _NON_KERNEL_SYMBOLS = (
     "RelevantMemory",
     "PlanRuntime",
     "PlanState",
-    "McpCapability",
-    "McpManager",
     "SubagentFactory",
     "SubagentExecutor",
     "AutonomyRuntime",
@@ -121,32 +112,3 @@ def test_supervisor_modules_do_not_import_agent_privates() -> None:
                 attr_hits.append(f"{name}: .{node.attr}")
     assert not import_hits, f"Supervisor import 引擎模块: {import_hits}"
     assert not attr_hits, f"Supervisor 触碰 Agent 私有对象: {attr_hits}"
-
-
-async def test_mcp_capability_is_removable_via_config(tmp_path, monkeypatch) -> None:
-    """zero-extension 可配置性：mcp_enabled=False 且无 extra_capabilities 时装配合法，
-    mcp__ 工具不出现——Capability 是可配置移除的。"""
-    monkeypatch.chdir(tmp_path)
-    config = AgentConfig(
-        model="claude-opus-4-6",
-        api_key="test-key",
-        terminal_output=False,
-        mcp_enabled=False,
-    )
-    registry = ToolRegistry()
-    dependencies = AgentDependencies(
-        tool_registry=registry,
-        tool_environment=ToolEnvironment(owns_mcp_manager=False),
-        extra_capabilities=(),
-    )
-    provider = Mock()
-    provider.aclose = AsyncMock()
-    with patch("lion_code.agent.create_provider", return_value=provider):
-        agent = Agent(config=config, dependencies=dependencies)
-
-    names = [tool.name for tool in registry.active_tools()]
-    assert not any(name.startswith("mcp__") for name in names), (
-        "mcp_enabled=False 仍安装了 mcp__ 工具"
-    )
-    await agent.clear_history()
-    await agent.close()

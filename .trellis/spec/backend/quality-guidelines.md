@@ -24,8 +24,8 @@
   Pydantic wire models in `lion_code/core/messages.py` use `extra="forbid"` and
   camel-case serialization aliases so persisted/provider payloads stay strict.
 - Async behavior is tested with `unittest.IsolatedAsyncioTestCase`; synchronous
-  behavior uses `unittest.TestCase`.  See `tests/tooling/test_mcp_adapter.py`,
-  `tests/integration/test_core_tool_runtime.py`, and
+  behavior uses `unittest.TestCase`.  See
+  `tests/integration/test_core_tool_runtime.py` and
   `tests/runtime/test_terminal_renderer.py`.
 - Tests isolate external effects with `unittest.mock` and project fakes.  Provider
   integration tests inject `FakeProvider` rather than call a real OpenAI or

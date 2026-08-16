@@ -12,7 +12,6 @@ import pytest
 from lion_code.agent import Agent
 from lion_code.capabilities.types import CapabilitySpec
 from lion_code.composition import AgentComposition, AgentConfig, AgentDependencies
-from lion_code.tooling.environment import ToolEnvironment
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool
 
@@ -112,11 +111,9 @@ async def test_example_capability_needs_only_spec_registration_and_tests(
         model="claude-opus-4-6",
         api_key="test-key",
         terminal_output=False,
-        mcp_enabled=False,
     )
     dependencies = AgentDependencies(
         tool_registry=ToolRegistry(),
-        tool_environment=ToolEnvironment(owns_mcp_manager=False),
         extra_capabilities=(spec,),
     )
     provider = Mock()

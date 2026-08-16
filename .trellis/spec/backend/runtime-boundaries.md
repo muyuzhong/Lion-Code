@@ -604,7 +604,7 @@ Usage has its own executable contract in
   `CapabilityRegistry`, and a `ToolRegistry` containing exactly the supplied `tools`.
   Empty tools and an empty system prompt are valid; an empty prompt is normalized to
   the neutral Meta prompt. The builder disables project pre-tool hooks and does not
-  create `ToolEnvironment`, MCP state, status/notice adapters, or any advanced Feature.
+  create status/notice adapters or any advanced Feature.
 - `MetaAgent` exposes only generic run/conversation/event/context/session/Provider/
   usage/close operations. Concrete Coding tools are caller-supplied Harness inputs;
   Feature-specific methods or state are forbidden. A Provider replacement that needs
@@ -690,12 +690,12 @@ Usage has its own executable contract in
 - `DreamCoordinator` is pure domain coordination over repository, identity,
   Session Memory View, typed child factory/runner, and the child usage command.
   The concrete restricted child lives in `dream_adapter.py`, selects only the
-  three read-only tools, disables MCP and project hooks, prevents nesting,
+  three read-only tools, disables project hooks, prevents nesting,
   enforces `DREAM_MAX_TURNS`, and validates all resolved read paths against the
   project and Memory roots. PR7a removed both from the composition root; a
   future Supervisor composition must supply its own Memory snapshot view.
-- `SubagentFactory` receives the concrete registry/environment, a typed
-  `ChildAgentConfig` provider, and `PermissionView`. It remains a constructor;
+- `SubagentFactory` receives the concrete registry and a typed
+  `ChildAgentConfig` provider. It remains a constructor;
   child execution, status, usage, errors, and closing remain in
   `SubagentExecutor`.
 
@@ -910,8 +910,8 @@ Usage has its own executable contract in
   object into a Domain Runtime recreates a service locator.
 - Good: `DreamCoordinator` receives a typed child factory while
   `RestrictedDreamAgentFactory` alone imports and configures the concrete Agent.
-- Bad: moving read-root checks, read-only tool selection, hook disabling, MCP
-  disabling, nesting prevention, or turn limits into the model prompt weakens the
+- Bad: moving read-root checks, read-only tool selection, hook disabling,
+  nesting prevention, or turn limits into the model prompt weakens the
   executable Dream boundary.
 - Bad: reintroducing Autonomy/Dream/Learning imports, fields, delegates, or command
   branches into the composition root, `Agent`, REPL, Application, or TUI before a
@@ -990,11 +990,12 @@ also rejects patterns an import graph cannot express:
 - Four-layer gates (`tests/architecture/test_kernel_isolation.py`, plus the
   expanded Core import contract in `_boundaries.py`): Kernel code must not
   import or reference Capability/Supervisor modules or symbols
-  (`<relevant-memory>`, `PlanRuntime`, `McpCapability`, `SubagentFactory`,
+  (`<relevant-memory>`, `PlanRuntime`, `SubagentFactory`,
   `AutonomyRuntime`, `DreamCoordinator`, `LearningRuntime`); Supervisor modules
   must not import the Agent engine or touch private fields
-  (`_aborted`, `core_runtime`); a capability (e.g. MCP) is removable via
-  config. See [Four-Layer Ownership](./four-layer-ownership.md).
+  (`_aborted`, `core_runtime`). See [Four-Layer Ownership](./four-layer-ownership.md)
+  and the PR7b removed-protocol strong negatives in
+  `tests/architecture/test_runtime_boundaries.py`.
 
 When a legitimate architecture move requires a new exception, change the
 runtime code, this contract, the AST allowlist, and the focused test in one
@@ -1069,7 +1070,7 @@ exception, or silently broaden an allowlist to make a regression pass.
   PR7a; direct runtime tests still execute.
 - `tests/test_session_memory_coordinator.py`, `tests/memory_runtime/`, and
   `tests/test_dream.py`: Memory read/update and semantic extraction, repository
-  identity validation, restricted Dream child construction, root checks, hook/MCP/
+  identity validation, restricted Dream child construction, root checks, hook/
   nesting/turn limits, validated plans, close-on-error, and atomic rollback.
 - `tests/architecture/test_runtime_boundaries.py`: migrated Domain modules do not
   import or reference Agent/Core Runtime, Dream does not accept Agent, forbidden

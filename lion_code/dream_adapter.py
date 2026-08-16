@@ -15,23 +15,21 @@ from .dream import (
     validate_dream_read_input,
 )
 from .subagent_factory import ChildAgentConfig
-from .tooling import ToolEnvironment, ToolRegistry
+from .tooling import ToolRegistry
 from .tooling.context import ToolContext
 from .tooling.selection import ToolSelectionPolicy, select_tools
 
 
 class RestrictedDreamAgentFactory:
-    """构造只含三个只读工具、禁用 MCP 和嵌套 Agent 的 Dream 子运行时。"""
+    """构造只含三个只读工具、禁止嵌套 Agent 的 Dream 子运行时。"""
 
     def __init__(
         self,
         *,
         registry: ToolRegistry,
-        environment: ToolEnvironment,
         child_config: Callable[[], ChildAgentConfig],
     ) -> None:
         self._registry = registry
-        self._environment = environment
         self._child_config = child_config
 
     def create(self, context: DreamContext) -> RestrictedDreamAgent:
@@ -59,11 +57,9 @@ class RestrictedDreamAgentFactory:
                     terminal_output=config.terminal_output,
                     custom_system_prompt=DREAM_SYSTEM_PROMPT,
                     tool_registry=child_registry,
-                    tool_environment=self_environment.child_view(),
                     is_sub_agent=True,
                     permission_mode="bypassPermissions",
                     max_turns=DREAM_MAX_TURNS,
-                    mcp_enabled=False,
                 )
                 # 项目 Hook 可能间接启动 Shell，Dream 必须完全禁用它。
                 self._pre_tool_use_hooks.clear()
@@ -87,7 +83,6 @@ class RestrictedDreamAgentFactory:
                     )
                 return await super()._execute_tool_call(name, safe_input, tool_call_id)
 
-        self_environment = self._environment
         return RestrictedDreamAgent(DreamChild(), read_roots)
 
 

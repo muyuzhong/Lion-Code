@@ -185,7 +185,7 @@ class LionCodingSession:
         self._backend.cancel()
 
     async def aclose(self) -> None:
-        """关闭底层 Agent(落盘会话、回收 Memory 任务与 MCP 连接)。"""
+        """关闭底层 Agent(落盘会话并回收 Memory 与 Capability 任务)。"""
         await self._backend.aclose()
 
     # ─── 会话管理 ────────────────────────────────────────────

@@ -50,7 +50,6 @@ async def test_repl_routes_session_memory_commands_through_shared_intents(
             session_memory_repository=repository,
             terminal_output=False,
         )
-    agent._mcp_initialized = True
     agent._session_memory = repository.save(
         SessionMemory(
             project_root=str(agent._project_identity.root),

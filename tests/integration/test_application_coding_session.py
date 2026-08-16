@@ -133,7 +133,6 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 session_repository=self._session_repository,
                 session_memory_repository=self._session_memory_repository,
             )
-        agent._mcp_initialized = True
         agent._extract_session_memory_semantics = _no_session_memory_semantics
         return LionCodingSession(agent), agent, fake
 
@@ -158,7 +157,6 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
             )
-            agent._mcp_initialized = True
             agent._extract_session_memory_semantics = _no_session_memory_semantics
             await agent.chat("first")
 
@@ -207,7 +205,6 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
             )
-        agent._mcp_initialized = True
         session = LionCodingSession(agent)
         notices: list[tuple[str, str]] = []
         session.set_notice_fn(lambda message, role: notices.append((message, role)))

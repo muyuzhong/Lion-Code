@@ -15,3 +15,11 @@ htmlcov/
 .ruff_cache/
 /benchmarks/context_management/README_CN.md
 /benchmarks/context_management/REPORT_CN.md
+
+# 质量门禁本地产物
+ruff.json
+ruff-format.txt
+mypy.jsonl
+radon-cc.json
+vulture.txt
+coverage.json

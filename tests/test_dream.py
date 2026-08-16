@@ -363,12 +363,8 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
             registry = ToolRegistry()
             for tool in create_builtin_tools():
                 registry.register(tool)
-            child_environment = object()
-            environment = Mock()
-            environment.child_view.return_value = child_environment
             factory = RestrictedDreamAgentFactory(
                 registry=registry,
-                environment=environment,
                 child_config=lambda: ChildAgentConfig(
                     model="test-model",
                     api_base="https://example.test/v1",
@@ -396,9 +392,7 @@ class TestDreamIsolation(unittest.IsolatedAsyncioTestCase):
             {tool.name for tool in kwargs["tool_registry"].all_tools()},
             {"read_file", "list_files", "grep_search"},
         )
-        self.assertIs(kwargs["tool_environment"], child_environment)
         self.assertTrue(kwargs["is_sub_agent"])
-        self.assertFalse(kwargs["mcp_enabled"])
         self.assertFalse(kwargs["terminal_output"])
         self.assertEqual(kwargs["max_turns"], dream.DREAM_MAX_TURNS)
         self.assertEqual(kwargs["permission_mode"], "bypassPermissions")

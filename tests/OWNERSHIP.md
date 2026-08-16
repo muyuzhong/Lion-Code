@@ -3,7 +3,7 @@ schema: test-ownership/v1
 layers:
   kernel: "Kernel 契约测试（Agent Loop/Turn/Session/Provider Port/Context/Usage）"
   harness: "Harness 契约测试（ProviderManager/ToolRuntime/Middleware/Permission/Session 持久化/Observer）"
-  capability: "Capability 契约测试（Skill/MCP/Plan/Memory/SubAgent）"
+  capability: "Capability 契约测试（Skill/Plan/Memory/SubAgent）"
   supervisor: "Supervisor 契约测试（Autonomy/Scheduler/Retry/Dream/Learning）"
   product: "Product integration（完整应用端到端）"
   eval: "Eval/CI infra（层外：评测/门禁/质量工具）"
@@ -71,9 +71,7 @@ layers:
 | tests/tooling/test_agent_runtime.py | mixed | harness+capability[Plan]：Agent._execute_tool_call + plan-mode toggle |
 | tests/tooling/test_agent_internal_runtime.py | mixed | harness+capability[SubAgent]+supervisor[schedule_wakeup] |
 | tests/tooling/test_capability_runtimes.py | capability | SkillRuntime / SubagentExecutor |
-| tests/tooling/test_tool_environment.py | mixed | harness+capability[MCP] |
 | tests/tooling/test_tool_selection.py | mixed | harness+capability[SubAgent] |
-| tests/tooling/test_mcp_adapter.py | mixed | capability[MCP]+harness |
 | tests/tooling/test_internal_tools.py | mixed | harness+capability[Skill/Plan/SubAgent]+supervisor[wakeup] |
 | tests/tooling/test_skill_registry_view.py | mixed | capability[Skill/SubAgent]+harness |
 
@@ -111,7 +109,6 @@ layers:
 | tests/test_dream.py | supervisor | Dream + Memory 触碰 |
 | tests/test_hooks.py | harness | permission/safety/hooks/execution backend |
 | tests/test_learning.py | supervisor | Learning |
-| tests/test_mcp_client.py | capability | MCP 客户端 |
 | tests/test_model_query.py | kernel | Provider 端口薄包装 |
 | tests/test_plan_runtime.py | capability | Plan（事务/审批/View；PR3 移除 pending reset，PR4 移除权限模式耦合） |
 | tests/test_project_identity.py | harness | identity/config |
@@ -143,9 +140,7 @@ layers:
    ToolContext 无 plan / auto_permission_fn，PermissionMiddleware/Policy 无 plan/auto 特判，
    PlanRuntime 不再写 PermissionController；产品策略（PlanRestrictedPolicy /
    LLMPermissionPolicy）留待后续 PR 由 Composition 注入。
-6. MCP（`tests/test_mcp_client.py`、`tests/tooling/test_mcp_adapter.py`、
-   `tests/tooling/test_tool_environment.py`）→ **capability[MCP]**。
-7. SubAgent/Skill（`tests/tooling/test_capability_runtimes.py`、
+6. SubAgent/Skill（`tests/tooling/test_capability_runtimes.py`、
    `tests/tooling/test_tool_selection.py`、`tests/tooling/test_skill_registry_view.py`、
    `tests/tooling/test_agent_internal_runtime.py` 部分）→ **capability[SubAgent/Skill]**。
 
@@ -160,8 +155,8 @@ layers:
   test_hooks.py、test_provider_manager.py、test_project_identity.py、test_prompt.py、
   tests/tui/（大部）。
 - **Capability**：tests/capabilities/、tests/memory_runtime/、test_plan_runtime.py、
-  test_mcp_client.py、test_session_memory*.py、application/test_skill_commands.py、
-  tests/tooling/（skill/subagent/mcp/plan-tools 文件）。
+  test_session_memory*.py、application/test_skill_commands.py、
+  tests/tooling/（skill/subagent/plan-tools 文件）。
 - **Supervisor**：test_autonomy.py、test_autonomy_flow.py、test_autonomy_goal_loop.py、
   test_dream.py、test_learning.py、integration/test_application_coding_session.py +
   application/test_coding_session_ports.py 的 overflow-retry 部分。

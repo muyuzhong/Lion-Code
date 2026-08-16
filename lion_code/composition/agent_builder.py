@@ -14,7 +14,6 @@ from ..agent_runtime import AgentRuntimeCoordinator
 from ..capabilities import (
     CapabilityRegistry,
     CapabilityRuntime,
-    McpCapability,
     create_plan_capability,
     create_skill_capability,
     create_subagent_capability,
@@ -27,7 +26,6 @@ from ..context import (
 )
 from ..execution_control import ExecutionControl
 from ..hooks import load_pre_tool_use_hooks
-from ..mcp_client import McpManager
 from ..memory_runtime import ProviderTextQueryService
 from ..observers import TerminalRenderer
 from ..permission_state import PermissionController, PermissionState
@@ -48,7 +46,7 @@ from ..session_runtime import SessionRepository
 from ..skill_runtime import SkillRuntime
 from ..subagent_factory import ChildAgentConfig, SubagentFactory
 from ..subagent_runtime import SubagentExecutor
-from ..tooling import ToolEnvironment, ToolRegistry, ToolRuntime
+from ..tooling import ToolRegistry, ToolRuntime
 from ..tooling.builtin import create_builtin_tools
 from ..tooling.context import ToolContext
 from ..tooling.internal import create_internal_tools
@@ -69,7 +67,6 @@ from .ports import (
     DeferredBackgroundScheduler,
     DeferredModelContextControl,
     DeferredProviderRuntimePort,
-    McpLifecycleState,
     NoticeController,
     NoticeSinkAdapter,
     PlanHost,
@@ -80,16 +77,14 @@ from .ports import (
 )
 
 # 内置能力名：Composition Root 的显式选择集合，Bare 图默认空集。
-CAP_MCP = "mcp"
+# 短生命周期常量：PR7c 将由 Profile 取代。
 CAP_SKILL = "skill"
 CAP_SUBAGENT = "subagent"
 CAP_PLAN = "plan"
 CAP_MEMORY = "memory"
 
-# 短生命周期名称：PR7b 将由 Profile 取代该常量。
 PRODUCT_CAPABILITIES = frozenset(
     {
-        CAP_MCP,
         CAP_SKILL,
         CAP_SUBAGENT,
         CAP_PLAN,
@@ -102,7 +97,7 @@ PRODUCT_CAPABILITIES = frozenset(
 class AgentComposition:
     """Composition Root 完成后交给 facade 的显式对象集合。
 
-    Feature 字段（plan / subagent / mcp / memory）在 Bare 图中为 ``None``：
+    Feature 字段（plan / subagent / memory）在 Bare 图中为 ``None``：
     调用方按所选 capabilities 判空，不创建 Null 对象。
     """
 
@@ -114,16 +109,12 @@ class AgentComposition:
     budget: BudgetPolicy
     read_file_state: dict[str, float]
     pre_tool_use_hooks: list[Any]
-    tool_environment: ToolEnvironment | None
     tool_registry: ToolRegistry
-    mcp_manager: Any | None
-    mcp_state: McpLifecycleState | None
     plan: PlanRuntime | None
     subagent_factory: SubagentFactory | None
     subagent_executor: SubagentExecutor | None
     skill_runtime: SkillRuntime | None
     capability_registry: CapabilityRegistry
-    mcp_capability: McpCapability | None
     capability_runtime: CapabilityRuntime
     prompt_composer: PromptComposer
     tool_context: ToolContext
@@ -161,9 +152,6 @@ class _FoundationGraph:
     session_state: SessionIdentityState
     session_repository: SessionRepository
     read_file_state: dict[str, float]
-    mcp_state: McpLifecycleState | None
-    tool_environment: ToolEnvironment | None
-    mcp_manager: Any | None
     tool_registry: ToolRegistry
     created_own_registry: bool
     selected_tool_names: set[str] | None
@@ -203,7 +191,6 @@ class _CapabilityGraph:
     subagent_executor: SubagentExecutor | None
     skill_runtime: SkillRuntime | None
     capability_registry: CapabilityRegistry
-    mcp_capability: McpCapability | None
     capability_runtime: CapabilityRuntime
 
 
@@ -232,7 +219,7 @@ def build_agent_composition(
     """按固定顺序创建 Agent object graph，并返回一次性 composition result。
 
     ``capabilities`` 显式选择内置能力；默认空集即 Bare 图：不创建
-    Memory/Plan/MCP/SubAgent/Skill。Full Product 由 ``PRODUCT_CAPABILITIES``
+    Memory/Plan/SubAgent/Skill。Full Product 由 ``PRODUCT_CAPABILITIES``
     显式选择。
     """
 
@@ -247,9 +234,6 @@ def build_agent_composition(
     session_state = foundation.session_state
     session_repository = foundation.session_repository
     read_file_state = foundation.read_file_state
-    mcp_state = foundation.mcp_state
-    tool_environment = foundation.tool_environment
-    mcp_manager = foundation.mcp_manager
     tool_registry = foundation.tool_registry
     plan = foundation.plan
 
@@ -258,7 +242,6 @@ def build_agent_composition(
     identity_port = _build_identity_port(config, foundation, provider_manager)
 
     capability_graph = _build_capability_graph(
-        config,
         foundation,
         provider_manager,
         identity_port,
@@ -268,7 +251,6 @@ def build_agent_composition(
     subagent_executor = capability_graph.subagent_executor
     skill_runtime = capability_graph.skill_runtime
     capability_registry = capability_graph.capability_registry
-    mcp_capability = capability_graph.mcp_capability
     capability_runtime = capability_graph.capability_runtime
 
     tooling_graph = _build_tooling_graph(
@@ -311,16 +293,12 @@ def build_agent_composition(
         budget=budget,
         read_file_state=read_file_state,
         pre_tool_use_hooks=tool_context.hooks,
-        tool_environment=tool_environment,
         tool_registry=tool_registry,
-        mcp_manager=mcp_manager,
-        mcp_state=mcp_state,
         plan=plan,
         subagent_factory=subagent_factory,
         subagent_executor=subagent_executor,
         skill_runtime=skill_runtime,
         capability_registry=capability_registry,
-        mcp_capability=mcp_capability,
         capability_runtime=capability_runtime,
         prompt_composer=prompt_composer,
         tool_context=tool_context,
@@ -411,7 +389,6 @@ def _build_foundation(
     )
     session_repository = deps.session_repository or SessionRepository()
     read_file_state: dict[str, float] = {}
-    mcp_state = McpLifecycleState() if CAP_MCP in capabilities else None
 
     if deps.tool_registry is not None and config.custom_tools is not None:
         raise ValueError("tool_registry and custom_tools cannot be combined")
@@ -421,24 +398,6 @@ def _build_foundation(
         if config.custom_tools is not None
         else None
     )
-    needs_tool_environment = bool(
-        capabilities & {CAP_MCP, CAP_SUBAGENT, CAP_SKILL, CAP_MEMORY}
-    )
-    if deps.tool_environment is not None:
-        tool_environment = deps.tool_environment
-    elif CAP_MCP in capabilities:
-        tool_environment = ToolEnvironment(
-            mcp_manager=McpManager(),
-            owns_mcp_manager=not config.is_sub_agent,
-        )
-    elif needs_tool_environment:
-        tool_environment = ToolEnvironment(
-            mcp_manager=None,
-            owns_mcp_manager=False,
-        )
-    else:
-        tool_environment = None
-    mcp_manager = tool_environment.mcp_manager if tool_environment is not None else None
     tool_registry = deps.tool_registry or ToolRegistry()
     if created_own_registry:
         for tool in [*create_builtin_tools(), *create_internal_tools()]:
@@ -472,9 +431,6 @@ def _build_foundation(
         session_state=session_state,
         session_repository=session_repository,
         read_file_state=read_file_state,
-        mcp_state=mcp_state,
-        tool_environment=tool_environment,
-        mcp_manager=mcp_manager,
         tool_registry=tool_registry,
         created_own_registry=created_own_registry,
         selected_tool_names=selected_tool_names,
@@ -550,7 +506,6 @@ def _build_identity_port(
 
 
 def _build_capability_graph(
-    config: AgentConfig,
     foundation: _FoundationGraph,
     provider_manager: ProviderManager,
     identity_port: RuntimeIdentityPort,
@@ -563,11 +518,10 @@ def _build_capability_graph(
     subagent_factory: SubagentFactory | None = None
     subagent_executor: SubagentExecutor | None = None
     if CAP_SUBAGENT in capabilities or CAP_SKILL in capabilities:
-        if foundation.tool_environment is None or foundation.status_sink is None:
-            raise RuntimeError("subagent capability requires tooling environment")
+        if foundation.status_sink is None:
+            raise RuntimeError("subagent capability requires status sink")
         subagent_factory = SubagentFactory(
             registry=foundation.tool_registry,
-            environment=foundation.tool_environment,
             child_config=child_config,
         )
         subagent_executor = SubagentExecutor(
@@ -581,31 +535,6 @@ def _build_capability_graph(
             raise RuntimeError("skill capability requires subagent machinery")
         skill_runtime = SkillRuntime(subagent_executor)
 
-    mcp_capability: McpCapability | None = None
-    if CAP_MCP in capabilities:
-        mcp_manager = foundation.mcp_manager
-        mcp_state = foundation.mcp_state
-        if foundation.tool_environment is None:
-            raise RuntimeError("mcp capability requires tooling environment")
-        mcp_capability = McpCapability(
-            mcp_manager=mcp_manager,
-            tool_registry=foundation.tool_registry,
-            emit_notice=foundation.notices.emit,
-            is_already_initialized=lambda: (
-                mcp_state.initialized if mcp_state is not None else False
-            ),
-            mark_initialized=lambda: (
-                setattr(mcp_state, "initialized", True)
-                if mcp_state is not None
-                else None
-            ),
-            is_root=(
-                config.mcp_enabled
-                and not config.is_sub_agent
-                and foundation.tool_environment.owns_mcp_manager
-            ),
-        )
-        capability_registry.register(mcp_capability.spec)
     if CAP_SKILL in capabilities and skill_runtime is not None:
         capability_registry.register(create_skill_capability(skill_runtime))
     if CAP_SUBAGENT in capabilities and subagent_executor is not None:
@@ -620,7 +549,6 @@ def _build_capability_graph(
         subagent_executor=subagent_executor,
         skill_runtime=skill_runtime,
         capability_registry=capability_registry,
-        mcp_capability=mcp_capability,
         capability_runtime=CapabilityRuntime(capability_registry),
     )
 
@@ -704,7 +632,6 @@ def _build_tooling_graph(
         session_state=foundation.session_state,
         session_repository=foundation.session_repository,
         tool_context=tool_context,
-        tool_environment=foundation.tool_environment,
     )
     return _ToolingGraph(
         prompt_composer=prompt_composer,
