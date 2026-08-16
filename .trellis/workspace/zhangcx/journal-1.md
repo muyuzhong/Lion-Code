@@ -1298,3 +1298,24 @@ SessionMemoryCoordinator/AutonomyRuntime/LearningRuntime/McpManager。
 ### Status
 
 [OK] **Completed**
+
+
+## Session 40: PR8 Capability Plane 重建
+
+**Date**: 2026-08-16
+**Task**: PR8 Capability Plane 重建
+**Branch**: `muyuzhong/pr8-capability-plane-rebuild`
+
+### Summary
+
+完成任务8 Capability Plane 重建：接入通用投影层与回合参与者 SPI，迁移 Memory 能力并收窄 SessionMemoryCoordinator 运行时边界；定向测试 217 passed/2 skipped，全量测试 766 passed/22 skipped，已推送任务分支。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6db5686` | (see git log) |
+
+### Status
+
+[OK] **Completed**

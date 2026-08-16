@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 39
+- **Total Sessions**: 40
 - **Last Active**: 2026-08-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1300 | Active |
+| `journal-1.md` | ~1321 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 40 | 2026-08-16 | PR8 Capability Plane 重建 | `6db5686` | `muyuzhong/pr8-capability-plane-rebuild` |
 | 39 | 2026-08-16 | PR6 MetaAgent Bare Extraction | `79f94cb` | `muyuzhong/pr6-meta-agent-bare-extraction` |
 | 38 | 2026-08-14 | 提取 Agent Composition Root | `c1510ae` | `master` |
 | 37 | 2026-08-13 | 接入 Capability PromptLayer 与 SessionParticipant | `a8c65bd` | `master` |
