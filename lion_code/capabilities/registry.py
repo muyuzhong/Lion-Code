@@ -212,9 +212,7 @@ class CapabilityRegistry:
         """All per-request projection layers in dependency-resolved order."""
         order = self._ensure_resolved()
         return tuple(
-            layer
-            for name in order
-            for layer in self._specs[name].projection_layers
+            layer for name in order for layer in self._specs[name].projection_layers
         )
 
     @property

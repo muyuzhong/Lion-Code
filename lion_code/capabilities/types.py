@@ -142,9 +142,7 @@ class CapabilitySpec:
     def __post_init__(self) -> None:
         object.__setattr__(self, "tool_sources", tuple(self.tool_sources))
         object.__setattr__(self, "prompt_layers", tuple(self.prompt_layers))
-        object.__setattr__(
-            self, "projection_layers", tuple(self.projection_layers)
-        )
+        object.__setattr__(self, "projection_layers", tuple(self.projection_layers))
         object.__setattr__(self, "turn_participants", tuple(self.turn_participants))
         object.__setattr__(
             self, "session_participants", tuple(self.session_participants)

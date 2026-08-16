@@ -64,6 +64,7 @@ from .ui import (
 )
 from .usage import UsageSnapshot
 
+
 def _agent_provider_factory(**kwargs: Any) -> ModelProvider:
     """保留 ``lion_code.agent.create_provider`` 的动态 monkeypatch seam。"""
 

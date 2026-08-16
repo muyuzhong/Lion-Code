@@ -315,8 +315,7 @@ def test_subagent_factory_reuses_coding_composition_entrypoint() -> None:
     imports = {
         (node.level, node.module, alias.name)
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
-        and node.module is not None
+        if isinstance(node, ast.ImportFrom) and node.module is not None
         for alias in node.names
     }
     assert (1, "meta_agent", "build_coding_agent") in imports

@@ -444,9 +444,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 "second answer",
             ],
         )
-        self.assertTrue(
-            projected[3].startswith("third question\n\n<relevant-memory>")
-        )
+        self.assertTrue(projected[3].startswith("third question\n\n<relevant-memory>"))
 
         state = await self._session_repository.load(agent.session_id)
         self.assertEqual(len(state.compaction_entries), 1)
@@ -594,9 +592,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(self._session_repository.session_dir.glob("*.json")), [])
         projected = [message.text for message in fake.received_messages[0]]
         self.assertEqual(projected[:2], ["first question", "first answer"])
-        self.assertTrue(
-            projected[2].startswith("second question\n\n<relevant-memory>")
-        )
+        self.assertTrue(projected[2].startswith("second question\n\n<relevant-memory>"))
         state = await self._session_repository.load(session_id)
         self.assertEqual(
             [message.text for message in state.messages],
