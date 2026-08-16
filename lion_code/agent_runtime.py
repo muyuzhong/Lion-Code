@@ -437,7 +437,10 @@ class AgentRuntimeCoordinator:
         prepared = self._context_manager.prepare(messages, state)
         self._last_context_actions = prepared.actions
         self._core_compaction_required = prepared.compaction_required
-        return list(prepared.messages)
+        return self._capabilities.project_context(
+            list(prepared.messages),
+            max_tokens=state.effective_window_tokens,
+        )
 
     async def capture_core_text(self, event: AgentEvent) -> None:
         """为 run_once/run 捕获本次助手文本，不参与终端或 TUI 渲染。"""
@@ -714,7 +717,6 @@ class AgentRuntimeCoordinator:
         self._execution.begin()
         identity._last_stop_reason = None
         try:
-            await self._capabilities.before_turn()
             if not identity.api_configured:
                 identity._emit_notice(
                     "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
@@ -728,6 +730,7 @@ class AgentRuntimeCoordinator:
             await self.compact_core_context_if_needed()
             if self._execution.cancelled:
                 return
+            await self._capabilities.before_turn(user_message)
             await self._runtime.prompt(user_message)
             self.sync_core_outcome()
             self._core_compaction_required = self._context_manager.should_compact(

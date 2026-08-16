@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 import pytest
@@ -10,6 +10,7 @@ from lion_code.capabilities import (
     CapabilityRuntime,
     CapabilitySpec,
 )
+from lion_code.core.messages import AgentMessage, UserMessage
 from lion_code.tooling.types import JSONValue, LionTool, ToolResult
 
 
@@ -44,7 +45,7 @@ class _FullCapability:
         self._events.append(f"{self._name}:render")
         return f"{self._name} prompt"
 
-    async def before_turn(self) -> None:
+    async def before_turn(self, _user_message: str) -> None:
         self._events.append(f"{self._name}:before")
 
     async def after_turn(self) -> None:
@@ -58,6 +59,21 @@ class _FullCapability:
 
     async def close(self) -> None:
         self._events.append(f"{self._name}:close")
+
+
+class _Projection:
+    def __init__(self, name: str, events: list[str]) -> None:
+        self.layer_id = name
+        self._events = events
+
+    def project(
+        self,
+        messages: Sequence[AgentMessage],
+        *,
+        max_tokens: int | None,
+    ) -> list[AgentMessage]:
+        self._events.append(f"{self.layer_id}:{max_tokens}")
+        return [*messages, UserMessage(content=self.layer_id)]
 
 
 def _full_spec(
@@ -89,7 +105,7 @@ async def test_full_spi_capability_contributes_and_dispatches_all_slots() -> Non
 
     await lifecycle.on_new_session()
     await lifecycle.on_restore_session()
-    await lifecycle.before_turn()
+    await lifecycle.before_turn("question")
     await lifecycle.after_turn()
     result = (
         await registry.tool_sources[0]
@@ -121,7 +137,7 @@ async def test_capability_runtime_preserves_dependency_order_and_closes_once() -
     registry.register(_full_spec(dependency))
     lifecycle = CapabilityRuntime(registry)
 
-    await lifecycle.before_turn()
+    await lifecycle.before_turn("question")
     await lifecycle.after_turn()
     await lifecycle.close()
     await lifecycle.close()
@@ -134,3 +150,32 @@ async def test_capability_runtime_preserves_dependency_order_and_closes_once() -
         "dependent:close",
         "dependency:close",
     ]
+
+
+def test_capability_runtime_folds_projection_layers_and_empty_is_identity() -> None:
+    events: list[str] = []
+    first = _Projection("first", events)
+    second = _Projection("second", events)
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(name="first", projection_layers=(first,)))
+    registry.register(
+        CapabilitySpec(
+            name="second",
+            projection_layers=(second,),
+            requires=frozenset({"first"}),
+        )
+    )
+
+    projected = CapabilityRuntime(registry).project_context(
+        [UserMessage(content="question")], max_tokens=128
+    )
+    assert [message.text for message in projected] == [
+        "question",
+        "first",
+        "second",
+    ]
+    assert events == ["first:128", "second:128"]
+
+    empty = CapabilityRuntime(CapabilityRegistry())
+    messages = [UserMessage(content="question")]
+    assert empty.project_context(messages, max_tokens=128) == messages

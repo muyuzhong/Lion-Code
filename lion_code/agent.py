@@ -29,12 +29,6 @@ from .core.harness import EventListener
 from .core.messages import AgentMessage
 from .core.provider import ModelProvider
 from .hooks import load_pre_tool_use_hooks
-from .memory_runtime import (
-    MemoryContextInjector,
-    MemoryCoordinator,
-    MemoryInjectionReport,
-    MemoryOverlay,
-)
 from .observers import TerminalRenderer
 from .permission_state import (
     PermissionMode,
@@ -69,9 +63,6 @@ from .ui import (
     print_sub_agent_start,
 )
 from .usage import UsageSnapshot
-
-_ORIGINAL_AGENT_SEMANTIC_EXTRACTOR: object | None = None
-
 
 def _agent_provider_factory(**kwargs: Any) -> ModelProvider:
     """保留 ``lion_code.agent.create_provider`` 的动态 monkeypatch seam。"""
@@ -447,42 +438,6 @@ class Agent:
         self._session_memory_coord.session_memory_error = value
 
     @property
-    def _project_context_files(self) -> tuple[Any, ...]:
-        return self._session_memory_coord.project_context_files
-
-    @property
-    def _project_memory_overlays(self) -> tuple[MemoryOverlay, ...]:
-        return self._session_memory_coord.project_memory_overlays
-
-    @property
-    def _memory_coordinator(self) -> MemoryCoordinator:
-        return self._session_memory_coord.memory_coordinator
-
-    @_memory_coordinator.setter
-    def _memory_coordinator(self, value: Any) -> None:
-        self._session_memory_coord.memory_coordinator = value
-
-    @property
-    def _memory_injector(self) -> MemoryContextInjector:
-        return self._session_memory_coord.memory_injector
-
-    @property
-    def _last_memory_injection(self) -> MemoryInjectionReport:
-        return self._session_memory_coord.last_memory_injection
-
-    @_last_memory_injection.setter
-    def _last_memory_injection(self, value: MemoryInjectionReport) -> None:
-        self._session_memory_coord.last_memory_injection = value
-
-    @property
-    def _turn_memory_overlays(self) -> tuple[MemoryOverlay, ...]:
-        return self._session_memory_coord.turn_memory_overlays
-
-    @_turn_memory_overlays.setter
-    def _turn_memory_overlays(self, value: tuple[MemoryOverlay, ...]) -> None:
-        self._session_memory_coord.turn_memory_overlays = value
-
-    @property
     def session_memory(self) -> SessionMemory | None:
         """返回最近的有效短期状态；初次读取损坏文件时为 None。"""
 
@@ -528,21 +483,6 @@ class Agent:
         """保存命令产生的短期状态，不改动当前轮已固定的 Overlay。"""
 
         self._session_memory_coord._save_session_memory(memory)
-
-    def _reload_project_memory(self) -> None:
-        """重新读取当前项目指令，始终保持在人写文件的只读边界内。"""
-
-        self._session_memory_coord._reload_project_memory()
-
-    def _build_turn_memory_overlays(self) -> tuple[MemoryOverlay, ...]:
-        """组合本轮不可变的项目、Session 与 Auto Memory。"""
-
-        return self._session_memory_coord._build_turn_memory_overlays()
-
-    def _prepare_turn_memory_snapshot(self, user_message: str) -> None:
-        """压缩后固定三层 Overlay，当前预取结果只留给下一轮。"""
-
-        self._session_memory_coord._prepare_turn_memory_snapshot(user_message)
 
     def abort(self) -> None:
         self._runtime_coordinator.abort()
@@ -791,41 +731,6 @@ class Agent:
         """从 JSONL 重建 Harness 唯一历史，并继续追加同一 Session。"""
         return await self._runtime_coordinator.restore_core_session(session_id)
 
-    def _reload_session_memory(self) -> None:
-        """重载当前项目状态；损坏文件仅暴露错误，绝不回写空状态。"""
-
-        self._session_memory_coord._reload_session_memory()
-
-    def _report_session_memory_error(self) -> None:
-        self._session_memory_coord._report_session_memory_error()
-
-    async def _update_session_memory_after_turn(
-        self,
-        user_message: str,
-        turn_start_index: int,
-    ) -> None:
-        """保存本轮确定性工具事实，再以受限模型 patch 补充任务语义。"""
-
-        await self._session_memory_coord._update_session_memory_after_turn(
-            user_message,
-            turn_start_index,
-            semantic_extractor=self._extract_session_memory_semantics,
-        )
-
-    async def _extract_session_memory_semantics(
-        self,
-        memory: SessionMemory,
-        user_message: str,
-        assistant_text: str,
-    ) -> dict[str, object]:
-        """让 side query 只提炼目标和交接语义，不接管工具事实。"""
-
-        return await self._session_memory_coord._extract_session_memory_semantics(
-            memory,
-            user_message,
-            assistant_text,
-        )
-
     async def restore_session_id(self, session_id: str) -> bool:
         """优先恢复 JSONL；Core 遇到旧 JSON 时原地迁移且保留源文件。"""
         if self._session_repository.exists(session_id):
@@ -928,6 +833,3 @@ class Agent:
 
     async def _confirm_dangerous(self, command: str) -> bool:
         return await self._confirmation.confirm(command)
-
-
-_ORIGINAL_AGENT_SEMANTIC_EXTRACTOR = Agent._extract_session_memory_semantics

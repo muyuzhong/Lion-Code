@@ -26,7 +26,7 @@ class _RecordingTurnParticipant:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def before_turn(self) -> None:
+    async def before_turn(self, _user_message: str) -> None:
         self.calls.append("before")
 
     async def after_turn(self) -> None:
@@ -188,7 +188,7 @@ class TestAgentCompositionWithCapabilities:
             terminal_output=False,
         )
 
-        asyncio.run(agent._capability_runtime.before_turn())  # noqa: SLF001
+        asyncio.run(agent._capability_runtime.before_turn("question"))  # noqa: SLF001
         asyncio.run(agent.close())
 
     def test_capability_runtime_after_turn_runs_on_early_chat_exit(self) -> None:
@@ -213,7 +213,7 @@ class TestAgentCompositionWithCapabilities:
         finally:
             asyncio.run(agent.close())
 
-        assert participant.calls == ["before", "after"]
+        assert participant.calls == ["after"]
 
     def test_session_participant_runs_after_new_identity_transition(self) -> None:
         """Session callbacks observe the new identity before Core is reset."""

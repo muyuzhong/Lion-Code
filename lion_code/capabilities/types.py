@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from lion_code.core.messages import AgentMessage
     from lion_code.tooling.types import LionTool
 
 
@@ -52,6 +53,20 @@ class PromptLayer(Protocol):
     def render(self) -> str: ...
 
 
+class ProjectionLayer(Protocol):
+    """在不修改 canonical history 的前提下贡献单次 Provider 投影。"""
+
+    @property
+    def layer_id(self) -> str: ...
+
+    def project(
+        self,
+        messages: Sequence[AgentMessage],
+        *,
+        max_tokens: int | None,
+    ) -> list[AgentMessage]: ...
+
+
 class TurnParticipant(Protocol):
     """Participates in the per-turn execution lifecycle.
 
@@ -61,7 +76,7 @@ class TurnParticipant(Protocol):
     protocol.
     """
 
-    async def before_turn(self) -> None: ...
+    async def before_turn(self, user_message: str) -> None: ...
 
     async def after_turn(self) -> None: ...
 
@@ -101,6 +116,9 @@ class CapabilitySpec:
         ``ToolSource`` instances whose tools should be registered.
     prompt_layers:
         ``PromptLayer`` instances whose fragments should be composed.
+    projection_layers:
+        ``ProjectionLayer`` instances that derive a per-request Provider
+        projection without changing canonical history.
     turn_participants:
         ``TurnParticipant`` instances that need per-turn hooks.
     session_participants:
@@ -115,6 +133,7 @@ class CapabilitySpec:
     name: str
     tool_sources: tuple[ToolSource, ...] = ()
     prompt_layers: tuple[PromptLayer, ...] = ()
+    projection_layers: tuple[ProjectionLayer, ...] = ()
     turn_participants: tuple[TurnParticipant, ...] = ()
     session_participants: tuple[SessionParticipant, ...] = ()
     resources: tuple[AsyncCloseable, ...] = ()
@@ -123,6 +142,9 @@ class CapabilitySpec:
     def __post_init__(self) -> None:
         object.__setattr__(self, "tool_sources", tuple(self.tool_sources))
         object.__setattr__(self, "prompt_layers", tuple(self.prompt_layers))
+        object.__setattr__(
+            self, "projection_layers", tuple(self.projection_layers)
+        )
         object.__setattr__(self, "turn_participants", tuple(self.turn_participants))
         object.__setattr__(
             self, "session_participants", tuple(self.session_participants)

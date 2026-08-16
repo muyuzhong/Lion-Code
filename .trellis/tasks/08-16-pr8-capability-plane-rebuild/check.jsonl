@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-16-pr8-capability-plane-rebuild/prd.md","reason":"Acceptance matrix: bare-path neutrality, narrow SPI only, un-skipped memory tests, slot inventory"}
+{"file":".trellis/tasks/08-16-pr8-capability-plane-rebuild/design.md","reason":"Expected slot mapping and timing invariants to verify against implementation"}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"Check no CapabilityContext/ServiceLocator regression and spec signature alignment"}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Check Kernel/Harness feature-blindness and layer import direction"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Project quality and verification requirements"}

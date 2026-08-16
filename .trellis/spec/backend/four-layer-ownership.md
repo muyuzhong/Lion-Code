@@ -109,14 +109,15 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 
 "core runtime 必须行为"措辞废弃，替换为 **Kernel 不变量**。
 
-> **PR1（Bare Agent Extraction）状态**：`AgentRuntimeCoordinator` 与 `SessionLifecycle`
-> 已完全移除 Memory 认知（`MemoryTurnHost`/`MemoryTurnPort` 桥、memory 构造参数、
-> turn/abort/clear/restore/close 中的 memory 编排全部删除）。turn 驱动的 Memory 自动行为
-> （`<relevant-memory>` 召回、overlay 注入、turn 后自动抽取）当前在 Core 生命周期中消失，
-> 属于迁移阶段问题，待 Capability re-home PR 恢复。相关测试
-> （`tests/memory_runtime/test_core_integration.py` 等）已标记 `skip` + re-home 理由。
-> `SessionMemoryCoordinator` 类保留，但不再桥接进 coordinator，仅服务独立于 turn 循环的
-> Memory 能力（持久化、命令）；Dream 委托已随 PR7a 删除。
+> **PR1 → PR8 状态**：`AgentRuntimeCoordinator` 与 `SessionLifecycle` 仍然不认识
+> Memory（没有 Memory 专属构造参数、符号或分支）。PR8 将原先删除的 turn 驱动行为
+> 通过通用 Capability SPI 恢复：Full 图注册 `MemoryCapability`，由
+> `TurnParticipant` 驱动快照/收尾、`ProjectionLayer` 生成临时 Provider 投影、
+> `SessionParticipant` 处理 clear/restore，`AsyncCloseable` 回收召回任务。
+> 因此 `<relevant-memory>` 不进入 canonical history 或 JSONL，Bare 图仍保持空
+> capability registry；`tests/memory_runtime/test_core_integration.py` 的 7 个迁移测试
+> 解除 skip 并验证真实行为。`SessionMemoryCoordinator` 只暴露 Memory capability
+> 所需的窄方法与既有命令面；Dream 委托已随 PR7a 删除。
 
 > **PR7a 状态**：Supervisor 对象（Autonomy/Dream/Learning 及其 model query）已从
 > Composition Root、`Agent` facade 与 CLI/Application/TUI 产品路径移除。
@@ -134,10 +135,11 @@ Supervisor ──► Capability ──► Harness ──► Kernel
 > capability 集合 API 已删除，Feature branch 只在 Composition Root 的
 > `_normalize_profile` 与各 `_build_*` 构造 helper（由架构测试强制）。
 
-> **PR2 / PR6 状态**：PR2 没有形成独立 PR，遗留的
+> **PR2 / PR6 / PR8 状态**：PR2 没有形成独立 PR，遗留的
 > `ProviderManager -> MemoryQuerySink` 依赖由 PR6 直接删除，不保留 deferred sink、兼容层
-> 或 fallback。Memory 在 Provider replacement 后刷新 query service 的行为不在 Bare 路径
-> 恢复，留给下一阶段 Feature Re-home。PR6 同时提供 `build_meta_agent()`：空
+> 或 fallback。PR8 让 `ProviderTextQueryService` 持有 Provider 对象或惰性工厂；Full
+> Composition Root 传入 live provider accessor，因此 Provider replacement 后 side query
+> 直接使用新 Provider，而不恢复 ProviderManager 通知链。PR6 同时提供 `build_meta_agent()`：空
 > `CapabilityRegistry` 与空 `ToolRegistry` 都是可运行状态，Coding tools 只能由调用方显式
 > 传入。`MetaAgent` facade 只暴露通用运行、对话、事件、上下文、会话、Provider、用量与
 > 关闭契约，不暴露任何 Feature-specific API。

@@ -18,6 +18,7 @@ from __future__ import annotations
 from .types import (
     AsyncCloseable,
     CapabilitySpec,
+    ProjectionLayer,
     PromptLayer,
     SessionParticipant,
     ToolSource,
@@ -204,6 +205,16 @@ class CapabilityRegistry:
         order = self._ensure_resolved()
         return tuple(
             layer for name in order for layer in self._specs[name].prompt_layers
+        )
+
+    @property
+    def projection_layers(self) -> tuple[ProjectionLayer, ...]:
+        """All per-request projection layers in dependency-resolved order."""
+        order = self._ensure_resolved()
+        return tuple(
+            layer
+            for name in order
+            for layer in self._specs[name].projection_layers
         )
 
     @property

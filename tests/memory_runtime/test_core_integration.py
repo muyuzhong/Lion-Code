@@ -20,11 +20,6 @@ from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 
-_REHOME = (
-    "PR1 Bare Agent Extraction: turn-driven Memory 自动行为已从 Core 生命周期移除，"
-    "待 Capability re-home PR 恢复"
-)
-
 
 class _QueryService:
     async def complete(
@@ -133,8 +128,14 @@ def _make_agent(
     async def no_semantic_patch(*_args, **_kwargs) -> dict[str, object]:
         return {}
 
-    monkeypatch.setattr(agent, "_extract_session_memory_semantics", no_semantic_patch)
-    agent._memory_coordinator = MemoryCoordinator(query_service=None)
+    monkeypatch.setattr(
+        agent._session_memory_coord,
+        "_extract_session_memory_semantics",
+        no_semantic_patch,
+    )
+    agent._session_memory_coord.memory_coordinator = MemoryCoordinator(
+        query_service=None
+    )
     return agent, fake, repository
 
 
@@ -175,13 +176,12 @@ def _evidence_tool_event() -> AssistantDoneEvent:
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason=_REHOME)
 async def test_overlay_reaches_provider_but_not_harness_or_jsonl(
     monkeypatch, tmp_path
 ) -> None:
     agent, fake, repository = _make_agent(monkeypatch, tmp_path, [_stop_event()])
     overlay = MemoryOverlay("project.md", "remember this", 13)
-    agent._memory_coordinator._active[overlay.path] = overlay
+    agent._session_memory_coord.memory_coordinator._active[overlay.path] = overlay
 
     await agent.chat("question")
 
@@ -196,7 +196,7 @@ async def test_overlay_reaches_provider_but_not_harness_or_jsonl(
     assert "<relevant-memory>" not in repository.storage_for(
         agent.session_id
     ).path.read_text(encoding="utf-8")
-    assert agent._last_memory_injection.injected_paths == (
+    assert agent._session_memory_coord.last_memory_injection.injected_paths == (
         str(agent._session_memory_repository.path),
         "project.md",
     )
@@ -204,7 +204,6 @@ async def test_overlay_reaches_provider_but_not_harness_or_jsonl(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason=_REHOME)
 async def test_project_overlay_reaches_provider_but_not_harness_or_jsonl(
     monkeypatch, tmp_path
 ) -> None:
@@ -229,7 +228,7 @@ async def test_project_overlay_reaches_provider_but_not_harness_or_jsonl(
     state = await repository.load(agent.session_id)
     assert state is not None
     assert all("<relevant-memory>" not in message.text for message in state.messages)
-    assert agent._last_memory_injection.injected_paths == (
+    assert agent._session_memory_coord.last_memory_injection.injected_paths == (
         "C:/repo/AGENTS.md",
         str(agent._session_memory_repository.path),
     )
@@ -278,7 +277,6 @@ async def test_clear_and_restore_keep_current_project_session_memory(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason=_REHOME)
 async def test_corrupt_session_memory_stays_visible_without_clear_overwrite(
     monkeypatch, tmp_path
 ) -> None:
@@ -311,7 +309,6 @@ async def test_corrupt_session_memory_stays_visible_without_clear_overwrite(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason=_REHOME)
 async def test_turn_end_merges_tool_evidence_before_semantic_patch(
     monkeypatch, tmp_path
 ) -> None:
@@ -334,7 +331,11 @@ async def test_turn_end_merges_tool_evidence_before_semantic_patch(
             "verification": ["model-invented verification"],
         }
 
-    monkeypatch.setattr(agent, "_extract_session_memory_semantics", semantic_patch)
+    monkeypatch.setattr(
+        agent._session_memory_coord,
+        "_extract_session_memory_semantics",
+        semantic_patch,
+    )
 
     await agent.chat("记录这轮进展")
 
@@ -351,7 +352,6 @@ async def test_turn_end_merges_tool_evidence_before_semantic_patch(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason=_REHOME)
 async def test_semantic_patch_failure_still_saves_tool_evidence(
     monkeypatch, tmp_path
 ) -> None:
@@ -369,7 +369,7 @@ async def test_semantic_patch_failure_still_saves_tool_evidence(
         raise RuntimeError("semantic memory unavailable")
 
     monkeypatch.setattr(
-        agent,
+        agent._session_memory_coord,
         "_extract_session_memory_semantics",
         unavailable_semantic_patch,
     )
@@ -383,7 +383,6 @@ async def test_semantic_patch_failure_still_saves_tool_evidence(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason=_REHOME)
 async def test_current_turn_prefetch_waits_until_next_user_turn_and_snapshot_is_fixed(
     monkeypatch, tmp_path
 ) -> None:
@@ -395,7 +394,9 @@ async def test_current_turn_prefetch_waits_until_next_user_turn_and_snapshot_is_
         [_tool_event(), _stop_event(), _stop_event("next turn")],
         registry,
     )
-    agent._memory_coordinator = MemoryCoordinator(query_service=_QueryService())
+    agent._session_memory_coord.memory_coordinator = MemoryCoordinator(
+        query_service=_QueryService()
+    )
 
     async def complete() -> list[RelevantMemory]:
         return [RelevantMemory("current.md", "current memory", 0, "")]
@@ -438,7 +439,9 @@ async def test_prefetch_failure_does_not_interrupt_tool_loop(
         [_tool_event(), _stop_event("after failure")],
         registry,
     )
-    agent._memory_coordinator = MemoryCoordinator(query_service=_QueryService())
+    agent._session_memory_coord.memory_coordinator = MemoryCoordinator(
+        query_service=_QueryService()
+    )
 
     async def fail() -> list[RelevantMemory]:
         raise RuntimeError("memory unavailable")
@@ -457,20 +460,19 @@ async def test_prefetch_failure_does_not_interrupt_tool_loop(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason=_REHOME)
 async def test_clear_and_restore_drop_previous_overlay(monkeypatch, tmp_path) -> None:
     first, _, repository = _make_agent(monkeypatch, tmp_path, [_stop_event()])
     await first.chat("first question")
 
     second, _, _ = _make_agent(monkeypatch, tmp_path, [])
     old = MemoryOverlay("old.md", "old", 3)
-    second._memory_coordinator._active[old.path] = old
+    second._session_memory_coord.memory_coordinator._active[old.path] = old
     assert await second.restore_core_session(first.session_id)
-    assert second._memory_coordinator.active_overlays == ()
+    assert second._session_memory_coord.memory_coordinator.active_overlays == ()
 
-    second._memory_coordinator._active[old.path] = old
+    second._session_memory_coord.memory_coordinator._active[old.path] = old
     await second.clear_history()
-    assert second._memory_coordinator.active_overlays == ()
+    assert second._session_memory_coord.memory_coordinator.active_overlays == ()
     assert repository.storage_for(first.session_id).path.exists()
     await first.close()
     await second.close()
@@ -490,9 +492,9 @@ async def test_sub_agent_on_core_skips_memory_prefetch(monkeypatch, tmp_path) ->
         )
 
     with patch.object(
-        agent._memory_coordinator,
+        agent._session_memory_coord.memory_coordinator,
         "begin_turn",
-        wraps=agent._memory_coordinator.begin_turn,
+        wraps=agent._session_memory_coord.memory_coordinator.begin_turn,
     ) as begin_turn:
         await agent.chat("sub question")
 

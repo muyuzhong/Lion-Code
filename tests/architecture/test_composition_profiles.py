@@ -41,6 +41,7 @@ from lion_code.tooling.types import LionTool, ToolResult
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
 PROFILES_PATH = SOURCE_ROOT / "composition" / "profiles.py"
+SUBAGENT_FACTORY_PATH = SOURCE_ROOT / "subagent_factory.py"
 
 _PROFILE_CLASSES = ("MinimalProfile", "CodingProfile", "FullProfile")
 
@@ -219,9 +220,9 @@ def test_full_graph_contains_memory_plan_subagent_skill_and_extensions(
         "skill",
         "subagent",
         "plan",
+        "memory",
         "example-extension",
     }
-    # Memory 由 SessionMemoryCoordinator 组合，不是 CapabilityRegistry spec。
     assert composition.plan is not None
     assert composition.subagent_factory is not None
     assert composition.skill_runtime is not None
@@ -302,6 +303,34 @@ def test_build_meta_agent_and_build_coding_agent_return_meta_facade(
     assert isinstance(coding, MetaAgent)
     asyncio.run(meta.close())
     asyncio.run(coding.close())
+
+
+def test_subagent_factory_reuses_coding_composition_entrypoint() -> None:
+    """子 Agent 必须经 CodingProfile 进入唯一 Composition Root。"""
+
+    tree = ast.parse(
+        SUBAGENT_FACTORY_PATH.read_text(encoding="utf-8"),
+        filename=str(SUBAGENT_FACTORY_PATH),
+    )
+    imports = {
+        (node.level, node.module, alias.name)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module is not None
+        for alias in node.names
+    }
+    assert (1, "meta_agent", "build_coding_agent") in imports
+    assert not {
+        (level, module)
+        for level, module, _name in imports
+        if level == 1 and module in {"agent", "agent_runtime"}
+    }
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "build_coding_agent"
+        for node in ast.walk(tree)
+    )
 
 
 # ---------------------------------------------------------------------------

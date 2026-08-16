@@ -247,7 +247,7 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
 
     async def test_timeout_covers_initial_capability_turn(self) -> None:
         class SlowTurnParticipant:
-            async def before_turn(self) -> None:
+            async def before_turn(self, _user_message: str) -> None:
                 await asyncio.sleep(0.2)
 
             async def after_turn(self) -> None:
