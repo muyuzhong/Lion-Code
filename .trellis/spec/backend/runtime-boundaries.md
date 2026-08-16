@@ -342,7 +342,6 @@ class SubagentFactory:
         self,
         *,
         registry: ToolRegistry,
-        environment: ToolEnvironment,
         child_config: Callable[[], ChildAgentConfig],
     ) -> None: ...
 ```
@@ -683,7 +682,7 @@ Usage has its own executable contract in
 - `SessionMemoryCoordinator` receives project identity/repository, transcript,
   cancellation View, the typed project-context loader, notice,
   current Memory query service, and the sub-agent flag. It does not receive
-  Agent, ToolContext, ToolEnvironment, ToolRegistry, Provider, Permission,
+  Agent, ToolContext, ToolRegistry, Provider, Permission,
   Core Runtime implementations, or any Dream runner/callback (PR7a deleted the
   Dream constructor dependency, `/dream` delegation, status callback, and
   refresh callback).
