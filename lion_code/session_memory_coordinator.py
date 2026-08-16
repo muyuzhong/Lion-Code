@@ -7,7 +7,7 @@ Agent、Provider、Tool Runtime 或界面实现。
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 
 from .core.cancellation import CancellationView
@@ -70,9 +70,6 @@ def _parse_session_memory_patch(raw: str) -> dict[str, object]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
-
-
-SemanticExtractor = Callable[[SessionMemory, str, str], Awaitable[dict[str, object]]]
 
 
 class SessionMemoryCoordinator:
@@ -183,12 +180,6 @@ class SessionMemoryCoordinator:
     def turn_memory_overlays(self, value: tuple[MemoryOverlay, ...]) -> None:
         self._turn_memory_overlays = value
 
-    def set_query_service(self, service: TextQueryService | None) -> None:
-        """绑定当前 Core Provider 的 side-query，并取消旧 Provider 的预取。"""
-
-        self._query = service
-        self._memory_coordinator.set_query_service(service)
-
     def show_session_memory(self) -> str:
         """读取并展示当前项目短期状态，不触碰 JSONL transcript。"""
 
@@ -281,14 +272,40 @@ class SessionMemoryCoordinator:
         overlays.extend(self._memory_coordinator.active_overlays)
         return tuple(overlays)
 
-    def _prepare_turn_memory_snapshot(self, user_message: str) -> None:
-        """压缩后固定三层 Overlay，当前预取结果只留给下一轮。"""
+    def begin_user_turn(self, user_message: str) -> None:
+        """在压缩后的 transcript 上固定本轮 Overlay 并启动召回预取。"""
 
         if not self._is_sub_agent:
             self._reload_session_memory()
             self._report_session_memory_error()
             self._memory_coordinator.collect_ready()
             self._memory_coordinator.begin_turn(user_message)
+        self._turn_memory_overlays = self._build_turn_memory_overlays()
+
+    def project(
+        self,
+        messages: Sequence[AgentMessage],
+        *,
+        max_tokens: int | None,
+    ) -> list[AgentMessage]:
+        """把本轮 Memory 非破坏性地叠加到 Provider 投影。"""
+
+        projected, report = self._memory_injector.inject(
+            tuple(messages),
+            self._turn_memory_overlays,
+            max_tokens=max_tokens,
+        )
+        self._last_memory_injection = report
+        return projected
+
+    def reset_for_session(self) -> None:
+        """清空旧会话运行态并重载项目、Session Memory。"""
+
+        self._memory_coordinator.reset()
+        self._reload_project_memory()
+        self._reload_session_memory()
+        self._reported_session_memory_error = None
+        self._last_memory_injection = MemoryInjectionReport()
         self._turn_memory_overlays = self._build_turn_memory_overlays()
 
     def _reload_session_memory(self) -> None:
@@ -308,39 +325,37 @@ class SessionMemoryCoordinator:
         self._reported_session_memory_error = error
         self._notices.emit(f"Session Memory unavailable: {error}", role="error")
 
-    async def _update_session_memory_after_turn(
+    async def finish_user_turn(
         self,
         user_message: str,
         turn_start_index: int,
-        *,
-        semantic_extractor: SemanticExtractor | None = None,
     ) -> None:
-        """保存本轮确定性工具事实，再以受限模型 patch 补充任务语义。"""
+        """保存本轮工具事实与受限语义 patch，并刷新下一轮 Overlay。"""
 
-        if self._session_memory is None or self._session_memory_error is not None:
-            return
-        messages = self._transcript.messages[turn_start_index:]
-        if not messages:
-            return
-        memory = apply_tool_evidence(
-            self._session_memory,
-            extract_tool_evidence(messages),
-        )
-        if not self._cancellation.cancelled:
-            try:
-                extractor = semantic_extractor or self._extract_session_memory_semantics
-                patch = await extractor(
-                    memory,
-                    user_message,
-                    _turn_assistant_text(messages),
+        if self._cancellation.cancelled:
+            self._memory_coordinator.cancel_pending()
+        if not self._is_sub_agent and self._session_memory is not None:
+            messages = self._transcript.messages[turn_start_index:]
+            if messages and self._session_memory_error is None:
+                memory = apply_tool_evidence(
+                    self._session_memory,
+                    extract_tool_evidence(messages),
                 )
-            except Exception:
-                patch = {}
-            memory = apply_semantic_patch(memory, patch)
-        try:
-            self._session_memory = self._session_memory_repository.save(memory)
-        except SessionMemoryError as error:
-            self._session_memory_error = str(error)
+                if not self._cancellation.cancelled:
+                    try:
+                        patch = await self._extract_session_memory_semantics(
+                            memory,
+                            user_message,
+                            _turn_assistant_text(messages),
+                        )
+                    except Exception:
+                        patch = {}
+                    memory = apply_semantic_patch(memory, patch)
+                try:
+                    self._session_memory = self._session_memory_repository.save(memory)
+                except SessionMemoryError as error:
+                    self._session_memory_error = str(error)
+        self._turn_memory_overlays = self._build_turn_memory_overlays()
 
     async def _extract_session_memory_semantics(
         self,

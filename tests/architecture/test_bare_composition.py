@@ -59,6 +59,7 @@ _BARE_GENERIC_FILES = (
 )
 _FEATURE_MODULE_PREFIXES = (
     "lion_code.autonomy_runtime",
+    "lion_code.capabilities.memory",
     "lion_code.capabilities.plan",
     "lion_code.capabilities.skill",
     "lion_code.capabilities.subagent",
@@ -79,6 +80,10 @@ _FEATURE_SYMBOLS = {
     "LearningRuntime",
     "MemoryContextInjector",
     "MemoryCoordinator",
+    "MemoryProjectionLayer",
+    "MemoryResource",
+    "MemorySessionParticipant",
+    "MemoryTurnParticipant",
     "MemoryQuerySink",
     "PlanRuntime",
     "PlanState",
@@ -90,6 +95,7 @@ _FEATURE_SYMBOLS = {
     "SkillRuntime",
     "SubagentExecutor",
     "SubagentFactory",
+    "create_memory_capability",
 }
 
 # Bare 图禁止出现的 Feature 字段（AgentComposition 中应为 None）。

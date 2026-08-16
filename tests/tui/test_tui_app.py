@@ -201,7 +201,9 @@ def app_factory():
                 session_repository=repository,
                 session_memory_repository=session_memory_repository,
         )
-        agent._extract_session_memory_semantics = _no_session_memory_semantics
+        agent._session_memory_coord._extract_session_memory_semantics = (
+            _no_session_memory_semantics
+        )
         return LionTuiApp(LionCodingSession(backend=agent))
 
     yield factory

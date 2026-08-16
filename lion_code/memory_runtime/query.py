@@ -32,7 +32,7 @@ class ProviderTextQueryService:
     def __init__(
         self,
         *,
-        provider: ModelProvider,
+        provider: ModelProvider | Callable[[], ModelProvider],
         model: str | Callable[[], str],
     ) -> None:
         self._provider = provider
@@ -46,9 +46,10 @@ class ProviderTextQueryService:
         max_output_tokens: int = 256,
     ) -> str:
         del max_output_tokens
+        provider = self._provider() if callable(self._provider) else self._provider
         model = self._model() if callable(self._model) else self._model
         return await complete_text(
-            self._provider,
+            provider,
             model=model,
             system=system,
             messages=[UserMessage(content=user)],

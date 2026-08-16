@@ -133,7 +133,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 session_repository=self._session_repository,
                 session_memory_repository=self._session_memory_repository,
             )
-        agent._extract_session_memory_semantics = _no_session_memory_semantics
+        agent._session_memory_coord._extract_session_memory_semantics = (
+            _no_session_memory_semantics
+        )
         return LionCodingSession(agent), agent, fake
 
     # ─── 构造约束 ────────────────────────────────────────────
@@ -157,7 +159,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
             )
-            agent._extract_session_memory_semantics = _no_session_memory_semantics
+            agent._session_memory_coord._extract_session_memory_semantics = (
+                _no_session_memory_semantics
+            )
             await agent.chat("first")
 
             recorder = agent._session_recorder
@@ -434,7 +438,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 "recent answer",
             ],
         )
-        self.assertEqual(projected[3], "trigger overflow")
+        self.assertTrue(
+            projected[3].startswith("trigger overflow\n\n<relevant-memory>")
+        )
 
         entries = await self._session_repository.storage_for(
             agent.session_id

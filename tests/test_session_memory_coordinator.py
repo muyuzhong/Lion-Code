@@ -30,20 +30,20 @@ class TestSessionMemoryCoordinator(unittest.IsolatedAsyncioTestCase):
         await self._agent.close()
         self._temp_dir.cleanup()
 
-    async def test_agent_owns_memory_state_through_coordinator(self) -> None:
+    async def test_memory_state_and_query_are_owned_by_coordinator(self) -> None:
         self.assertIsInstance(
             self._agent._session_memory_coord,
             SessionMemoryCoordinator,
         )
         self.assertIs(
-            self._agent._memory_coordinator,
+            self._agent._session_memory_coord.memory_coordinator,
             self._agent._session_memory_coord.memory_coordinator,
         )
-        query_service = self._agent._memory_coordinator._query_service
+        query_service = self._agent._session_memory_coord._query
         self.assertIsInstance(query_service, ProviderTextQueryService)
-        self.assertIs(query_service._provider, self._agent.core_runtime.provider)
+        self.assertIs(query_service._provider(), self._agent.core_runtime.provider)
 
-    async def test_agent_private_state_setters_preserve_test_and_runtime_seams(
+    async def test_agent_session_memory_commands_use_coordinator_state(
         self,
     ) -> None:
         memory = SessionMemory(
@@ -52,12 +52,6 @@ class TestSessionMemoryCoordinator(unittest.IsolatedAsyncioTestCase):
         )
         self._agent._session_memory = self._repository.save(memory)
         self.assertEqual(self._agent.session_memory.active_task, "验证协调器")
-
-        original = self._agent._memory_coordinator
-        replacement = Mock()
-        self._agent._memory_coordinator = replacement
-        self.assertIs(self._agent._memory_coordinator, replacement)
-        self._agent._memory_coordinator = original
 
     async def test_public_commands_remain_thin_coordinator_delegates(self) -> None:
         self._agent._session_memory_coord.show_active_task = Mock(

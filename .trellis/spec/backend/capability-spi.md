@@ -38,8 +38,18 @@ class PromptLayer(Protocol):
     def layer_id(self) -> str: ...
     def render(self) -> str: ...
 
+class ProjectionLayer(Protocol):
+    @property
+    def layer_id(self) -> str: ...
+    def project(
+        self,
+        messages: Sequence[AgentMessage],
+        *,
+        max_tokens: int | None,
+    ) -> list[AgentMessage]: ...
+
 class TurnParticipant(Protocol):
-    async def before_turn(self) -> None: ...
+    async def before_turn(self, user_message: str) -> None: ...
     async def after_turn(self) -> None: ...
 
 class SessionParticipant(Protocol):
@@ -51,6 +61,7 @@ class CapabilitySpec:
     name: str
     tool_sources: tuple[ToolSource, ...] = ()
     prompt_layers: tuple[PromptLayer, ...] = ()
+    projection_layers: tuple[ProjectionLayer, ...] = ()
     turn_participants: tuple[TurnParticipant, ...] = ()
     session_participants: tuple[SessionParticipant, ...] = ()
     resources: tuple[AsyncCloseable, ...] = ()
@@ -64,6 +75,8 @@ class CapabilityRegistry:
     @property
     def prompt_layers(self) -> tuple[PromptLayer, ...]: ...
     @property
+    def projection_layers(self) -> tuple[ProjectionLayer, ...]: ...
+    @property
     def turn_participants(self) -> tuple[TurnParticipant, ...]: ...
     @property
     def session_participants(self) -> tuple[SessionParticipant, ...]: ...
@@ -72,10 +85,16 @@ class CapabilityRegistry:
     async def close_all(self) -> None: ...
 
 class CapabilityLifecycle(Protocol):
-    async def before_turn(self) -> None: ...
+    async def before_turn(self, user_message: str) -> None: ...
     async def after_turn(self) -> None: ...
     async def on_new_session(self) -> None: ...
     async def on_restore_session(self) -> None: ...
+    def project_context(
+        self,
+        messages: list[AgentMessage],
+        *,
+        max_tokens: int | None,
+    ) -> list[AgentMessage]: ...
     async def close(self) -> None: ...
 
 class CapabilityRuntime(CapabilityLifecycle):
@@ -126,10 +145,21 @@ still allow mutation behind the registry's dependency-order cache.
 ### Aggregated Extension Slots
 
 1. Each aggregated property (``tool_sources``, ``prompt_layers``,
-   ``turn_participants``, ``session_participants``, ``resources``) returns
+   ``projection_layers``, ``turn_participants``, ``session_participants``,
+   ``resources``) returns
    contributions in dependency-resolved order, flattening all capabilities.
 2. Properties auto-resolve lazily—callers do not need to call ``resolve()``
    explicitly unless they want to fail fast.
+
+3. ``ProjectionLayer.project()`` receives the current Provider projection and
+   returns a new sequence. It must not mutate canonical history, JSONL state, or
+   the input sequence; ``max_tokens`` is the caller's effective context budget.
+   ``CapabilityRuntime.project_context()`` folds layers in dependency-resolved
+   order and is identity-preserving when the registry has no layers.
+
+4. ``CapabilityLifecycle.before_turn(user_message)`` runs after generic session
+   readiness and compaction checks but before the Provider stream. Its
+   ``after_turn()`` counterpart runs from the coordinator's ``finally`` path.
 
 ### Resource Closure
 
@@ -166,6 +196,9 @@ still allow mutation behind the registry's dependency-order cache.
 | ``close_all()`` with no resources | Completes without error |
 | Property access before ``resolve()`` | Lazy resolution; no explicit call needed |
 | New ``register()`` after ``resolve()`` | Cached order invalidated; next access re-resolves |
+| Empty projection registry | Return the original messages unchanged |
+| Multiple projection layers | Fold in dependency-resolved order and pass the same token budget |
+| Turn participant receives the user input | Pass the exact ``user_message`` string; do not expose an Agent/context object |
 
 ## 5. Executable Enforcement
 
@@ -258,6 +291,34 @@ The tool-bearing capabilities use construction-time command binding:
 - The prompt layer renders the current Plan state on every Composer request;
   it does not mutate Plan state or retain a prompt mirror.
 
+### MemoryCapability (``capabilities/memory.py``)
+
+- ``create_memory_capability(coordinator, transcript)`` contributes exactly the
+  slots needed by the existing Memory behavior: ``MemoryTurnParticipant`` for
+  turn-start overlay snapshots and post-turn evidence/semantic persistence,
+  ``MemorySessionParticipant`` for clear/restore reset and reload,
+  ``MemoryProjectionLayer`` for the temporary ``<relevant-memory>`` Provider
+  projection, and ``MemoryResource`` for closing pending recall work.
+- ``SessionMemoryCoordinator`` exposes only the narrow capability methods
+  ``begin_user_turn()``, ``finish_user_turn()``, ``project()``, and
+  ``reset_for_session()`` for this integration. It receives a
+  ``ProviderTextQueryService`` whose provider is resolved lazily, so Provider
+  replacement is visible without a ProviderManager-to-Memory callback.
+- Projection is applied after generic ``ContextManager`` preparation and only
+  to the Provider request. The injected wrapper never enters canonical Core
+  messages, compaction input, or JSONL. A cancelled turn still saves
+  deterministic tool evidence, cancels unfinished recall, and never leaks a
+  stale result into a later turn.
+
+### Future external-tool capabilities (MCP boundary)
+
+MCP is not a current capability and must not be reintroduced into
+``ToolEnvironment`` or generic Harness code. If a future external-tool
+capability owns a connection, process, or background task, the capability must
+declare that resource through ``resources``/``AsyncCloseable`` and close it in
+the registry's reverse dependency order. The generic tool/runtime layers must
+consume only the resulting ``ToolSource`` contract.
+
 ### Dynamic wakeup tool
 
 - ``create_wakeup_tool(runtime.schedule_wakeup)`` captures the command while
@@ -298,10 +359,13 @@ The tool-bearing capabilities use construction-time command binding:
   inherited capability tool objects with tools bound to the child runtimes;
   ordinary built-in and caller tools remain shared by registry view.
 - ``CapabilityRuntime`` is the only generic lifecycle adapter. It dispatches
-  turn and session participants from the registry and closes registry resources
-  once; it does not expose capability lookup or kernel state.
+  projection, turn, and session participants from the registry and closes
+  registry resources once; it does not expose capability lookup or kernel state.
+- ``AgentRuntimeCoordinator.prepare_core_context()`` calls the lifecycle port's
+  ``project_context()`` after generic context preparation. The coordinator only
+  knows the generic projection port.
 - ``AgentRuntimeCoordinator.chat()`` calls the lifecycle port's
-  ``before_turn()`` and invokes ``after_turn()`` from a ``finally`` block
+  ``before_turn(user_message)`` after compaction and invokes ``after_turn()`` from a ``finally`` block
   covering early exits, cancellation, and Provider/tool failures.
 - ``SessionLifecycle`` receives the same lifecycle port for new/restore
   callbacks and close; capability resources are released once by

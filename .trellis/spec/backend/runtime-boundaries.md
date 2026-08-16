@@ -120,10 +120,16 @@ class PromptComposer:
     def set_dynamic_context(self, dynamic_context: str) -> None: ...
 
 class CapabilityLifecycle(Protocol):
-    async def before_turn(self) -> None: ...
+    async def before_turn(self, user_message: str) -> None: ...
     async def after_turn(self) -> None: ...
     async def on_new_session(self) -> None: ...
     async def on_restore_session(self) -> None: ...
+    def project_context(
+        self,
+        messages: list[AgentMessage],
+        *,
+        max_tokens: int | None,
+    ) -> list[AgentMessage]: ...
     async def close(self) -> None: ...
 
 class ToolCommand(Protocol):
@@ -515,8 +521,11 @@ while `SessionLifecycle` is the only post-construction writer for new/restore
 transitions. `Agent.session_id`, `Agent.session_start_time`, `ToolContext.session`,
 Recorder construction, and application session metadata are read-only projections.
 For cancellation, `ExecutionControl` owns the one Core `CancellationToken` and
-`AgentRuntimeCoordinator` owns begin/cancel orchestration, including Memory prefetch,
-Core stream, compaction, explicit abort, and timeout side effects. Standalone
+`AgentRuntimeCoordinator` owns begin/cancel orchestration for the Core stream,
+compaction, explicit abort, and timeout side effects. Memory prefetch is owned by
+the Memory capability's turn participant/resource; cancelled-turn cleanup is
+requested through the coordinator's narrow Memory method, not a generic abort hook.
+Standalone
 `AgentHarness` owns its local token only when no external cancellation view is
 supplied. When a coordinator-owned `LionAgentRuntime` receives that external
 view, its `cancel()` command must route back to `ExecutionControl.cancel()`;
@@ -592,8 +601,9 @@ Usage has its own executable contract in
 - `Agent.configure_api()` is an idle-only transaction. Build the replacement Provider
   first, replace it without clearing canonical history, update stored credentials and
   model, refresh the compactor and model-limit cache, then schedule the old Provider
-  for closing. Provider replacement no longer refreshes a Memory query service in
-  Bare Harness; that Capability-owned behavior waits for Feature Re-home.
+  for closing. The Full Memory capability's `ProviderTextQueryService` resolves
+  its Provider lazily through the live Core runtime, so side queries use the
+  replacement without a ProviderManager-to-Memory notification.
 - `ProviderManager` owns that configuration transaction and all Provider/Thinking commands.
   `ProviderView` is the only provider/model/thinking projection exposed to consumers;
   credentials and base URLs stay inside the manager.
@@ -620,6 +630,11 @@ Usage has its own executable contract in
   `ExecutionControl`. A new chat calls `begin()` before setup; explicit abort and
   timeout call the same coordinator cancellation path, while timeout retains its
   distinct final stop reason.
+- `CapabilityRuntime` is the only generic Capability lifecycle adapter. It folds
+  `ProjectionLayer` contributions after `ContextManager.prepare()`, passes the
+  exact user message to `before_turn()`, and invokes `after_turn()` from the
+  coordinator's `finally` path. An empty registry is an identity projection and
+  does not create feature behavior.
 - Core Provider and Tool contracts consume `CancellationView`; one concrete
   `CancellationToken` reaches the Provider stream and Tool adapter. `ToolContext`
   stores `session: SessionView` and `cancellation: CancellationView`, never
@@ -688,7 +703,9 @@ Usage has its own executable contract in
   Both are Supervisor-owned runtimes with no production caller after PR7a.
 - `SessionMemoryCoordinator` receives project identity/repository, transcript,
   cancellation View, the typed project-context loader, notice,
-  current Memory query service, and the sub-agent flag. It does not receive
+  current Memory query service, and the sub-agent flag. Its Capability-facing
+  methods are `begin_user_turn()`, `finish_user_turn()`, `project()`, and
+  `reset_for_session()`; it does not receive
   Agent, ToolContext, ToolRegistry, Provider, Permission,
   Core Runtime implementations, or any Dream runner/callback (PR7a deleted the
   Dream constructor dependency, `/dream` delegation, status callback, and
@@ -728,16 +745,22 @@ Usage has its own executable contract in
   Project and Session layers are required overlays; canonical Core messages and JSONL
   never contain their XML wrapper or injected text.
 - `SessionMemoryCoordinator` owns project identity, Session Memory persistence,
-  project/turn overlays, Auto Memory recall coordination, Dream, and post-turn
-  Session Memory updates. `Agent` is the facade for the graph assembled by
-  `composition/agent_builder.py` and exposes compatibility delegates; the coordinator receives its
-  transcript, query, state views, and commands independently rather than through an
-  Agent-shaped host or global service locator.
-- A root chat compresses canonical context first, reloads and fixes the Session Memory
-  snapshot, collects any completed Auto Memory recall, starts recall for the next
-  turn, and then calls the Provider. Tool-loop Provider calls reuse exactly that
-  snapshot. At turn end deterministic tool evidence is saved before the bounded
-  semantic patch; a failed patch cannot erase file or verification facts.
+  project/turn overlays, Auto Memory recall coordination, and post-turn Session
+  Memory updates. The Full composition registers it through `MemoryCapability`:
+  `MemoryTurnParticipant` owns the turn boundary, `MemoryProjectionLayer` owns
+  the temporary Provider projection, `MemorySessionParticipant` owns clear/restore
+  reset, and `MemoryResource` closes pending recall work. `Agent` is the facade
+  for the graph assembled by `composition/agent_builder.py`; the coordinator
+  receives its transcript, query, state views, and commands independently rather
+  than through an Agent-shaped host or global service locator.
+- A root chat compresses canonical context first, then the generic lifecycle calls
+  `before_turn(user_message)`, which reloads and fixes the Session Memory snapshot,
+  collects completed Auto Memory recall, and starts recall for the next turn.
+  `prepare_core_context()` applies the capability projection after generic context
+  preparation; Tool-loop Provider calls reuse exactly the turn-start snapshot.
+  At turn end deterministic tool evidence is saved before the bounded semantic
+  patch; a failed patch cannot erase file or verification facts. A cancelled turn
+  cancels pending recall and still preserves deterministic tool evidence.
 - `/clear` starts a new JSONL conversation but retains the current project's Session
   Memory. Restoring JSONL reloads the current project state rather than treating an
   old transcript as the work-state authority.

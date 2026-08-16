@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-16-pr8-capability-plane-rebuild/prd.md","reason":"PR8 requirements: memory re-home, SPI minimal extension, per-capability slot review, acceptance matrix"}
+{"file":".trellis/tasks/08-16-pr8-capability-plane-rebuild/design.md","reason":"Behavior-to-slot mapping, ProjectionLayer primitive, chat timing, memory capability assembly, gating sync"}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"Existing narrow SPI contracts: slots, registry, runtime, forbidden god-object patterns"}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Layer ownership and PR1/PR2/PR6/PR7 migration status that PR8 closes"}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Coordinator, session lifecycle, and context projection wiring contracts"}

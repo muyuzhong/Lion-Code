@@ -20,6 +20,7 @@ from ..capabilities import (
     CapabilityRegistry,
     CapabilityRuntime,
     CapabilitySpec,
+    create_memory_capability,
     create_plan_capability,
     create_skill_capability,
     create_subagent_capability,
@@ -302,6 +303,7 @@ def build_agent_composition(profile: Profile) -> AgentComposition:
         provider_graph,
         runtime_coordinator,
         selection.capabilities,
+        capability_registry,
     )
     session_memory_coord = session_graph.session_memory_coordinator
 
@@ -764,6 +766,7 @@ def _build_session_graph(
     provider_graph: _ProviderGraph,
     runtime_coordinator: AgentRuntimeCoordinator,
     capabilities: frozenset[str],
+    capability_registry: CapabilityRegistry,
 ) -> _SessionGraph:
     session_memory_coord: SessionMemoryCoordinator | None = None
     if _CAP_MEMORY in capabilities:
@@ -771,7 +774,7 @@ def _build_session_graph(
         assert foundation.notice_sink is not None
         identity = foundation.resolve_identity(foundation.cwd)
         memory_query = ProviderTextQueryService(
-            provider=provider_graph.provider,
+            provider=lambda: runtime_coordinator.core_runtime.provider,
             model=lambda: provider_graph.provider_manager.model,
         )
         session_memory_coord = SessionMemoryCoordinator(
@@ -785,6 +788,12 @@ def _build_session_graph(
             notices=foundation.notice_sink,
             query=memory_query,
             is_sub_agent=config.is_sub_agent,
+        )
+        capability_registry.register(
+            create_memory_capability(
+                session_memory_coord,
+                runtime_coordinator.core_runtime,
+            )
         )
     return _SessionGraph(session_memory_coordinator=session_memory_coord)
 
