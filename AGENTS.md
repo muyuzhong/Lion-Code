@@ -70,6 +70,16 @@
   `git push --force-with-lease origin <branch>`。
   本地 master 引用陈旧时先 `git checkout -B master origin/master` 对齐，
   否则 `gh pr merge` 会报 "not possible to fast-forward" 警告（squash 合并实际仍会成功）。
+- **链上多条 PR 同时打开时按链路顺序合并**：先合最上游（PR7b #36 → PR7c #37 →
+  PR8 #38），每合一个就把下游 rebase 到新 master、等 CI 绿、再合下一个，逐级推进；
+  先合下游会把上游内容混进下游 squash，上游 PR 的 diff 与回滚点全部错乱。
+  下游 PR 处于 CONFLICTING 期间 CI 检出的是分支自身，解除冲突后的首轮 CI 才跑
+  真实 merge 结果，ruff/mypy 基线违规此时才首次暴露（PR8 实测：修完冲突后
+  CI 红在 ruff check 55>54 / format 83>79），必须等这轮 CI 绿再合。
+- 修链式冲突更稳的 rebase：`git rebase --onto origin/master <上游分支旧 tip> <本分支>`，
+  只重放本链专属提交（PR7c/PR8 实测零冲突落地），比整段 rebase 等待 git 自动
+  跳过已 upstream 提交更确定；rebase 前记下本分支旧 tip，完成后
+  `git diff <旧 tip> HEAD --stat` 为空即内容零变化，可放心 force-push。
 
 ### 分层重构（改 Kernel 层代码）
 
