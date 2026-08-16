@@ -312,8 +312,6 @@ class LionCodingSession:
             return self._backend.show_session_memory()
         if result.handoff_requested:
             return self._backend.create_session_handoff()
-        if result.dream_requested:
-            return await self._backend.dream()
         return None
 
     # ─── Lion 特有交互(权限确认 / Plan 审批)─────────────────

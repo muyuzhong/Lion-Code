@@ -3,7 +3,7 @@
 验收：
 1. CapabilityRegistry() 为空是合法状态。
 2. registry names == () 时对象图仍能构造。
-3. Bare composition 不创建 Memory/Plan/MCP/SubAgent/Skill/Autonomy/Dream/Learning。
+3. Bare composition 不创建 Memory/Plan/MCP/SubAgent/Skill。
 4. 不存在为了构造通过而增加的 Null Feature（缺失即 None，不造假对象）。
 5. Tool Runtime 不依赖 McpManager。
 6. Meta base prompt 不引用不存在的 Feature。
@@ -105,9 +105,6 @@ _FEATURE_FIELDS = (
     "skill_runtime",
     "mcp_capability",
     "session_memory_coordinator",
-    "autonomy",
-    "learning",
-    "model_query",
 )
 
 
@@ -140,7 +137,7 @@ def test_bare_graph_constructs_with_empty_registry(tmp_path, monkeypatch) -> Non
 
 
 def test_bare_graph_creates_no_feature_objects(tmp_path, monkeypatch) -> None:
-    """Bare composition 不创建 Memory/Plan/MCP/SubAgent/Skill/Autonomy/Dream/Learning。"""
+    """Bare composition 不创建 Memory/Plan/MCP/SubAgent/Skill。"""
     composition = _bare_composition(tmp_path, monkeypatch)
     for field in _FEATURE_FIELDS:
         assert getattr(composition, field) is None, field

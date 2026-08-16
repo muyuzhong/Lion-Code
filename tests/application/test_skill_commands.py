@@ -62,6 +62,14 @@ class TestSkillFallback(unittest.TestCase):
             result = registry.execute(_FakeSession(), "/nonexistent")
         self.assertFalse(result.handled)
 
+    def test_supervisor_commands_are_no_longer_registered(self) -> None:
+        """PR7a：/dream 不再是产品命令，未命中 skill 时走 unknown-command。"""
+        registry = create_default_command_registry()
+        self.assertIsNone(registry.get("dream"))
+        with patch("lion_code.skills.get_skill_by_name", return_value=None):
+            result = registry.execute(_FakeSession(), "/dream")
+        self.assertFalse(result.handled)
+
     def test_inline_skill_fallback_returns_resolved_prompt(self) -> None:
         registry = create_default_command_registry()
         skill = _fake_skill()

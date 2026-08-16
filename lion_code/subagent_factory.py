@@ -59,11 +59,10 @@ class SubagentFactory:
         if allowed_tools:
             tool_policy = ToolSelectionPolicy(
                 allowed_names=frozenset(allowed_tools),
-                exclude_names=frozenset({"schedule_wakeup"}),
             )
         else:
             tool_policy = ToolSelectionPolicy(
-                exclude_names=frozenset({"agent", "schedule_wakeup"}),
+                exclude_names=frozenset({"agent"}),
             )
         return self._create(system_prompt=system_prompt, tool_policy=tool_policy)
 

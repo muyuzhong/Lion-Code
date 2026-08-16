@@ -93,7 +93,6 @@ class CommandResult:
     task_text: str | None = None
     session_memory_requested: bool = False
     handoff_requested: bool = False
-    dream_requested: bool = False
     skills_list_requested: bool = False
     skill_prompt: str | None = None
 
@@ -298,12 +297,6 @@ def create_default_command_registry() -> CommandRegistry:
             description="保存当前项目的交接摘要",
             usage="/handoff",
             handler=lambda _ctx: CommandResult(handled=True, handoff_requested=True),
-        ),
-        SlashCommand(
-            name="dream",
-            description="整理受限的 Auto Memory 候选",
-            usage="/dream",
-            handler=lambda _ctx: CommandResult(handled=True, dream_requested=True),
         ),
         SlashCommand(
             name="skills",

@@ -30,7 +30,7 @@ def print_welcome() -> None:
     console.print("[dim]  Type your request, or 'exit' to quit.[/dim]")
     console.print(
         "[dim]  Commands: /clear /plan /cost /compact /task /session-memory "
-        "/handoff /dream /memory /skills[/dim]\n"
+        "/handoff /memory /skills[/dim]\n"
     )
 
 

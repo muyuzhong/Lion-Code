@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from integration.test_application_coding_session import (
@@ -412,16 +412,15 @@ async def test_session_memory_commands_dispatch_through_tui(app_factory) -> None
         await _submit(app, pilot, "/session-memory")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        with patch.object(agent, "dream", AsyncMock(return_value="Dream 完成")):
-            await _submit(app, pilot, "/dream")
-            await app.workers.wait_for_complete()
-            await pilot.pause()
+        await _submit(app, pilot, "/dream")
+        await pilot.pause()
 
     statuses = [item.text for item in app.state.items if item.role == "status"]
     assert any("接入 TUI 命令" in text for text in statuses)
     assert any("生成交接" in text for text in statuses)
     assert any("Previous handoff" in text for text in statuses)
-    assert any(text == "Dream 完成" for text in statuses)
+    # PR7a：/dream 不再是产品命令，走 unknown-command 提示。
+    assert any("未知命令" in text for text in statuses)
     assert app.session.messages == ()
 
 

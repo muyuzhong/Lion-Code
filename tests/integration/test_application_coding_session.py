@@ -11,7 +11,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from lion_code.agent import Agent
 from lion_code.application import (
@@ -257,7 +257,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.messages[2].text, "echo:hi")
         self.assertIsInstance(events[-1], AgentSettledEvent)
 
-    async def test_session_memory_commands_share_task_handoff_and_dream_intents(
+    async def test_session_memory_commands_share_task_and_handoff_intents(
         self,
     ) -> None:
         session, agent, _fake = self._make_session([])
@@ -285,18 +285,12 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         snapshot = await session.execute_session_memory_command(
             session.handle_command("/session-memory")
         )
-        agent.dream = AsyncMock(return_value="Dream 完成")
-        dream = await session.execute_session_memory_command(
-            session.handle_command("/dream")
-        )
 
         self.assertIn("接入命令", task or "")
         self.assertIn("完成 handoff", switched or "")
         self.assertIn("已结束任务", finished or "")
         self.assertIn("项目：", handoff or "")
         self.assertIn("Previous handoff", snapshot or "")
-        self.assertEqual(dream, "Dream 完成")
-        agent.dream.assert_awaited_once()
         self.assertIsNone(
             agent.session_memory.active_task if agent.session_memory else None
         )

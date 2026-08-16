@@ -1,7 +1,7 @@
 """CLI 入口的 TUI 单路径契约。"""
 
 import sys
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -58,13 +58,11 @@ async def test_repl_routes_session_memory_commands_through_shared_intents(
             next_step="验证命令",
         )
     )
-    agent.dream = AsyncMock(return_value="Dream 完成")
     inputs = iter((
         "/task",
         "/task switch 生成交接",
         "/handoff",
         "/session-memory",
-        "/dream",
         "exit",
     ))
     monkeypatch.setattr("builtins.input", lambda: next(inputs))
@@ -75,4 +73,3 @@ async def test_repl_routes_session_memory_commands_through_shared_intents(
     assert agent.session_memory is not None
     assert agent.session_memory.active_task == "生成交接"
     assert agent.session_memory.previous_handoff is not None
-    agent.dream.assert_awaited_once()

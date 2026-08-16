@@ -204,6 +204,3 @@ class FakeCodingSessionBackend:
 
     def create_session_handoff(self) -> str:
         return "handoff"
-
-    async def dream(self) -> str:
-        return "dreamed"

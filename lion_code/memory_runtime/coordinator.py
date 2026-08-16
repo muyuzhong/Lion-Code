@@ -129,7 +129,11 @@ class MemoryCoordinator:
         self._session_bytes = 0
 
     def invalidate(self, filenames: list[str]) -> None:
-        """Dream 修改文件后淘汰对应 Overlay，并允许下一轮重新召回。"""
+        """外部整理（如 Dream）修改文件后淘汰对应 Overlay，并允许下一轮重新召回。
+
+        PR7a 后产品路径无调用者；保留供未来 Supervisor composition 的 Dream
+        re-home 使用。
+        """
 
         self.cancel_pending()
         targets = set(filenames)

@@ -11,7 +11,7 @@ import pytest
 
 from lion_code.agent import Agent
 from lion_code.capabilities.types import CapabilitySpec
-from lion_code.composition import AgentConfig, AgentDependencies
+from lion_code.composition import AgentComposition, AgentConfig, AgentDependencies
 from lion_code.tooling.environment import ToolEnvironment
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool
@@ -179,6 +179,53 @@ def test_builder_is_a_construction_function_not_a_service_locator():
         and "builder" in node.attr.casefold()
         for node in ast.walk(_tree(SOURCE_ROOT / "agent.py"))
     )
+
+
+_SUPERVISOR_MODULES = (
+    "autonomy_runtime",
+    "dream",
+    "dream_adapter",
+    "learning_runtime",
+    "model_query",
+)
+_SUPERVISOR_SYMBOLS = (
+    "AutonomyRuntime",
+    "CAP_AUTONOMY",
+    "CAP_DREAM",
+    "CAP_LEARNING",
+    "DreamCoordinator",
+    "LearningRuntime",
+    "ProviderModelQuery",
+    "RestrictedDreamAgentFactory",
+    "SessionMemorySnapshotView",
+)
+_SUPERVISOR_FIELDS = frozenset({"autonomy", "dream", "learning", "model_query"})
+
+
+def test_composition_root_has_no_supervisor_surface() -> None:
+    """PR7a：Composition Root 不 import、构造或返回 Supervisor 对象。"""
+    composition_fields = {field.name for field in fields(AgentComposition)}
+    assert not composition_fields & _SUPERVISOR_FIELDS
+
+    tree = _tree(BUILDER_PATH)
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            root = (node.module or "").lstrip(".").split(".")[0]
+            if root in _SUPERVISOR_MODULES:
+                violations.append((node.lineno, root))
+            for alias in node.names:
+                if alias.name in _SUPERVISOR_SYMBOLS:
+                    violations.append((node.lineno, alias.name))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in _SUPERVISOR_MODULES:
+                    violations.append((node.lineno, alias.name))
+        elif isinstance(node, ast.Name) and node.id in _SUPERVISOR_SYMBOLS:
+            violations.append((node.lineno, node.id))
+        elif isinstance(node, ast.Attribute) and node.attr in _SUPERVISOR_SYMBOLS:
+            violations.append((node.lineno, node.attr))
+    assert not violations, f"Composition Root 出现 Supervisor 符号: {violations}"
 
 
 @pytest.mark.parametrize(

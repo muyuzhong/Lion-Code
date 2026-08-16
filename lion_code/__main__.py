@@ -103,10 +103,6 @@ async def run_repl(agent: Agent) -> None:
 
     def handle_sigint(sig, frame):
         nonlocal sigint_count
-        # 无论当前是否正在请求模型，都先停止 /loop 和 /goal；两轮之间的等待阶段
-        # `is_processing` 为假，仅走下面的 abort 分支会漏掉这些后台流程。
-        agent.stop_loop()
-        agent.stop_goal()
         # `is_processing` 才表示主 Agent 是否有活动任务；`_output_buffer` 只服务于
         # 子 Agent，不能用它判断主 Agent 是否可中断。
         if not agent.is_aborted and agent.is_processing:
@@ -145,7 +141,7 @@ async def run_repl(agent: Agent) -> None:
         if inp.startswith("/"):
             command_result = command_session.handle_command(inp)
             command_name = inp[1:].split(" ", 1)[0].lower()
-            if command_name in {"task", "session-memory", "handoff", "dream"}:
+            if command_name in {"task", "session-memory", "handoff"}:
                 try:
                     message = await command_session.execute_session_memory_command(
                         command_result
@@ -171,32 +167,6 @@ async def run_repl(agent: Agent) -> None:
                 await agent.compact()
             except Exception as e:
                 print_error(str(e))
-            continue
-        if inp == "/learn":
-            try:
-                print_info(await agent.learn_from_current_session())
-            except Exception as e:
-                print_error(str(e))
-            continue
-        if inp == "/goal" or inp.startswith("/goal "):
-            condition = inp[len("/goal"):].strip()
-            if not condition:
-                agent.show_goal()
-                continue
-            directive = agent.set_goal(condition)
-            try:
-                await agent.pursue_goal(directive)
-            except Exception as e:
-                if "abort" not in str(e).lower():
-                    print_error(str(e))
-            continue
-        if inp == "/loop" or inp.startswith("/loop "):
-            rest = inp[len("/loop"):].strip()
-            try:
-                await agent.run_loop(rest)
-            except Exception as e:
-                if "abort" not in str(e).lower():
-                    print_error(str(e))
             continue
         if inp == "/memory":
             memories = list_memories()
@@ -281,11 +251,6 @@ REPL commands:
   /task done          Finish the active project task
   /session-memory     Show project Session Memory
   /handoff            Save a project handoff summary
-  /dream              Consolidate restricted candidates into Auto Memory
-  /learn              Distill this session into a reusable Skill when worthwhile
-  /goal <condition>   Pursue a goal across turns until an evaluator judges it met
-  /goal               Show the active goal's status
-  /loop [interval] <prompt>  Re-run a prompt on an interval (5m/2h) or self-paced
   /memory             List saved memories
   /skills             List available skills
   /<skill-name>       Invoke a skill (e.g. /commit "fix types")

@@ -323,10 +323,7 @@ class SessionMemoryCoordinator:
         ],
         notices: NoticeSink,
         query: TextQueryService | None,
-        dream_runner: DreamRunner,
         is_sub_agent: bool,
-        status_callback: StatusCallback,
-        refresh_context: Callable[[], None],
     ) -> None: ...
 
 class DreamCoordinator:
@@ -556,9 +553,9 @@ The concrete routing and ownership contract is:
   `PlanCapability` ToolSource. The same capability contributes a live
   `PlanPromptLayer` over `PlanView` and a `PlanSessionParticipant`; the tool
   adapter copies `terminate` from `PlanToolOutcome` into `ToolResult`.
-- Dynamic `schedule_wakeup` -> `AutonomyRuntime.schedule_wakeup`. The runtime
-  owns delay clamping and `pending_wakeup`; registration remains temporary to
-  the dynamic loop.
+- Dynamic `schedule_wakeup` was an `AutonomyRuntime` temporary tool (PR7a
+  removed it from the product path along with its SubAgent filter rules); a
+  future Supervisor composition re-owns registration and clamping.
 
 `SubagentFactory` remains child construction and tool selection only. It must
 not absorb execution lifecycle, status, usage, error conversion, or closure.
@@ -574,9 +571,8 @@ Usage has its own executable contract in
 - Every `Agent` composes one `AgentRuntimeCoordinator`, which owns exactly one
   `LionAgentRuntime`; both OpenAI-compatible and Anthropic requests go through
   `ModelProvider` implementations in `lion_code/providers/`.
-- `LionAgentRuntime.messages` is the only active conversation state. Goal, loop,
-  plan, learning, Dream, side queries, and child agents must not create
-  protocol-private histories or SDK clients.
+- `LionAgentRuntime.messages` is the only active conversation state. Plan and
+  child agents must not create protocol-private histories or SDK clients.
 - `AgentRuntimeCoordinator` owns Core assembly, observer subscription order,
   `SessionRecorder`, context projection/compaction, background cleanup, output
   capture, the supplied `ExecutionControl`, shared `UsageLedger` / `BudgetPolicy`,
@@ -649,7 +645,7 @@ Usage has its own executable contract in
 - `Agent._create_terminal_renderer()` is the corresponding renderer factory boundary:
   it resolves `lion_code.agent.TerminalRenderer` at call time, so terminal renderer
   patches remain effective while the coordinator rebuilds observers.
-- Child and Dream agents inherit the parent's stored Provider configuration and
+- Child agents inherit the parent's stored Provider configuration and
   `terminal_output` setting. They must not infer credentials from a transport client.
 - `SubagentFactory` owns child tool selection and construction from the concrete
   registry/environment and typed child-config provider. It imports `Agent` only
@@ -661,9 +657,9 @@ Usage has its own executable contract in
 - `LearningRuntime` owns explicit `/learn` transcript projection, evaluator decision
   parsing, and Skill creation from `TranscriptView`, `ModelQuery`, and an immutable
   cwd. It reads the existing canonical Core history and uses the existing side-query
-  path; `Agent` retains the
-  public delegation and composition boundary, and no second history or Provider is
-  created.
+  path. PR7a removed its composition and `Agent` delegation; the module waits for a
+  future Supervisor composition and must not regain product reachability through
+  Memory or `Agent`.
 - Base product dependencies and imports do not include the OpenAI or Anthropic Python
   SDKs. The online context benchmark may use the `benchmark` optional extra, but the
   import must remain lazy so product startup and offline benchmark validation work
@@ -677,23 +673,27 @@ Usage has its own executable contract in
   tools, UI objects, or an API-readiness flag.
 - `ProviderModelQuery` resolves the active Provider and model through live
   callables for every request. It owns the API-readiness precondition and
-  preserves typed Core message roles for evaluator requests.
+  preserves typed Core message roles for evaluator requests. PR7a removed it
+  from the composition root; no production caller exists until Supervisor
+  re-home.
 - `AutonomyRuntime` receives conversation, transcript, query, notice,
   cancellation, concrete registry, confirmation, Ledger, and Policy separately.
   `LearningRuntime` receives transcript, query, and an immutable cwd only.
+  Both are Supervisor-owned runtimes with no production caller after PR7a.
 - `SessionMemoryCoordinator` receives project identity/repository, transcript,
   cancellation View, the typed project-context loader, notice,
-  current Memory query service, Dream command, sub-agent flag, status callback,
-  and refresh callback. It does not receive Agent, ToolContext, ToolEnvironment,
-  ToolRegistry, Provider, Permission, or Core Runtime implementations.
-  The Plan read-only guard for `/dream` moved to the `Agent` facade
-  (`Agent.dream()` checks the live Plan activation state).
+  current Memory query service, and the sub-agent flag. It does not receive
+  Agent, ToolContext, ToolEnvironment, ToolRegistry, Provider, Permission,
+  Core Runtime implementations, or any Dream runner/callback (PR7a deleted the
+  Dream constructor dependency, `/dream` delegation, status callback, and
+  refresh callback).
 - `DreamCoordinator` is pure domain coordination over repository, identity,
   Session Memory View, typed child factory/runner, and the child usage command.
   The concrete restricted child lives in `dream_adapter.py`, selects only the
   three read-only tools, disables MCP and project hooks, prevents nesting,
   enforces `DREAM_MAX_TURNS`, and validates all resolved read paths against the
-  project and Memory roots.
+  project and Memory roots. PR7a removed both from the composition root; a
+  future Supervisor composition must supply its own Memory snapshot view.
 - `SubagentFactory` receives the concrete registry/environment, a typed
   `ChildAgentConfig` provider, and `PermissionView`. It remains a constructor;
   child execution, status, usage, errors, and closing remain in
@@ -758,7 +758,9 @@ Usage has its own executable contract in
   durable user preferences, explicit feedback, verified decisions with reasons,
   reusable failure-and-fix lessons, and external references; it rejects progress,
   pending work, temporary test failures, file lists, verification logs, handoffs,
-  and next steps. Dream still writes only validated Auto Memory files.
+  and next steps. Dream still writes only validated Auto Memory files. PR7a removed
+  `/dream` from the product command surface; this contract documents the retained
+  `DreamCoordinator` domain behavior until Supervisor re-home.
 
 ### Frontends
 
@@ -772,9 +774,11 @@ Usage has its own executable contract in
   callback is cleared before the TUI closes its session on unmount; confirmation and
   Plan callbacks are reclaimed with that session. Toggling terminal output must not
   rebuild or replace `UsageObserver` or `SessionRecorder`.
-- `CommandRegistry` parses `/task`, `/session-memory`, `/handoff`, and `/dream` into
+- `CommandRegistry` parses `/task`, `/session-memory`, and `/handoff` into
   synchronous intents. `LionCodingSession` performs the state operation; both the
   REPL and TUI dispatch those same intents and do not add command text to JSONL.
+  `/dream`, `/learn`, `/goal`, and `/loop` are no longer registered commands
+  (PR7a); unknown slash commands fall through the existing unknown-command path.
 
 ## 4. Validation & Error Matrix
 
@@ -821,8 +825,8 @@ Usage has its own executable contract in
 | Fork Skill | Reuse `SubagentExecutor`; preserve start/end status, usage merge, error conversion, and close |
 | Child `run_once` success | Return child text, merge input/output usage, emit end status, then close |
 | Child construction or execution error | Return an error `ToolResult`, emit end status, and close any created child |
-| Domain side query before API configuration | Raise `ModelQueryUnavailableError`; Auto Mode may ask through its explicit confirmation callback without incrementing denial counters |
-| Confirmation callback replaced after Agent construction | Refresh the existing `AutonomyRuntime`; the next Auto decision must call the replacement |
+| Domain side query before API configuration | Raise `ModelQueryUnavailableError` (module retained without a production caller after PR7a) |
+| Confirmation callback replaced after Agent construction | `set_confirm_fn()` updates only the generic confirmation owner; Autonomy refresh waits for Supervisor re-home |
 | Session Memory repository identity differs from the injected project identity | Raise `ValueError` during coordinator construction before any Memory mutation |
 | Dream has no durable evidence | Return an empty `DreamResult` without constructing a child |
 | Dream child creation succeeds, then execution or parsing fails | Always close the child; do not apply a partial plan |
@@ -830,7 +834,7 @@ Usage has its own executable contract in
 | Dream child inherits separate project-hook collections | Clear both the Agent hook list and the existing `ToolContext.hooks` collection |
 | Dream plan is invalid, conflicts, or the Memory snapshot changed | Reject it; atomic apply restores every touched file and index on failure |
 | Plan exit approval with clear-and-execute | Copy `terminate` from `PlanToolOutcome` into `ToolResult`; clear-and-execute no longer terminates |
-| Dynamic wakeup command | Clamp delay, update `AutonomyRuntime.pending_wakeup`, and expose the tool only in the dynamic loop scope |
+| Dynamic wakeup command | Retained `AutonomyRuntime` clamps delay and updates `pending_wakeup` inside its dynamic loop; the temporary product tool registration was removed in PR7a |
 | `build_meta_agent(provider=p, tools=[])` | Construct and run with the supplied Provider; send an empty tool schema |
 | MetaAgent receives `system_prompt=""` | Normalize to the neutral Meta prompt; never fall back to the Coding prompt |
 | Bare construction reaches a Feature/helper/default-tool factory | Fail the architecture and strong-negative tests |
@@ -896,8 +900,10 @@ Usage has its own executable contract in
 - Bad: PermissionMiddleware/PermissionPolicy branching on `mode == "plan"` or
   `mode == "auto"`, or reading `ToolContext.plan` / `auto_permission_fn`,
   reintroduces product knowledge into Harness Permission.
-- Good: `Agent` composes `AutonomyRuntime` from separate conversation, transcript,
-  query, notice, cancellation, registry, confirmation, usage, and budget objects.
+- Good: `AutonomyRuntime` composes separate conversation, transcript, query, notice,
+  cancellation, registry, confirmation, usage, and budget objects (retained module,
+  no production caller after PR7a; the composition root must not re-import it
+  before a Supervisor composition exists).
 - Base: `LearningRuntime` receives only the canonical transcript View, one
   Provider-neutral query, and an immutable cwd.
 - Bad: passing `agent`, `host`, `_core_runtime`, or an aggregate Context/Services
@@ -907,6 +913,10 @@ Usage has its own executable contract in
 - Bad: moving read-root checks, read-only tool selection, hook disabling, MCP
   disabling, nesting prevention, or turn limits into the model prompt weakens the
   executable Dream boundary.
+- Bad: reintroducing Autonomy/Dream/Learning imports, fields, delegates, or command
+  branches into the composition root, `Agent`, REPL, Application, or TUI before a
+  Supervisor composition exists; Memory must construct without a Dream runner and
+  must not delegate `/dream`.
 
 ## 6. Executable Enforcement
 
@@ -973,8 +983,10 @@ also rejects patterns an import graph cannot express:
   `CapabilityContext`, `ServiceLocator`, or `AgentCapability` god-object
   types. See [Capability SPI](./capability-spi.md).
 - `tests/architecture/test_composition_root.py` enforces one-shot builder
-  construction, absence of whole-Agent runtime constructors, and capability
-  registration without edits to facade/runtime/application/TUI modules.
+  construction, absence of whole-Agent runtime constructors, capability
+  registration without edits to facade/runtime/application/TUI modules, and the
+  PR7a no-Supervisor-surface rule (no Autonomy/Dream/Learning/model-query
+  imports, symbols, or `AgentComposition` fields).
 - Four-layer gates (`tests/architecture/test_kernel_isolation.py`, plus the
   expanded Core import contract in `_boundaries.py`): Kernel code must not
   import or reference Capability/Supervisor modules or symbols
@@ -1048,11 +1060,13 @@ exception, or silently broaden an allowlist to make a regression pass.
 - `tests/test_session_memory.py`, `tests/test_dream.py`,
   `tests/integration/test_application_coding_session.py`, and `tests/test_cli.py`: deterministic
   tool evidence, task/handoff persistence, filtered Dream candidates, and matching
-  REPL/TUI command intents.
+  REPL/TUI command intents (`/dream` asserts the unknown-command path after PR7a).
 - `tests/test_autonomy_goal_loop.py`, `tests/test_autonomy_flow.py`,
   `tests/test_learning.py`, and `tests/test_model_query.py`: explicit narrow
   construction, Goal/loop/classifier behavior, live confirmation replacement,
-  role-preserving side queries, and unavailable-query handling.
+  role-preserving side queries, and unavailable-query handling. Agent-driven
+  Autonomy/Dream behavior tests carry a unified `_REHOME` skip reason after
+  PR7a; direct runtime tests still execute.
 - `tests/test_session_memory_coordinator.py`, `tests/memory_runtime/`, and
   `tests/test_dream.py`: Memory read/update and semantic extraction, repository
   identity validation, restricted Dream child construction, root checks, hook/MCP/
@@ -1102,24 +1116,25 @@ agent = build_meta_agent(provider=provider, tools=create_builtin_tools())
 ### Correct
 
 ```python
-self._autonomy = AutonomyRuntime(
-    conversation=self,
-    transcript=self._core_runtime,
+# PR7a：Agent 不再组合 Supervisor 对象；以下是未来 Supervisor composition
+# 的合法形态示例（窄依赖，无 Agent/host 参数）。
+autonomy = AutonomyRuntime(
+    conversation=coordinator,
+    transcript=core_runtime,
     query=model_query,
-    notices=self,
-    cancellation=self._runtime_coordinator.cancellation,
-    tool_registry=self.tool_registry,
-    confirm=self._confirm_fn,
-    usage=self.usage,
-    budget=self.budget_policy,
+    notices=notice_sink,
+    cancellation=cancellation_view,
+    tool_registry=tool_registry,
+    confirm=confirm_callback,
+    usage=usage_ledger,
+    budget=budget_policy,
 )
-self._learning = LearningRuntime(self._core_runtime, model_query, self.cwd)
-self._dream = DreamCoordinator(
-    repository=self._session_repository,
-    identity=self._project_identity,
+dream = DreamCoordinator(
+    repository=session_repository,
+    identity=project_identity,
     session_memory=session_memory_view,
     factory=restricted_dream_factory,
-    usage=self.usage,
+    usage=usage_ledger,
 )
 history = agent.core_runtime.messages
 session_id = agent.tool_context.session.id

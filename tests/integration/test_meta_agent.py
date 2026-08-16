@@ -208,10 +208,7 @@ async def test_strong_negative_flow_never_constructs_advanced_features(
         raise AssertionError("advanced Feature constructor called")
 
     for name in (
-        "AutonomyRuntime",
         "ChildAgentConfig",
-        "DreamCoordinator",
-        "LearningRuntime",
         "McpCapability",
         "McpLifecycleState",
         "McpManager",
@@ -219,11 +216,8 @@ async def test_strong_negative_flow_never_constructs_advanced_features(
         "PlanHost",
         "PlanRuntime",
         "PlanState",
-        "ProviderModelQuery",
         "ProviderTextQueryService",
-        "RestrictedDreamAgentFactory",
         "SessionMemoryCoordinator",
-        "SessionMemorySnapshotView",
         "SkillRuntime",
         "SubagentStatusSink",
         "SubagentExecutor",

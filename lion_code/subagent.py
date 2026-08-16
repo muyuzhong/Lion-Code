@@ -133,11 +133,10 @@ def get_sub_agent_config(agent_type: str) -> SubAgentConfig:
         if custom["allowed_tools"]:
             policy = ToolSelectionPolicy(
                 allowed_names=frozenset(custom["allowed_tools"]),
-                exclude_names=frozenset({"schedule_wakeup"}),
             )
         else:
             policy = ToolSelectionPolicy(
-                exclude_names=frozenset({"agent", "schedule_wakeup"}),
+                exclude_names=frozenset({"agent"}),
             )
         return SubAgentConfig(custom["system_prompt"], policy)
 
@@ -148,7 +147,6 @@ def get_sub_agent_config(agent_type: str) -> SubAgentConfig:
                 require_read_only=True,
                 exclude_names=frozenset({
                     "agent",
-                    "schedule_wakeup",
                     "enter_plan_mode",
                     "exit_plan_mode",
                 }),
@@ -159,13 +157,13 @@ def get_sub_agent_config(agent_type: str) -> SubAgentConfig:
             PLAN_PROMPT,
             ToolSelectionPolicy(
                 require_read_only=True,
-                exclude_names=frozenset({"agent", "schedule_wakeup"}),
+                exclude_names=frozenset({"agent"}),
             ),
         )
     else:  # 未知内置类型按 general 处理，保持调用侧的向后兼容行为。
         return SubAgentConfig(
             GENERAL_PROMPT,
             ToolSelectionPolicy(
-                exclude_names=frozenset({"agent", "schedule_wakeup"}),
+                exclude_names=frozenset({"agent"}),
             ),
         )

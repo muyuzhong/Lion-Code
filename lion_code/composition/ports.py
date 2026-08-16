@@ -18,7 +18,6 @@ from ..provider_manager import (
     ProviderView,
 )
 from ..session_identity import SessionIdentityState
-from ..session_memory import SessionMemory
 from ..session_runtime import SessionRecorder, SessionRepository
 from ..tooling import ToolEnvironment
 
@@ -271,16 +270,6 @@ class DeferredModelContextControl(ModelContextControl):
         if self._runtime is None:
             raise RuntimeError("Provider Runtime 尚未初始化")
         self._runtime.invalidate_model_limit_cache(model)
-
-
-class SessionMemorySnapshotView:
-    """向 Dream 暴露最新有效 Session Memory 快照。"""
-
-    def __init__(self, load: Callable[[], SessionMemory | None]) -> None:
-        self._load = load
-
-    def load(self) -> SessionMemory | None:
-        return self._load()
 
 
 class SessionRecorderConfigurationRecorder(ConfigurationRecorder):

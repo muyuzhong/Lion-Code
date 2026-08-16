@@ -547,7 +547,7 @@ class TestSubAgentPermissionInheritance:
 
         try:
             sub_tools = {t.name for t in sub_agent.tool_registry.all_tools()}
-            # general type excludes 'agent' and 'schedule_wakeup' but includes 'skill'.
+            # general type excludes 'agent' but includes 'skill'.
             assert "skill" in sub_tools
             assert "agent" not in sub_tools
         finally:

@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/08-16-pr7a-supervisor-product-detachment/prd.md","reason":"PR7a requirements, deletion scope, re-home rule, and acceptance criteria"}
+{"file":".trellis/tasks/08-16-pr7a-supervisor-product-detachment/design.md","reason":"Verified current and target graphs plus Memory-Dream separation design"}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Normative Capability versus Supervisor ownership boundary"}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Current composition, permission, session, Memory, and facade contracts"}
