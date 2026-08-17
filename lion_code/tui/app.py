@@ -1184,8 +1184,8 @@ class LionTuiApp(App):
     def _dispatch(self, result: CommandResult) -> None:
         if not result.handled:
             self._notice(
-                "未知命令 — 可用: /task /session-memory /handoff "
-                "/model /clear /plan /cost /compact /theme /thinking /quit /skills"
+                "未知命令 — 可用: /model /clear /plan /cost /compact "
+                "/theme /thinking /quit /skills"
             )
             return
         if result.exit_requested:
@@ -1208,16 +1208,6 @@ class LionTuiApp(App):
             )
         elif result.skills_list_requested:
             self._show_skills_list()
-        elif (
-            result.task_action is not None
-            or result.session_memory_requested
-            or result.handoff_requested
-        ):
-            self.run_worker(
-                self._execute_session_memory_command(result),
-                exclusive=True,
-                group="chat",
-            )
         elif result.model_picker_requested:
             self.action_model()
         elif result.resume_session_id is not None:
@@ -1265,18 +1255,6 @@ class LionTuiApp(App):
             desc = skill.description or ""
             lines.append(f"  {tag} - {desc}")
         self._notice("\n".join(lines))
-
-    async def _execute_session_memory_command(self, result: CommandResult) -> None:
-        """在应用会话层执行共享的短期记忆命令意图。"""
-
-        try:
-            message = await self.session.execute_session_memory_command(result)
-        # 前端必须把异步命令失败显示为状态行，不能让 Worker 静默退出。
-        except Exception as error:  # noqa: BLE001
-            self._notice(f"Error: {error}", role="error")
-            return
-        if message:
-            self._notice(message)
 
     def _switch_theme(self, name: str) -> None:
         try:

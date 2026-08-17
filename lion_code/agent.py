@@ -33,20 +33,14 @@ from .observers import TerminalRenderer
 from .permission_state import (
     PermissionMode,
 )
-from .project_identity import ProjectIdentity, resolve_project_identity
 from .prompt import (
     build_dynamic_system_context,
-    load_project_context_files,
 )
 from .providers.factory import create_provider
 from .providers.thinking import (
     ThinkingLevel,
 )
 from .session_identity import SessionIdentityState
-from .session_memory import (
-    SessionMemory,
-    SessionMemoryRepository,
-)
 from .session_runtime import (
     SessionRecorder,
     SessionRepository,
@@ -73,17 +67,6 @@ def _agent_provider_factory(**kwargs: Any) -> ModelProvider:
 
 def _agent_hooks_loader() -> list[Any]:
     return load_pre_tool_use_hooks()
-
-
-def _agent_project_identity_resolver(cwd: Path | None) -> ProjectIdentity:
-    return resolve_project_identity(cwd)
-
-
-def _agent_project_context_loader(
-    cwd: Path,
-    identity: ProjectIdentity,
-) -> Sequence[Any]:
-    return load_project_context_files(cwd=cwd, identity=identity)
 
 
 def _agent_dynamic_context_builder(names: Sequence[str]) -> str:
@@ -147,7 +130,6 @@ class Agent:
         custom_system_prompt: str | None = None,
         tool_registry: ToolRegistry | None = None,
         session_repository: SessionRepository | None = None,
-        session_memory_repository: SessionMemoryRepository | None = None,
         context_manager: ContextManager | None = None,
         context_compactor: ContextCompactor | None = None,
         model_limits_resolver: ModelLimitsResolver | None = None,
@@ -186,7 +168,6 @@ class Agent:
                 confirm_fn,
                 tool_registry,
                 session_repository,
-                session_memory_repository,
                 context_manager,
                 context_compactor,
                 model_limits_resolver,
@@ -200,14 +181,11 @@ class Agent:
             confirm_fn=confirm_fn,
             tool_registry=tool_registry,
             session_repository=session_repository,
-            session_memory_repository=session_memory_repository,
             context_manager=context_manager,
             context_compactor=context_compactor,
             model_limits_resolver=model_limits_resolver,
             provider_factory=_agent_provider_factory,
             pre_tool_use_hooks_loader=_agent_hooks_loader,
-            project_identity_resolver=_agent_project_identity_resolver,
-            project_context_loader=_agent_project_context_loader,
             dynamic_system_context_builder=_agent_dynamic_context_builder,
             terminal_renderer_factory=_agent_terminal_renderer_factory,
             print_info=_agent_print_info,
@@ -229,7 +207,6 @@ class Agent:
         assert composition.subagent_factory is not None
         assert composition.subagent_executor is not None
         assert composition.skill_runtime is not None
-        assert composition.session_memory_coordinator is not None
         assert composition.status_sink is not None
 
         self.is_sub_agent = resolved_config.is_sub_agent
@@ -260,7 +237,6 @@ class Agent:
         self.tool_runtime = composition.tool_runtime
         self._provider_manager = composition.provider_manager
         self._runtime_coordinator = composition.runtime_coordinator
-        self._session_memory_coord = composition.session_memory_coordinator
         self.confirm_fn = resolved_dependencies.confirm_fn
 
     def _resolve_thinking_mode(self) -> str:
@@ -405,85 +381,6 @@ class Agent:
     def core_runtime(self) -> LionAgentRuntime:
         """返回供应用会话层订阅事件与读取消息快照的 Core Runtime。"""
         return self._core_runtime
-
-    @property
-    def _project_identity(self) -> ProjectIdentity:
-        return self._session_memory_coord.project_identity
-
-    def _load_project_context_files(self, identity: ProjectIdentity) -> tuple[Any, ...]:
-        """为协调器保留项目指令加载的可测试宿主边界。"""
-
-        return load_project_context_files(
-            cwd=self.tool_context.cwd,
-            identity=identity,
-        )
-
-    @property
-    def _session_memory_repository(self) -> SessionMemoryRepository:
-        return self._session_memory_coord.session_memory_repository
-
-    @property
-    def _session_memory(self) -> SessionMemory | None:
-        return self._session_memory_coord.session_memory
-
-    @_session_memory.setter
-    def _session_memory(self, value: SessionMemory | None) -> None:
-        self._session_memory_coord.session_memory = value
-
-    @property
-    def _session_memory_error(self) -> str | None:
-        return self._session_memory_coord.session_memory_error
-
-    @_session_memory_error.setter
-    def _session_memory_error(self, value: str | None) -> None:
-        self._session_memory_coord.session_memory_error = value
-
-    @property
-    def session_memory(self) -> SessionMemory | None:
-        """返回最近的有效短期状态；初次读取损坏文件时为 None。"""
-
-        return self._session_memory
-
-    @property
-    def session_memory_error(self) -> str | None:
-        """返回最近一次 Session Memory 加载错误，供前端显式提示。"""
-
-        return self._session_memory_error
-
-    def show_session_memory(self) -> str:
-        """读取并展示当前项目短期状态，不触碰 JSONL transcript。"""
-
-        return self._session_memory_coord.show_session_memory()
-
-    def show_active_task(self) -> str:
-        """读取活动任务的最小视图。"""
-
-        return self._session_memory_coord.show_active_task()
-
-    def switch_session_task(self, task: str) -> str:
-        """持久化新的活动任务，并把旧任务保留为待继续事项。"""
-
-        return self._session_memory_coord.switch_session_task(task)
-
-    def finish_session_task(self) -> str:
-        """结束当前任务并计算受限的长期候选，候选不会直接写入 Auto Memory。"""
-
-        return self._session_memory_coord.finish_session_task()
-
-    def create_session_handoff(self) -> str:
-        """从当前短期状态生成并保存 handoff，供下一会话直接续接。"""
-
-        return self._session_memory_coord.create_session_handoff()
-
-    def _editable_session_memory(self) -> SessionMemory:
-        """重载可安全写入的项目状态；损坏文件绝不被命令覆盖。"""
-
-        return self._session_memory_coord._editable_session_memory()
-
-    def _save_session_memory(self, memory: SessionMemory) -> None:
-        """保存命令产生的短期状态，不改动当前轮已固定的 Overlay。"""
-
-        self._session_memory_coord._save_session_memory(memory)
 
     def abort(self) -> None:
         self._runtime_coordinator.abort()
@@ -820,7 +717,7 @@ class Agent:
         )
         return result.content
 
-    # ─── 外部资源与 Memory 预取 ──────────────────────────────
+    # ─── 外部资源与 Capability 生命周期 ─────────────────────
 
     async def close(self) -> None:
         """释放 Capability 等外部资源，确保进程正常退出（issue #8）。"""

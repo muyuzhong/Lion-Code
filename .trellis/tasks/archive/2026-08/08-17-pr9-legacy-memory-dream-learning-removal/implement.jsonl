@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"更新 Agent composition、canonical Session、ContextManager/Compactor、facade 和删除后的运行时边界。"}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"移除仅由旧 Memory 使用的 ProjectionLayer slot，保留通用 Capability contributions 与生命周期契约。"}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"把 PR9 后的层归属、保留 Capability/Session seams 和已删除旧实现写成当前契约。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"验证 canonical JSONL Session persistence 与旧项目 Memory 文件存储的边界。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"按现有质量门禁执行 compile、focused/full tests、import-linter、diff 检查和基线区分。"}

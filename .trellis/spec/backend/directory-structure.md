@@ -19,13 +19,12 @@ lion_code/
 ├── tooling/             # Tool definitions, registry, permissions and middleware runtime
 ├── adapters/            # Boundary adapters between Lion tooling and Core tools
 ├── session_runtime/     # JSONL repository/recorder and legacy JSON read-migration
-├── memory_runtime/      # Memory coordination, injection and queries
 ├── observers/           # Event consumers such as terminal and usage renderers
 └── tui/                 # The Textual frontend only
 ```
 
-Other root modules such as `autonomy.py`, `dream.py`, `hooks.py`, `memory.py`,
-`skills.py`, and `tools.py` are existing feature modules.  Keep a change close
+Other root modules such as `autonomy.py`, `hooks.py`, `skills.py`,
+and `tools.py` are existing feature modules. Keep a change close
 to its current owner instead of moving it merely to make a generic layered
 diagram look cleaner.
 

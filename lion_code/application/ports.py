@@ -123,27 +123,12 @@ class ControlPort(Protocol):
     def toggle_plan_mode(self) -> str: ...
 
 
-class SessionMemoryPort(Protocol):
-    """Commands for the project's short-lived session memory."""
-
-    def show_active_task(self) -> str: ...
-
-    def switch_session_task(self, task: str) -> str: ...
-
-    def finish_session_task(self) -> str: ...
-
-    def show_session_memory(self) -> str: ...
-
-    def create_session_handoff(self) -> str: ...
-
-
 class CodingSessionBackend(
     ConversationPort,
     SessionPort,
     SettingsPort,
     UsagePort,
     ControlPort,
-    SessionMemoryPort,
     Protocol,
 ):
     """The composed backend contract consumed by ``LionCodingSession``."""
@@ -158,7 +143,6 @@ __all__ = [
     "NoticeCallback",
     "PlanApprovalCallback",
     "QueueSnapshot",
-    "SessionMemoryPort",
     "SessionPort",
     "SettingsPort",
     "UsagePort",

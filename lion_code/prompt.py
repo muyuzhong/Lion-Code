@@ -291,9 +291,8 @@ def get_git_context() -> str:
 
 
 # ─── 前缀缓存的静态/动态边界 ─────────────────────────────────
-# 静态模板在用户和会话之间完全一致，适合作为 cache_control 前缀；环境、Git、Memory
-# 和 Skill 会随项目变化，因此放在动态尾部。项目指令由 Agent 的临时 Provider
-# Overlay 注入，不进入系统提示或 canonical Session。
+# 静态模板在用户和会话之间完全一致，适合作为 cache_control 前缀；环境、Git
+# 和 Skill 会随项目变化，因此放在动态尾部。项目指令不进入 canonical Session。
 
 
 def build_static_system_prompt() -> str:
@@ -306,8 +305,8 @@ def build_dynamic_system_context(
 ) -> str:
     """返回会话内稳定、但随机器和项目变化的未缓存上下文。
 
-    只包含核心环境与 Git 信息；Memory/Skill/Agent 等 Feature 说明由对应
-    PromptLayer 贡献，不进入基础 MetaAgent Prompt。
+    只包含核心环境与 Git 信息；Skill/Agent 等 Feature 说明由对应 PromptLayer
+    贡献，不进入基础 MetaAgent Prompt。
     """
     plat = f"{platform.system()} {platform.machine()}"
     shell = (

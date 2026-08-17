@@ -15,7 +15,7 @@ Lion Code 是我个人从零做的一个轻量级 Python Coding Agent（命令�
 - 语言/运行时：Python 3.12+
 - 代码规模：主包 `lion_code/` 约 **23,700 行**，测试约 **15,800 行**
 - 测试：**577 条通过**、6 条跳过（`pytest -q` 实测约 59 秒）
-- Git 历史：237 个 commit，首个提交 2026-07-21（期间做过一次核心运行时的整体迁移融合，core/providers/session/context/memory 等层是从早期项目演进合并进来的）
+- Git 历史：237 个 commit，首个提交 2026-07-21（期间做过一次核心运行时的整体迁移融合，core/providers/session/context/tooling 等层是从早期项目演进合并进来的）
 - 依赖极少：pydantic、rich、textual、pygments、anyio、httpx。**Provider 层零 SDK**，Anthropic 和 OpenAI 兼容协议都是直接用 httpx 自己实现的适配器
 - 安装后是真实可用的 CLI：`pip install -e .` 得到 `lion-code` 命令，支持一次性 prompt、REPL、Textual TUI、会话恢复
 
@@ -32,7 +32,7 @@ CLI / Textual TUI
             ├─ providers/       anthropic / openai_compatible / fake（纯 httpx）
             ├─ context/         上下文管理管线（预算/裁剪/摘要/Token 估算）
             ├─ tooling/         权限、Hook、大结果落盘
-            ├─ memory + dream   项目记忆与隔离式整合
+            ├─ context + session 上下文管理与 JSONL 会话持久化
             └─ tui/             Textual 终端 UI（约 5K 行）
 ```
 
@@ -52,15 +52,11 @@ CLI / Textual TUI
 
 其中一个自己做的设计决策：**裁剪是缓存感知的**——如果 Provider 前缀缓存还热（距上次调用 <5 分钟），即使过了 60% 阈值也延迟改写旧前缀，直到 75% 才动手。动机是改写旧消息会作废整段前缀缓存，用一点 Token 缓冲换缓存命中率。
 
-### 3. 隔离式记忆整合（/dream）
-
-记忆整合用一个受限子 Agent：只有只读权限，不能写文件/执行 Shell。它输出结构化 JSON 计划（created/updated/deleted），**主进程校验**文件名、类型、内容大小和运行前快照之后才集中落盘。模型自始至终碰不到记忆文件系统的写权限。
-
-### 4. 会话持久化
+### 3. 会话持久化
 
 JSONL 追加写 + `fsync`，选 JSONL 不选 JSON 就是为了崩溃恢复——半截写入最多丢最后一行。旧 JSON 格式会话只读迁移，源文件永不修改。
 
-### 5. 评测（两套，都是真实跑过的受控实验）
+### 4. 评测（两套，都是真实跑过的受控实验）
 
 **上下文管理评测**：9 项编码任务 × 3 档上下文负载（60–70% / 75–85% / 85–95%）× 多策略 × 2 次重复 = **54 个真实 API 会话**（DeepSeek API，总花费 ¥13.99，有 ¥15 预算保护阈值）。结果：
 
@@ -84,12 +80,11 @@ Textual 写的完整终端应用（不是带颜色的 REPL）：流式 Markdown 
 
 - CI（GitHub Actions）有一套**质量基线门禁**：ruff / mypy / format / coverage 不和满分比，而是和提交的机器可读 JSON 基线比，原则是"不许继续恶化"，后续阶段逐条收紧；另用 import-linter 做分层架构防回归断言
 - 有一份设计取舍表记录在 README：每个关键决策（先落盘再预览、缓存热时延迟裁剪、Hook 故障 fail-closed、JSONL 选型、零 SDK 等）都写明代价
-- 进行中的工作：Auto 模式还是实验能力、跨平台 CI 未做、`/learn` `/dream` 缺真实后端集成测试、演示素材（GIF/截图）未补——这些在 README 路线图里都是未勾选项
+- 进行中的工作：跨平台 CI 未做、演示素材（GIF/截图）未补——这些在 README 路线图里都是未勾选项
 
 ## 值得一提的点（如实，但确实比较独特）
 
 1. **缓存感知的上下文裁剪 + 拿真实 API 会话做了统计验证**。大多数个人项目讲到上下文管理就是"做个摘要"，这个项目做到了"延迟裁剪保护前缀缓存"这个决策，并且用 54 个付费会话 + 配对 bootstrap 置信区间验证收益，还如实报告了不显著的指标。能聊：前缀缓存机制、为什么改写旧消息会作废缓存、实验设计、为什么费用差异不显著也照写。
 2. **Fail-closed 的工具执行边界**。分层权限 + Hook 子进程最小环境 + 复合信任指纹 + "Hook 故障 ≠ 策略拒绝"的不变量。能聊：威胁模型、为什么密钥不能进 Hook 子进程、fail-closed 的可用性代价。
-3. **隔离式记忆整合**。用权限受限的子 Agent 产出计划、主进程校验后落盘，本质是把"不可信模型输出"当不可信输入处理的最小实践。能聊：prompt injection 防御思路、计划-校验-执行三段式。
-4. **零 SDK 的 Provider 层 + Provider 无关的异步生成器核心循环**。同一套循环吃 Anthropic / OpenAI 兼容 / 测试 Fake 三种后端，靠每轮动态钩子（get_system / get_tools / prepare_context）实现 Plan 模式、Skill 激活、上下文投影而不重建运行时。能聊：协议适配细节、异步生成器做控制流的好处和代价。
-5. **质量基线门禁的 CI 设计**。"不许恶化、逐条收紧"的 ratchet 式质量治理，配 import-linter 架构契约，是接手有历史债务代码时的现实做法，比"全绿"口号真实。
+3. **零 SDK 的 Provider 层 + Provider 无关的异步生成器核心循环**。同一套循环吃 Anthropic / OpenAI 兼容 / 测试 Fake 三种后端，靠每轮动态钩子（get_system / get_tools / prepare_context）实现 Plan 模式、Skill 激活、上下文投影而不重建运行时。能聊：协议适配细节、异步生成器做控制流的好处和代价。
+4. **质量基线门禁的 CI 设计**。"不许恶化、逐条收紧"的 ratchet 式质量治理，配 import-linter 架构契约，是接手有历史债务代码时的现实做法，比"全绿"口号真实。

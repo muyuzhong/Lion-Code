@@ -40,7 +40,7 @@
       "source_files": [
         "lion_code/agent.py",
         "lion_code/prompt.py",
-        "lion_code/memory.py"
+        "lion_code/context/manager.py"
       ],
       "idle_before_turns": [],
       "facts": [

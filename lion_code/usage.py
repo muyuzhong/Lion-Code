@@ -113,7 +113,7 @@ class UsageLedger:
         self._last_response_at = response_at
 
     def record_child_usage(self, input_tokens: int, output_tokens: int) -> None:
-        """累计 child/Skill/Dream 返回量，不改变父响应、turn 或上下文跟踪。"""
+        """累计 child/Skill 返回量，不改变父响应、turn 或上下文跟踪。"""
 
         self._input_tokens += input_tokens
         self._output_tokens += output_tokens

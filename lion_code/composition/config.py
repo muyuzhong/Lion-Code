@@ -10,8 +10,6 @@ if TYPE_CHECKING:
     from ..context import ContextCompactor, ContextManager, ModelLimitsResolver
     from ..core.provider import ModelProvider
     from ..permission_state import PermissionMode
-    from ..project_identity import ProjectIdentity
-    from ..session_memory import SessionMemoryRepository
     from ..session_runtime import SessionRepository
     from ..tooling import ToolRegistry
 
@@ -42,17 +40,12 @@ class AgentDependencies:
     confirm_fn: Callable[[str], Awaitable[bool]] | None = None
     tool_registry: ToolRegistry | None = None
     session_repository: SessionRepository | None = None
-    session_memory_repository: SessionMemoryRepository | None = None
     context_manager: ContextManager | None = None
     context_compactor: ContextCompactor | None = None
     model_limits_resolver: ModelLimitsResolver | None = None
     provider: ModelProvider | None = None
     provider_factory: Callable[..., ModelProvider] | None = None
     pre_tool_use_hooks_loader: Callable[[], list[Any]] | None = None
-    project_identity_resolver: Callable[[Any], ProjectIdentity] | None = None
-    project_context_loader: Callable[[Any, ProjectIdentity], Sequence[Any]] | None = (
-        None
-    )
     dynamic_system_context_builder: Callable[[Sequence[str]], str] | None = None
     terminal_renderer_factory: Callable[[], Any] | None = None
     print_info: Callable[[str], None] | None = None

@@ -2,13 +2,6 @@
 
 from __future__ import annotations
 
-from .memory import (
-    MemoryProjectionLayer,
-    MemoryResource,
-    MemorySessionParticipant,
-    MemoryTurnParticipant,
-    create_memory_capability,
-)
 from .plan import PlanPromptLayer, PlanSessionParticipant, create_plan_capability
 from .registry import (
     CapabilityRegistry,
@@ -22,7 +15,6 @@ from .subagent import create_subagent_capability
 from .types import (
     AsyncCloseable,
     CapabilitySpec,
-    ProjectionLayer,
     PromptLayer,
     SessionParticipant,
     ToolSource,
@@ -37,19 +29,13 @@ __all__ = [
     "CapabilitySpec",
     "CircularDependencyError",
     "DuplicateCapabilityError",
-    "MemoryProjectionLayer",
-    "MemoryResource",
-    "MemorySessionParticipant",
-    "MemoryTurnParticipant",
     "MissingDependencyError",
     "PlanPromptLayer",
     "PlanSessionParticipant",
-    "ProjectionLayer",
     "PromptLayer",
     "SessionParticipant",
     "ToolSource",
     "TurnParticipant",
-    "create_memory_capability",
     "create_plan_capability",
     "create_skill_capability",
     "create_subagent_capability",

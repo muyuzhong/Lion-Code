@@ -3,8 +3,8 @@
 > 代码精简阶段产出。本文件记录质量基线的人类可读说明；CI 的权威机器基线为
 > `docs/quality-baseline-2026-08.json`。
 > 原则：先记录基线 → 执行「不得继续恶化」→ 后续阶段按模块逐步提高标准。
-> 三阶段-2 于 2026-08-03 复测：Session Memory 协调职责已迁出 `agent.py`，
-> 新增 4 个特征测试。
+> PR9 于 2026-08-17 复测：旧项目 Memory、Dream、Learning 生产链路及其专属
+> 测试与质量基线条目已删除；canonical JSONL Session entry 模型保留。
 > 2026-08-04 复测：CI 门槛切到 Python 3.12.13 + Linux 平台 + 精确固定 dev 工具；
 > Ruff/mypy 不再解析人类可读文本，而是用机器输出和违规指纹比对。
 
@@ -35,11 +35,9 @@
 | 717 | `tests/application/test_coding_session.py` |
 | 700 | `tests/tui/test_tui_app.py` |
 | 556 | `tests/tui/test_tui_autocomplete.py` |
-| 553 | `lion_code/dream.py` |
 | 552 | `lion_code/tui/state.py` |
 | 546 | `lion_code/core/loop.py` |
 | 528 | `tests/core/test_harness.py` |
-| 520 | `lion_code/session_memory.py` |
 | 514 | `lion_code/application/session.py` |
 
 ## 3. 最大 20 个函数（按 body 行数）
@@ -88,14 +86,12 @@
 
 | 复杂度 | 函数 |
 |---|---|
-| F (44) | `lion_code/__main__.py: run_repl` |
 | F (44) | `lion_code/core/loop.py: run_agent_loop` |
-| E (32) | `lion_code/agent.py: Agent.configure_api` |
+| E (32) | `lion_code/tui/app.py: LionTuiApp._apply_streaming_transcript_event` |
+| E (31) | `lion_code/__main__.py: main` |
+| D (29) | `lion_code/providers/stream.py: canonicalize_provider_stream` |
 | D (28) | `lion_code/application/session.py: LionCodingSession._drive` |
-| D (26) | `lion_code/dream.py: parse_dream_plan` |
-| D (22) | `lion_code/agent.py: Agent.__init__` |
-| C (20) | `lion_code/dream.py: apply_dream_plan` |
-| C (20) | `lion_code/hooks.py: _run_command_hook` |
+| D (27) | `lion_code/__main__.py: run_repl` |
 
 ## 5. 可维护性指数（radon mi，最差）
 
@@ -131,8 +127,8 @@
 
 CI 权威口径为 Python 3.12.13、`coverage==7.15.2`、`source = ["lion_code"]`。
 
-- coverage report 总覆盖率：**72%**（11,714 语句 / 2,759 未覆盖 / 3,566 分支 / 658 部分分支）。
-- coverage JSON 真实分支覆盖率：**58.33%**（2,080 / 3,566），这是 CI 的全局分支覆盖率下限。
+- coverage report 总覆盖率：**73%**（11,141 语句 / 2,518 未覆盖 / 3,154 分支 / 537 部分分支）。
+- coverage JSON 真实分支覆盖率：**58.56%**（1,847 / 3,154）；CI 全局分支覆盖率下限仍为 58.33%。
 - changed-lines 覆盖率：新增或修改的可执行 `lion_code/*.py` 行必须 **≥80%**；没有变更的可执行生产代码行时跳过。
 
 **最差模块**（≤50%）：
@@ -145,26 +141,28 @@ CI 权威口径为 Python 3.12.13、`coverage==7.15.2`、`source = ["lion_code"]
 | 26% | `lion_code/tui/terminal_title.py` |
 | 40% | `lion_code/ui.py` |
 | 46% | `lion_code/tui/widgets.py` |
-| 47% | `lion_code/memory.py` |
 
 ## 9. 测试与稳定性
 
-- **CI Linux 全量：572 passed, 7 skipped, 11 subtests passed，耗时约 23s**（2026-08-04 GitHub Actions Python 3.12.13；dev 工具版本由 pyproject 精确固定）。
+- **本次全量：705 passed, 21 skipped, 10 subtests passed，耗时约 72s**（Windows 本地复测；CI 仍以 Linux Python 3.12.13 为权威）。
 - **本机 Windows 警告候选**：`PytestUnhandledThreadExceptionWarning` —— `UnicodeEncodeError: 'gbk' codec can't encode character '⠴'`（测试/应用内线程在 GBK 环境打印 Unicode spinner 导致）。该警告未在 Linux/UTF-8 CI 日志中复现；如后续复现，应单独修复输出编码。
 
 ## 10. 静态工具基线（配置后）
 
 | 工具 | 当前状态 | 基线值 |
 |---|---|---|
-| `ruff check lion_code tests scripts --output-format=json` | 82 个违规指纹，59 个可自动修复 | 82 且不得出现新指纹 |
-| `ruff format --check lion_code tests scripts` | 103 文件待重排 | 103 且不得出现新文件指纹 |
-| `mypy lion_code --platform linux -O json` | 68 个错误指纹 | 68 且不得出现新指纹 |
-| `radon cc lion_code -j` | 11 个 D/E/F 级复杂度块 | 11 且不得出现新 D/E/F 指纹 |
-| `vulture lion_code tests --min-confidence 70` | 5 个高置信候选 | 5 且不得出现新指纹 |
-| `import-linter --no-cache` | 5 契约 KEPT | 0 broken |
-| `coverage json` | 分支覆盖率 58.33% | ≥58.33%，changed-lines ≥80% |
+| `ruff check lion_code tests scripts --output-format=json` | 48 个违规指纹 | 54 且不得出现新指纹 |
+| `ruff format --check lion_code tests scripts` | 74 文件待重排 | 79 且不得出现新文件指纹 |
+| `mypy lion_code --platform linux -O json` | 38 个错误指纹 | 68 且不得出现新指纹 |
+| `radon cc lion_code -j` | 9 个 D/E/F 级复杂度块 | 12 且不得出现新 D/E/F 指纹 |
+| `vulture lion_code tests --min-confidence 70` | 3 个高置信候选 | 5 且不得出现新指纹 |
+| `import-linter --no-cache` | 6 契约 KEPT | 0 broken |
+| `coverage json` | 分支覆盖率 58.56% | ≥58.33%，changed-lines ≥80% |
 
-**ruff 违规分布**：I001 (import 排序) 33、RUF012 (可变 class default) 9、UP037 (字符串类型注解) 7、E741/RUF022/RUF043 各 5，其余散落（RUF021/RUF023/UP017/RUF036/UP035/UP040/E731/UP012）。**忽略项及原因见 `pyproject.toml [tool.ruff.lint]`**（含 RUF001/002/003 中文项目误报、E501 行宽、E402 条件导入等）。
+本次删除同步移除了旧 Memory/Dream/Learning 文件对应的质量指纹；当前机器指纹以
+`docs/quality-baseline-2026-08.json` 为准。**忽略项及原因见
+`pyproject.toml [tool.ruff.lint]`**（含 RUF001/002/003 中文项目误报、E501 行宽、
+E402 条件导入等）。
 
 > 本机 Windows 默认 `mypy lion_code` 当前仍为 99 个错误；CI 以 Linux 平台为权威，因此显式传入 `--platform linux` 并把基线收紧为 68。
 
@@ -172,10 +170,9 @@ CI 权威口径为 Python 3.12.13、`coverage==7.15.2`、`source = ["lion_code"]
 
 | 位置 | 类型 |
 |---|---|
-| `lion_code/__main__.py:108` | unused variable `sig` |
-| `lion_code/providers/thinking.py:104,113` | unused variable `provider_kind` |
+| `lion_code/__main__.py:103` | unused variable `sig` |
 | `tests/benchmarks/test_external_anchor.py:65` | unused variable `output_dir` |
-| `tests/test_agent_run.py:67` | unsatisfiable `if` |
+| `tests/test_agent_run.py:74` | unsatisfiable `if` |
 
 ## 11. CI 门槛（不得继续恶化）
 
@@ -183,10 +180,10 @@ CI 权威口径为 Python 3.12.13、`coverage==7.15.2`、`source = ["lion_code"]
 
 | 指标 | 基线 | 阈值含义 |
 |---|---|---|
-| ruff check | 82 个 JSON 指纹 | 状态码只允许 0/1；数量不得超过基线；不得出现新指纹 |
-| ruff format | 103 个文件指纹 | 状态码只允许 0/1；数量不得超过基线；不得出现新文件指纹 |
+| ruff check | 54 个 JSON 指纹 | 状态码只允许 0/1；数量不得超过基线；不得出现新指纹 |
+| ruff format | 79 个文件指纹 | 状态码只允许 0/1；数量不得超过基线；不得出现新文件指纹 |
 | mypy | 68 个 Linux JSONL 指纹 | 状态码只允许 0/1；数量不得超过基线；不得出现新指纹 |
-| radon | 11 个 D/E/F 指纹 | 不允许新增 D/E/F 级复杂度块 |
+| radon | 12 个 D/E/F 指纹 | 不允许新增 D/E/F 级复杂度块 |
 | vulture | 5 个高置信指纹 | 状态码只允许 0/3；不允许新增高置信候选 |
 | import-linter | 0 broken | 不得打破架构边界 |
 | pytest | 全部通过 | 不得回归 |
@@ -209,8 +206,9 @@ CI 权威口径为 Python 3.12.13、`coverage==7.15.2`、`source = ["lion_code"]
 5. 生产代码不导入 tests 与 benchmarks。
 
 补充的 tests/architecture/test_runtime_boundaries.py 以 AST 检查 Provider 私有消息
-历史、旧消息路径、全局 UI Sink、SessionRecorder 构造点、JSONL writer 旁路和
-Memory Overlay 对 Core Harness 的写操作。CI 已同时运行 pytest 与
+历史、旧消息路径、全局 UI Sink、SessionRecorder 构造点和 JSONL writer 旁路；
+PR9 的 tests/architecture/test_legacy_memory_removal.py 负责旧 Memory/Dream/Learning
+模块、对象和 ProjectionLayer 符号的负向门禁。CI 已同时运行 pytest 与
 lint-imports --no-cache，因此这两类检查均会阻止架构回归。
 
 ## 13. 复现命令

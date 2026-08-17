@@ -63,22 +63,6 @@ class _FakePromptLayer:
         return self._text
 
 
-class _FakeProjectionLayer:
-    """Minimal per-request projection layer."""
-
-    def __init__(self, layer_id: str, suffix: str) -> None:
-        self._id = layer_id
-        self._suffix = suffix
-
-    @property
-    def layer_id(self) -> str:
-        return self._id
-
-    def project(self, messages, *, max_tokens):
-        del max_tokens
-        return [*messages, self._suffix]
-
-
 class _FakeTurnParticipant:
     """Minimal TurnParticipant that records hook calls."""
 
@@ -161,13 +145,11 @@ class TestRegistration:
     def test_mutable_inputs_are_normalized_at_construction(self) -> None:
         tool_source = _FakeToolSource(["tool"])
         prompt_layer = _FakePromptLayer("layer")
-        projection_layer = _FakeProjectionLayer("projection", "projected")
         turn_participant = _FakeTurnParticipant()
         session_participant = _FakeSessionParticipant()
         resource = _FakeResource("resource", [])
         tool_sources = [tool_source]
         prompt_layers = [prompt_layer]
-        projection_layers = [projection_layer]
         turn_participants = [turn_participant]
         session_participants = [session_participant]
         resources = [resource]
@@ -175,7 +157,6 @@ class TestRegistration:
         inputs: dict[str, Any] = {
             "tool_sources": tool_sources,
             "prompt_layers": prompt_layers,
-            "projection_layers": projection_layers,
             "turn_participants": turn_participants,
             "session_participants": session_participants,
             "resources": resources,
@@ -186,7 +167,6 @@ class TestRegistration:
 
         assert spec.tool_sources == (tool_source,)
         assert spec.prompt_layers == (prompt_layer,)
-        assert spec.projection_layers == (projection_layer,)
         assert spec.turn_participants == (turn_participant,)
         assert spec.session_participants == (session_participant,)
         assert spec.resources == (resource,)
@@ -194,7 +174,6 @@ class TestRegistration:
 
         tool_sources.clear()
         prompt_layers.clear()
-        projection_layers.clear()
         turn_participants.clear()
         session_participants.clear()
         resources.clear()
@@ -202,7 +181,6 @@ class TestRegistration:
 
         assert spec.tool_sources == (tool_source,)
         assert spec.prompt_layers == (prompt_layer,)
-        assert spec.projection_layers == (projection_layer,)
         assert spec.turn_participants == (turn_participant,)
         assert spec.session_participants == (session_participant,)
         assert spec.resources == (resource,)
@@ -387,16 +365,6 @@ class TestAggregation:
         assert [layer.layer_id for layer in layers] == ["layer_1", "layer_2"]
         assert [layer.render() for layer in layers] == ["fragment A", "fragment B"]
 
-    def test_aggregate_projection_layers(self) -> None:
-        pl1 = _FakeProjectionLayer("layer_1", "first")
-        pl2 = _FakeProjectionLayer("layer_2", "second")
-
-        registry = CapabilityRegistry()
-        registry.register(CapabilitySpec(name="cap_a", projection_layers=(pl1,)))
-        registry.register(CapabilitySpec(name="cap_b", projection_layers=(pl2,)))
-
-        assert registry.projection_layers == (pl1, pl2)
-
     def test_aggregate_turn_participants(self) -> None:
         tp1 = _FakeTurnParticipant()
         tp2 = _FakeTurnParticipant()
@@ -464,7 +432,6 @@ class TestAggregation:
 
         assert registry.tool_sources == ()
         assert registry.prompt_layers == ()
-        assert registry.projection_layers == ()
         assert registry.turn_participants == ()
         assert registry.session_participants == ()
         assert registry.resources == ()

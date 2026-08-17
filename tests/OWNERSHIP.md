@@ -3,8 +3,8 @@ schema: test-ownership/v1
 layers:
   kernel: "Kernel 契约测试（Agent Loop/Turn/Session/Provider Port/Context/Usage）"
   harness: "Harness 契约测试（ProviderManager/ToolRuntime/Middleware/Permission/Session 持久化/Observer）"
-  capability: "Capability 契约测试（Skill/Plan/Memory/SubAgent）"
-  supervisor: "Supervisor 契约测试（Autonomy/Scheduler/Retry/Dream/Learning）"
+  capability: "Capability 契约测试（Skill/Plan/SubAgent）"
+  supervisor: "Supervisor 契约测试（Autonomy/Scheduler/Retry）"
   product: "Product integration（完整应用端到端）"
   eval: "Eval/CI infra（层外：评测/门禁/质量工具）"
   mixed: "跨层（见备注中的主层与混合原因）"
@@ -43,15 +43,6 @@ layers:
 | tests/application/test_coding_session_ports.py | mixed | harness+supervisor：应用 facade/ports + overflow retry 编排 |
 | tests/application/test_provider_settings.py | harness | Provider settings facade |
 | tests/application/test_skill_commands.py | capability | Skill 能力路由 |
-
-### tests/memory_runtime/
-
-| 测试文件/目录 | Layer | 备注 |
-|---|---|---|
-| tests/memory_runtime/test_coordinator.py | capability | Memory coordinator |
-| tests/memory_runtime/test_injector.py | capability | `<relevant-memory>`（MemoryContextInjector） |
-| tests/memory_runtime/test_core_integration.py | mixed | capability[Memory]+kernel：Memory overlays 到 provider projection，驱动真实 Agent.chat |
-| tests/memory_runtime/test_lifecycle.py | capability | Memory 生命周期 + 一个 harness case（coordinator abort） |
 
 ### tests/tooling/
 
@@ -104,19 +95,14 @@ layers:
 | tests/test_autonomy.py | supervisor | Autonomy |
 | tests/test_autonomy_flow.py | supervisor | Autonomy flow |
 | tests/test_autonomy_goal_loop.py | supervisor | Autonomy / Goal lifecycle |
-| tests/test_cli.py | product | CLI/REPL 驱动 Agent + session memory |
 | tests/test_context_formal_benchmark.py | eval | 上下文评测（层外） |
-| tests/test_dream.py | supervisor | Dream + Memory 触碰 |
 | tests/test_hooks.py | harness | permission/safety/hooks/execution backend |
-| tests/test_learning.py | supervisor | Learning |
 | tests/test_model_query.py | kernel | Provider 端口薄包装 |
 | tests/test_plan_runtime.py | capability | Plan（事务/审批/View；PR3 移除 pending reset，PR4 移除权限模式耦合） |
 | tests/test_project_identity.py | harness | identity/config |
 | tests/test_prompt.py | harness | prompt composition |
 | tests/test_provider_manager.py | harness | ProviderManager |
 | tests/test_quality_baseline.py | eval | 质量基线（层外） |
-| tests/test_session_memory.py | capability | Session Memory |
-| tests/test_session_memory_coordinator.py | capability | Session Memory coordinator |
 | tests/test_ui.py | harness | REPL 输出 |
 | tests/test_usage.py | kernel | Usage/Budget 语义 |
 
@@ -130,17 +116,14 @@ layers:
    不是 agent runtime。
 3. `tests/integration/test_agent_core_runtime.py` → **mixed**。名字带 "core runtime"，
    实际含 Kernel + Harness + Capability[Plan/SubAgent] + Supervisor 重试。
-4. `<relevant-memory>`（`tests/memory_runtime/test_injector.py`、`test_core_integration.py`）
-   → **capability[Memory]**。由 `memory_runtime/injector.py::MemoryContextInjector` 产生，
-   不是 Kernel 必须行为。
-5. Plan 事务（`tests/test_plan_runtime.py`、`tests/tooling/test_agent_runtime.py` plan-mode 部分）
+4. Plan 事务（`tests/test_plan_runtime.py`、`tests/tooling/test_agent_runtime.py` plan-mode 部分）
    → **capability[Plan]**。clear-and-execute 的 pending context reset 与
    `apply_plan_context_reset` 已随 PR3 从 Kernel/Runtime 移除，集成测试标记 skip 待 re-home。
    PR4 进一步移除 Plan 与 Permission 的耦合：PermissionMode 不含 plan/auto，
    ToolContext 无 plan / auto_permission_fn，PermissionMiddleware/Policy 无 plan/auto 特判，
    PlanRuntime 不再写 PermissionController；产品策略（PlanRestrictedPolicy /
    LLMPermissionPolicy）留待后续 PR 由 Composition 注入。
-6. SubAgent/Skill（`tests/tooling/test_capability_runtimes.py`、
+5. SubAgent/Skill（`tests/tooling/test_capability_runtimes.py`、
    `tests/tooling/test_tool_selection.py`、`tests/tooling/test_skill_registry_view.py`、
    `tests/tooling/test_agent_internal_runtime.py` 部分）→ **capability[SubAgent/Skill]**。
 
@@ -154,12 +137,11 @@ layers:
   （renderer+usage observer）、tests/tooling/（大部）、tests/application/（facade）、
   test_hooks.py、test_provider_manager.py、test_project_identity.py、test_prompt.py、
   tests/tui/（大部）。
-- **Capability**：tests/capabilities/、tests/memory_runtime/、test_plan_runtime.py、
-  test_session_memory*.py、application/test_skill_commands.py、
+- **Capability**：tests/capabilities/、test_plan_runtime.py、
+  application/test_skill_commands.py、
   tests/tooling/（skill/subagent/plan-tools 文件）。
 - **Supervisor**：test_autonomy.py、test_autonomy_flow.py、test_autonomy_goal_loop.py、
-  test_dream.py、test_learning.py、integration/test_application_coding_session.py +
   application/test_coding_session_ports.py 的 overflow-retry 部分。
-- **Product integration**：tests/tui/test_tui_app.py、test_cli.py、tests/integration/（Mixed）。
+- **Product integration**：tests/tui/test_tui_app.py、tests/integration/（Mixed）。
 - **Eval/CI infra（层外）**：tests/architecture/、tests/benchmarks/、
   test_context_formal_benchmark.py、test_quality_baseline.py。

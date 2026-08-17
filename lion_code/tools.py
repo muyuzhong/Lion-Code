@@ -9,8 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .memory import rebuild_memory_index_if_needed
-
 # ─── 权限模式 ───────────────────────────────────────────────
 
 # PermissionMode 的权威定义位于 permission_state.py，工具实现不再声明权限状态。
@@ -42,7 +40,6 @@ def _write_file(inp: dict) -> str:
         path = Path(inp["file_path"])
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(inp["content"], encoding="utf-8")
-        rebuild_memory_index_if_needed(str(path))
         lines = inp["content"].split("\n")
         line_count = len(lines)
         preview = "\n".join(f"{i + 1:4d} | {l}" for i, l in enumerate(lines[:30]))

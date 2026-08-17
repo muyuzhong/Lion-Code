@@ -26,9 +26,6 @@ SESSION_RECORDER_SITES = {
     "agent_runtime.py": frozenset({"AgentRuntimeCoordinator.reset_core_observers"}),
 }
 JSONL_WRITER_SYMBOLS = frozenset({"JsonlSessionStorage", "entry_to_json_line"})
-MEMORY_INDEX_REBUILD_SYMBOLS = frozenset(
-    {"_update_memory_index", "rebuild_memory_index_if_needed"}
-)
 REMOVED_SKILL_COMMAND_SYMBOLS = frozenset(
     {
         "SkillInvocation",
@@ -714,13 +711,6 @@ def _session_identity_reset_count(tree: ast.Module) -> int:
     )
 
 
-def _contains_string(tree: ast.AST, value: str) -> bool:
-    return any(
-        isinstance(node, ast.Constant) and node.value == value
-        for node in ast.walk(tree)
-    )
-
-
 def _contains_attr_call(tree: ast.AST, attr: str) -> bool:
     return any(
         isinstance(node, ast.Call)
@@ -728,18 +718,6 @@ def _contains_attr_call(tree: ast.AST, attr: str) -> bool:
         and node.func.attr == attr
         for node in ast.walk(tree)
     )
-
-
-def _memory_index_write_sites(tree: ast.Module) -> frozenset[str]:
-    sites: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
-            continue
-        if _contains_string(node, "MEMORY.md") and _contains_attr_call(
-            node, "write_text"
-        ):
-            sites.add(node.name)
-    return frozenset(sites)
 
 
 def _removed_skill_command_symbols(tree: ast.Module) -> frozenset[str]:
@@ -1272,7 +1250,6 @@ def test_usage_state_has_one_owner_and_command_only_writes() -> None:
     assert record_model_sites == {"observers/usage.py": ["UsageObserver.handle"]}
     assert record_child_sites == {
         "subagent_runtime.py": ["SubagentExecutor._run_child"],
-        "dream.py": ["DreamCoordinator.run"],
     }
     assert record_turn_sites == {
         "agent_runtime.py": ["AgentRuntimeCoordinator.before_core_tool_calls"]
@@ -1562,31 +1539,6 @@ def test_dynamic_imports_are_allowlisted() -> None:
     )
 
 
-def test_memory_overlay_code_cannot_mutate_harness_messages() -> None:
-    paths = (
-        *_source_files("memory_runtime"),
-        SOURCE_ROOT / "session_memory_coordinator.py",
-    )
-    harness_references = {
-        _source_key(path): sorted(_agent_harness_references(_tree(path)))
-        for path in paths
-        if _agent_harness_references(_tree(path))
-    }
-    mutations = {
-        _source_key(path): sorted(_harness_mutation_calls(_tree(path)))
-        for path in paths
-        if _harness_mutation_calls(_tree(path))
-    }
-
-    assert not harness_references, (
-        f"Memory Overlay code must not own an AgentHarness: {harness_references}"
-    )
-    assert not mutations, (
-        "Memory Overlay code must return temporary projections, not mutate Core: "
-        f"{mutations}"
-    )
-
-
 def _type_annotation_mentions(tree: ast.Module, name: str) -> bool:
     """Check whether *name* appears in any type annotation in *tree*."""
     for node in ast.walk(tree):
@@ -1595,49 +1547,6 @@ def _type_annotation_mentions(tree: ast.Module, name: str) -> bool:
         if isinstance(node, ast.Attribute) and node.attr == name:
             return True
     return False
-
-
-def test_memory_layer_does_not_reference_agent_harness_in_types() -> None:
-    """Memory layer type annotations must not mention ``AgentHarness``.
-
-    The shared ``TranscriptView`` replaces direct Harness access; type-level
-    references to ``AgentHarness`` would bypass that boundary.
-    """
-    paths = (
-        *_source_files("memory_runtime"),
-        SOURCE_ROOT / "session_memory_coordinator.py",
-    )
-    violations = {
-        _source_key(path): ["AgentHarness"]
-        for path in paths
-        if _type_annotation_mentions(_tree(path), "AgentHarness")
-    }
-    assert not violations, (
-        f"Memory layer must not reference AgentHarness in type annotations: "
-        f"{violations}"
-    )
-
-
-def test_memory_index_has_one_authoritative_definition() -> None:
-    definitions = {
-        _source_key(path): sorted(
-            _defined_symbols(_tree(path), MEMORY_INDEX_REBUILD_SYMBOLS)
-        )
-        for path in _source_files()
-        if _defined_symbols(_tree(path), MEMORY_INDEX_REBUILD_SYMBOLS)
-    }
-    write_sites = {
-        _source_key(path): sorted(_memory_index_write_sites(_tree(path)))
-        for path in _source_files()
-        if _memory_index_write_sites(_tree(path))
-    }
-
-    assert definitions == {
-        "memory.py": ["_update_memory_index", "rebuild_memory_index_if_needed"]
-    }
-    assert write_sites == {"memory.py": ["_update_memory_index"]}, (
-        f"MEMORY.md index writes must stay inside memory.py: {write_sites}"
-    )
 
 
 def test_removed_skill_command_symbols_do_not_return() -> None:
@@ -1709,9 +1618,6 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     jsonl_writer = ast.parse("from lion_code.core.session import JsonlSessionStorage\n")
     memory = ast.parse("def inject(runtime):\n    runtime.replace_messages([])\n")
     memory_owner = ast.parse("from lion_code.core import AgentHarness\n")
-    memory_index_writer = ast.parse(
-        "def rebuild(root):\n    (root / 'MEMORY.md').write_text('')\n"
-    )
     old_skill = ast.parse("def parse_skill_invocation():\n    return '/skill:'\n")
     dynamic_importlib = ast.parse(
         "import importlib\ndef load(name):\n    return importlib.import_module(name)\n"
@@ -1779,7 +1685,6 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
     )
     assert _harness_mutation_calls(memory) == frozenset({"replace_messages"})
     assert _agent_harness_references(memory_owner) == frozenset({"AgentHarness"})
-    assert _memory_index_write_sites(memory_index_writer) == frozenset({"rebuild"})
     assert _removed_skill_command_symbols(old_skill) == frozenset(
         {"/skill:", "parse_skill_invocation"}
     )
@@ -1917,24 +1822,12 @@ def test_domain_runtimes_use_only_narrow_dependencies() -> None:
 
     scoped = {
         "autonomy_runtime.py": ("AutonomyRuntime",),
-        "learning_runtime.py": ("LearningRuntime",),
-        "session_memory_coordinator.py": ("SessionMemoryCoordinator",),
-        "dream.py": ("DreamCoordinator",),
         "subagent_factory.py": ("SubagentFactory",),
     }
     removed_hosts = {
         "AutonomyHost",
-        "LearningRuntimeHost",
-        "SessionMemoryHost",
         "SubagentFactoryHost",
     }
-    forbidden_modules = {
-        "lion_code.agent",
-        "lion_code.agent_runtime",
-        "lion_code.providers",
-        "lion_code.tooling",
-    }
-
     for filename, class_names in scoped.items():
         tree = _tree(SOURCE_ROOT / filename)
         defined = {
@@ -1964,11 +1857,7 @@ def test_domain_runtimes_use_only_narrow_dependencies() -> None:
                     imported.add(f"lion_code.{item.module}")
                 elif item.module:
                     imported.add(item.module)
-        if filename == "session_memory_coordinator.py":
-            assert not imported.intersection(forbidden_modules), {
-                filename: sorted(imported.intersection(forbidden_modules))
-            }
-        if filename in {"autonomy_runtime.py", "learning_runtime.py", "dream.py"}:
+        if filename == "autonomy_runtime.py":
             assert "lion_code.agent" not in imported
             assert "lion_code.agent_runtime" not in imported
 
@@ -2003,25 +1892,6 @@ def test_domain_runtimes_use_only_narrow_dependencies() -> None:
             and node.attr in {"_core_runtime", "_host"}
         }
         assert not forbidden_attributes, {filename: sorted(forbidden_attributes)}
-
-
-def test_dream_domain_has_typed_runner_factory_and_no_agent_field() -> None:
-    """Dream domain keeps pure policy while concrete Agent construction stays outside."""
-
-    tree = _tree(SOURCE_ROOT / "dream.py")
-    class_names = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
-    assert {"DreamAgentRunner", "DreamAgentFactory", "SessionMemoryView"} <= class_names
-    agent_fields = {
-        node.attr
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute) and node.attr == "agent"
-    }
-    assert not agent_fields
-
-    adapter = (SOURCE_ROOT / "dream_adapter.py").read_text(encoding="utf-8")
-    assert 'permission_mode="bypassPermissions"' in adapter
-    assert "DREAM_MAX_TURNS" in adapter
-    assert "require_read_only=True" in adapter
 
 
 # ---------------------------------------------------------------------------

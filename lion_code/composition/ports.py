@@ -8,7 +8,6 @@ from typing import Any, Literal
 from ..agent_runtime import AgentRuntimeCoordinator
 from ..context import ContextCompactor
 from ..core.provider import ModelProvider
-from ..domain_ports import NoticeSink
 from ..observers import TerminalRenderer
 from ..permission_state import PermissionController
 from ..provider_manager import (
@@ -52,21 +51,6 @@ class NoticeController:
             self._print_error(message)
         else:
             self._print_info(message)
-
-
-class NoticeSinkAdapter(NoticeSink):
-    """把有关键字参数的通知控制器适配成 Domain NoticeSink。"""
-
-    def __init__(self, controller: NoticeController) -> None:
-        self._controller = controller
-
-    def emit(
-        self,
-        message: str,
-        *,
-        role: Literal["info", "error"] = "info",
-    ) -> None:
-        self._controller.emit(message, role=role)
 
 
 class ConfirmationController:

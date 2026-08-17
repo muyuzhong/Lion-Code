@@ -85,7 +85,7 @@ class CodingProfile:
 
 @dataclass(frozen=True, slots=True)
 class FullProfile:
-    """Full 产品：Coding 形态 + Memory/Plan/SubAgent/默认 Skill 与完整 facade。
+    """Full 产品：Coding 形态 + Plan/SubAgent/默认 Skill 与完整 facade。
 
     第三方扩展以 immutable ``CapabilitySpec`` values 组合，不进入 dependencies。
     """
