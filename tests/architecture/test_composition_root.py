@@ -161,7 +161,6 @@ def test_agent_constructor_delegates_to_the_composition_root():
             "PlanRuntime",
             "ProviderManager",
             "AgentRuntimeCoordinator",
-            "AutonomyRuntime",
             "SubagentFactory",
             "CapabilityRegistry",
             "ToolRuntime",
@@ -193,18 +192,16 @@ def test_builder_is_a_construction_function_not_a_service_locator():
     )
 
 
-_SUPERVISOR_MODULES = (
-    "autonomy_runtime",
-    "model_query",
-)
+_SUPERVISOR_MODULES = ("supervisor",)
 _SUPERVISOR_SYMBOLS = (
-    "AutonomyRuntime",
-    "CAP_AUTONOMY",
-    "CAP_DREAM",
-    "CAP_LEARNING",
-    "ProviderModelQuery",
+    "CheckpointStore",
+    "Goal",
+    "RetryPolicy",
+    "Supervisor",
 )
-_SUPERVISOR_FIELDS = frozenset({"autonomy", "dream", "learning", "model_query"})
+_SUPERVISOR_FIELDS = frozenset(
+    {"autonomy", "dream", "learning", "model_query", "supervisor"}
+)
 
 
 def test_composition_root_has_no_supervisor_surface() -> None:
@@ -236,7 +233,6 @@ def test_composition_root_has_no_supervisor_surface() -> None:
 @pytest.mark.parametrize(
     "path,class_name",
     [
-        ("autonomy_runtime.py", "AutonomyRuntime"),
         ("plan_runtime.py", "PlanRuntime"),
         ("subagent_factory.py", "SubagentFactory"),
     ],

@@ -23,7 +23,7 @@ lion_code/
 └── tui/                 # The Textual frontend only
 ```
 
-Other root modules such as `autonomy.py`, `hooks.py`, `skills.py`,
+Other root modules such as `supervisor.py`, `hooks.py`, `skills.py`,
 and `tools.py` are existing feature modules. Keep a change close
 to its current owner instead of moving it merely to make a generic layered
 diagram look cleaner.

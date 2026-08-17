@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec index and quality checklist"}
+{"file": ".trellis/spec/backend/four-layer-ownership.md", "reason": "verify layer ownership and import direction"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "verify public runtime seams and forbidden private dependencies"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "verify retry/cancel/recovery behavior"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "run project quality gates consistently"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "verify module placement after Autonomy deletion"}
+{"file": ".trellis/spec/backend/usage-ownership.md", "reason": "verify no duplicate usage/budget owner"}
+{"file": ".trellis/tasks/08-17-pr10-supervisor-plane/research/autonomy-boundary.md", "reason": "review legacy Autonomy deletion against source evidence"}
+{"file": ".trellis/tasks/08-17-pr10-supervisor-plane/research/composition-and-checkpoint-boundary.md", "reason": "review Supervisor public boundary and checkpoint restrictions"}

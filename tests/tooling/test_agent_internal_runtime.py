@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import inspect
 import unittest
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from lion_code.agent import Agent
 from lion_code.tooling.types import ToolResult
-
-_REHOME = "等待 Supervisor composition 重新接入 Autonomy"
 
 
 class TestAgentInternalRuntime(unittest.IsolatedAsyncioTestCase):
@@ -49,30 +46,12 @@ class TestAgentInternalRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertIn("enter_plan_mode", after)
         self.assertIn('"name": "enter_plan_mode"', result)
 
-    @unittest.skip(_REHOME)
-    async def test_dynamic_loop_registers_schedule_wakeup_temporarily(self):
-        agent = self._agent()
-        visible_during_chat = []
-
-        async def chat(_prompt):
-            visible_during_chat.append(agent.tool_registry.is_active("schedule_wakeup"))
-
-        agent._autonomy._conversation = SimpleNamespace(chat=chat)
-
-        with patch("lion_code.agent.print_info"):
-            await agent._run_loop_dynamic({"prompt": "check"})
-
-        self.assertEqual(visible_during_chat, [True])
-        with self.assertRaises(LookupError):
-            agent.tool_registry.resolve("schedule_wakeup")
-
     def test_agent_router_contains_no_tool_name_branches(self):
         source = inspect.getsource(Agent._execute_tool_call)
 
         for forbidden in (
             'name == "agent"',
             'name == "skill"',
-            'name == "schedule_wakeup"',
             'name in ("enter_plan_mode", "exit_plan_mode")',
             "run_pre_tool_use_hooks",
             "check_permission",

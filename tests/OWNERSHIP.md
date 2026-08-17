@@ -4,7 +4,7 @@ layers:
   kernel: "Kernel 契约测试（Agent Loop/Turn/Session/Provider Port/Context/Usage）"
   harness: "Harness 契约测试（ProviderManager/ToolRuntime/Middleware/Permission/Session 持久化/Observer）"
   capability: "Capability 契约测试（Skill/Plan/SubAgent）"
-  supervisor: "Supervisor 契约测试（Autonomy/Scheduler/Retry）"
+  supervisor: "Supervisor 契约测试（Goal/Scheduler/Retry/Checkpoint）"
   product: "Product integration（完整应用端到端）"
   eval: "Eval/CI infra（层外：评测/门禁/质量工具）"
   mixed: "跨层（见备注中的主层与混合原因）"
@@ -26,7 +26,7 @@ layers:
 | tests/architecture/ | eval | 门禁元测试（边界强制 AST/行为测试），非层测试；`_boundaries.py` 是辅助模块 |
 | tests/core/ | kernel | 纯 Kernel。AgentHarness 循环、取消、provider events。名字准确 |
 | tests/context/ | kernel | Context Window / Compaction / projection / policy |
-| tests/providers/ | kernel | Provider Port 实现（Anthropic/OpenAI/fake/stream/limits/thinking/oneshot/factory） |
+| tests/providers/ | kernel | Provider Port 实现（Anthropic/OpenAI/fake/stream/limits/thinking/factory） |
 | tests/adapters/ | harness | Tool 协议适配（adapt_lion_tool/to_core_result/adapt_active_tools） |
 | tests/runtime/ | harness | **名字误导**：测 `agent_runtime.py`（coordinator）+ observers（TerminalRenderer/UsageObserver），非 Kernel core runtime |
 | tests/session_runtime/ | harness | SessionRecorder / SessionRepository / JSONL 持久化，**非 agent runtime** |
@@ -58,12 +58,11 @@ layers:
 | tests/tooling/test_read_freshness.py | harness | 读取新鲜度 |
 | tests/tooling/test_tool_search.py | harness | 工具搜索 |
 | tests/tooling/test_builtin_tools.py | harness | 内置工具 |
-| tests/tooling/test_temporary_tools.py | harness | 临时工具 |
 | tests/tooling/test_agent_runtime.py | mixed | harness+capability[Plan]：Agent._execute_tool_call + plan-mode toggle |
-| tests/tooling/test_agent_internal_runtime.py | mixed | harness+capability[SubAgent]+supervisor[schedule_wakeup] |
+| tests/tooling/test_agent_internal_runtime.py | mixed | harness+capability[SubAgent] |
 | tests/tooling/test_capability_runtimes.py | capability | SkillRuntime / SubagentExecutor |
 | tests/tooling/test_tool_selection.py | mixed | harness+capability[SubAgent] |
-| tests/tooling/test_internal_tools.py | mixed | harness+capability[Skill/Plan/SubAgent]+supervisor[wakeup] |
+| tests/tooling/test_internal_tools.py | mixed | harness+capability[Skill/Plan/SubAgent] |
 | tests/tooling/test_skill_registry_view.py | mixed | capability[Skill/SubAgent]+harness |
 
 ### tests/integration/
@@ -92,12 +91,9 @@ layers:
 | 测试文件/目录 | Layer | 备注 |
 |---|---|---|
 | tests/test_agent_run.py | kernel | Agent.run() 契约；接线 SessionRepository(=Harness) 但断言 Kernel 不变量 |
-| tests/test_autonomy.py | supervisor | Autonomy |
-| tests/test_autonomy_flow.py | supervisor | Autonomy flow |
-| tests/test_autonomy_goal_loop.py | supervisor | Autonomy / Goal lifecycle |
+| tests/test_supervisor.py | supervisor | Goal / retry / checkpoint lifecycle |
 | tests/test_context_formal_benchmark.py | eval | 上下文评测（层外） |
 | tests/test_hooks.py | harness | permission/safety/hooks/execution backend |
-| tests/test_model_query.py | kernel | Provider 端口薄包装 |
 | tests/test_plan_runtime.py | capability | Plan（事务/审批/View；PR3 移除 pending reset，PR4 移除权限模式耦合） |
 | tests/test_project_identity.py | harness | identity/config |
 | tests/test_prompt.py | harness | prompt composition |
@@ -132,7 +128,7 @@ layers:
 ## 层分布汇总
 
 - **Kernel（纯）**：tests/core/、tests/context/、tests/providers/、test_usage.py、
-  test_agent_run.py（为主）、test_model_query.py。
+  test_agent_run.py（为主）。
 - **Harness**：tests/adapters/、tests/session_runtime/、tests/runtime/
   （renderer+usage observer）、tests/tooling/（大部）、tests/application/（facade）、
   test_hooks.py、test_provider_manager.py、test_project_identity.py、test_prompt.py、
@@ -140,8 +136,8 @@ layers:
 - **Capability**：tests/capabilities/、test_plan_runtime.py、
   application/test_skill_commands.py、
   tests/tooling/（skill/subagent/plan-tools 文件）。
-- **Supervisor**：test_autonomy.py、test_autonomy_flow.py、test_autonomy_goal_loop.py、
-  application/test_coding_session_ports.py 的 overflow-retry 部分。
+- **Supervisor**：test_supervisor.py、application/test_coding_session_ports.py 的
+  overflow-retry 部分。
 - **Product integration**：tests/tui/test_tui_app.py、tests/integration/（Mixed）。
 - **Eval/CI infra（层外）**：tests/architecture/、tests/benchmarks/、
   test_context_formal_benchmark.py、test_quality_baseline.py。

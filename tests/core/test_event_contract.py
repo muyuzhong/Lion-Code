@@ -69,7 +69,7 @@ _FORBIDDEN_IMPORTS = (
     "lion_code.plan_runtime",
     "lion_code.skill_runtime",
     "lion_code.subagent_runtime",
-    "lion_code.autonomy_runtime",
+    "lion_code.supervisor",
     "lion_code.composition",
 )
 

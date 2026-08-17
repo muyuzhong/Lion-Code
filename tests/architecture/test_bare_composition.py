@@ -58,7 +58,7 @@ _BARE_GENERIC_FILES = (
     ),
 )
 _FEATURE_MODULE_PREFIXES = (
-    "lion_code.autonomy_runtime",
+    "lion_code.supervisor",
     "lion_code.capabilities.plan",
     "lion_code.capabilities.skill",
     "lion_code.capabilities.subagent",
@@ -68,14 +68,16 @@ _FEATURE_MODULE_PREFIXES = (
     "lion_code.subagent_runtime",
 )
 _FEATURE_SYMBOLS = {
-    "AutonomyRuntime",
+    "CheckpointStore",
     "ChildAgentConfig",
+    "Goal",
     "PlanRuntime",
     "PlanState",
-    "ProviderModelQuery",
+    "RetryPolicy",
     "SkillRuntime",
     "SubagentExecutor",
     "SubagentFactory",
+    "Supervisor",
 }
 
 # Bare 图禁止出现的 Feature 字段（AgentComposition 中应为 None）。

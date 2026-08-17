@@ -80,14 +80,15 @@ but must not own session persistence or a second command dispatcher.
 ## Retained runtime seams
 
 - `CapabilityRegistry`, `CapabilityRuntime`, `Plan`, `Skill`, and `SubAgent`.
-- `ModelQuery` and `ProviderModelQuery`, because Autonomy still consumes the
-  generic query contract. Memory-only text-query adapters are deleted.
-- `TranscriptView`, `ConversationRunner`, `NoticeSink`, and `AutonomyRuntime`.
+- The public `AgentEvent`, result and session-reference contract consumed by
+  `supervisor.py`.
 - Provider replacement, usage recording, permission confirmation, ContextManager
   preparation, ContextCompactor summaries, and Core Event Stream.
 
-These are narrow ports, not compatibility aliases. New code must not reintroduce
-the removed project Memory graph or a second projection/lifecycle slot for it.
+These are narrow ports, not compatibility aliases. `Supervisor` must not import
+Agent/Harness implementations or hold a second session-history writer. Its
+checkpoint contains execution-control fields only and is separate from the
+canonical session JSONL path.
 
 ## Verification obligations
 
