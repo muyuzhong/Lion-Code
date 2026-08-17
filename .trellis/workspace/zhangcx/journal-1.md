@@ -1342,3 +1342,61 @@ SessionMemoryCoordinator/AutonomyRuntime/LearningRuntime/McpManager。
 ### Status
 
 [OK] **Completed**
+
+
+## Session 42: 完成 PR10 Supervisor Plane
+
+**Date**: 2026-08-17
+**Task**: 完成 PR10 Supervisor Plane
+**Branch**: `muyuzhong/pr9-legacy-memory-dream-learning-removal`
+
+### Summary
+
+验证本地 Supervisor Plane、Profile 隔离与架构门禁，全量测试 707 passed；归档 PR10 任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e966dc6` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 43: 完成 PR11 最终架构收尾
+
+**Date**: 2026-08-17
+**Task**: 完成 PR11 最终架构收尾
+**Branch**: `muyuzhong/pr11-final-architecture-cleanup`
+
+### Summary
+
+统一 MetaAgent 公共 facade 与最终 Profile 语义，固化 Capability、Supervisor、目录依赖和 Legacy 移除门禁。
+
+### Main Changes
+
+- Minimal/Coding/Full 全部经 Profile 构造 MetaAgent，Coding 移除可选 Skill，Full 保留 extension_specs。
+- Agent 复用 MetaAgent 通用 API，包根锁定最终公共 API，新增 Composition/MetaAgent 依赖契约。
+- Test C、当前 Legacy 零符号清单与 future Memory Capability 兼容扫描落地。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fb62c5a` | (see git log) |
+| `c88ca30` | (see git log) |
+
+### Testing
+
+- [OK] 718 passed，3 skipped，10 subtests；95 项架构测试和 9 条 import-linter 契约通过。
+- [OK] Ruff、format、mypy、Radon、vulture、coverage、compileall、git diff 门禁通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 本轮 PR0-PR11 架构重构结束；New Memory System 如需启动应单独从零立项。
