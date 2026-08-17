@@ -1319,3 +1319,26 @@ SessionMemoryCoordinator/AutonomyRuntime/LearningRuntime/McpManager。
 ### Status
 
 [OK] **Completed**
+
+
+## Session 41: PR9 旧 Memory Dream Learning 全链路删除
+
+**Date**: 2026-08-17
+**Task**: PR9 旧 Memory Dream Learning 全链路删除
+**Branch**: `muyuzhong/pr9-legacy-memory-dream-learning-removal`
+
+### Summary
+
+基于 PR8 最新 master 删除旧 Memory、Dream、Learning 生产链路及仅供旧 Memory 使用的 ProjectionLayer；收口 FullProfile、Agent facade、CLI/TUI、Session/Capability 契约，新增旧符号负向架构门禁。全量 705 passed、21 skipped、coverage 58.56%、changed-lines 100%、import-linter 0 broken。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `652884b` | (see git log) |
+| `abb1023` | (see git log) |
+| `40da4e3` | (see git log) |
+
+### Status
+
+[OK] **Completed**

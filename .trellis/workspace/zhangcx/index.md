@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 40
-- **Last Active**: 2026-08-16
+- **Total Sessions**: 41
+- **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1321 | Active |
+| `journal-1.md` | ~1344 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 41 | 2026-08-17 | PR9 旧 Memory Dream Learning 全链路删除 | `652884b`, `abb1023`, `40da4e3` | `muyuzhong/pr9-legacy-memory-dream-learning-removal` |
 | 40 | 2026-08-16 | PR8 Capability Plane 重建 | `6db5686` | `muyuzhong/pr8-capability-plane-rebuild` |
 | 39 | 2026-08-16 | PR6 MetaAgent Bare Extraction | `79f94cb` | `muyuzhong/pr6-meta-agent-bare-extraction` |
 | 38 | 2026-08-14 | 提取 Agent Composition Root | `c1510ae` | `master` |
