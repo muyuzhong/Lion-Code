@@ -10,7 +10,7 @@ not historical implementation or future Memory design.
 | Kernel | `core/`, `context/`, `session_runtime/`, `provider_manager.py`, `execution_control.py`, `permission_state.py`, `usage.py` | Product capabilities, frontend state, project feature stores |
 | Harness | `agent_runtime.py`, `session_lifecycle.py`, `composition/`, `agent.py` | A second history, service locator, or deleted legacy graph |
 | Capability | `capabilities/`, `plan_runtime.py`, `skill_runtime.py`, `subagent_factory.py`, `subagent_runtime.py` | Provider/session ownership, broad Agent dependencies, Memory/Dream/Learning replacements |
-| Application/Supervisor | `application/`, `tui/`, `autonomy_runtime.py`, `model_query.py` | Core/Harness containers, direct JSONL writes, removed command surfaces |
+| Application/Supervisor | `application/`, `tui/`, `supervisor.py` | Core/Harness containers, direct JSONL writes, Agent private runtime, removed command surfaces |
 
 `CapabilityRegistry` aggregates immutable contributions and closeable resources;
 it is not a service locator. `ContextManager` and `ContextCompactor` remain
@@ -42,8 +42,11 @@ adapter, Learning runtime, Memory-only provider text query, Memory file-write
 hook, project Memory facade/application ports, and the Memory-only per-request
 capability projection slot. No compatibility alias or placeholder remains.
 
-The generic `ModelQuery`/`ProviderModelQuery` seam remains for Autonomy. Skill,
-Plan, SubAgent, Provider, usage, permission, Event Stream, session replay, and
+The Supervisor consumes only the public Agent event/result/session contracts.
+Goal lifecycle, scheduler, retry/recovery and execution-control checkpoints are
+owned by `supervisor.py`; Provider request retry, UsageLedger/BudgetPolicy,
+canonical session replay and Application overflow retry remain with their
+existing owners. Skill, Plan, SubAgent, Provider, permission, Event Stream and
 context compaction remain active ownership contracts.
 
 ## Architecture tests

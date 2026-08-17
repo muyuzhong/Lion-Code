@@ -12,7 +12,6 @@ from lion_code.tooling.internal import (
     create_enter_plan_tool,
     create_exit_plan_tool,
     create_skill_tool,
-    create_wakeup_tool,
 )
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
@@ -92,20 +91,6 @@ class TestInternalTools(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.content, f"{expected}ed")
             command = enter_command if expected == "enter" else exit_command
             self.assertEqual(command.calls, [(expected, {})])
-
-    async def test_wakeup_tool_calls_injected_command(self):
-        command = _Command("wakeup", "scheduled")
-        runtime = _runtime(create_wakeup_tool(command))
-        arguments = {"delaySeconds": 60, "reason": "later", "prompt": "work"}
-
-        result = await runtime.execute(
-            tool_call_id="call-1",
-            name="schedule_wakeup",
-            arguments=arguments,
-        )
-
-        self.assertEqual(result.content, "scheduled")
-        self.assertEqual(command.calls, [("wakeup", arguments)])
 
 
 if __name__ == "__main__":

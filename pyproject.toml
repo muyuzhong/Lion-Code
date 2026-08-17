@@ -128,10 +128,36 @@ forbidden_modules = [
     "lion_code.usage",
     "lion_code.session_runtime",
     "lion_code.capabilities",
-    "lion_code.autonomy_runtime",
+    "lion_code.supervisor",
     "lion_code.agent",
     "lion_code.agent_runtime",
     "lion_code.composition",
+]
+ignore_imports = []
+allow_indirect_imports = "False"
+
+[[tool.importlinter.contracts]]
+name = "Supervisor 只依赖公开 Core 事件契约"
+type = "forbidden"
+source_modules = ["lion_code.supervisor"]
+forbidden_modules = [
+    "lion_code.agent",
+    "lion_code.agent_runtime",
+    "lion_code.application",
+    "lion_code.capabilities",
+    "lion_code.composition",
+    "lion_code.context",
+    "lion_code.permission_state",
+    "lion_code.provider_manager",
+    "lion_code.providers",
+    "lion_code.session_identity",
+    "lion_code.session_lifecycle",
+    "lion_code.session_runtime",
+    "lion_code.skill_runtime",
+    "lion_code.subagent_runtime",
+    "lion_code.tooling",
+    "lion_code.tui",
+    "lion_code.usage",
 ]
 ignore_imports = []
 allow_indirect_imports = "False"
@@ -146,18 +172,15 @@ forbidden_modules = [
     "lion_code.provider_manager",
     "lion_code.agent_runtime",
     "lion_code.application",
-    "lion_code.autonomy",
-    "lion_code.autonomy_runtime",
+    "lion_code.supervisor",
     "lion_code.capabilities",
     "lion_code.composition",
     "lion_code.config",
     "lion_code.context",
-    "lion_code.domain_ports",
     "lion_code.execution_control",
     "lion_code.frontmatter",
     "lion_code.hooks",
     "lion_code.meta_agent",
-    "lion_code.model_query",
     "lion_code.observers",
     "lion_code.permission_state",
     "lion_code.plan_runtime",
@@ -197,17 +220,14 @@ forbidden_modules = [
     "lion_code.adapters",
     "lion_code.agent",
     "lion_code.agent_runtime",
-    "lion_code.autonomy",
-    "lion_code.autonomy_runtime",
+    "lion_code.supervisor",
     "lion_code.capabilities",
     "lion_code.composition",
     "lion_code.context",
-    "lion_code.domain_ports",
     "lion_code.execution_control",
     "lion_code.frontmatter",
     "lion_code.hooks",
     "lion_code.meta_agent",
-    "lion_code.model_query",
     "lion_code.observers",
     "lion_code.permission_state",
     "lion_code.plan_runtime",
