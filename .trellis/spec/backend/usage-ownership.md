@@ -6,7 +6,7 @@ This contract defines the current usage-accounting boundary for one Lion Code
 ## 1. Scope and Trigger
 
 Apply this guide whenever a change reads, records, resets, displays, or limits
-model, child-agent, Skill, Dream, response, turn, prompt-window, or cost usage.
+model, child-agent, Skill, response, turn, prompt-window, or cost usage.
 It covers `usage.py`, Core event adapters, the Agent composition root,
 `AgentRuntimeCoordinator`, `AutonomyRuntime`, session lifecycle, Application,
 TUI, and all child execution paths.
@@ -88,7 +88,7 @@ and provider-reported cost, increments responses, and replaces the latest prompt
 size and response time. `last_prompt_tokens` uses `Usage.total_tokens` when
 provided, otherwise input + cache-read + cache-write + output.
 
-Child-agent, Skill, and Dream completion paths call `record_child_usage()`.
+Child-agent and Skill completion paths call `record_child_usage()`.
 That command adds only input and output tokens. It must preserve cache fields,
 reasoning, provider-reported cost, responses, turns, `last_prompt_tokens`, and
 `last_response_at`; child totals may never overwrite already aggregated parent
@@ -156,7 +156,7 @@ through Application rather than importing the Ledger.
 | Boundary | Required behavior | Rejected behavior |
 |----------|-------------------|-------------------|
 | Model completion | One terminal assistant event records one response | Streaming chunks or non-assistant events mutate totals |
-| Child / Skill / Dream | Add child input/output to cumulative totals | Assignment replaces parent totals or changes response/context fields |
+| Child / Skill | Add child input/output to cumulative totals | Assignment replaces parent totals or changes response/context fields |
 | Estimated cost | Use the fixed token formula | Use provider-reported cost as the budget estimate |
 | Equal cost and turn limits | Stop on `>=`; cost decision first | Use `>` or return turn when both limits are reached |
 | Core tool boundary | Record turn, then check | Check before recording the boundary turn |
@@ -217,7 +217,7 @@ The minimum focused matrix is:
   compaction/Plan tracking reset, observer rebuild identity, and shared owner.
 - `tests/integration/test_application_coding_session.py`: typed snapshot boundary and
   terminal-toggle observer identity.
-- child, Skill, Dream, goal, and loop suites: cumulative aggregation and common
+- child, Skill, goal, and loop suites: cumulative aggregation and common
   budget decisions.
 - `tests/architecture/test_runtime_boundaries.py`: unique construction,
   forbidden legacy names, private-field writes, observer shape, child command

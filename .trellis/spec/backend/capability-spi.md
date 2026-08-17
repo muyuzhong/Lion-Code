@@ -1,52 +1,21 @@
 # Capability SPI
 
-This contract defines the extension mechanism for Agent-level capabilities.
-It is executable architecture, not a migration plan.
+This contract describes the current Agent capability extension surface. It is
+an executable architecture contract, not a migration plan.
 
-## 1. Scope and Trigger
+## Public slots
 
-Apply this guide whenever adding a new Agent-level capability (Browser,
-Sandbox, Checkpoint, Scheduler, ComputerUse, etc.) or modifying the
-``lion_code.capabilities`` package.
-
-The separation is strict:
-
-- Kernel and Capability are distinct layers.
-- A Capability declares *what the Agent can do*, not *how the Agent runs*.
-- Core, Provider, ToolRuntime, Session, Permission, Usage, ExecutionControl,
-  Context, and Agent are Kernel—they must not be Capability-ized.
-- ``CapabilityRegistry`` is an extension contribution organizer, NOT a service
-  locator or dependency-injection container.
-
-## 2. Public Signatures
-
-~~~python
+```python
 class AsyncCloseable(Protocol):
     async def close(self) -> None: ...
 
 class ToolSource(Protocol):
     def tools(self) -> Sequence[LionTool]: ...
 
-class ToolCommand(Protocol):
-    async def __call__(
-        self,
-        arguments: Mapping[str, JSONValue],
-    ) -> ToolResult: ...
-
 class PromptLayer(Protocol):
     @property
     def layer_id(self) -> str: ...
     def render(self) -> str: ...
-
-class ProjectionLayer(Protocol):
-    @property
-    def layer_id(self) -> str: ...
-    def project(
-        self,
-        messages: Sequence[AgentMessage],
-        *,
-        max_tokens: int | None,
-    ) -> list[AgentMessage]: ...
 
 class TurnParticipant(Protocol):
     async def before_turn(self, user_message: str) -> None: ...
@@ -61,321 +30,43 @@ class CapabilitySpec:
     name: str
     tool_sources: tuple[ToolSource, ...] = ()
     prompt_layers: tuple[PromptLayer, ...] = ()
-    projection_layers: tuple[ProjectionLayer, ...] = ()
     turn_participants: tuple[TurnParticipant, ...] = ()
     session_participants: tuple[SessionParticipant, ...] = ()
     resources: tuple[AsyncCloseable, ...] = ()
     requires: frozenset[str] = frozenset()
+```
 
-class CapabilityRegistry:
-    def register(self, spec: CapabilitySpec) -> None: ...
-    def resolve(self) -> tuple[str, ...]: ...
-    @property
-    def tool_sources(self) -> tuple[ToolSource, ...]: ...
-    @property
-    def prompt_layers(self) -> tuple[PromptLayer, ...]: ...
-    @property
-    def projection_layers(self) -> tuple[ProjectionLayer, ...]: ...
-    @property
-    def turn_participants(self) -> tuple[TurnParticipant, ...]: ...
-    @property
-    def session_participants(self) -> tuple[SessionParticipant, ...]: ...
-    @property
-    def resources(self) -> tuple[AsyncCloseable, ...]: ...
-    async def close_all(self) -> None: ...
+`CapabilityRegistry` resolves explicit dependencies, aggregates the slots above
+in dependency order, and closes resources in reverse dependency order. It is an
+aggregation mechanism, not a service locator, dependency-injection container,
+provider owner, or mutable runtime-state store.
 
-class CapabilityLifecycle(Protocol):
-    async def before_turn(self, user_message: str) -> None: ...
-    async def after_turn(self) -> None: ...
-    async def on_new_session(self) -> None: ...
-    async def on_restore_session(self) -> None: ...
-    def project_context(
-        self,
-        messages: list[AgentMessage],
-        *,
-        max_tokens: int | None,
-    ) -> list[AgentMessage]: ...
-    async def close(self) -> None: ...
+`CapabilityRuntime` dispatches turn/session lifecycle methods and close. Generic
+context preparation and compaction remain owned by `ContextManager` and
+`ContextCompactor`; the Capability SPI has no per-request projection slot.
 
-class CapabilityRuntime(CapabilityLifecycle):
-    def __init__(self, registry: CapabilityRegistry) -> None: ...
-~~~
+## Invariants
 
-## 3. Contracts
+1. `lion_code.capabilities` does not import `Agent`, `AgentRuntimeCoordinator`,
+   or `AgentHarness`.
+2. `CapabilitySpec` is frozen and normalizes all sequence contributions to
+   tuples and dependencies to a frozenset.
+3. Missing and circular dependencies fail during resolution.
+4. Capability tools capture narrow commands at construction and never recover
+   a service locator from `ToolContext`.
+5. Capabilities consume read-only Kernel views and ports instead of mirroring
+   permission, session, usage, cancellation, Plan, or provider state.
+6. The built-in graph contains Plan, SubAgent, and Skill capabilities where the
+   selected Profile requires them. No Memory, Dream, or Learning capability is
+   registered or replaced by a placeholder.
 
-### Kernel–Capability Separation
+## Retained built-ins
 
-1. ``lion_code.capabilities`` must not import ``lion_code.agent``,
-   ``lion_code.agent_runtime``.
-2. ``lion_code.capabilities`` must not reference ``AgentHarness`` in any form.
-3. ``CapabilityRegistry`` must not import ``Agent``, create ``Provider``
-   objects, create ``Session`` objects, modify ``Permission``, or hold
-   runtime state beyond the registry itself.
-4. No ``CapabilityContext``, ``ServiceLocator``, or monolithic
-   ``AgentCapability`` interface with a dozen lifecycle hooks.
-5. Capability-specific tools receive their command dependency when the
-   ``ToolSource`` is constructed. Their ``LionTool.execute_fn`` may ignore
-   ``ToolContext``; it must not recover a controller or service locator from
-   that context at execution time.
+- `PlanCapability` contributes Plan tools, a live prompt layer, and session
+  lifecycle participation.
+- `SubagentCapability` contributes the `agent` tool and delegates child usage,
+  status, errors, and closure to `SubagentExecutor`.
+- `SkillCapability` contributes the Skill tool and uses the same child executor.
 
-### CapabilitySpec Immutability
-
-1. ``CapabilitySpec`` is a frozen, slotted dataclass—its fields cannot be
-   mutated after construction.
-2. ``requires`` is a ``frozenset[str]`` of capability names that must be
-   initialized before this one.  Dependency ordering is explicit; no priority
-   numbers or implicit ordering.
-
-Construction must normalize every sequence contribution to a tuple and
-``requires`` to a frozenset before the spec is exposed. ``frozen=True`` only
-protects the dataclass attributes; retaining a caller-owned list or set would
-still allow mutation behind the registry's dependency-order cache.
-
-### Dependency Resolution
-
-1. Missing dependencies raise ``MissingDependencyError`` at resolve time,
-   naming both the requiring and missing capabilities.
-2. Circular dependencies raise ``CircularDependencyError`` at resolve time,
-   naming all unresolved capabilities.
-3. Capabilities with no inter-dependencies preserve their registration order
-   (stable topological sort).
-4. The cached order is invalidated on each new ``register()`` call and
-   lazily recomputed on the next property access or ``resolve()`` call.
-
-### Aggregated Extension Slots
-
-1. Each aggregated property (``tool_sources``, ``prompt_layers``,
-   ``projection_layers``, ``turn_participants``, ``session_participants``,
-   ``resources``) returns
-   contributions in dependency-resolved order, flattening all capabilities.
-2. Properties auto-resolve lazily—callers do not need to call ``resolve()``
-   explicitly unless they want to fail fast.
-
-3. ``ProjectionLayer.project()`` receives the current Provider projection and
-   returns a new sequence. It must not mutate canonical history, JSONL state, or
-   the input sequence; ``max_tokens`` is the caller's effective context budget.
-   ``CapabilityRuntime.project_context()`` folds layers in dependency-resolved
-   order and is identity-preserving when the registry has no layers.
-
-4. ``CapabilityLifecycle.before_turn(user_message)`` runs after generic session
-   readiness and compaction checks but before the Provider stream. Its
-   ``after_turn()`` counterpart runs from the coordinator's ``finally`` path.
-
-### Resource Closure
-
-1. ``close_all()`` closes resources in reverse dependency order (most
-   dependent first).
-2. Within a single capability, resources are closed in reverse declaration
-   order.
-3. All resources are attempted even if one raises; the first exception is
-   re-raised after all closures complete.
-
-### State Ownership Preservation
-
-1. The Capability SPI must not reintroduce mirrored mutable state
-   (``permission_mode``, ``session_id``, ``plan state``, ``usage counters``,
-   ``cancelled``).
-2. Future capabilities that need access to Kernel state must consume the
-   corresponding read-only View / Port (``PermissionView``, ``SessionView``,
-   ``CancellationView``, ``PlanView``, etc.), not a god-object context.
-3. This PR establishes the type contract only; defining Capability Ports for
-   all Kernel state is deferred to future work.
-
-## 4. Validation & Error Matrix
-
-| Condition | Required result |
-|---|---|
-| Register a capability with a duplicate name | ``DuplicateCapabilityError`` |
-| Register a capability with an empty name | ``ValueError`` |
-| Resolve with a ``requires`` referencing an unregistered name | ``MissingDependencyError`` naming both capabilities |
-| Resolve with a circular dependency | ``CircularDependencyError`` naming all unresolved capabilities |
-| Resolve with a self-referencing dependency | ``CircularDependencyError`` |
-| No dependencies | Registration order preserved |
-| Independent dependency groups | Each group respects internal ordering; inter-group order is registration order |
-| ``close_all()`` with one failing resource | All resources attempted; first exception re-raised |
-| ``close_all()`` with no resources | Completes without error |
-| Property access before ``resolve()`` | Lazy resolution; no explicit call needed |
-| New ``register()`` after ``resolve()`` | Cached order invalidated; next access re-resolves |
-| Empty projection registry | Return the original messages unchanged |
-| Multiple projection layers | Fold in dependency-resolved order and pass the same token budget |
-| Turn participant receives the user input | Pass the exact ``user_message`` string; do not expose an Agent/context object |
-
-## 5. Executable Enforcement
-
-The boundary rules are enforced by both import contracts and AST
-architecture tests:
-
-~~~powershell
-lint-imports --no-cache
-python -m pytest -q tests/architecture/test_runtime_boundaries.py
-~~~
-
-import-linter contracts in ``pyproject.toml``:
-
-- ``lion_code.capabilities`` cannot import ``lion_code.agent``,
-  ``lion_code.agent_runtime``.
-- Existing contracts (Core, Providers, Application, TUI) automatically
-  forbid ``capabilities`` where applicable because whitelist-based
-  boundaries derive their forbidden set from ``ALL_ROOTS``.
-
-AST tests in ``tests/architecture/test_runtime_boundaries.py``:
-
-- ``test_capabilities_do_not_import_agent_engine``: capabilities source
-  files must not import from ``agent`` or
-  ``agent_runtime``.
-- ``test_capabilities_do_not_reference_agent_harness``: capabilities
-  source files must not reference ``AgentHarness`` in any form.
-- ``test_capabilities_do_not_define_service_locator_or_god_context``:
-  capabilities source files must not define ``CapabilityContext``,
-  ``ServiceLocator``, or ``AgentCapability``.
-- ``test_import_linter_config_matches_boundaries``: the import-linter
-  contract in ``pyproject.toml`` matches the ``Boundary`` definition in
-  ``_boundaries.py``.
-- ``test_all_roots_matches_filesystem``: ``ALL_ROOTS`` includes
-  ``capabilities`` (auto-discovered from the filesystem).
-
-## 6. Tests Required
-
-- ``tests/capabilities/test_capability_registry.py``: registration,
-  duplicate rejection, dependency resolution (missing, circular,
-  self-referencing, chained, stable ordering), aggregation of each
-  extension slot, construction-time container normalization, close semantics
-  (reverse order, error continuation, first-error re-raise), and full
-  integration lifecycle.
-- ``tests/architecture/test_runtime_boundaries.py``: capability boundary
-  import, AgentHarness reference, and god-context prevention tests.
-- ``tests/capabilities/test_capability_migration.py``: Skill/SubAgent
-  capability installation, SubAgent permission inheritance, Skill tool
-  delegation, close-does-not-double-release, and architecture boundary
-  compliance.
-- ``tests/tooling/test_capability_runtimes.py``: Skill inline/unknown/fork
-  routing plus Subagent success/error conversion, status ordering, usage
-  aggregation, and child closure.
-- ``tests/architecture/test_tool_routing.py``: ToolContext/controller removal,
-  forbidden Agent route names, and capability/runtime reverse-import guards.
-
-## 7. Capability Contributions and Tool Bindings
-
-The tool-bearing capabilities use construction-time command binding:
-
-### SkillCapability (``capabilities/skill.py``)
-
-- ``create_skill_capability(runtime: SkillRuntime)`` implements
-  ``ToolSource`` and captures the supplied runtime in the ``skill`` tool.
-- ``SkillRuntime`` owns lookup, inline activation, unknown-skill handling, and
-  fork dispatch. It does not receive or import ``Agent``.
-- A fork delegates child construction and lifecycle to ``SubagentExecutor``;
-  inline activation does not create a child.
-- No ``TurnParticipant`` or ``AsyncCloseable`` slots.
-
-### SubagentCapability (``capabilities/subagent.py``)
-
-- ``create_subagent_capability(executor: SubagentExecutor)`` implements
-  ``ToolSource`` and captures the supplied executor in the ``agent`` tool.
-- ``SubagentFactory`` remains responsible only for child selection and
-  construction. ``SubagentExecutor`` owns start/end status, ``run_once``,
-  child usage merge, error conversion, and final child closure.
-- No ``TurnParticipant`` or ``AsyncCloseable`` slots.
-
-### PlanCapability (``capabilities/plan.py``)
-
-- ``create_plan_capability(runtime: PlanRuntime)`` contributes the enter/exit
-  ToolSource, a live ``PlanPromptLayer`` over ``PlanView``, and a
-  ``PlanSessionParticipant`` for new/restore transitions.
-- The tools call the bound ``PlanRuntime`` directly. The tool adapter copies
-  ``terminate`` from ``PlanToolOutcome`` into ``ToolResult``; with PR3 the
-  clear-and-execute enhancement is removed, so Plan approval never terminates.
-- PR4：PlanRuntime 不再持有或写入 PermissionController。enter/exit/toggle 只
-  管理 Plan 状态与审批事务；Plan 期间的读写限制由未来的
-  ``PlanRestrictedPolicy`` 注入，Capability 自身不把 ``plan`` 当作权限模式。
-- The prompt layer renders the current Plan state on every Composer request;
-  it does not mutate Plan state or retain a prompt mirror.
-
-### MemoryCapability (``capabilities/memory.py``)
-
-- ``create_memory_capability(coordinator, transcript)`` contributes exactly the
-  slots needed by the existing Memory behavior: ``MemoryTurnParticipant`` for
-  turn-start overlay snapshots and post-turn evidence/semantic persistence,
-  ``MemorySessionParticipant`` for clear/restore reset and reload,
-  ``MemoryProjectionLayer`` for the temporary ``<relevant-memory>`` Provider
-  projection, and ``MemoryResource`` for closing pending recall work.
-- ``SessionMemoryCoordinator`` exposes only the narrow capability methods
-  ``begin_user_turn()``, ``finish_user_turn()``, ``project()``, and
-  ``reset_for_session()`` for this integration. It receives a
-  ``ProviderTextQueryService`` whose provider is resolved lazily, so Provider
-  replacement is visible without a ProviderManager-to-Memory callback.
-- Projection is applied after generic ``ContextManager`` preparation and only
-  to the Provider request. The injected wrapper never enters canonical Core
-  messages, compaction input, or JSONL. A cancelled turn still saves
-  deterministic tool evidence, cancels unfinished recall, and never leaks a
-  stale result into a later turn.
-
-### Future external-tool capabilities (MCP boundary)
-
-MCP is not a current capability and must not be reintroduced into
-``ToolEnvironment`` or generic Harness code. If a future external-tool
-capability owns a connection, process, or background task, the capability must
-declare that resource through ``resources``/``AsyncCloseable`` and close it in
-the registry's reverse dependency order. The generic tool/runtime layers must
-consume only the resulting ``ToolSource`` contract.
-
-### Dynamic wakeup tool
-
-- ``create_wakeup_tool(runtime.schedule_wakeup)`` captures the command while
-  the dynamic loop temporarily registers the tool.
-- ``AutonomyRuntime`` owns ``pending_wakeup`` and delay clamping; the tool
-  does not route through ``Agent``.
-
-### Agent Composition Changes
-
-- ``composition/agent_builder.py`` is profile-driven (PR7c):
-  ``build_agent_composition(profile)`` takes a single immutable Profile value.
-  ``MinimalProfile`` is the **Bare graph** — it creates no
-  Memory/Plan/SubAgent/Skill objects and registers only caller tools.
-  ``CodingProfile`` binds the Coding tool suite to the profile-selected
-  ``CommandExecutionBackend`` and composes Skill only when a
-  ``SkillComposition`` value is present (composing Skill also registers the
-  ``agent`` tool via the shared Subagent machinery; it is model-visible, not
-  hidden). ``FullProfile`` fixes the Full Product
-  shape (Coding form + Memory/Plan/SubAgent/default Skill + ``CapabilitySpec``
-  extensions with the full ``Agent`` facade). Public profiles accept no
-  capability-name set and expose no feature bools; the capability construction
-  branch lives only in the composition-root helpers (``_normalize_profile``,
-  ``_resolve_dependencies``, ``_build_foundation``, ``_build_capability_graph``,
-  ``_build_session_graph``), enforced by
-  ``tests/architecture/test_composition_profiles.py``.
-- Feature construction is gated by the normalized selection: ``_build_foundation``
-  creates ``PlanRuntime`` only when the corresponding capability is selected;
-  ``_build_capability_graph`` and ``_build_session_graph`` construct
-  each runtime only for selected capabilities. `CapabilityRegistry` may be empty
-  and an empty registry remains a legal object graph.
-- For the Full Product, ``composition/agent_builder.py`` creates
-  ``SkillRuntime``, ``SubagentExecutor``, and ``PlanRuntime`` before registering
-  the corresponding capabilities. ``Agent.__init__`` only normalizes the public
-  configuration, builds a ``FullProfile``, invokes the composition root, and
-  exposes the resulting facade delegates.
-- Capability-provided tools are registered into fresh root registries. When a
-  child receives a filtered registry, the composition root replaces the
-  inherited capability tool objects with tools bound to the child runtimes;
-  ordinary built-in and caller tools remain shared by registry view.
-- ``CapabilityRuntime`` is the only generic lifecycle adapter. It dispatches
-  projection, turn, and session participants from the registry and closes
-  registry resources once; it does not expose capability lookup or kernel state.
-- ``AgentRuntimeCoordinator.prepare_core_context()`` calls the lifecycle port's
-  ``project_context()`` after generic context preparation. The coordinator only
-  knows the generic projection port.
-- ``AgentRuntimeCoordinator.chat()`` calls the lifecycle port's
-  ``before_turn(user_message)`` after compaction and invokes ``after_turn()`` from a ``finally`` block
-  covering early exits, cancellation, and Provider/tool failures.
-- ``SessionLifecycle`` receives the same lifecycle port for new/restore
-  callbacks and close; capability resources are released once by
-  ``CapabilityRuntime.close()``.
-- ``tooling/internal.py``'s ``create_internal_tools()`` no longer includes
-  ``create_skill_tool()`` or ``create_agent_tool()``; they are provided by
-  capabilities. Plan tools are provided by ``PlanCapability`` and the wakeup
-  tool is registered only by the dynamic loop.
-
-Adding a built-in capability requires its implementation and a registration in
-the composition wiring plus focused tests. It must not require edits to
-``agent.py``, ``agent_runtime.py``, ``session_lifecycle.py``,
-``tooling/context.py``, ``application/``, or ``tui/``.
+Future capabilities may add the existing generic slots or closeable resources,
+but must not add a second history store, writer, or context projection path.

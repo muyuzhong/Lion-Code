@@ -54,12 +54,6 @@ Textual 争用 stdout。REPL 则保留 `ui.print_*` 的直接终端输出。两�
 | `/plan` | 切换 Plan 模式 |
 | `/cost` | 显示本会话输入/输出 Token |
 | `/compact` | 使用当前 Provider 压缩上下文 |
-| `/task` | 查看当前项目的目标、活动任务与下一步 |
-| `/task switch <内容>` | 切换活动任务；旧任务保留为待继续事项 |
-| `/task done` | 结束活动任务并保留完成摘要 |
-| `/session-memory` | 查看当前项目的跨会话短期工作状态 |
-| `/handoff` | 生成并保存可继续的项目交接摘要 |
-| `/dream` | 整理受限的 Session Memory 候选到 Auto Memory |
 | `/thinking [level]` | 切换 `off/minimal/low/medium/high/xhigh` 档位 |
 | `/theme [name]` | 切换 TUI 主题；无参数时打开选择器 |
 | `/quit`、`/exit` | 退出 TUI |

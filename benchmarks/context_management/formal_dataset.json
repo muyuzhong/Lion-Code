@@ -84,7 +84,7 @@
       "tool_payload_bytes": 30000,
       "large_result_turns": [2, 6],
       "large_tool_payload_bytes": 48000,
-      "source_files": ["benchmarks/context_management/benchmark.py", "lion_code/memory.py"],
+      "source_files": ["benchmarks/context_management/benchmark.py", "lion_code/context/manager.py"],
       "contract_turns": {
         "1": "规范化契约：只移除 = 与 : 两侧空白以及首尾空白，命令、路径和自然语言内部空格必须保留。",
         "5": "兼容契约：实现可以使用标准库 re，但不得改变不含结构分隔符的普通文本。"
