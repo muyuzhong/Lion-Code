@@ -163,6 +163,33 @@ ignore_imports = []
 allow_indirect_imports = "False"
 
 [[tool.importlinter.contracts]]
+name = "Composition 不依赖 Product Facade 与 Interfaces"
+type = "forbidden"
+source_modules = ["lion_code.composition"]
+forbidden_modules = [
+    "lion_code.agent",
+    "lion_code.application",
+    "lion_code.meta_agent",
+    "lion_code.supervisor",
+    "lion_code.tui",
+]
+ignore_imports = []
+allow_indirect_imports = "True"
+
+[[tool.importlinter.contracts]]
+name = "MetaAgent 不依赖 Product Features 与 Interfaces"
+type = "forbidden"
+source_modules = ["lion_code.meta_agent"]
+forbidden_modules = [
+    "lion_code.agent",
+    "lion_code.application",
+    "lion_code.supervisor",
+    "lion_code.tui",
+]
+ignore_imports = []
+allow_indirect_imports = "False"
+
+[[tool.importlinter.contracts]]
 name = "Providers 只依赖 Core 抽象"
 type = "forbidden"
 source_modules = ["lion_code.providers"]

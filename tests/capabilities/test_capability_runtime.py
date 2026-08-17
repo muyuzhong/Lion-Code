@@ -134,3 +134,43 @@ async def test_capability_runtime_preserves_dependency_order_and_closes_once() -
         "dependent:close",
         "dependency:close",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "omitted",
+    ["plan", "skill", "subagent", "third-party"],
+)
+async def test_c_any_capability_can_be_omitted_from_generic_runtime(
+    omitted: str,
+) -> None:
+    """Test C：任一 Capability 缺席时，通用 lifecycle 仍按剩余 specs 工作。"""
+
+    events: list[str] = []
+    names = ("plan", "skill", "subagent", "third-party")
+    capabilities = {name: _FullCapability(events, name) for name in names}
+    registry = CapabilityRegistry()
+    for name in names:
+        if name != omitted:
+            registry.register(_full_spec(capabilities[name]))
+    lifecycle = CapabilityRuntime(registry)
+
+    assert registry.names == tuple(name for name in names if name != omitted)
+    assert len(registry.tool_sources) == 3
+    assert len(registry.prompt_layers) == 3
+
+    await lifecycle.on_new_session()
+    await lifecycle.on_restore_session()
+    await lifecycle.before_turn("question")
+    await lifecycle.after_turn()
+    await lifecycle.close()
+
+    assert not any(event.startswith(f"{omitted}:") for event in events)
+    for name in names:
+        if name == omitted:
+            continue
+        assert f"{name}:new" in events
+        assert f"{name}:restore" in events
+        assert f"{name}:before" in events
+        assert f"{name}:after" in events
+        assert f"{name}:close" in events

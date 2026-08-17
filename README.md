@@ -6,7 +6,7 @@
 
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
-[![Tests: 518 passed](https://img.shields.io/badge/Tests-518%20passed-22c55e.svg)](tests/)
+[![Tests: 718 passed](https://img.shields.io/badge/Tests-718%20passed-22c55e.svg)](tests/)
 [![Status: Active](https://img.shields.io/badge/Status-Active%20Development-f59e0b.svg)](#路线图)
 
 [快速开始](#快速开始) · [架构](#架构) · [安全模型](#1-fail-closed-工具执行边界) · [上下文管理](#2-多级上下文管理) · [评测](#可复现评测) · [路线图](#路线图)
@@ -24,59 +24,39 @@
 - **经验怎样被再次使用**——辛苦排查出的问题，如何在下一次会话、下一位同事遇到时自动生效？
 - **这些机制到底有没有用**——如何用数据说话，而不是凭感觉？
 
-Lion Code 就是我对这些问题的回答。它是一个**可读、可验证的 Agent 运行时**（~43K 行 Python，518 条测试），用较少的依赖实现了上述所有关键机制，并为每项重要结论保留了源码、测试或 Benchmark 证据。
+Lion Code 就是我对这些问题的回答。它是一个**可读、可验证的 Agent 运行时**（~43K 行 Python，718 条测试），用较少的依赖实现了上述所有关键机制，并为每项重要结论保留了源码、测试或 Benchmark 证据。
 
 ---
 
 ## 架构
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                     CLI / Textual TUI                        │
-│              lion-code [prompt] | --repl | --resume          │
-└──────────────────────────┬───────────────────────────────────┘
-                           │
-┌──────────────────────────▼───────────────────────────────────┐
-│                   LionCodingSession                          │
-│          (application/session.py)                            │
-│   事件桥接: Agent ↔ TUI · 命令注册 · Skill 发现              │
-└──────────────────────────┬───────────────────────────────────┘
-                           │
-┌──────────────────────────▼───────────────────────────────────┐
-│                        Agent                                 │
-│                    (agent.py, ~94 KB)                         │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │              Core Runtime (core/)                     │   │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │   │
-│  │  │  Loop    │  │ Harness  │  │ Canonical Messages│   │   │
-│  │  │ (async   │  │ (配置,   │  │ (AgentMessage,    │   │   │
-│  │  │  gen)    │  │  事件)   │  │  ToolResult...)   │   │   │
-│  │  └──────────┘  └──────────┘  └──────────────────┘   │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                           │                                  │
-│  ┌────────────────────────▼────────────────────────────┐     │
-│  │              统一工具路由                             │     │
-│  │  ┌────────┐ ┌─────┐ ┌────────┐ ┌────────────────┐  │     │
-│  │  │ 内置   │ │ MCP │ │ Skill  │ │Sub-agent/Plan  │  │     │
-│  │  │(文件,  │ │     │ │        │ │  内部工具      │  │     │
-│  │  │ Shell, │ │     │ │        │ │                │  │     │
-│  │  │ 搜索)  │ │     │ │        │ │                │  │     │
-│  │  └────────┘ └─────┘ └────────┘ └────────────────┘  │     │
-│  └─────────────────────────────────────────────────────┘     │
-│                           │                                  │
-│  ┌────────────────────────▼────────────────────────────┐     │
-│  │           上下文管理管线                              │     │
-│  │  落盘 → 预算 → 裁剪(缓存感知) → 清理 →              │     │
-│  │  摘要(85% 水位)                                      │     │
-│  └─────────────────────────────────────────────────────┘     │
-│                           │                                  │
-│  ┌────────────────────────▼────────────────────────────┐     │
-│  │         Providers (纯 httpx，零 SDK 依赖)            │     │
-│  │  Anthropic API  ·  OpenAI-compatible  ·  Fake       │     │
-│  └─────────────────────────────────────────────────────┘     │
-└──────────────────────────────────────────────────────────────┘
+Interfaces (CLI / TUI / Application / package API)
+    ↓
+Composition / Profile
+    ↓
+MetaAgent facade
+    ↓
+Agent Kernel ─────→ Harness
+    │
+    └─────────────→ Capability Plane ─────→ optional features
+
+Supervisor
+    ↓
+AgentFactory selects Profile
+    ↓
+MetaAgent
 ```
+
+Profile 只决定组装图，不把 feature 开关塞进通用配置：
+
+- `MinimalProfile` = `MetaAgent` + caller tools + zero-extension registry
+- `CodingProfile` = `MetaAgent` + Coding Tools + Coding Harness policy
+- `FullProfile` = `CodingProfile` + Skill + Plan + SubAgent + external `CapabilitySpec`
+
+三个 Profile 都返回同一个 feature-neutral `MetaAgent` facade。FullProfile 当前不含
+Memory；项目中也没有 Legacy Memory、Dream 或 Learning 生产对象图。Supervisor 位于
+普通 Agent 对象图之外，只通过公开 Agent 端口运行 Profile 选择出的 MetaAgent。
 
 每次工具调用按以下顺序执行：
 
@@ -372,16 +352,20 @@ python -m benchmarks.agent_e2e --help
 ```
 Lion-Code/
 ├── lion_code/                  # 主包 (~43K 行)
-│   ├── __main__.py             # CLI、TUI 与 REPL 入口
-│   ├── agent.py                # Agent 组装、工具路由与宿主能力 (~94 KB)
-│   ├── agent_runtime.py        # Agent ↔ Core Runtime 桥接
-│   ├── core/                   # 可移植 Agent 循环
+│   ├── __init__.py             # 最终公共 API
+│   ├── __main__.py             # CLI、TUI 与 REPL 进程入口
+│   ├── meta_agent.py           # feature-neutral 公共 Agent facade
+│   ├── agent.py                # Application/CLI 使用的内部 Full 产品宿主
+│   ├── composition/            # Profile 与一次性 Composition Root
+│   ├── agent_runtime.py        # Kernel/Harness 运行协调
+│   ├── core/                   # Agent Kernel、Harness 与规范协议
 │   │   ├── loop.py             # 异步生成器：整个工具使用周期
 │   │   ├── harness.py          # 配置、事件总线、消息队列
 │   │   ├── messages.py         # 规范消息类型（AgentMessage、ToolResult...）
 │   │   ├── tools.py            # 工具定义、执行协议、并行批处理
 │   │   ├── provider.py         # ModelProvider 抽象
 │   │   └── provider_events.py  # 流式事件（delta、done、error）
+│   ├── capabilities/           # CapabilitySpec/Registry/Runtime 与内置适配
 │   ├── providers/              # 纯 httpx HTTP Provider（零 SDK 依赖）
 │   │   ├── http.py             # 共享 HTTP 客户端（重试/流式）
 │   │   ├── anthropic.py        # Anthropic Messages API 适配
@@ -398,7 +382,6 @@ Lion-Code/
 │   ├── tooling/                # 工具执行运行时
 │   │   ├── runtime.py          # 统一执行入口（pre/post 中间件）
 │   │   ├── builtin.py          # 文件、Shell、搜索、Web 工具
-│   │   ├── mcp.py              # MCP 客户端集成
 │   │   ├── permission.py       # 静态权限规则与危险操作判定
 │   │   ├── registry.py         # 工具注册与解析
 │   │   ├── middleware.py       # 拦截器链
@@ -417,9 +400,11 @@ Lion-Code/
 │   ├── hooks.py                # PreToolUse 命令 Hook (~23 KB)
 │   ├── skills.py               # Skill 发现与解析
 │   ├── session_runtime/        # JSONL 记录、旧 JSON 迁移、Repository
-│   ├── subagent.py             # Sub-agent 配置与启动
-│   ├── mcp_client.py           # MCP 协议客户端
-│   ├── supervisor.py           # 长期任务 goal/retry/checkpoint 编排
+│   ├── plan_runtime.py         # Plan Capability 的状态所有者
+│   ├── skill_runtime.py        # Skill Capability 的运行时
+│   ├── subagent_factory.py     # Profile-backed child Agent 工厂
+│   ├── subagent_runtime.py     # SubAgent Capability 的执行器
+│   ├── supervisor.py           # Agent 外部 goal/retry/scheduler/checkpoint 平面
 │   ├── prompt.py               # System Prompt 拼装
 │   └── config.py               # API 配置
 ├── benchmarks/
@@ -434,7 +419,7 @@ Lion-Code/
 │       ├── verifier.py         # 结构化通过/失败判定
 │       ├── regression.py       # 基线对比与退化检测
 │       └── external_anchor.py  # SWE-bench 集成
-├── tests/                      # 518 条测试
+├── tests/                      # 718 条测试
 │   ├── core/                   # Core Runtime 单元测试
 │   ├── context/                # 上下文管理测试
 │   ├── integration/            # 集成测试
@@ -564,7 +549,7 @@ TUI 支持实时路径补全、命令/Skill 提示、流式 Markdown、可展开
 ## 测试
 
 ```bash
-# 完整测试套件（518 条）
+# 完整测试套件（718 条）
 python -m pytest -q
 
 # 编译检查

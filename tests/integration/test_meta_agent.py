@@ -126,7 +126,7 @@ async def test_zero_extension_zero_tool_smoke(tmp_path, monkeypatch) -> None:
     assert [message.role for message in agent.messages] == ["user", "assistant"]
     assert provider.received_tools == [[]]
     assert provider.received_systems == ["You are a helpful assistant."]
-    assert agent._capability_registry.names == ()
+    assert not hasattr(agent, "_capability_registry")
     assert agent.usage.responses == 1
     assert agent.budget.max_cost_usd is None
     await agent.close()
@@ -389,12 +389,16 @@ def test_meta_agent_public_surface_is_feature_neutral() -> None:
         "usage",
     }
     forbidden = (
+        "active_task",
         "autonom",
         "dream",
         "goal",
+        "handoff",
         "learn",
+        "memory",
         "plan",
         "skill",
         "subagent",
+        "supervisor",
     )
     assert not any(marker in name.casefold() for name in public for marker in forbidden)

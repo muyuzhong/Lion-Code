@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required focused full validation and review checklist."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Review final ownership and negative boundaries."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Review facade composition session and Supervisor invariants."}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"Review Test C and CapabilityRegistry semantics."}
+{"file":".trellis/tasks/08-17-pr11-final-architecture-cleanup/research/local-architecture-audit.md","reason":"Cross-check fixes against every evidence-backed deviation."}

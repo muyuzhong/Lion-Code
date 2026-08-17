@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Final physical and logical layer placement rules."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Kernel Harness Capability Supervisor ownership contract."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Composition Profile facade session and Supervisor invariants."}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"CapabilitySpec incremental registration and zero-extension contract."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Preserve canonical JSONL persistence restore and compaction behavior."}
+{"file":".trellis/tasks/08-17-pr11-final-architecture-cleanup/research/local-architecture-audit.md","reason":"Verified local PR9 PR10 baseline and PR11 architecture deviations."}

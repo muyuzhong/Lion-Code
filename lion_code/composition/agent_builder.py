@@ -87,7 +87,6 @@ from .profiles import (
     CodingProfile,
     FullProfile,
     MinimalProfile,
-    ProductFacadeKind,
     Profile,
 )
 
@@ -133,7 +132,6 @@ class AgentComposition:
     notices: NoticeController
     confirmation: ConfirmationController
     status_sink: SubagentStatusSink | None
-    facade: ProductFacadeKind
 
 
 @dataclass(slots=True)
@@ -142,7 +140,6 @@ class _ProfileSelection:
 
     config: AgentConfig
     dependencies: AgentDependencies
-    facade: ProductFacadeKind
     capabilities: frozenset[str]
     builtin_tools: bool
     caller_tools: tuple[LionTool, ...]
@@ -307,7 +304,6 @@ def build_agent_composition(profile: Profile) -> AgentComposition:
         notices=notices,
         confirmation=confirmation,
         status_sink=status_sink,
-        facade=selection.facade,
     )
 
 
@@ -321,7 +317,6 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
         return _ProfileSelection(
             config=profile.config,
             dependencies=profile.dependencies,
-            facade=profile.facade,
             capabilities=frozenset(),
             builtin_tools=False,
             caller_tools=profile.tools,
@@ -332,18 +327,10 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
             extension_specs=(),
         )
     if isinstance(profile, CodingProfile):
-        capabilities = (
-            frozenset(
-                {_CAP_SKILL, _CAP_SUBAGENT},
-            )
-            if profile.skill is not None
-            else frozenset()
-        )
         return _ProfileSelection(
             config=profile.config,
             dependencies=profile.dependencies,
-            facade=profile.facade,
-            capabilities=capabilities,
+            capabilities=frozenset(),
             builtin_tools=True,
             caller_tools=profile.extra_tools,
             base_prompt=profile.system_prompt or build_static_system_prompt(),
@@ -356,7 +343,6 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
         return _ProfileSelection(
             config=profile.config,
             dependencies=profile.dependencies,
-            facade=profile.facade,
             capabilities=frozenset(
                 {_CAP_SKILL, _CAP_SUBAGENT, _CAP_PLAN},
             ),

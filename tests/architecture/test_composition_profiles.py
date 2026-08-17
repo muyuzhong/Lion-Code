@@ -1,9 +1,8 @@
 """PR7c Composition Profile Layer：三种 Profile 的真实对象图与结构门禁。
 
 验收：
-1. MinimalProfile 实际图只含 caller tools，CapabilityRegistry 为空，facade 为 MetaAgent。
-2. CodingProfile 实际图含 backend 绑定的 Coding 工具与 Meta facade；Skill 只随
-   SkillComposition 出现。
+1. MinimalProfile 实际图只含 caller tools，CapabilityRegistry 为空，产出 MetaAgent。
+2. CodingProfile 实际图含 backend 绑定的 Coding 工具与 Harness policy，产出 MetaAgent。
 3. FullProfile 实际图含 Plan/SubAgent/默认 Skill/extension specs，Capability
    prompt layers 进入同一 PromptComposer。
 4. Profile 是 frozen/slots 纯值对象：无 feature bool、运行时方法或 registry lookup。
@@ -17,6 +16,7 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
+import lion_code
 from lion_code.agent import Agent
 from lion_code.composition import (
     NEUTRAL_SYSTEM_PROMPT,
@@ -25,14 +25,20 @@ from lion_code.composition import (
     CodingProfile,
     FullProfile,
     MinimalProfile,
-    ProductFacadeKind,
-    SkillComposition,
     build_agent_composition,
 )
 from lion_code.composition.agent_builder import _normalize_profile
-from lion_code.meta_agent import MetaAgent, build_coding_agent, build_meta_agent
+from lion_code.core import AssistantMessage, TextContent
+from lion_code.core.provider_events import AssistantDoneEvent
+from lion_code.meta_agent import (
+    MetaAgent,
+    build_coding_agent,
+    build_meta_agent,
+    build_profile_agent,
+)
 from lion_code.prompt import build_static_system_prompt
 from lion_code.session_runtime import SessionRepository
+from lion_code.supervisor import RetryPolicy, Supervisor, VolatileCheckpointStore
 from lion_code.tooling.builtin import BUILTIN_TOOL_NAMES
 from lion_code.tooling.execution import LocalCommandExecutionBackend
 from lion_code.tooling.permission import PermissionDecision, PermissionPolicy
@@ -85,6 +91,31 @@ def _fake_provider():
     return provider
 
 
+class _CompletedProvider:
+    def __init__(self, text: str) -> None:
+        self._event = AssistantDoneEvent(
+            reason="stop",
+            message=AssistantMessage(
+                model="fake",
+                content=[TextContent(text=text)],
+                stop_reason="stop",
+            ),
+        )
+
+    async def aclose(self) -> None:
+        return None
+
+    def stream_response(self, **_kwargs):
+        async def events():
+            yield self._event
+
+        return events()
+
+
+def _completed_provider(text: str) -> _CompletedProvider:
+    return _CompletedProvider(text)
+
+
 def _minimal(tmp_path, monkeypatch, **profile_kwargs) -> object:
     monkeypatch.chdir(tmp_path)
     profile_kwargs.setdefault(
@@ -115,7 +146,6 @@ def test_minimal_graph_only_contains_caller_tools(tmp_path, monkeypatch) -> None
     assert composition.subagent_executor is None
     assert composition.skill_runtime is None
     assert composition.status_sink is None
-    assert composition.facade is ProductFacadeKind.META
     assert NEUTRAL_SYSTEM_PROMPT in composition.prompt_composer.get_system()
 
 
@@ -146,7 +176,6 @@ def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypat
     assert composition.capability_registry.names == ()
     assert composition.skill_runtime is None
     assert composition.plan is None
-    assert composition.facade is ProductFacadeKind.META
     assert composition.permission_policy is strategy
 
     result = asyncio.run(
@@ -161,12 +190,11 @@ def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypat
     assert build_static_system_prompt() in composition.prompt_composer.get_system()
 
 
-def test_coding_graph_composes_skill_only_with_skill_composition(tmp_path, monkeypatch):
+def test_coding_graph_never_composes_full_capabilities(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     profile = CodingProfile(
         config=AgentConfig(api_key="test-key", terminal_output=False),
         dependencies=AgentDependencies(),
-        skill=SkillComposition(),
     )
     with patch(
         "lion_code.composition.agent_builder.create_provider",
@@ -174,10 +202,10 @@ def test_coding_graph_composes_skill_only_with_skill_composition(tmp_path, monke
     ):
         composition = build_agent_composition(profile)
 
-    assert set(composition.capability_registry.names) == {"skill", "subagent"}
-    assert composition.skill_runtime is not None
-    assert composition.subagent_executor is not None
-    # Coding 不构造 Full-only Capability。
+    assert composition.capability_registry.names == ()
+    assert composition.skill_runtime is None
+    assert composition.subagent_executor is None
+    assert composition.subagent_factory is None
     assert composition.plan is None
 
 
@@ -221,7 +249,6 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
     assert composition.subagent_factory is not None
     assert composition.skill_runtime is not None
     assert composition.status_sink is not None
-    assert composition.facade is ProductFacadeKind.FULL
     assert composition.permission_policy is strategy
     system = composition.prompt_composer.get_system()
     assert build_static_system_prompt() in system
@@ -240,6 +267,8 @@ def test_profile_types_reject_capability_name_sets() -> None:
     for profile_type in (MinimalProfile, CodingProfile, FullProfile):
         field_names = {field.name for field in fields(profile_type)}
         assert "capabilities" not in field_names
+        assert "facade" not in field_names
+        assert "skill" not in field_names
         assert not field_names & {"skill_enabled", "memory_enabled", "plan_enabled"}
 
 
@@ -263,6 +292,7 @@ def test_full_agent_facade_uses_full_profile_and_child_uses_coding_profile(
 
     try:
         assert isinstance(agent, Agent)
+        assert isinstance(agent, MetaAgent)
         assert isinstance(child, MetaAgent)
         assert not isinstance(child, Agent)
         assert child.permission_mode == "bypassPermissions"
@@ -271,11 +301,9 @@ def test_full_agent_facade_uses_full_profile_and_child_uses_coding_profile(
         asyncio.run(agent.close())
 
 
-def test_build_meta_agent_and_build_coding_agent_return_meta_facade(
-    tmp_path, monkeypatch
-):
+def test_all_profiles_return_meta_facade(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    provider = _fake_provider()
+    provider = _completed_provider("minimal")
     meta = build_meta_agent(
         provider=provider,
         tools=[_tool("caller_tool")],
@@ -286,16 +314,90 @@ def test_build_meta_agent_and_build_coding_agent_return_meta_facade(
 
     with patch(
         "lion_code.composition.agent_builder.create_provider",
-        return_value=_fake_provider(),
+        side_effect=[
+            _completed_provider("coding"),
+            _completed_provider("full"),
+        ],
     ):
         coding = build_coding_agent(
             api_key="test-key",
             terminal_output=False,
             system_prompt="custom coding prompt",
         )
+        full = build_profile_agent(
+            FullProfile(
+                config=AgentConfig(api_key="test-key", terminal_output=False),
+                dependencies=AgentDependencies(session_repository=_repo(tmp_path)),
+            )
+        )
     assert isinstance(coding, MetaAgent)
+    assert isinstance(full, MetaAgent)
+    assert not hasattr(full, "plan")
+    assert asyncio.run(meta.run("minimal smoke")).final_text == "minimal"
+    assert asyncio.run(coding.run("coding smoke")).final_text == "coding"
+    assert asyncio.run(full.run("full smoke")).final_text == "full"
     asyncio.run(meta.close())
     asyncio.run(coding.close())
+    asyncio.run(full.close())
+
+
+def test_package_root_exports_only_final_product_api() -> None:
+    assert set(lion_code.__all__) == {
+        "AgentConfig",
+        "AgentDependencies",
+        "AgentFactory",
+        "AgentPort",
+        "AsyncioScheduler",
+        "CapabilitySpec",
+        "CheckpointError",
+        "CheckpointStore",
+        "CodingProfile",
+        "FullProfile",
+        "Goal",
+        "JsonCheckpointStore",
+        "MetaAgent",
+        "MinimalProfile",
+        "Phase",
+        "Profile",
+        "PublicAgentEventListener",
+        "PublicAgentResult",
+        "RetryPolicy",
+        "Scheduler",
+        "Status",
+        "Supervisor",
+        "SupervisorResult",
+        "SupervisorState",
+        "VolatileCheckpointStore",
+        "build_coding_agent",
+        "build_meta_agent",
+        "build_profile_agent",
+    }
+    assert not hasattr(lion_code, "Agent")
+
+
+def test_supervisor_factory_selects_profile_backed_meta_agent(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    provider = _completed_provider("supervised")
+    profile = MinimalProfile(
+        config=AgentConfig(terminal_output=False),
+        dependencies=AgentDependencies(
+            provider=provider,
+            session_repository=_repo(tmp_path),
+        ),
+    )
+    supervisor = Supervisor(
+        agent_factory=lambda: build_profile_agent(profile),
+        goal="run selected profile",
+        retry_policy=RetryPolicy(max_attempts=1),
+        checkpoint_store=VolatileCheckpointStore(),
+    )
+
+    result = asyncio.run(supervisor.run())
+
+    assert result.succeeded
+    assert result.session_id
 
 
 def test_subagent_factory_reuses_coding_composition_entrypoint() -> None:
