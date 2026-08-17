@@ -29,8 +29,7 @@ def print_welcome() -> None:
     console.print("\n  [bold cyan]Lion Code[/bold cyan][dim] — 一个轻量级编码 Agent[/dim]\n")
     console.print("[dim]  Type your request, or 'exit' to quit.[/dim]")
     console.print(
-        "[dim]  Commands: /clear /plan /cost /compact /task /session-memory "
-        "/handoff /memory /skills[/dim]\n"
+        "[dim]  Commands: /clear /plan /cost /compact /skills[/dim]\n"
     )
 
 

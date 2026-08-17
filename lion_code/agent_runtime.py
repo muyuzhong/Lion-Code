@@ -431,16 +431,13 @@ class AgentRuntimeCoordinator:
     async def prepare_core_context(
         self, messages: list[AgentMessage]
     ) -> list[AgentMessage]:
-        """只生成 Provider 投影，不改写 canonical history 或 JSONL。"""
+        """通过 ContextManager 准备 Provider context，不改写 canonical history 或 JSONL。"""
 
         state = self.context_runtime_state()
         prepared = self._context_manager.prepare(messages, state)
         self._last_context_actions = prepared.actions
         self._core_compaction_required = prepared.compaction_required
-        return self._capabilities.project_context(
-            list(prepared.messages),
-            max_tokens=state.effective_window_tokens,
-        )
+        return list(prepared.messages)
 
     async def capture_core_text(self, event: AgentEvent) -> None:
         """为 run_once/run 捕获本次助手文本，不参与终端或 TUI 渲染。"""

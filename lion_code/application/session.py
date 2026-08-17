@@ -5,7 +5,7 @@
 - 对外提供 ``prompt``/``continue_``/``cancel``/``is_running``/``messages``/
   队列快照/``aclose``,事件以 ``AsyncIterator[LionSessionEvent]`` 流出;
 - 内部组合现有 ``Agent``(Core Runtime 路径)作为实现细节:Agent 已经
-  完成 Provider/ToolRuntime/SessionRecorder/ContextManager/MemoryCoordinator
+  完成 Provider/ToolRuntime/SessionRecorder/ContextManager
   的组装与每轮编排,本层不重复实现任何 Loop;
 - 底层 ``AgentEvent`` 原样透传,唯 ``AgentEndEvent`` 包装为
   ``SessionAgentEndEvent``;一次调用彻底结束后追加 ``AgentSettledEvent``;
@@ -125,7 +125,7 @@ class LionCodingSession:
 
     @property
     def messages(self) -> tuple[AgentMessage, ...]:
-        """Canonical transcript 快照(不含 Memory overlay 等临时投影)。"""
+        """Canonical transcript 快照，不含临时上下文投影。"""
         return self._backend.messages
 
     @property
@@ -153,8 +153,8 @@ class LionCodingSession:
     ) -> AsyncIterator[LionSessionEvent]:
         """跑一轮对话,或在运行中把消息入队。
 
-        空闲时:驱动一次完整 ``Agent.chat``(含 Memory 预取、自动压缩、
-        Plan 上下文重置续跑),事件按产生顺序流出,结束后发 Settled。
+        空闲时:驱动一次完整 ``Agent.chat``(含自动压缩、Plan 上下文重置续跑),
+        事件按产生顺序流出,结束后发 Settled。
         运行中:``streaming_behavior`` 必填,消息入队并发 ``QueueUpdateEvent``。
         """
         if self.is_running:
@@ -181,11 +181,11 @@ class LionCodingSession:
             yield event
 
     def cancel(self) -> None:
-        """取消当前一轮:同时中断模型流、工具执行与在途 Memory 预取。"""
+        """取消当前一轮:同时中断模型流与工具执行。"""
         self._backend.cancel()
 
     async def aclose(self) -> None:
-        """关闭底层 Agent(落盘会话并回收 Memory 与 Capability 任务)。"""
+        """关闭底层 Agent(落盘会话并回收 Capability 任务)。"""
         await self._backend.aclose()
 
     # ─── 会话管理 ────────────────────────────────────────────
@@ -291,28 +291,6 @@ class LionCodingSession:
 
     def handle_command(self, text: str) -> CommandResult:
         return self._command_registry.execute(self, text)
-
-    async def execute_session_memory_command(
-        self,
-        result: CommandResult,
-    ) -> str | None:
-        """执行项目短期记忆命令；解析意图由 CommandRegistry 统一提供。"""
-
-        if self._running:
-            raise RuntimeError("会话运行中，取消当前任务后再执行命令")
-        if result.task_action == "show":
-            return self._backend.show_active_task()
-        if result.task_action == "switch":
-            if result.task_text is None:
-                raise ValueError("缺少要切换的任务")
-            return self._backend.switch_session_task(result.task_text)
-        if result.task_action == "done":
-            return self._backend.finish_session_task()
-        if result.session_memory_requested:
-            return self._backend.show_session_memory()
-        if result.handoff_requested:
-            return self._backend.create_session_handoff()
-        return None
 
     # ─── Lion 特有交互(权限确认 / Plan 审批)─────────────────
 

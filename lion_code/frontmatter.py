@@ -1,4 +1,4 @@
-"""供 Memory 与 Skill 共用的简化版 YAML frontmatter 解析器。
+"""供 Skill 配置使用的简化版 YAML frontmatter 解析器。
 
 这里只支持 `---` 分隔符之间的 `key: value`，避免为受控配置格式引入完整 YAML 依赖。
 """

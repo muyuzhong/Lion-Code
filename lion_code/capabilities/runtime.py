@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from lion_code.core.messages import AgentMessage
-
 from .registry import CapabilityRegistry
 
 
@@ -21,13 +19,6 @@ class CapabilityLifecycle(Protocol):
     async def on_restore_session(self) -> None: ...
 
     async def close(self) -> None: ...
-
-    def project_context(
-        self,
-        messages: list[AgentMessage],
-        *,
-        max_tokens: int | None,
-    ) -> list[AgentMessage]: ...
 
 
 class CapabilityRuntime:
@@ -52,17 +43,6 @@ class CapabilityRuntime:
     async def on_restore_session(self) -> None:
         for participant in self._registry.session_participants:
             await participant.on_restore_session()
-
-    def project_context(
-        self,
-        messages: list[AgentMessage],
-        *,
-        max_tokens: int | None,
-    ) -> list[AgentMessage]:
-        projected = list(messages)
-        for layer in self._registry.projection_layers:
-            projected = layer.project(projected, max_tokens=max_tokens)
-        return projected
 
     async def close(self) -> None:
         if self._closed:

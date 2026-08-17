@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 import time
 import uuid
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,7 +19,6 @@ from ..capabilities import (
     CapabilityRegistry,
     CapabilityRuntime,
     CapabilitySpec,
-    create_memory_capability,
     create_plan_capability,
     create_skill_capability,
     create_subagent_capability,
@@ -33,22 +31,18 @@ from ..context import (
 )
 from ..execution_control import ExecutionControl
 from ..hooks import load_pre_tool_use_hooks
-from ..memory_runtime import ProviderTextQueryService
 from ..observers import TerminalRenderer
 from ..permission_state import PermissionController, PermissionState
 from ..plan_runtime import PlanRuntime, PlanState
-from ..project_identity import ProjectIdentity, resolve_project_identity
 from ..prompt import (
     PromptComposer,
     build_dynamic_system_context,
     build_static_system_prompt,
-    load_project_context_files,
 )
 from ..provider_manager import ProviderKind, ProviderManager, ProviderState
 from ..providers.factory import create_provider
 from ..providers.thinking import ThinkingLevel
 from ..session_identity import SessionIdentityState
-from ..session_memory_coordinator import SessionMemoryCoordinator
 from ..session_runtime import SessionRepository
 from ..skill_runtime import SkillRuntime
 from ..subagent_factory import ChildAgentConfig, SubagentFactory
@@ -82,7 +76,6 @@ from .ports import (
     DeferredModelContextControl,
     DeferredProviderRuntimePort,
     NoticeController,
-    NoticeSinkAdapter,
     PlanHost,
     RuntimeIdentityPort,
     SessionRecorderConfigurationRecorder,
@@ -102,14 +95,13 @@ from .profiles import (
 _CAP_SKILL = "skill"
 _CAP_SUBAGENT = "subagent"
 _CAP_PLAN = "plan"
-_CAP_MEMORY = "memory"
 
 
 @dataclass(slots=True)
 class AgentComposition:
     """Composition Root 完成后交给 facade 的显式对象集合。
 
-    Feature 字段（plan / subagent / memory）在 Bare 图中为 ``None``：
+    Feature 字段（plan / subagent）在 Bare 图中为 ``None``：
     调用方按所选 capabilities 判空，不创建 Null 对象。
     """
 
@@ -136,7 +128,6 @@ class AgentComposition:
     context_manager: ContextManager
     provider_manager: ProviderManager
     runtime_coordinator: AgentRuntimeCoordinator
-    session_memory_coordinator: SessionMemoryCoordinator | None
     identity_port: RuntimeIdentityPort
     session_port: SessionStatePort
     notices: NoticeController
@@ -168,8 +159,6 @@ class _FoundationGraph:
     cwd: Path
     provider_factory: Any
     hooks_loader: Any
-    resolve_identity: Any
-    context_loader: Any
     dynamic_context_builder: Any
     renderer_factory: Any
     notices: NoticeController
@@ -184,7 +173,6 @@ class _FoundationGraph:
     read_file_state: dict[str, float]
     tool_registry: ToolRegistry
     created_own_registry: bool
-    notice_sink: NoticeSinkAdapter | None
     plan: PlanRuntime | None
 
 
@@ -194,8 +182,6 @@ class _ResolvedDependencies:
     cwd: Path
     provider_factory: Any
     hooks_loader: Any
-    resolve_identity: Any
-    context_loader: Any
     dynamic_context_builder: Any
     renderer_factory: Any
     notices: NoticeController
@@ -234,17 +220,12 @@ class _ToolingGraph:
     session_port: SessionStatePort
 
 
-@dataclass(slots=True)
-class _SessionGraph:
-    session_memory_coordinator: SessionMemoryCoordinator | None
-
-
 def build_agent_composition(profile: Profile) -> AgentComposition:
     """按固定顺序创建 Agent object graph，并返回一次性 composition result。
 
     Profile 是组合选择的唯一来源：``MinimalProfile`` 构造零内置 Capability 的
     Bare 图，``CodingProfile`` 构造 backend 绑定的 Coding 工具形态，
-    ``FullProfile`` 固定组合 Memory/Plan/SubAgent/默认 Skill。
+    ``FullProfile`` 固定组合 Plan/SubAgent/默认 Skill。
     """
 
     selection = _normalize_profile(profile)
@@ -297,16 +278,6 @@ def build_agent_composition(profile: Profile) -> AgentComposition:
         tool_runtime,
         context_manager,
     )
-    session_graph = _build_session_graph(
-        config,
-        foundation,
-        provider_graph,
-        runtime_coordinator,
-        selection.capabilities,
-        capability_registry,
-    )
-    session_memory_coord = session_graph.session_memory_coordinator
-
     return AgentComposition(
         permission_controller=permission_controller,
         session_state=session_state,
@@ -331,7 +302,6 @@ def build_agent_composition(profile: Profile) -> AgentComposition:
         context_manager=context_manager,
         provider_manager=provider_manager,
         runtime_coordinator=runtime_coordinator,
-        session_memory_coordinator=session_memory_coord,
         identity_port=identity_port,
         session_port=session_port,
         notices=notices,
@@ -388,7 +358,7 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
             dependencies=profile.dependencies,
             facade=profile.facade,
             capabilities=frozenset(
-                {_CAP_SKILL, _CAP_SUBAGENT, _CAP_PLAN, _CAP_MEMORY},
+                {_CAP_SKILL, _CAP_SUBAGENT, _CAP_PLAN},
             ),
             builtin_tools=True,
             caller_tools=profile.extra_tools,
@@ -429,8 +399,6 @@ def _resolve_dependencies(
         cwd=cwd,
         provider_factory=deps.provider_factory or create_provider,
         hooks_loader=deps.pre_tool_use_hooks_loader or load_pre_tool_use_hooks,
-        resolve_identity=deps.project_identity_resolver or resolve_project_identity,
-        context_loader=deps.project_context_loader or _default_project_context_loader,
         dynamic_context_builder=(
             deps.dynamic_system_context_builder or build_dynamic_system_context
         ),
@@ -449,8 +417,6 @@ def _build_foundation(selection: _ProfileSelection) -> _FoundationGraph:
     cwd = resolved.cwd
     provider_factory = resolved.provider_factory
     hooks_loader = resolved.hooks_loader
-    resolve_identity = resolved.resolve_identity
-    context_loader = resolved.context_loader
     dynamic_context_builder = resolved.dynamic_context_builder
     renderer_factory = resolved.renderer_factory
     notices = resolved.notices
@@ -482,9 +448,6 @@ def _build_foundation(selection: _ProfileSelection) -> _FoundationGraph:
             for tool in [*create_builtin_tools(backend), *create_internal_tools()]:
                 tool_registry.register(tool)
 
-    notice_sink = (
-        NoticeSinkAdapter(notices) if _CAP_MEMORY in selection.capabilities else None
-    )
     if _CAP_PLAN in selection.capabilities:
         plan: PlanRuntime | None = PlanRuntime(
             PlanHost(session_state, notices),
@@ -497,8 +460,6 @@ def _build_foundation(selection: _ProfileSelection) -> _FoundationGraph:
         cwd=cwd,
         provider_factory=provider_factory,
         hooks_loader=hooks_loader,
-        resolve_identity=resolve_identity,
-        context_loader=context_loader,
         dynamic_context_builder=dynamic_context_builder,
         renderer_factory=renderer_factory,
         notices=notices,
@@ -513,7 +474,6 @@ def _build_foundation(selection: _ProfileSelection) -> _FoundationGraph:
         read_file_state=read_file_state,
         tool_registry=tool_registry,
         created_own_registry=created_own_registry,
-        notice_sink=notice_sink,
         plan=plan,
     )
 
@@ -758,51 +718,6 @@ def _build_runtime_coordinator(
     )
     provider_graph.background_scheduler.bind(runtime_coordinator)
     return runtime_coordinator
-
-
-def _build_session_graph(
-    config: AgentConfig,
-    foundation: _FoundationGraph,
-    provider_graph: _ProviderGraph,
-    runtime_coordinator: AgentRuntimeCoordinator,
-    capabilities: frozenset[str],
-    capability_registry: CapabilityRegistry,
-) -> _SessionGraph:
-    session_memory_coord: SessionMemoryCoordinator | None = None
-    if _CAP_MEMORY in capabilities:
-        # notice_sink 与 CAP_MEMORY 同条件创建，此处仅为类型收窄的不变量断言。
-        assert foundation.notice_sink is not None
-        identity = foundation.resolve_identity(foundation.cwd)
-        memory_query = ProviderTextQueryService(
-            provider=lambda: runtime_coordinator.core_runtime.provider,
-            model=lambda: provider_graph.provider_manager.model,
-        )
-        session_memory_coord = SessionMemoryCoordinator(
-            identity=identity,
-            repository=foundation.dependencies.session_memory_repository,
-            transcript=runtime_coordinator.core_runtime,
-            cancellation=foundation.execution.cancellation,
-            load_project_context=lambda project_identity: tuple(
-                foundation.context_loader(foundation.cwd, project_identity)
-            ),
-            notices=foundation.notice_sink,
-            query=memory_query,
-            is_sub_agent=config.is_sub_agent,
-        )
-        capability_registry.register(
-            create_memory_capability(
-                session_memory_coord,
-                runtime_coordinator.core_runtime,
-            )
-        )
-    return _SessionGraph(session_memory_coordinator=session_memory_coord)
-
-
-def _default_project_context_loader(
-    cwd: Path,
-    identity: ProjectIdentity,
-) -> Sequence[Any]:
-    return load_project_context_files(cwd=cwd, identity=identity)
 
 
 def _child_config(

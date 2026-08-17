@@ -148,7 +148,7 @@ async def run_agent_loop(
             # and tool-activation prompt updates are visible without rebuilding.
             current_system = get_system() if get_system else system
             # Let the host shape provider context (trim tool results, budget,
-            # cache-heat, summarization, memory injection) without rebuilding.
+            # cache-heat, and summarization) without rebuilding.
             provider_messages = _provider_context(messages)
             if prepare_context is not None:
                 prepared = prepare_context(provider_messages)

@@ -11,7 +11,6 @@ import sys
 from .agent import Agent
 from .application.session import LionCodingSession
 from .config import load_api_config
-from .memory import list_memories
 from .permission_state import PermissionMode
 from .skills import (
     discover_skills,
@@ -139,18 +138,7 @@ async def run_repl(agent: Agent) -> None:
             break
 
         if inp.startswith("/"):
-            command_result = command_session.handle_command(inp)
-            command_name = inp[1:].split(" ", 1)[0].lower()
-            if command_name in {"task", "session-memory", "handoff"}:
-                try:
-                    message = await command_session.execute_session_memory_command(
-                        command_result
-                    )
-                    if message:
-                        print_info(message)
-                except Exception as error:  # noqa: BLE001 - REPL 需保留交互循环并显示命令失败。
-                    print_error(str(error))
-                continue
+            command_session.handle_command(inp)
 
         # 内置 REPL 命令在普通对话前分发，避免被误送给模型。
         if inp == "/clear":
@@ -167,15 +155,6 @@ async def run_repl(agent: Agent) -> None:
                 await agent.compact()
             except Exception as e:
                 print_error(str(e))
-            continue
-        if inp == "/memory":
-            memories = list_memories()
-            if not memories:
-                print_info("No memories saved yet.")
-            else:
-                print_info(f"{len(memories)} memories:")
-                for m in memories:
-                    print(f"    [{m.type}] {m.name} — {m.description}")
             continue
         if inp == "/skills":
             skills = discover_skills()
@@ -246,12 +225,6 @@ REPL commands:
   /plan               Toggle plan mode (read-only <-> normal)
   /cost               Show token usage and cost
   /compact            Manually compact conversation
-  /task               Show the active project task
-  /task switch <text> Switch the active project task
-  /task done          Finish the active project task
-  /session-memory     Show project Session Memory
-  /handoff            Save a project handoff summary
-  /memory             List saved memories
   /skills             List available skills
   /<skill-name>       Invoke a skill (e.g. /commit "fix types")
 

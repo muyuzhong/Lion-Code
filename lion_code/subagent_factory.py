@@ -28,8 +28,8 @@ class ChildAgentConfig:
 class SubagentFactory:
     """为父 Agent 创建受限工具视图的 Coding 形态子 Agent。
 
-    child graph 使用 CodingProfile：不递归构造 Memory/Plan/SubAgent 等
-    Full-only Capability，只共享经选择的 ToolRegistry 与 Provider 快照。
+    child graph 使用 CodingProfile：不递归构造 Plan/SubAgent 等 Full-only
+    Capability，只共享经选择的 ToolRegistry 与 Provider 快照。
     """
 
     def __init__(

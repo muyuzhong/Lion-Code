@@ -1,6 +1,6 @@
 """一次性无工具补全:消费 Provider 流并返回最终文本。
 
-供 side-query 场景(Memory 召回、评估器、Auto Mode 分类器)复用,
+供 side-query 场景(评估器、Auto Mode 分类器)复用,
 替代直连 SDK 的旧实现。输出上限与采样由 Provider 配置决定,
 不支持逐调用覆盖(协议层没有该参数)。
 """
