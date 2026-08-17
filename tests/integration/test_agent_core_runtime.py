@@ -30,7 +30,6 @@ from lion_code.core import (
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 from lion_code.provider_manager import ProviderManager
 from lion_code.providers import RuntimeModelLimits
-from lion_code.session_memory_coordinator import SessionMemoryCoordinator
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
@@ -40,10 +39,6 @@ _PLAN_REHOME = (
     "PR3 Kernel 不含 Plan：clear-and-execute 上下文清空 + 自动 continue 的增强"
     "依赖 Kernel 对 Plan 的特判，已随 Runtime 移除；待 Capability re-home PR 恢复"
 )
-
-
-async def _no_memory_semantics(*_args, **_kwargs) -> dict[str, object]:
-    return {}
 
 
 class _LimitsFakeProvider(FakeProvider):
@@ -175,15 +170,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self._temp_dir = tempfile.TemporaryDirectory()
         self._session_repository = SessionRepository(Path(self._temp_dir.name))
-        self._memory_semantics_patch = patch.object(
-            SessionMemoryCoordinator,
-            "_extract_session_memory_semantics",
-            new=_no_memory_semantics,
-        )
-        self._memory_semantics_patch.start()
 
     def tearDown(self) -> None:
-        self._memory_semantics_patch.stop()
         self._temp_dir.cleanup()
 
     def _make_agent(
@@ -444,7 +432,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 "second answer",
             ],
         )
-        self.assertTrue(projected[3].startswith("third question\n\n<relevant-memory>"))
+        self.assertEqual(projected[3], "third question")
 
         state = await self._session_repository.load(agent.session_id)
         self.assertEqual(len(state.compaction_entries), 1)
@@ -592,7 +580,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(self._session_repository.session_dir.glob("*.json")), [])
         projected = [message.text for message in fake.received_messages[0]]
         self.assertEqual(projected[:2], ["first question", "first answer"])
-        self.assertTrue(projected[2].startswith("second question\n\n<relevant-memory>"))
+        self.assertEqual(projected[2], "second question")
         state = await self._session_repository.load(session_id)
         self.assertEqual(
             [message.text for message in state.messages],
@@ -887,9 +875,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         # 未清空上下文：第二次调用仍是完整历史，而不是摘要单条。
         self.assertEqual(
             [message.role for message in fake.received_messages[1]],
-            ["user", "assistant", "toolResult", "user"],
+            ["user", "assistant", "toolResult"],
         )
-        self.assertIn("<relevant-memory>", fake.received_messages[1][-1].text)
         self.assertEqual(agent._core_runtime.messages[-1].text, "implemented")
         self.assertIs(agent.tool_context.permission, permission)
         # PR4：审批通过不再把权限切换到 acceptEdits。
@@ -977,22 +964,10 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         await agent.close()
         self.assertTrue(new_fake.closed)
 
-    async def test_configure_api_refreshes_memory_query_provider(self) -> None:
-        agent, _old_fake = self._make_agent([], ToolRegistry())
-        query_service = agent._session_memory_coord._query
-        new_fake = FakeProvider([])
-
-        with patch("lion_code.agent.create_provider", return_value=new_fake):
-            agent.configure_api(api_key="new-key", api_base="https://new.test/v1")
-
-        self.assertIs(agent._session_memory_coord._query, query_service)
-        self.assertIs(query_service._provider(), new_fake)
-
     async def test_configure_api_failure_keeps_complete_state(self) -> None:
         agent, provider = self._make_agent([], ToolRegistry())
         runtime = agent.core_runtime
         compactor = agent._context_compactor
-        query_service = agent._session_memory_coord._query
         config = agent.get_api_config()
 
         with (
@@ -1011,8 +986,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertIs(agent.core_runtime, runtime)
         self.assertIs(agent.core_runtime.provider, provider)
         self.assertIs(agent._context_compactor, compactor)
-        self.assertIs(agent._session_memory_coord._query, query_service)
-        self.assertIs(query_service._provider(), provider)
         self.assertEqual(agent.get_api_config(), config)
         self.assertFalse(provider.closed)
 
@@ -1160,21 +1133,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         # 子 Agent 不落盘会话:仓库里只有父会话。
         sessions = await self._session_repository.list_sessions()
         self.assertEqual(len(sessions), 1)
-
-    async def test_side_queries_use_core_provider(self) -> None:
-        """Memory 的 side-query 改走 Core Provider,不再用 SDK。"""
-        from lion_code.memory_runtime import ProviderTextQueryService
-
-        agent, fake = self._make_agent([_stop_event("done")], ToolRegistry())
-
-        self.assertIsInstance(
-            agent._session_memory_coord._query, ProviderTextQueryService
-        )
-        self.assertIs(
-            agent._session_memory_coord._query._provider(),
-            agent.core_runtime.provider,
-        )
-        self.assertEqual(fake.call_count, 0)
 
     async def test_configure_api_model_only_keeps_core_provider(self) -> None:
         """只改模型不重建 Provider,经 set_model 直接生效。"""

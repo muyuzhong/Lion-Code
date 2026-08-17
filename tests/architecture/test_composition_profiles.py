@@ -4,7 +4,7 @@
 1. MinimalProfile 实际图只含 caller tools，CapabilityRegistry 为空，facade 为 MetaAgent。
 2. CodingProfile 实际图含 backend 绑定的 Coding 工具与 Meta facade；Skill 只随
    SkillComposition 出现。
-3. FullProfile 实际图含 Memory/Plan/SubAgent/默认 Skill/extension specs，Capability
+3. FullProfile 实际图含 Plan/SubAgent/默认 Skill/extension specs，Capability
    prompt layers 进入同一 PromptComposer。
 4. Profile 是 frozen/slots 纯值对象：无 feature bool、运行时方法或 registry lookup。
 5. Kernel/Harness 不 import Profile，Feature branch 只存在于 Composition Root。
@@ -114,7 +114,6 @@ def test_minimal_graph_only_contains_caller_tools(tmp_path, monkeypatch) -> None
     assert composition.subagent_factory is None
     assert composition.subagent_executor is None
     assert composition.skill_runtime is None
-    assert composition.session_memory_coordinator is None
     assert composition.status_sink is None
     assert composition.facade is ProductFacadeKind.META
     assert NEUTRAL_SYSTEM_PROMPT in composition.prompt_composer.get_system()
@@ -147,7 +146,6 @@ def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypat
     assert composition.capability_registry.names == ()
     assert composition.skill_runtime is None
     assert composition.plan is None
-    assert composition.session_memory_coordinator is None
     assert composition.facade is ProductFacadeKind.META
     assert composition.permission_policy is strategy
 
@@ -181,7 +179,6 @@ def test_coding_graph_composes_skill_only_with_skill_composition(tmp_path, monke
     assert composition.subagent_executor is not None
     # Coding 不构造 Full-only Capability。
     assert composition.plan is None
-    assert composition.session_memory_coordinator is None
 
 
 class _ExamplePromptLayer:
@@ -191,9 +188,7 @@ class _ExamplePromptLayer:
         return "example extension prompt layer"
 
 
-def test_full_graph_contains_memory_plan_subagent_skill_and_extensions(
-    tmp_path, monkeypatch
-):
+def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkeypatch):
     from lion_code.capabilities.types import CapabilitySpec
 
     monkeypatch.chdir(tmp_path)
@@ -220,13 +215,11 @@ def test_full_graph_contains_memory_plan_subagent_skill_and_extensions(
         "skill",
         "subagent",
         "plan",
-        "memory",
         "example-extension",
     }
     assert composition.plan is not None
     assert composition.subagent_factory is not None
     assert composition.skill_runtime is not None
-    assert composition.session_memory_coordinator is not None
     assert composition.status_sink is not None
     assert composition.facade is ProductFacadeKind.FULL
     assert composition.permission_policy is strategy
@@ -419,7 +412,6 @@ def test_feature_construction_branches_live_only_in_normalize_profile() -> None:
     composition_helpers = {
         "_normalize_profile",
         "_build_capability_graph",
-        "_build_session_graph",
         "_build_foundation",
         "_resolve_dependencies",
     }

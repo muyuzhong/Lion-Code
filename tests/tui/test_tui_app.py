@@ -24,8 +24,6 @@ from textual.widgets import ListView
 
 from lion_code.agent import Agent
 from lion_code.application.session import LionCodingSession
-from lion_code.project_identity import resolve_project_identity
-from lion_code.session_memory import SessionMemory, SessionMemoryRepository
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tui.app import (
@@ -37,12 +35,6 @@ from lion_code.tui.app import (
 from lion_code.tui.autocomplete import CompletionItem, CompletionState
 from lion_code.tui.prompt_input import PromptInput
 from lion_code.tui.widgets import TranscriptView
-
-
-async def _no_session_memory_semantics(*_args, **_kwargs) -> dict[str, object]:
-    """TUI 用例只消费主对话脚本，不占用状态提炼 side query。"""
-
-    return {}
 
 
 def test_completion_selected_render_line_accounts_for_group_headers() -> None:
@@ -185,10 +177,6 @@ def app_factory():
 
     temp_dir = tempfile.TemporaryDirectory()
     repository = SessionRepository(Path(temp_dir.name))
-    session_memory_repository = SessionMemoryRepository(
-        resolve_project_identity(),
-        storage_dir=Path(temp_dir.name) / "session-memory",
-    )
 
     def factory(events: list, registry: ToolRegistry | None = None) -> LionTuiApp:
         fake = FakeProvider(events)
@@ -199,10 +187,6 @@ def app_factory():
                 tool_registry=registry or ToolRegistry(),
                 custom_system_prompt="test",
                 session_repository=repository,
-                session_memory_repository=session_memory_repository,
-        )
-        agent._session_memory_coord._extract_session_memory_semantics = (
-            _no_session_memory_semantics
         )
         return LionTuiApp(LionCodingSession(backend=agent))
 
@@ -385,44 +369,6 @@ async def test_cost_and_unknown_commands(app_factory) -> None:
     status_texts = [item.text for item in app.state.items if item.role == "status"]
     assert any(t.startswith("tokens:") for t in status_texts)
     assert any("未知命令" in t for t in status_texts)
-
-
-@pytest.mark.asyncio
-async def test_session_memory_commands_dispatch_through_tui(app_factory) -> None:
-    app = app_factory([])
-    agent = app.session._backend
-    agent._session_memory = agent._session_memory_repository.save(
-        SessionMemory(
-            project_root=str(agent._project_identity.root),
-            current_goal="完成短期记忆",
-            active_task="接入 TUI 命令",
-            next_step="验证分发",
-        )
-    )
-
-    async with app.run_test() as pilot:
-        await _submit(app, pilot, "/task")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        await _submit(app, pilot, "/task switch 生成交接")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        await _submit(app, pilot, "/handoff")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        await _submit(app, pilot, "/session-memory")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        await _submit(app, pilot, "/dream")
-        await pilot.pause()
-
-    statuses = [item.text for item in app.state.items if item.role == "status"]
-    assert any("接入 TUI 命令" in text for text in statuses)
-    assert any("生成交接" in text for text in statuses)
-    assert any("Previous handoff" in text for text in statuses)
-    # PR7a：/dream 不再是产品命令，走 unknown-command 提示。
-    assert any("未知命令" in text for text in statuses)
-    assert app.session.messages == ()
 
 
 @pytest.mark.asyncio

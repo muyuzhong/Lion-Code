@@ -189,18 +189,3 @@ class FakeCodingSessionBackend:
     def toggle_plan_mode(self) -> str:
         self.plan_mode = not self.plan_mode
         return "plan" if self.plan_mode else "default"
-
-    def show_active_task(self) -> str:
-        return "active task"
-
-    def switch_session_task(self, task: str) -> str:
-        return f"switched:{task}"
-
-    def finish_session_task(self) -> str:
-        return "finished"
-
-    def show_session_memory(self) -> str:
-        return "session memory"
-
-    def create_session_handoff(self) -> str:
-        return "handoff"

@@ -212,12 +212,9 @@ async def test_strong_negative_flow_never_constructs_advanced_features(
 
     for name in (
         "ChildAgentConfig",
-        "NoticeSinkAdapter",
         "PlanHost",
         "PlanRuntime",
         "PlanState",
-        "ProviderTextQueryService",
-        "SessionMemoryCoordinator",
         "SkillRuntime",
         "SubagentStatusSink",
         "SubagentExecutor",
@@ -396,7 +393,6 @@ def test_meta_agent_public_surface_is_feature_neutral() -> None:
         "dream",
         "goal",
         "learn",
-        "memory",
         "plan",
         "skill",
         "subagent",

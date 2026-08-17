@@ -3,7 +3,7 @@
 验收：
 1. CapabilityRegistry() 为空是合法状态。
 2. registry names == () 时对象图仍能构造。
-3. Bare composition 不创建 Memory/Plan/SubAgent/Skill。
+3. Bare composition 不创建 Plan/SubAgent/Skill。
 4. 不存在为了构造通过而增加的 Null Feature（缺失即 None，不造假对象）。
 5. Tool Runtime 不依赖外部工具协议实现。
 6. Meta base prompt 不引用不存在的 Feature。
@@ -59,16 +59,10 @@ _BARE_GENERIC_FILES = (
 )
 _FEATURE_MODULE_PREFIXES = (
     "lion_code.autonomy_runtime",
-    "lion_code.capabilities.memory",
     "lion_code.capabilities.plan",
     "lion_code.capabilities.skill",
     "lion_code.capabilities.subagent",
-    "lion_code.dream",
-    "lion_code.learning_runtime",
-    "lion_code.memory",
-    "lion_code.memory_runtime",
     "lion_code.plan_runtime",
-    "lion_code.session_memory",
     "lion_code.skill_runtime",
     "lion_code.subagent_factory",
     "lion_code.subagent_runtime",
@@ -76,26 +70,12 @@ _FEATURE_MODULE_PREFIXES = (
 _FEATURE_SYMBOLS = {
     "AutonomyRuntime",
     "ChildAgentConfig",
-    "DreamCoordinator",
-    "LearningRuntime",
-    "MemoryContextInjector",
-    "MemoryCoordinator",
-    "MemoryProjectionLayer",
-    "MemoryResource",
-    "MemorySessionParticipant",
-    "MemoryTurnParticipant",
-    "MemoryQuerySink",
     "PlanRuntime",
     "PlanState",
     "ProviderModelQuery",
-    "ProviderTextQueryService",
-    "RelevantMemory",
-    "RestrictedDreamAgentFactory",
-    "SessionMemoryCoordinator",
     "SkillRuntime",
     "SubagentExecutor",
     "SubagentFactory",
-    "create_memory_capability",
 }
 
 # Bare 图禁止出现的 Feature 字段（AgentComposition 中应为 None）。
@@ -104,7 +84,6 @@ _FEATURE_FIELDS = (
     "subagent_factory",
     "subagent_executor",
     "skill_runtime",
-    "session_memory_coordinator",
 )
 
 
@@ -142,7 +121,7 @@ def test_bare_graph_constructs_with_empty_registry(tmp_path, monkeypatch) -> Non
 
 
 def test_bare_graph_creates_no_feature_objects(tmp_path, monkeypatch) -> None:
-    """Bare composition 不创建 Memory/Plan/SubAgent/Skill。"""
+    """Bare composition 不创建 Plan/SubAgent/Skill。"""
     composition = _bare_composition(tmp_path, monkeypatch)
     for field in _FEATURE_FIELDS:
         assert getattr(composition, field) is None, field
@@ -183,14 +162,12 @@ def test_base_prompt_does_not_reference_features() -> None:
     dynamic = build_dynamic_system_context(deferred_tool_names=[])
     combined = static + dynamic
 
-    # 使用 agent tool / memory / skills / Plan 的显式指引词。
+    # 使用 agent tool / skills / Plan 的显式指引词。
     for marker in (
         "Use the `agent` tool",
-        "Auto Memory",
         "Available Skills",
         "plan mode",
         "Plan mode",
-        "REPL commands like /clear, /cost, /compact, /memory",
         "REPL commands like /clear, /cost, /compact, /skills",
         "use the `skill` tool",
     ):
@@ -241,10 +218,3 @@ def test_meta_agent_does_not_import_concrete_coding_tools() -> None:
         if isinstance(node, ast.ImportFrom) and node.module is not None
     }
     assert not imported_modules & {"tooling.builtin", "tooling.internal"}
-
-
-def test_provider_manager_has_no_memory_reference() -> None:
-    """ProviderManager 只刷新通用 Provider/Context/Recorder 状态。"""
-
-    source = (SOURCE_ROOT / "provider_manager.py").read_text(encoding="utf-8")
-    assert "memory" not in source.casefold()
