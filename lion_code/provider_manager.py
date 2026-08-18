@@ -234,38 +234,6 @@ class ProviderManager:
             return
         self._apply_target_state(target, previous=current, record=True)
 
-    def set_thinking(self, enabled: bool) -> str:
-        """切换旧布尔 Thinking API，并持久化实际生效的 legacy 值。"""
-
-        current = self._state
-        previous_view = self.view
-        if current.thinking_enabled == enabled:
-            return previous_view.thinking_mode
-        target = ProviderState(
-            model=current.model,
-            provider_kind=current.provider_kind,
-            api_key=current.api_key,
-            openai_base_url=current.openai_base_url,
-            anthropic_base_url=current.anthropic_base_url,
-            thinking_enabled=enabled,
-            thinking_level=current.thinking_level,
-        )
-        self._state = target
-        current_view = self.view
-        self._recorder.record_configuration_change(previous_view, current_view)
-        return current_view.thinking_mode
-
-    def resolve_thinking_mode(self) -> str:
-        """按当前 model 能力解析兼容 API 的 legacy Thinking 值。"""
-
-        if not self._state.thinking_enabled:
-            return "disabled"
-        if not _model_supports_thinking(self._state.model):
-            return "disabled"
-        if _model_supports_adaptive_thinking(self._state.model):
-            return "adaptive"
-        return "enabled"
-
     def set_thinking_level(self, level: ThinkingLevel | str) -> ThinkingLevel:
         """热替换 Provider 以应用新档位，并记录档位变化。"""
 

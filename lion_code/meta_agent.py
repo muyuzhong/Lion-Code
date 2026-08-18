@@ -161,9 +161,6 @@ class MetaAgent:
     def thinking(self) -> bool:
         return self._provider_manager.thinking
 
-    def set_thinking(self, enabled: bool) -> str:
-        return self._provider_manager.set_thinking(enabled)
-
     @property
     def thinking_level(self) -> ThinkingLevel:
         return self._provider_manager.thinking_level

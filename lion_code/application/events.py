@@ -25,7 +25,6 @@ from lion_code.core.events import AgentEvent
 from lion_code.core.messages import WireModel
 
 type CompactionReason = Literal["manual", "threshold", "overflow"]
-type SessionChangeReason = Literal["new", "resume", "clear"]
 
 
 class SessionAgentEndEvent(WireModel):
@@ -79,27 +78,6 @@ class AutoRetryEndEvent(WireModel):
     final_error: str | None = Field(default=None, serialization_alias="finalError")
 
 
-class SessionChangedEvent(WireModel):
-    """活动会话被替换(新建/恢复/清空)。"""
-
-    type: Literal["session_changed"] = "session_changed"
-    session_id: str = Field(serialization_alias="sessionId")
-    reason: SessionChangeReason
-
-
-class ProviderChangedEvent(WireModel):
-    """供应商或模型切换生效。"""
-
-    type: Literal["provider_changed"] = "provider_changed"
-    provider_name: str = Field(serialization_alias="providerName")
-    model: str
-
-
-class ThinkingLevelChangedEvent(WireModel):
-    type: Literal["thinking_level_changed"] = "thinking_level_changed"
-    level: str
-
-
 type SessionOwnEvent = Annotated[
     SessionAgentEndEvent
     | AgentSettledEvent
@@ -107,10 +85,7 @@ type SessionOwnEvent = Annotated[
     | CompactionStartEvent
     | CompactionEndEvent
     | AutoRetryStartEvent
-    | AutoRetryEndEvent
-    | SessionChangedEvent
-    | ProviderChangedEvent
-    | ThinkingLevelChangedEvent,
+    | AutoRetryEndEvent,
     Field(discriminator="type"),
 ]
 
