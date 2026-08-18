@@ -445,12 +445,9 @@ class RetryPolicy:
             raise ValueError("retryable stop reasons must be non-empty strings")
         object.__setattr__(self, "retryable_stop_reasons", reasons)
 
-    def should_retry(
-        self, *, attempt: int, stop_reason: str
-    ) -> bool:
+    def should_retry(self, *, attempt: int, stop_reason: str) -> bool:
         return (
-            attempt < self.max_attempts
-            and stop_reason in self.retryable_stop_reasons
+            attempt < self.max_attempts and stop_reason in self.retryable_stop_reasons
         )
 
     def delay_seconds(self, retry_number: int) -> float:
