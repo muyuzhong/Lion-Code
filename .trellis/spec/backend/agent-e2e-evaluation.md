@@ -158,6 +158,15 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   regression / 12 holdout. Public cards contain the base revision and gold patch
   SHA-256 only. `PrivateEvidence.gold_revision` and provenance details remain on
   the evaluator side and must agree with the public hash.
+- The V2 corpus keeps the same 30-card / 10-10-10 / 18-12 contract. It retires
+  cards whose referenced modules were deleted (Dream/Memory/Learning/MCP and
+  legacy TUI, PR9/PR7b) instead of mutating their v1 SHA-pinned records in
+  place; rewrites surviving cards to currently existing paths when the original
+  test file was renamed; and backfills four `cross_file_refactor` cards from the
+  real Git history (#48/#52/#55/#57) using single-commit base/gold pairs whose
+  REG and HOLDOUT commit sets do not intersect. Since v2, `validate_active_resources_exist`
+  rejects ACTIVE cards whose involved files or validation paths are missing from
+  the current worktree; v1 assets stay frozen as historical records.
 - Historical `base=fail` / `gold=pass` is provenance language: the base tree
   differs from the gold tree and the Git binary diff is clean, hash-matched, and
   stable for exactly three repeats. It is not a semantic hidden-test pass and

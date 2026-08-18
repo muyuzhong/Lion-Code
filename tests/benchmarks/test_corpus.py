@@ -28,7 +28,7 @@ _PUBLIC_CATALOG_PATH = (
     / "benchmarks"
     / "agent_e2e"
     / "corpus_assets"
-    / "public_catalog.v1.json"
+    / "public_catalog.v2.json"
 )
 _PUBLIC_CATALOG_SHA_PATH = _PUBLIC_CATALOG_PATH.with_suffix(".sha256")
 _PUBLIC_CATALOG_LOCK_PATH = _PUBLIC_CATALOG_PATH.with_suffix(".lock.json")
@@ -144,8 +144,15 @@ if __name__ == "__main__":
 
 
 class TestActiveResourceExistenceGate(unittest.TestCase):
-    def test_v2_catalog_rejects_missing_validation_file(self) -> None:
+    def test_v2_catalog_with_all_resources_present_passes(self) -> None:
+        catalog = bundled_catalog()
+        self.assertEqual(catalog.catalog_version, "v2")
+        validate_active_resources_exist(catalog)
+
+    def test_v2_catalog_rejects_missing_involved_file(self) -> None:
         catalog = bundled_catalog()
         stale = catalog.model_copy(update={"catalog_version": "v2"})
+        first = stale.tasks[0].model_copy(update={"involved_files": ("missing/path.py",)})
+        stale = stale.model_copy(update={"tasks": (first, *stale.tasks[1:])})
         with self.assertRaisesRegex(CorpusAdmissionError, "缺失文件"):
             validate_active_resources_exist(stale)
