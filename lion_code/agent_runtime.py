@@ -70,6 +70,11 @@ StopReason = Literal[
     "aborted",
 ]
 
+# 通用 Harness 的绝对迭代保险上限，与用户预算解耦：预算的 max_turns 只经
+# UsageLedger 在 Core 工具边界生效（见 before_core_tool_calls），这里仅防止
+# 无工具调用的纯文本死循环（usage-ownership.md §1 禁止把预算值传给 Harness）。
+_ITERATION_SAFETY_CAP = 200
+
 
 @dataclass(slots=True)
 class AgentRunResult:
@@ -334,7 +339,7 @@ class AgentRuntimeCoordinator:
             cancellation=execution.cancellation,
             cancel_callback=execution.cancel,
             prepare_context=self.prepare_core_context,
-            max_turns=budget.max_turns,
+            max_turns=_ITERATION_SAFETY_CAP,
             before_tool_calls=self.before_core_tool_calls,
         )
         if self._context_compactor is None:
