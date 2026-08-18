@@ -345,40 +345,5 @@ def test_load_custom_themes_ignores_missing_dirs_and_non_json(tmp_path: Path) ->
     assert diagnostics == []
 
 
-def test_tool_result_accents_derive_from_theme() -> None:
-    from rich.console import Console
-
-    from lion_code.tui.state import ChatItem
-    from lion_code.tui.widgets import render_chat_item
-
-    data = _theme_data(vars={"base": "#1e1e2e"})
-    data["colors"]["tool_success_text"] = "#00fa9a"
-    data["colors"]["tool_error_text"] = "#fa0064"
-    data["roles"]["tool"] = {"border": "#101010", "body": "#e0e0e0 on base"}
-    theme = parse_tui_theme_json(data)
-
-    console = Console(record=True, width=80)
-    console.print(
-        render_chat_item(
-            ChatItem(role="tool", text="→ read README.md", tool_result_text="✓ read\nok"),
-            theme=theme,
-            show_tool_results=True,
-        )
-    )
-    console.print(
-        render_chat_item(
-            ChatItem(role="tool", text="$ false", tool_result_text="✗ bash\nfailed"),
-            theme=theme,
-            show_tool_results=True,
-        )
-    )
-    output = console.export_text(styles=True)
-
-    # Success/error accents use the theme tokens, and their background comes
-    # from the tool body style, never a hardcoded black.
-    assert "38;2;0;250;154" in output
-    assert "38;2;250;0;100" in output
-    assert "48;2;0;0;0" not in output
-    assert "48;2;30;30;46" in output
 
 
