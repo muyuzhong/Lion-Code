@@ -50,6 +50,6 @@ Profile 应能注入安全策略，且这是 embedder 唯一的安全注入缝�
 
 ## 落地
 
-- 提交: `3c43bbf`
+- 提交: `a19660ab0e03d44dfc0aa24f340c97565e71bf73`（squash merge）
 - PR: #58（标题：refactor: 移除 Profile 层无生产消费者的 permission_strategy 旋钮）
-- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 待绿。
+- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 已通过（2026-08-18）。

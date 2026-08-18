@@ -64,6 +64,6 @@ Provider/application 层有三组互不相关的迁移残留，共同点是「�
 
 ## 落地
 
-- 提交: `e428556`
+- 提交: `731316423ec2d714e1e12783425731f40113a9a3`（squash merge）
 - PR: #54（标题：refactor: 清理 Provider 层迁移残留（死认证旋钮、死 thinking 方法、vendored 死声明））
-- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 待绿。
+- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 已通过（2026-08-18）。

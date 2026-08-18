@@ -88,6 +88,6 @@ patch 它们。镜像字段的替代消费者完全可以经 `composition.runtim
 
 ## 落地
 
-- 提交: `e88ddbb`
+- 提交: `1f38a7817a71f9c7fe129698f89b10f4e26d6865`（squash merge）
 - PR: #55（标题：refactor: 清理内部 Agent 宿主与 AgentComposition 的死面（镜像字段、无引用方法、别名堆叠、死 __setattr__））
-- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 待绿。
+- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 已通过（2026-08-18）。

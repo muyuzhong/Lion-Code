@@ -44,6 +44,6 @@
 
 ## 落地
 
-- 提交: `05af823`
+- 提交: `871f33b7b471a46107e4afc5156d42eb5c235e9d`（squash merge）
 - PR: #51（标题：refactor: 删除零构造的 BashExecutionMessage/BranchSummaryMessage/CompactionSummaryMessage 角色）
-- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 待绿。
+- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 已通过（2026-08-18）。

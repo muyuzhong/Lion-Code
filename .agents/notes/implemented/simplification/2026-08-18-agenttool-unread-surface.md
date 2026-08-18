@@ -52,6 +52,6 @@
 
 ## 落地
 
-- 提交: `456d0ab`
+- 提交: `1c0eda50b06f93558629b6aeded64a14bc9003ad`（squash merge）
 - PR: #52（标题：refactor: 删除 AgentTool 无人读取的渲染/准备/展示面）
-- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 待绿。
+- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 已通过（2026-08-18）。
