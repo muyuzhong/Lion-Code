@@ -75,8 +75,6 @@ _USAGE_LEDGER_FIELDS = frozenset(
         "_last_prompt_tokens",
         "_last_response_at",
         "_output_tokens",
-        "_reasoning_tokens",
-        "_reported_cost_usd",
         "_responses",
         "_turns",
     }

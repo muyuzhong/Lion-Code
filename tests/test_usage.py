@@ -41,11 +41,9 @@ class TestUsageLedger(unittest.TestCase):
         self.assertEqual(usage.output_tokens, 23)
         self.assertEqual(usage.cache_read_tokens, 15)
         self.assertEqual(usage.cache_write_tokens, 7)
-        self.assertEqual(usage.reasoning_tokens, 9)
         self.assertEqual(usage.responses, 2)
         self.assertEqual(usage.last_prompt_tokens, 17)
         self.assertEqual(usage.last_response_at, 20.0)
-        self.assertAlmostEqual(usage.reported_cost_usd, 0.03)
 
     def test_child_usage_is_not_overwritten_by_later_model_usage(self) -> None:
         ledger = UsageLedger()

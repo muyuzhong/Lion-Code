@@ -395,7 +395,7 @@ class Agent(MetaAgent):
         return await self.restore_latest_session()
 
     def token_usage(self) -> UsageSnapshot:
-        return self.get_token_usage()
+        return self._usage.snapshot()
 
     def provider_config(self) -> dict[str, Any]:
         return self.get_api_config()
@@ -457,9 +457,6 @@ class Agent(MetaAgent):
 
     def toggle_plan_mode(self) -> str:
         return self.plan.toggle()
-
-    def get_token_usage(self) -> UsageSnapshot:
-        return self._usage.snapshot()
 
     # ─── 运行时模型/凭证配置（TUI /model 的后端）──────────────
 

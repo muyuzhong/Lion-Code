@@ -86,7 +86,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         kwargs = _ChildAgent.created_with
         child_registry = kwargs["tool_registry"]
         self.assertEqual(result, "skill result")
-        usage = parent.get_token_usage()
+        usage = parent.token_usage()
         self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
         self.assertEqual((usage.responses, usage.turns), (0, 0))
         self.assertIs(
@@ -222,7 +222,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, "Sub-agent error: boom")
-        usage = parent.get_token_usage()
+        usage = parent.token_usage()
         self.assertEqual((usage.input_tokens, usage.output_tokens), (0, 0))
         self.assertEqual(
             events,
@@ -261,7 +261,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(child_registry.resolve(custom_name), custom_tool)
         self.assertEqual(kwargs["system_prompt"], skill_result["prompt"])
-        usage = parent.get_token_usage()
+        usage = parent.token_usage()
         self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
         self.assertEqual((usage.responses, usage.turns), (0, 0))
         _ChildAgent.last_instance.close.assert_awaited_once_with()

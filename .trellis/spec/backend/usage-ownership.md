@@ -33,13 +33,11 @@ class UsageSnapshot:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
-    reasoning_tokens: int = 0
     turns: int = 0
     responses: int = 0
     last_prompt_tokens: int = 0
     last_response_at: float | None = None
     cost_usd: float = 0.0
-    reported_cost_usd: float = 0.0
 
 @dataclass(frozen=True, slots=True)
 class BudgetDecision:
@@ -65,7 +63,7 @@ class UsageLedger:
 ~~~
 
 The general public read boundary is `MetaAgent.usage -> UsageSnapshot`; the
-internal Full product host also supplies `Agent.get_token_usage()` to
+internal Full product host also supplies `Agent.token_usage()` to
 `LionCodingSession.token_usage()`. TUI and other frontend
 consumers read named snapshot fields; they never receive the Ledger or an
 untyped usage dictionary.
@@ -85,21 +83,21 @@ only terminal `MessageEndEvent` values whose message is `AssistantMessage`, then
 calls `record_model_usage()` exactly once. It owns no token, response, timestamp,
 cost, or synchronization state.
 
-`record_model_usage()` adds input, output, cache-read, cache-write, reasoning,
-and provider-reported cost, increments responses, and replaces the latest prompt
-size and response time. `last_prompt_tokens` uses `Usage.total_tokens` when
-provided, otherwise input + cache-read + cache-write + output.
+`record_model_usage()` adds input, output, cache-read and cache-write,
+increments responses, and replaces the latest prompt size and response time.
+`last_prompt_tokens` uses `Usage.total_tokens` when provided, otherwise
+input + cache-read + cache-write + output.
 
 Child-agent and Skill completion paths call `record_child_usage()`.
 That command adds only input and output tokens. It must preserve cache fields,
-reasoning, provider-reported cost, responses, turns, `last_prompt_tokens`, and
-`last_response_at`; child totals may never overwrite already aggregated parent
-usage.
+responses, turns, `last_prompt_tokens`, and `last_response_at`; child totals may
+never overwrite already aggregated parent usage.
 
 ### Cost and budget decisions
 
 Estimated cost is derived from cumulative token totals and is independent of
-provider-reported cost:
+provider-reported cost (Provider-reported `Usage.cost` remains in Core data but
+does not enter the Ledger snapshot):
 
 ~~~text
 cost_usd = (
@@ -110,11 +108,10 @@ cost_usd = (
 ) / 1_000_000
 ~~~
 
-`reported_cost_usd` accumulates `Usage.cost.total` separately. `BudgetPolicy`
-is stateless: the decision depends only on its frozen limits and the supplied
-snapshot. It checks estimated cost before turns, uses inclusive `>=` boundaries,
-and returns the existing user-facing reason. When both limits are reached,
-`max_cost` wins.
+`BudgetPolicy` is stateless: the decision depends only on its frozen limits and
+the supplied snapshot. It checks estimated cost before turns, uses inclusive
+`>=` boundaries, and returns the existing user-facing reason. When both limits
+are reached, `max_cost` wins.
 
 At the Core tool boundary, Runtime must call `record_turn()` before taking the
 snapshot and checking the Policy. Therefore the tool call at the exact turn
@@ -127,8 +124,7 @@ final-text responses and queued follow-ups, rather than Core tool boundaries.
 ### Reset and observer lifecycle
 
 Session clear and successful restore call `reset()`: every token field, turn,
-response, timestamp, prompt tracker, and reported cost returns to its zero/None
-default. Context compaction and Plan clear-and-execute call only
+response, timestamp and prompt tracker returns to its zero/None default. Context compaction and Plan clear-and-execute call only
 `reset_context_tracking()`, so they clear `last_prompt_tokens` while preserving
 all cumulative usage and `last_response_at`.
 
