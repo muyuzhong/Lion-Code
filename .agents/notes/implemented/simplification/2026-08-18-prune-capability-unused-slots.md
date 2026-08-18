@@ -1,6 +1,6 @@
 # Agent Note: 裁剪 Capability 扩展契约的未使用槽位（requires 依赖解析与 per-turn 挂钩）
 
-- Status: proposed
+- Status: implemented
 - 日期: 2026-08-18
 - 范围: `lion_code/capabilities/`、`lion_code/agent_runtime.py`、`lion_code/session_lifecycle.py`、`tests/capabilities/`、`tests/test_agent_run.py`、`tests/architecture/test_runtime_boundaries.py`、`.trellis/spec/backend/capability-spi.md`
 
@@ -95,3 +95,7 @@ per-turn 挂钩时按需加回的成本很低，且届时会有真实用例来�
   且 `AGENTS.md` 明示不做向后兼容，风险可接受。
 - `resolve()` 删除后测试断言顺序的写法会变（改经聚合属性），属于测试重写而非行为变化。
 - 未来 Capability 若真的需要依赖序，需重建排序器——成本与今天删除它对称。
+## 落地
+
+- 提交: 9fcb235（分支 simplify/prune-capability-slots）
+- 验证: registry/types/runtime/agent_runtime 删除依赖解析与 per-turn 分发（-659 行）；同步 capability-spi.md 与 5 个测试文件。门禁：全量 692 passed（同 5 个既有失败）、ruff 48<54、mypy 38<68。

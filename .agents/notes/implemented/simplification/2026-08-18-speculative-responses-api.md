@@ -1,6 +1,6 @@
 # Agent Note: 删除 OpenAI-compatible 适配器里投机性的 /v1/responses 子系统
 
-- Status: proposed
+- Status: implemented
 - 日期: 2026-08-18
 - 范围: `lion_code/providers/openai_compatible.py`、`lion_code/providers/config.py`、`tests/providers/test_openai_compatible.py`
 
@@ -50,3 +50,7 @@ API，先铺好」。但按 `AGENTS.md` 原则 2（不预防性抽象、绝不�
 - 若短期内真接入 codex 类模型，需重建 responses 解析——已评估成本对称；
   作为 mitigation，删除前把 responses 的行为语义（tool call 累积、usage 解析）
   摘录进本笔记的 git 历史即可。
+## 落地
+
+- 提交: f7b1c80（分支 simplify/remove-responses-api）
+- 验证: openai_compatible.py 1128→~600 行；删除 TestOpenAIResponsesApi；同步 PROVIDER_STATE_ALLOWLIST。门禁：全量 711 passed（5 个沙箱环境/既有失败除外）、ruff 48<54、mypy 38<68、radon 9≤12。

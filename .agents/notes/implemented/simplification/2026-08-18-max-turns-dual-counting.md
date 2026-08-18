@@ -1,6 +1,6 @@
 # Agent Note: 收口 max_turns 双计数机制（Harness 代次计数与 Ledger 工具边界计数）
 
-- Status: proposed
+- Status: implemented
 - 日期: 2026-08-18
 - 范围: `lion_code/agent_runtime.py`、`lion_code/core/loop.py`、`lion_code/core/harness.py`、`lion_code/usage.py`、`tests/test_agent_run.py`、`tests/test_usage.py`、`tests/integration/test_agent_core_runtime.py`、`.trellis/spec/backend/usage-ownership.md`
 
@@ -65,3 +65,7 @@ Option B：给 Harness 的计数改独立命名（如 `max_iterations`）与独�
   Harness 显式传入的上限——需确认 Agent 路径至少保留一个宽松的绝对上限
   （或依赖 cancellation/超时）。这正是 Option A 里「Harness 保留独立 max_turns
   字段」的原因，实现时不得顺手删掉该字段。
+## 落地
+
+- 提交: 78bbb23（分支 simplify/max-turns-single-counting）
+- 验证: agent_runtime 不再传 budget.max_turns 给 Harness，改为独立 _ITERATION_SAFETY_CAP=200；预算只经 before_core_tool_calls 生效。门禁：全量 711 passed（同 5 个既有失败）、ruff/mypy 基线通过。

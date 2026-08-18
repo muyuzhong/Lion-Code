@@ -1,6 +1,6 @@
 # Agent Note: 删除 REPL 的第二套斜杠命令分发（回到单一 dispatcher）
 
-- Status: proposed
+- Status: implemented
 - 日期: 2026-08-18
 - 范围: `lion_code/__main__.py`、`lion_code/application/`、`tests/tui/`、`tests/application/`
 
@@ -47,3 +47,7 @@ TUI 已经证明 `CommandResult` 协议够用。两套分发的维护成本（�
   的 notice/confirm 回调链路——接线时需要保持同样的终端呈现（TUI 已示范做法）。
 - `/skills` 在 REPL 中的输出样式与 application 层可能不同，迁移后样式可能略变——
   属可接受的呈现差异。
+## 落地
+
+- 提交: 6a82197（分支 simplify/repl-single-dispatcher）
+- 验证: run_repl 消费 CommandResult 单一分发；新增 test_repl_unknown_command_prints_hint。门禁：全量 712 passed（同 5 个既有失败）。
