@@ -66,7 +66,7 @@
       "tool_payload_bytes": 29000,
       "large_result_turns": [2],
       "large_tool_payload_bytes": 48000,
-      "source_files": ["lion_code/agent.py", "tests/test_autonomy.py"],
+      "source_files": ["lion_code/agent.py", "tests/test_supervisor.py"],
       "contract_turns": {
         "1": "保留契约：KEEP_RECENT_RESULTS=3，恰好保留最后三条，较短输入不得被裁剪。",
         "4": "稳定性契约：重复执行 snip_stale 必须幂等，keep_recent=0 时全部替换。"

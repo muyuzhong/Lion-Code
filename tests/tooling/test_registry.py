@@ -83,11 +83,11 @@ class TestToolRegistry(unittest.TestCase):
     def test_temporary_tool_is_removed_after_scope(self):
         registry = ToolRegistry()
 
-        with registry.temporary_tool(_tool("schedule_wakeup")):
-            self.assertTrue(registry.is_active("schedule_wakeup"))
+        with registry.temporary_tool(_tool("temporary_scope")):
+            self.assertTrue(registry.is_active("temporary_scope"))
 
         with self.assertRaises(LookupError):
-            registry.resolve("schedule_wakeup")
+            registry.resolve("temporary_scope")
 
     def test_temporary_tool_restores_previous_definition_and_state(self):
         registry = ToolRegistry()

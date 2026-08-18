@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec index and required pre-development checklist"}
+{"file": ".trellis/spec/backend/four-layer-ownership.md", "reason": "four-layer ownership and Supervisor/Application/Harness boundary"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "runtime dependency and state ownership constraints"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "retry, cancellation, and recovery error contracts"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "quality and verification requirements"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "module placement and package boundary rules"}
+{"file": ".trellis/spec/backend/usage-ownership.md", "reason": "usage/budget ownership that must not move into Supervisor"}
+{"file": ".trellis/tasks/08-17-pr10-supervisor-plane/research/autonomy-boundary.md", "reason": "evidence-backed deletion and re-home decisions for legacy Autonomy"}
+{"file": ".trellis/tasks/08-17-pr10-supervisor-plane/research/composition-and-checkpoint-boundary.md", "reason": "public Agent/event/session and strict checkpoint boundary evidence"}

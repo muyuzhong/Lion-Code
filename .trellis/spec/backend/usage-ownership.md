@@ -8,8 +8,9 @@ This contract defines the current usage-accounting boundary for one Lion Code
 Apply this guide whenever a change reads, records, resets, displays, or limits
 model, child-agent, Skill, response, turn, prompt-window, or cost usage.
 It covers `usage.py`, Core event adapters, the Agent composition root,
-`AgentRuntimeCoordinator`, `AutonomyRuntime`, session lifecycle, Application,
-TUI, and all child execution paths.
+`AgentRuntimeCoordinator`, session lifecycle, Application, TUI, and all child
+execution paths. `Supervisor` is deliberately outside this ownership graph and
+must not create, mirror, read or persist usage/budget state.
 
 The ownership rule is strict:
 
@@ -117,9 +118,8 @@ and returns the existing user-facing reason. When both limits are reached,
 At the Core tool boundary, Runtime must call `record_turn()` before taking the
 snapshot and checking the Policy. Therefore the tool call at the exact turn
 limit is stopped. Pure final-text responses do not increment turns. Runtime
-evaluates the Ledger through the same Policy; the retained Autonomy runtime
-(no production caller after PR7a) must not create a second usage budget state
-when re-homed. The Coordinator must not pass `BudgetPolicy.max_turns`
+evaluates the Ledger through the same Policy; the long-running Supervisor must
+not create a second usage budget state. The Coordinator must not pass `BudgetPolicy.max_turns`
 to the generic Harness loop: that loop counts provider iterations, including
 final-text responses and queued follow-ups, rather than Core tool boundaries.
 
@@ -147,7 +147,8 @@ commands.
 Core emits canonical usage in Assistant messages but must not import
 `lion_code.usage` or observers. Providers construct Core `Usage` data and must
 not import runtime ownership modules. Observers may depend on Core events and
-Usage. Runtime and Autonomy may depend on Usage. Application imports
+Usage. Runtime may depend on Usage; Supervisor must not depend on Usage.
+Application imports
 `UsageSnapshot` only for its typed projection, and TUI reads that projection
 through Application rather than importing the Ledger.
 

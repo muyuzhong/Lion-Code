@@ -59,6 +59,102 @@ SessionAgentEnd(will_retry=True)
 - If the underlying run itself raises unexpectedly, `_drive()` drains/cleans up
   its queue and propagates the exception.  It does not pretend the run settled.
 
+## Supervisor control recovery
+
+`lion_code.supervisor.Supervisor` makes long-running retry decisions only from
+the public Agent result and its injected `RetryPolicy`:
+
+- `stop_reason == "completed"` becomes terminal success.
+- An allowlisted stop reason becomes `retry_wait` only while the attempt count
+  is below `RetryPolicy.max_attempts`; the injected Scheduler owns the wait.
+- `aborted`/`cancelled` and an explicit `Supervisor.cancel()` request become a
+  terminal cancelled state and never enter retry policy.
+- Factory, session-restore, public-result-contract and Agent-close failures are
+  represented as control-plane stop reasons. They are retryable only when the
+  caller explicitly includes that reason in the policy.
+- A checkpoint records only the next execution decision and session reference.
+  It does not replace canonical session history or snapshot an in-flight Agent.
+
+### Supervisor public control contract (PR10)
+
+#### 1. Scope / trigger
+
+This contract applies when a caller creates a `Supervisor` for a goal that may
+cross process or attempt boundaries. It does not change the one-shot Agent
+execution contract or the application-owned overflow retry.
+
+#### 2. Signatures
+
+The injected factory must return a public structural port with these operations:
+
+```text
+session_id -> str
+subscribe(listener) -> unsubscribe callback
+run(prompt, timeout?) -> PublicAgentResult
+restore(session_id) -> bool
+cancel() -> None
+close() -> Awaitable[None]
+```
+
+`Supervisor.cancel()` is the control-plane cancellation command. It is distinct
+from cancellation of the caller's `Supervisor.run()` task.
+
+#### 3. Contracts
+
+- `restore(session_id)` is required; Supervisor does not probe private runtime
+  attributes or fall back to an older alias such as `resume()`.
+- An explicit `Supervisor.cancel()` always persists a terminal `cancelled`
+  checkpoint and returns a `SupervisorResult` with that status, including while
+  waiting in the injected Scheduler.
+- A caller-driven `asyncio.CancelledError` remains a caller cancellation and is
+  re-raised after the best-effort terminal checkpoint write.
+- Retry decisions use only the public result stop reason and the injected
+  `RetryPolicy`; Agent message/content state is not an error-policy input.
+
+#### 4. Validation & error matrix
+
+| Condition | Result | Retry eligibility |
+|---|---|---|
+| public `restore()` returns `False` or raises | `session_restore_error` | only if explicitly allowlisted |
+| factory, public run, result contract, or close fails | named control stop reason | only if explicitly allowlisted |
+| public result is `completed` | terminal `completed` | none |
+| result is `aborted`/`cancelled`, or Supervisor.cancel() is called | terminal `cancelled` | never |
+| caller cancels `Supervisor.run()` | checkpoint best effort, re-raise `CancelledError` | caller decides |
+
+#### 5. Good / base / bad cases
+
+- Good: a retry-wait checkpoint is loaded, `cancel()` is called, and the next
+  persisted state is terminal `cancelled` without creating another Agent.
+- Base: a completed public result clears retry metadata and persists the public
+  session reference.
+- Bad: looking for `resume()` when `restore()` is absent, or retrying a
+  cancellation because its stop reason appears in a generic allowlist.
+
+#### 6. Tests required
+
+- `tests/test_supervisor.py` asserts public restore, running-checkpoint restore,
+  cancellation during an Agent run, cancellation during retry wait, and no
+  retry after cancellation.
+- Architecture tests assert Supervisor imports only Core public events and that
+  Profile/Agent source does not know the Supervisor plane.
+
+#### 7. Wrong vs correct
+
+Wrong:
+
+```python
+restore = getattr(agent, "restore", None) or getattr(agent, "resume")
+```
+
+Correct:
+
+```python
+restored = await agent.restore(session_id)
+```
+
+The explicit port keeps session recovery public and prevents a compatibility
+alias from silently widening the Supervisor boundary.
+
 ## Presentation and persistence
 
 - `lion_code/observers/terminal.py::TerminalRenderer.handle` renders assistant

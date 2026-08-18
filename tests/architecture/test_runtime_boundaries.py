@@ -13,11 +13,12 @@ SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
 # Import-direction boundaries live in _boundaries.py (single source of truth).
 # AST tests and import-linter config both derive from those definitions.
 _CORE = BOUNDARIES[0]
-_PROVIDERS = BOUNDARIES[1]
-_APPLICATION = BOUNDARIES[2]
-_TUI = BOUNDARIES[3]
-_CAPABILITIES = BOUNDARIES[4]
-_PRODUCTION = BOUNDARIES[5]
+_SUPERVISOR = BOUNDARIES[1]
+_PROVIDERS = BOUNDARIES[2]
+_APPLICATION = BOUNDARIES[3]
+_TUI = BOUNDARIES[4]
+_CAPABILITIES = BOUNDARIES[5]
+_PRODUCTION = BOUNDARIES[6]
 
 LEGACY_MESSAGE_SYMBOLS = frozenset({"_anthropic_messages", "_openai_messages"})
 HARNESS_MUTATION_METHODS = frozenset({"clear_queues", "follow_up", "replace_messages"})
@@ -1330,11 +1331,11 @@ def test_permission_state_has_one_owner_and_live_read_ports() -> None:
 
 
 def test_tooling_does_not_import_product_runtimes() -> None:
-    """tooling 包不得 import PlanRuntime / AutonomyRuntime（Harness 不认识产品运行时）。"""
+    """tooling 包不得 import PlanRuntime / Supervisor（Harness 不认识产品运行时）。"""
     violations: dict[str, tuple[str, ...]] = {}
     for path in _source_files("tooling"):
         imported = _product_import_roots(path, _tree(path))
-        bad = sorted(imported & {"plan_runtime", "autonomy_runtime"})
+        bad = sorted(imported & {"plan_runtime", "supervisor"})
         if bad:
             violations[_source_key(path)] = tuple(bad)
     assert not violations, f"tooling 包反向绑定产品运行时: {violations}"
@@ -1821,7 +1822,7 @@ def test_domain_runtimes_use_only_narrow_dependencies() -> None:
     """Domain runtimes must not regain an Agent-shaped host or private runtime seam."""
 
     scoped = {
-        "autonomy_runtime.py": ("AutonomyRuntime",),
+        "supervisor.py": ("Supervisor",),
         "subagent_factory.py": ("SubagentFactory",),
     }
     removed_hosts = {
@@ -1857,7 +1858,7 @@ def test_domain_runtimes_use_only_narrow_dependencies() -> None:
                     imported.add(f"lion_code.{item.module}")
                 elif item.module:
                     imported.add(item.module)
-        if filename == "autonomy_runtime.py":
+        if filename == "supervisor.py":
             assert "lion_code.agent" not in imported
             assert "lion_code.agent_runtime" not in imported
 

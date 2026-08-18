@@ -25,12 +25,12 @@ _NON_KERNEL_SYMBOLS = (
     "PlanState",
     "SubagentFactory",
     "SubagentExecutor",
-    "AutonomyRuntime",
+    "Supervisor",
 )
 _NON_KERNEL_STRING = "<relevant-memory>"
 
 # Supervisor 模块：可消费 Kernel 事件契约，但不得 import Agent 引擎或触碰私有对象。
-_SUPERVISOR_MODULES = ("autonomy_runtime.py",)
+_SUPERVISOR_MODULES = ("supervisor.py",)
 _SUPERVISOR_FORBIDDEN_IMPORTS = (
     "lion_code.agent",
     "lion_code.agent_runtime",
@@ -72,7 +72,7 @@ def test_kernel_does_not_reference_capability_or_supervisor_symbols() -> None:
 def test_kernel_has_no_import_of_capability_or_supervisor_modules() -> None:
     forbidden = re.compile(
         r"lion_code\.(plan_runtime|capabilities|subagent_runtime"
-        r"|skill_runtime|autonomy_runtime)\b"
+        r"|skill_runtime|supervisor)\b"
     )
     hits: list[str] = []
     for path in _KERNEL_FILES:

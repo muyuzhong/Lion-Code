@@ -14,7 +14,6 @@ REMOVED_ROUTE_NAMES = (
     "run_subagent_tool",
     "enter_plan_mode_tool",
     "exit_plan_mode_tool",
-    "schedule_wakeup_tool",
 )
 
 

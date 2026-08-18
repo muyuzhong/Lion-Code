@@ -151,10 +151,7 @@ class Agent:
             terminal_output=terminal_output,
         )
         if config is not None:
-            if (
-                legacy_config != AgentConfig()
-                or custom_system_prompt is not None
-            ):
+            if legacy_config != AgentConfig() or custom_system_prompt is not None:
                 raise ValueError(
                     "config cannot be combined with legacy configuration arguments"
                 )
@@ -431,6 +428,9 @@ class Agent:
         await self.close()
 
     async def resume(self, session_id: str) -> bool:
+        return await self.restore_session_id(session_id)
+
+    async def restore(self, session_id: str) -> bool:
         return await self.restore_session_id(session_id)
 
     async def restore_latest(self) -> bool:

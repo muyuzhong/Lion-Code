@@ -154,49 +154,11 @@ def create_tool_search_tool() -> LionTool:
     )
 
 
-def create_wakeup_tool(command: ToolCommand) -> LionTool:
-    async def execute(context, tool_call_id, arguments, on_update):
-        del context, tool_call_id, on_update
-        return await command(arguments)
-
-    return LionTool(
-        name="schedule_wakeup",
-        label="Schedule wakeup",
-        description=(
-            "Schedule when to resume work in /loop dynamic mode — you were invoked via /loop "
-            "without an interval and are asked to self-pace. Pass the same /loop prompt back via "
-            "`prompt` so the next firing repeats the task. To end the loop, simply do not call this "
-            "tool. delaySeconds is clamped to [60, 3600]."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "delaySeconds": {
-                    "type": "number",
-                    "description": "Seconds from now to wake up (clamped to [60, 3600]).",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "One short sentence explaining the chosen delay.",
-                },
-                "prompt": {
-                    "type": "string",
-                    "description": "The /loop prompt to run on wake-up (pass the same prompt to repeat the task).",
-                },
-            },
-            "required": ["delaySeconds", "reason", "prompt"],
-        },
-        execute_fn=execute,
-        capabilities=ToolCapabilities(),
-    )
-
-
 def create_internal_tools() -> list[LionTool]:
     """创建常驻内部工具。
 
     ``skill`` 和 ``agent`` 工具已由 Capability SPI (SkillCapability /
     SubagentCapability) 通过 ToolSource 接入，不再由此函数提供。
-    ``schedule_wakeup`` 由动态循环临时注册。
     """
     return [
         create_tool_search_tool(),

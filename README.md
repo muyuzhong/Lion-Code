@@ -104,8 +104,8 @@ Lion Code 就是我对这些问题的回答。它是一个**可读、可验证�
 
 > PR4：Permission 只负责通用安全语义，不再包含 `plan`/`auto` 模式。Plan 是
 > Capability 层产品概念（`--plan` 通过 Plan 能力命令激活，期间读写限制由未来注入的
-> `PlanRestrictedPolicy` 负责）；Auto 分类器属于 Supervisor Plane
-> （`AutonomyRuntime`），由未来注入的 `LLMPermissionPolicy` 接线。
+> `PlanRestrictedPolicy` 负责）。Supervisor 不参与工具权限判定，权限策略仍属于
+> Tooling/Harness 边界。
 
 这些模式与四层防御叠加：
 
@@ -211,7 +211,7 @@ async def run_agent_loop(
 
 - **`get_system()`**——允许 Plan 模式、Skill 激活和工具变更更新系统提示
 - **`get_tools()`**——动态发现的 MCP 工具、延迟激活的 Skill、按 Sub-agent 的工具集视图
-- **`prepare_context(messages)`**——裁剪、预算、注入 Memory Overlay 到投影上下文
+- **`prepare_context(messages)`**——裁剪、预算并生成 Provider 投影上下文
 
 并行工具执行将相邻的并行能力工具分组为并发批次，串行工具则作为屏障：
 
@@ -251,23 +251,23 @@ async def _append_entry(self, entry: dict) -> None:
 
 旧 JSON 会话透明发现与迁移——源文件永不修改，只读不写。
 
-### 5. Memory 架构与隔离式整合
+### 5. Supervisor Plane 与长期任务控制
 
-Memory 系统在三个层级运行：
+长期运行行为由 Agent 外部显式组合产生：
 
-| 层级 | 作用域 | 触发方式 | 写入权限 |
-|------|--------|----------|:---:|
-| **Session** | 当前对话 | 自动（JSONL） | Agent |
-| **Memory** | 按项目的持久事实 | `/dream` 命令 | 隔离只读 Agent → 计划 → 主进程校验 |
-| **Skill** | 可复用工作流 / 流程 | `/learn` 命令 | Meta-Skill 分析 → 用户确认 |
+```python
+Supervisor(
+    agent_factory=...,       # 在外部选择 Minimal/Coding/Full Profile
+    goal=...,
+    retry_policy=...,
+    checkpoint_store=...,
+)
+```
 
-`/dream` 命令使用一个**隔离式 Agent**，该 Agent：
-- 仅有**只读**文件和搜索权限
-- **不能**写文件、执行 Shell、调用 MCP 或启动其他 Agent
-- 输出结构化 JSON 计划：`{created: [...], updated: [...], deleted: [...]}`
-- 主进程随后校验文件名、Memory 类型、内容大小和运行前快照，再集中写入并重建索引
-
-这种设计阻止了模型直接操作 Memory 文件系统，同时仍能自动整合重复信息、清理过期条目。
+Supervisor 只负责再次运行 Agent 的主体、时机和策略。Checkpoint 仅保存 goal、phase、
+attempt、status、session reference、retry metadata 和 timestamps；它不保存会话内容，
+也不替代 JSONL session history。普通 Profile 和 Agent 不知道 Supervisor、goal、retry
+或 scheduler。
 
 ### 6. Textual TUI 与实时流式渲染
 
@@ -415,14 +415,11 @@ Lion-Code/
 │   │   ├── themes.py           # 内置 + 自定义主题加载
 │   │   └── autocomplete.py     # 路径/命令/Skill 补全引擎
 │   ├── hooks.py                # PreToolUse 命令 Hook (~23 KB)
-│   ├── memory.py               # 项目 Memory 文件系统 (~14 KB)
-│   ├── memory_runtime/         # Memory Overlay 注入（含预算限制）
-│   ├── dream.py                # 隔离式 Memory 整合 Agent (~19 KB)
-│   ├── skills.py               # Skill 发现、解析与 /learn 创建
+│   ├── skills.py               # Skill 发现与解析
 │   ├── session_runtime/        # JSONL 记录、旧 JSON 迁移、Repository
 │   ├── subagent.py             # Sub-agent 配置与启动
 │   ├── mcp_client.py           # MCP 协议客户端
-│   ├── autonomy.py             # /goal、/loop、Auto 模式契约
+│   ├── supervisor.py           # 长期任务 goal/retry/checkpoint 编排
 │   ├── prompt.py               # System Prompt 拼装
 │   └── config.py               # API 配置
 ├── benchmarks/
@@ -502,21 +499,13 @@ lion-code --repl                                       # 纯文本 REPL
 | `/task` | 查看当前项目的目标、活动任务与下一步 |
 | `/task switch <内容>` | 切换活动任务，并把旧任务保留为待继续事项 |
 | `/task done` | 结束活动任务，保留完成摘要并准备受限长期候选 |
-| `/session-memory` | 查看当前项目的跨会话短期工作状态 |
 | `/handoff` | 生成并保存下一 Session 可继续的交接摘要 |
-| `/dream` | 将受限候选与最近项目 Session 整理为 Auto Memory |
-| `/learn` | 判断并沉淀当前会话中的可复用经验 |
-| `/memory` | 查看已保存的 Memory |
 | `/skills` | 查看可用 Skill |
-| `/goal <条件>` | 围绕停止条件继续迭代 |
-| `/loop <任务>` | 按间隔或模型自定时重复任务 |
 | `/<skill-name>` | 调用一个用户可执行 Skill |
 | `exit` / `quit` | 退出程序 |
 
-项目上下文按 `AGENTS.md`（兼容 `CLAUDE.md`）→ Session Memory → Auto Memory 的优先级
-临时投影给 Provider；不会写入 canonical 对话或 JSONL。`/clear` 只开启新对话，保留当前
-项目或 worktree 的 Session Memory；`/dream` 只接收稳定偏好、明确反馈、已验证决策及原因、
-可复用失败经验和外部引用等候选，不能自动改写 `AGENTS.md`。
+项目上下文按 `AGENTS.md`（兼容 `CLAUDE.md`）临时投影给 Provider；不会写入 canonical
+对话或 JSONL。`/clear` 只开启新对话，长期任务则由外部 Supervisor 显式恢复。
 
 ### TUI（Textual）
 
@@ -547,7 +536,7 @@ TUI 支持实时路径补全、命令/Skill 提示、流式 Markdown、可展开
 ```text
 ~/.lion-code/
 ├── sessions/           # JSONL 会话记录（旧 JSON 透明迁移）
-├── projects/           # 按项目隔离的 Memory 文件 + MEMORY.md 索引
+├── supervisor/         # 可选的执行控制 checkpoint
 ├── tool-results/       # 超大工具结果全文（>30 KB）
 ├── trusted-hooks.json  # 项目 Hook 信任指纹
 ├── config.json         # 已保存的 API 配置
@@ -565,8 +554,7 @@ TUI 支持实时路径补全、命令/Skill 提示、流式 Markdown、可展开
 | 超大结果挤占上下文 | 先完整落盘，再提供预览和可回读路径 | 增加本地 I/O，但避免永久丢失内容 |
 | 立即裁剪能减少 Token | 缓存仍热时延迟改写旧前缀 | 短期保留更多 Token，换取更高缓存复用 |
 | Hook 故障时是否继续执行 | 所有异常均 fail-closed | Hook 故障降低可用性，但不会静默绕过安全边界 |
-| Memory 整合安全 | 隔离只读 Agent → 计划 → 主程序校验 → 应用 | 多一道结构校验，换取路径和删除边界可控 |
-| 何时从经验中学习 | 仅用户显式执行 `/learn` 或 `/dream` | 不做后台自动沉淀，用户保留最终控制权 |
+| 长期任务恢复 | Supervisor checkpoint + session reference | 只保存执行控制，不复制会话内容 |
 | 防止覆盖外部修改 | 写文件前要求先读，并校验 mtime | 多一次读取，换取更清晰的并发修改保护 |
 | Provider SDK 依赖 | 纯 httpx，核心路径零 SDK 导入 | 必须直接实现 API 适配器 |
 | 会话格式 | JSONL 而非 JSON | 读取器略复杂，但崩溃恢复更安全 |
@@ -591,9 +579,6 @@ python benchmarks/context_management/formal_benchmark.py
 ## 路线图
 
 - [ ] **演示素材**——终端 GIF、代表性任务记录和结果截图
-- [ ] **Auto Mode**——补全默认规则资产，补齐流程测试，标记为稳定能力
-- [ ] **Goal 持久化**——将 `/goal` 变为可恢复的持久任务系统，支持独立验证
-- [ ] **E2E 验证**——为 `/learn` 与 `/dream` 补充真实后端集成测试
 - [ ] **CI 管线**——跨平台（Windows、Linux）、多 Python 版本 CI，展示测试状态徽章
 - [ ] **评测扩展**——更多任务多样性和对抗性测试用例
 
