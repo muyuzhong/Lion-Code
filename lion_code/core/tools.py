@@ -42,18 +42,6 @@ class AgentToolResult(WireModel):
         return "".join(block.text for block in self.content if isinstance(block, TextContent))
 
 
-class ToolCallRenderer(Protocol):
-    def __call__(self, arguments: Mapping[str, JSONValue]) -> str | None:
-        """Return a frontend-friendly tool invocation, or ``None``."""
-        ...
-
-
-class ToolResultRenderer(Protocol):
-    def __call__(self, result: AgentToolResult, *, expanded: bool) -> str | None:
-        """Return frontend markup for a tool result, or ``None``."""
-        ...
-
-
 ToolUpdateCallback = Callable[[AgentToolResult], None]
 
 
@@ -70,7 +58,6 @@ class ToolExecutor(Protocol):
 
 
 ToolExecutionMode = Literal["sequential", "parallel"]
-ToolArgumentPreparer = Callable[[object], Mapping[str, JSONValue]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,16 +65,10 @@ class AgentTool:
     """A tool exposed to the portable agent loop."""
 
     name: str
-    label: str
     description: str
     parameters: Mapping[str, JSONValue]
     execute_fn: ToolExecutor
-    prompt_snippet: str | None = None
-    prompt_guidelines: tuple[str, ...] = ()
-    prepare_arguments: ToolArgumentPreparer | None = None
     execution_mode: ToolExecutionMode = "parallel"
-    render_call: ToolCallRenderer | None = None
-    render_result: ToolResultRenderer | None = None
 
     @property
     def input_schema(self) -> Mapping[str, JSONValue]:
@@ -109,9 +90,7 @@ __all__ = [
     "AgentTool",
     "AgentToolResult",
     "ToolCall",
-    "ToolCallRenderer",
     "ToolExecutionMode",
     "ToolExecutor",
-    "ToolResultRenderer",
     "ToolUpdateCallback",
 ]

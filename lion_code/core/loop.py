@@ -400,40 +400,33 @@ async def _execute_tool_call(
         )
 
     tool = tools.get(call.name)
-    prepared_call = call
     if tool is None:
         result = _error_result(f"Tool {call.name} not found")
         is_error = True
     else:
-        try:
-            prepared_call = _prepare_tool_call(tool, call)
-        except Exception as exc:  # noqa: BLE001 - 参数兼容钩子属于工具边界
-            result = _error_result(str(exc))
+        if signal is not None and signal.is_cancelled():
+            result = _error_result("Operation aborted")
             is_error = True
         else:
-            if signal is not None and signal.is_cancelled():
-                result = _error_result("Operation aborted")
-                is_error = True
-            else:
-                outcome: _ToolRunOutcome | None = None
-                async for item in _run_tool(tool, prepared_call, signal):
-                    if isinstance(item, _ToolRunOutcome):
-                        outcome = item
-                        continue
-                    update = item
-                    yield ToolExecutionUpdateEvent(
-                        tool_call_id=call.id,
-                        tool_name=call.name,
-                        args=call.arguments,
-                        partial_result=update,
-                    )
-                if outcome is None:  # pragma: no cover - 私有生成器始终产生终态
-                    outcome = _ToolRunOutcome(
-                        result=_error_result("Tool produced no result"),
-                        is_error=True,
-                    )
-                result = outcome.result
-                is_error = outcome.is_error
+            outcome: _ToolRunOutcome | None = None
+            async for item in _run_tool(tool, call, signal):
+                if isinstance(item, _ToolRunOutcome):
+                    outcome = item
+                    continue
+                update = item
+                yield ToolExecutionUpdateEvent(
+                    tool_call_id=call.id,
+                    tool_name=call.name,
+                    args=call.arguments,
+                    partial_result=update,
+                )
+            if outcome is None:  # pragma: no cover - 私有生成器始终产生终态
+                outcome = _ToolRunOutcome(
+                    result=_error_result("Tool produced no result"),
+                    is_error=True,
+                )
+            result = outcome.result
+            is_error = outcome.is_error
 
     yield ToolExecutionEndEvent(
         tool_call_id=call.id,
@@ -451,17 +444,6 @@ async def _execute_tool_call(
     )
     yield MessageStartEvent(message=message)
     yield MessageEndEvent(message=message)
-
-
-def _prepare_tool_call(tool: AgentTool, call: ToolCall) -> ToolCall:
-    if tool.prepare_arguments is None:
-        return call
-    prepared = tool.prepare_arguments(call.arguments)
-    if not isinstance(prepared, Mapping):
-        raise TypeError(f"Tool {tool.name} prepare_arguments must return a mapping")
-    if prepared is call.arguments:
-        return call
-    return call.model_copy(update={"arguments": dict(prepared)})
 
 
 async def _run_tool(

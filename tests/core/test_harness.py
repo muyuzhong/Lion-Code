@@ -33,7 +33,6 @@ def _echo_tool() -> AgentTool:
 
     return AgentTool(
         name="echo",
-        label="Echo",
         description="echo the msg argument",
         parameters={},
         execute_fn=execute,
@@ -141,7 +140,6 @@ class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
         tools = [
             AgentTool(
                 name=name,
-                label=name,
                 description=name,
                 parameters={},
                 execute_fn=execute,
@@ -197,7 +195,6 @@ class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
         tools = [
             AgentTool(
                 name=name,
-                label=name,
                 description=name,
                 parameters={},
                 execute_fn=execute,
@@ -219,16 +216,12 @@ class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provider.call_count, 2)
         self.assertEqual(harness.messages[-1].text, "final")
 
-    async def test_prepare_arguments_runs_before_execute(self) -> None:
+    async def test_tool_execute_receives_raw_arguments(self) -> None:
         observed: list[tuple[str, dict]] = []
-
-        def prepare(arguments):
-            observed.append(("prepare", dict(arguments)))
-            return {"msg": arguments["legacy"]}
 
         async def execute(tool_call_id, arguments, signal, on_update):
             observed.append(("execute", dict(arguments)))
-            return AgentToolResult(content=[TextContent(text=arguments["msg"])])
+            return AgentToolResult(content=[TextContent(text=arguments["legacy"])])
 
         provider = FakeProvider(
             [
@@ -262,11 +255,9 @@ class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
                 tools=[
                     AgentTool(
                         name="compat",
-                        label="Compat",
                         description="compat",
                         parameters={},
                         execute_fn=execute,
-                        prepare_arguments=prepare,
                     )
                 ],
             )
@@ -278,8 +269,7 @@ class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             observed,
             [
-                ("prepare", {"legacy": "converted"}),
-                ("execute", {"msg": "converted"}),
+                ("execute", {"legacy": "converted"}),
             ],
         )
 
@@ -317,7 +307,6 @@ class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
                 tools=[
                     AgentTool(
                         name="slow",
-                        label="Slow",
                         description="slow",
                         parameters={},
                         execute_fn=execute,
@@ -388,7 +377,6 @@ class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
         tools = [
             AgentTool(
                 name=name,
-                label=name,
                 description=name,
                 parameters={},
                 execute_fn=execute,
@@ -502,7 +490,6 @@ class TestStructuredToolError(unittest.IsolatedAsyncioTestCase):
                 tools=[
                     AgentTool(
                         name="guarded",
-                        label="Guarded",
                         description="guarded",
                         parameters={},
                         execute_fn=execute,

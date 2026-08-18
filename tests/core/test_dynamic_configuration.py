@@ -28,7 +28,6 @@ def _echo_tool() -> AgentTool:
 
     return AgentTool(
         name="echo",
-        label="Echo",
         description="echo the msg argument",
         parameters={},
         execute_fn=execute,
@@ -41,7 +40,6 @@ def _tool_named(name: str) -> AgentTool:
 
     return AgentTool(
         name=name,
-        label=name,
         description=name,
         parameters={},
         execute_fn=execute,
@@ -112,7 +110,7 @@ class TestDynamicTools(unittest.IsolatedAsyncioTestCase):
             return AgentToolResult(content=[TextContent(text="A")], details={})
 
         tool_a = AgentTool(
-            name="A", label="A", description="A", parameters={}, execute_fn=execute_a
+            name="A", description="A", parameters={}, execute_fn=execute_a
         )
         tool_b = _tool_named("B")
 
