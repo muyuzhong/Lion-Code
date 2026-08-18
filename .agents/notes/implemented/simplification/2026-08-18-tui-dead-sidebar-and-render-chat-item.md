@@ -62,3 +62,9 @@ TUI 的前端渲染已全部收敛到 `TranscriptView` 补全建议等活跃组�
   对称；当前无任何文档/任务提及此规划（`.trellis/tasks/` 无侧边栏相关条目）。
 - 私有 helper 中 `_format_cost`/`_compact_usage_count` 等命名与 usage 展示语义
   相近，删除前确认无活跃组件复用（已核对：无）。
+
+## 落地
+
+- 提交: `8a427219e36907c23df1ad8f65fcecf0b6206dd8`（squash merge）
+- PR: #50（标题：refactor: 删除 TUI 侧边栏子系统与 tests-only 的 render_chat_item 家族）
+- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 已通过（2026-08-18）。

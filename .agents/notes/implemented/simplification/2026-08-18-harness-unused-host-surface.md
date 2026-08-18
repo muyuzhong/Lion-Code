@@ -58,3 +58,9 @@ per-tool 钩子。工具执行后策略已经在 `ToolRuntime` middleware 实现
   `queue_snapshot()`），只删 `count` 属性不删类型，风险低。
 - `before_tool_call` 若保留其测试则一并保留，避免为了删 3 行改写既有用例；
   本提案将其列为可选项。
+
+## 落地
+
+- 提交: `84c408cbfc2a7e70e9ae1a386fbaeb7e2702907c`（squash merge）
+- PR: #49（标题：refactor: 裁剪通用 Harness 的无宿主面（队列原语、all 排空、单工具钩子））
+- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 已通过（2026-08-18）。

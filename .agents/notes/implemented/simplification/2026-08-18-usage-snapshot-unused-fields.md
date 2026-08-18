@@ -68,3 +68,9 @@ promote 的另一个「未来需求预留」。按 `AGENTS.md` 原则 2 与「�
   且个人项目未发布，风险可接受。
 - 若未来要做「供应商报告费用 vs 估算费用」对照展示，需要把 cost 累计重新加回
   Ledger——与今天删除对称。
+
+## 落地
+
+- 提交: `7b23c0288b744b2edee478be68f2f80e5799250e`（squash merge）
+- PR: #53（标题：refactor: 移除 UsageSnapshot 无产品消费者的字段与一次多余转发层）
+- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 已通过（2026-08-18）。
