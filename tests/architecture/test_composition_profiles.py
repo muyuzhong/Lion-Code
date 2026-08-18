@@ -41,7 +41,7 @@ from lion_code.session_runtime import SessionRepository
 from lion_code.supervisor import RetryPolicy, Supervisor, VolatileCheckpointStore
 from lion_code.tooling.builtin import BUILTIN_TOOL_NAMES
 from lion_code.tooling.execution import LocalCommandExecutionBackend
-from lion_code.tooling.permission import PermissionDecision, PermissionPolicy
+from lion_code.tooling.permission import PermissionPolicy
 from lion_code.tooling.types import LionTool, ToolResult
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -59,16 +59,6 @@ class _RecordingBackend:
     def run(self, command: str, *, timeout_ms: float = 30000.0) -> str:
         self.calls.append((command, timeout_ms))
         return f"backend-ran: {command}"
-
-
-class _AllowAllStrategy:
-    """验证 identity 传递的最小 ToolPermissionStrategy 实现。"""
-
-    def check_hard_boundaries(self, *, tool, arguments, mode):
-        return None
-
-    def check(self, *, tool, arguments, mode):
-        return PermissionDecision("allow")
 
 
 async def _noop_execute(_context, _tool_call_id, _arguments, _on_update):
