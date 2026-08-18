@@ -6,16 +6,16 @@ import hashlib
 import json
 import subprocess
 from collections import Counter
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping
 
 from .catalog import validate_catalog
 from .models import Catalog, TaskResources, TaskSpec, TaskSplit, TaskStatus
 
-
 CORPUS_ID = "lion-historical-replay"
 CORPUS_VERSION = "v1"
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PRIVATE_VERIFIER_IDENTITY = "lion-historical-patch-provenance/v1"
 _REPOSITORY = "https://github.com/muyuzhong/Lion-Code"
 _RESOURCES = TaskResources(
@@ -98,6 +98,39 @@ def bundled_private_evidence() -> dict[str, PrivateEvidence]:
     return dict(_PRIVATE_EVIDENCE)
 
 
+def validate_active_resources_exist(
+    catalog: Catalog,
+    *,
+    repository_root: str | Path = _REPOSITORY_ROOT,
+) -> None:
+    """校验 ACTIVE 条目引用的文件在当前工作树存在。
+
+    v1 是 SHA-256 钉定资产，历史失效条目保留其版本语义；本校验对 v2 起的
+    catalog 生效，作为门禁阻止失效 involved_files / validation 命令再次进入。
+    """
+
+    if catalog.catalog_version == "v1":
+        return
+    root = Path(repository_root).resolve()
+    missing: list[str] = []
+    for task in catalog.tasks:
+        if task.status is not TaskStatus.ACTIVE:
+            continue
+        for relative in task.involved_files:
+            if not (root / relative).exists():
+                missing.append(f"{task.task_id} involved_files: {relative}")
+        for command in task.public_validation_commands:
+            for token in command.split():
+                if (token.startswith("tests/") or token.startswith("benchmarks/")) and not (
+                    root / token
+                ).exists():
+                    missing.append(f"{task.task_id} validation: {token}")
+    if missing:
+        raise CorpusAdmissionError(
+            "ACTIVE 条目引用了缺失文件: " + "; ".join(missing)
+        )
+
+
 def validate_corpus(
     catalog: Catalog,
     evidence: Mapping[str, PrivateEvidence],
@@ -107,6 +140,7 @@ def validate_corpus(
     """校验任务配额、公开/私有对应、稳定证据与 split 防泄漏规则。"""
 
     validate_catalog(catalog)
+    validate_active_resources_exist(catalog)
     tasks = tuple(task for task in catalog.tasks if task.status is TaskStatus.ACTIVE)
     if len(catalog.tasks) != 30 or len(tasks) != 30:
         raise CorpusAdmissionError("Corpus must contain exactly 30 active tasks")
