@@ -52,7 +52,6 @@ _CONTROL_FIELDS = {
     "retry_count",
     "last_stop_reason",
     "last_error",
-    "next_delay_seconds",
     "created_at",
     "updated_at",
     "next_run_at",

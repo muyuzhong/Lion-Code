@@ -133,10 +133,6 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
 
         state = SupervisorState(goal_id="strict", goal="control")
         payload = state.to_dict()
-        payload["next_delay_seconds"] = -1
-        with self.assertRaises(CheckpointError):
-            SupervisorState.from_dict(payload)
-        payload = state.to_dict()
         payload["created_at"] = float("inf")
         with self.assertRaises(CheckpointError):
             SupervisorState.from_dict(payload)
@@ -176,7 +172,6 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
                 "retry_count",
                 "last_stop_reason",
                 "last_error",
-                "next_delay_seconds",
                 "created_at",
                 "updated_at",
                 "next_run_at",
@@ -294,7 +289,6 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
                 status="pending",
                 attempt=1,
                 retry_count=1,
-                next_delay_seconds=10.0,
                 created_at=now,
                 updated_at=now,
                 next_run_at=now + 10.0,

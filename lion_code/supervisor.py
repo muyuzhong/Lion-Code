@@ -100,7 +100,6 @@ _STATE_FIELDS = frozenset(
         "retry_count",
         "last_stop_reason",
         "last_error",
-        "next_delay_seconds",
         "created_at",
         "updated_at",
         "next_run_at",
@@ -191,18 +190,10 @@ def _validate_state_optional_text(
 
 
 def _validate_state_timestamps(
-    next_delay_seconds: float,
     created_at: float,
     updated_at: float,
     next_run_at: float | None,
 ) -> None:
-    if (
-        isinstance(next_delay_seconds, bool)
-        or not isinstance(next_delay_seconds, (int, float))
-        or next_delay_seconds < 0
-        or not math.isfinite(next_delay_seconds)
-    ):
-        raise ValueError("next_delay_seconds must be finite and non-negative")
     if (
         isinstance(created_at, bool)
         or not isinstance(created_at, (int, float))
@@ -249,7 +240,6 @@ class SupervisorState:
     retry_count: int = 0
     last_stop_reason: str | None = None
     last_error: str | None = None
-    next_delay_seconds: float = 0.0
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     next_run_at: float | None = None
@@ -262,7 +252,6 @@ class SupervisorState:
             self.session_id, self.last_stop_reason, self.last_error
         )
         _validate_state_timestamps(
-            self.next_delay_seconds,
             self.created_at,
             self.updated_at,
             self.next_run_at,
@@ -281,7 +270,6 @@ class SupervisorState:
             "retry_count": self.retry_count,
             "last_stop_reason": self.last_stop_reason,
             "last_error": self.last_error,
-            "next_delay_seconds": self.next_delay_seconds,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "next_run_at": self.next_run_at,
@@ -311,9 +299,6 @@ class SupervisorState:
 
         attempt = _non_negative_integer(value["attempt"], "attempt")
         retry_count = _non_negative_integer(value["retry_count"], "retry_count")
-        next_delay_seconds = _finite_number(
-            value["next_delay_seconds"], "next_delay_seconds"
-        )
         created_at = _finite_number(value["created_at"], "created_at")
         updated_at = _finite_number(value["updated_at"], "updated_at")
         next_run_at_value = value["next_run_at"]
@@ -322,9 +307,6 @@ class SupervisorState:
             if next_run_at_value is None
             else _finite_number(next_run_at_value, "next_run_at")
         )
-        if next_delay_seconds < 0:
-            raise CheckpointError("next_delay_seconds must be non-negative")
-
         try:
             return cls(
                 goal_id=_required_text(value["goal_id"], "goal_id"),
@@ -338,7 +320,6 @@ class SupervisorState:
                     value["last_stop_reason"], "last_stop_reason"
                 ),
                 last_error=_optional_text(value["last_error"], "last_error"),
-                next_delay_seconds=next_delay_seconds,
                 created_at=created_at,
                 updated_at=updated_at,
                 next_run_at=next_run_at,
@@ -465,11 +446,10 @@ class RetryPolicy:
         object.__setattr__(self, "retryable_stop_reasons", reasons)
 
     def should_retry(
-        self, *, attempt: int, stop_reason: str, cancelled: bool = False
+        self, *, attempt: int, stop_reason: str
     ) -> bool:
         return (
-            not cancelled
-            and attempt < self.max_attempts
+            attempt < self.max_attempts
             and stop_reason in self.retryable_stop_reasons
         )
 
@@ -490,10 +470,6 @@ class SupervisorResult:
     state: SupervisorState
 
     @property
-    def goal_id(self) -> str:
-        return self.state.goal_id
-
-    @property
     def status(self) -> Status:
         return self.state.status
 
@@ -508,10 +484,6 @@ class SupervisorResult:
     @property
     def stop_reason(self) -> str | None:
         return self.state.last_stop_reason
-
-    @property
-    def error(self) -> str | None:
-        return self.state.last_error
 
     @property
     def succeeded(self) -> bool:
@@ -547,7 +519,7 @@ _RUNNING_EVENT_TYPES = frozenset(
         "compaction_completed",
     }
 )
-_CANCELLED_STOP_REASONS = frozenset({"aborted", "cancelled"})
+_CANCELLED_STOP_REASONS = frozenset({"aborted"})
 
 
 class Supervisor:
@@ -565,7 +537,6 @@ class Supervisor:
         retry_policy: RetryPolicy | None = None,
         checkpoint_store: CheckpointStore,
         scheduler: Scheduler | None = None,
-        run_timeout: float | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self._agent_factory = agent_factory
@@ -573,13 +544,6 @@ class Supervisor:
         self._retry_policy = retry_policy or RetryPolicy()
         self._checkpoint_store = checkpoint_store
         self._scheduler = scheduler or AsyncioScheduler()
-        if run_timeout is not None and (
-            isinstance(run_timeout, bool)
-            or not math.isfinite(run_timeout)
-            or run_timeout <= 0
-        ):
-            raise ValueError("run_timeout must be a positive finite number")
-        self._run_timeout = run_timeout
         self._clock = clock
         self._state: SupervisorState | None = None
         self._current_agent: AgentPort | None = None
@@ -696,7 +660,6 @@ class Supervisor:
                     status="failed",
                     last_stop_reason="max_attempts",
                     last_error="maximum attempts reached before the next run",
-                    next_delay_seconds=0.0,
                     next_run_at=None,
                     updated_at=self._clock(),
                 )
@@ -707,7 +670,6 @@ class Supervisor:
                 phase="running",
                 status="running",
                 attempt=next_attempt,
-                next_delay_seconds=0.0,
                 next_run_at=None,
                 updated_at=self._clock(),
             )
@@ -837,7 +799,7 @@ class Supervisor:
         try:
             public_result = await agent.run(
                 self._goal.prompt,
-                timeout=self._run_timeout,
+                timeout=None,
             )
         except asyncio.CancelledError:
             agent.cancel()
@@ -950,7 +912,6 @@ class Supervisor:
                     session_id=session_id,
                     last_stop_reason=outcome.stop_reason,
                     last_error=None,
-                    next_delay_seconds=0.0,
                     next_run_at=None,
                     updated_at=self._clock(),
                 )
@@ -958,7 +919,6 @@ class Supervisor:
         if self._retry_policy.should_retry(
             attempt=state.attempt,
             stop_reason=outcome.stop_reason,
-            cancelled=False,
         ):
             retry_count = state.retry_count + 1
             delay = self._retry_policy.delay_seconds(retry_count)
@@ -972,7 +932,6 @@ class Supervisor:
                     retry_count=retry_count,
                     last_stop_reason=outcome.stop_reason,
                     last_error=outcome.error,
-                    next_delay_seconds=delay,
                     next_run_at=now + delay,
                     updated_at=now,
                 )
@@ -985,7 +944,6 @@ class Supervisor:
                 session_id=session_id,
                 last_stop_reason=outcome.stop_reason,
                 last_error=outcome.error,
-                next_delay_seconds=0.0,
                 next_run_at=None,
                 updated_at=self._clock(),
             )
@@ -999,7 +957,6 @@ class Supervisor:
                 status="cancelled",
                 last_stop_reason=state.last_stop_reason or "cancelled",
                 last_error=state.last_error or "Supervisor cancellation requested",
-                next_delay_seconds=0.0,
                 next_run_at=None,
                 updated_at=self._clock(),
             )
