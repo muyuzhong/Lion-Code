@@ -128,8 +128,16 @@ PROVIDER_STATE_ALLOWLIST: dict[str, frozenset[str]] = {
         {
             "_client",
             "_config",
+            "_content_parts",
+            "_finish_reason",
             "_owns_client",
+            "_thinking_parts",
+            "_thinking_signature",
+            "_tool_builders",
+            "_usage",
             "arguments_parts",
+            "emitted_content",
+            "fatal",
             "id",
             "name",
         }
