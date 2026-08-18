@@ -193,18 +193,6 @@ class ToolResultMessage(WireModel):
         return content_text(self.content)
 
 
-class BashExecutionMessage(WireModel):
-    role: Literal["bashExecution"] = "bashExecution"
-    command: str
-    output: str
-    exit_code: int | None = None
-    cancelled: bool = False
-    truncated: bool = False
-    full_output_path: str | None = None
-    timestamp: int = Field(default_factory=current_timestamp_ms)
-    exclude_from_context: bool = False
-
-
 class CustomMessage(WireModel):
     role: Literal["custom"] = "custom"
     custom_type: str
@@ -218,28 +206,11 @@ class CustomMessage(WireModel):
         return content_text(self.content)
 
 
-class BranchSummaryMessage(WireModel):
-    role: Literal["branchSummary"] = "branchSummary"
-    summary: str
-    from_id: str
-    timestamp: int = Field(default_factory=current_timestamp_ms)
-
-
-class CompactionSummaryMessage(WireModel):
-    role: Literal["compactionSummary"] = "compactionSummary"
-    summary: str
-    tokens_before: int
-    timestamp: int = Field(default_factory=current_timestamp_ms)
-
-
 type AgentMessage = Annotated[
     UserMessage
     | AssistantMessage
     | ToolResultMessage
-    | BashExecutionMessage
-    | CustomMessage
-    | BranchSummaryMessage
-    | CompactionSummaryMessage,
+    | CustomMessage,
     Field(discriminator="role"),
 ]
 
@@ -268,10 +239,4 @@ def message_to_user(message: AgentMessage) -> UserMessage:
 
 def message_text(message: AgentMessage) -> str:
     """Return the user-visible text represented by an agent message."""
-    if isinstance(message, (UserMessage, AssistantMessage, ToolResultMessage, CustomMessage)):
-        return message.text
-    if isinstance(message, (BranchSummaryMessage, CompactionSummaryMessage)):
-        return message.summary
-    if isinstance(message, BashExecutionMessage):
-        return message.output
-    return ""
+    return message.text
