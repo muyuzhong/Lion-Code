@@ -65,6 +65,6 @@
 
 ## 落地
 
-- 提交: `274f033`
+- 提交: `850de7d`
 - PR: #57（标题：refactor: 折叠两个 provider 适配器间重复的流式信封与工具函数（不合并适配器））
 - 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 待绿。
