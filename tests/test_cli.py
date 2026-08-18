@@ -171,7 +171,9 @@ async def test_repl_dispatch_exit_returns_true() -> None:
         (_result(message="hello notice"), [], "hello notice"),
     ],
 )
-async def test_repl_dispatch_routes_intent(result, expected_calls, expected_out, capsys) -> None:
+async def test_repl_dispatch_routes_intent(
+    result, expected_calls, expected_out, capsys
+) -> None:
     agent = _StubReplAgent()
 
     exited = await _dispatch_repl_command(agent, result)
@@ -193,7 +195,9 @@ async def test_repl_dispatch_compact_error_is_printed(capsys) -> None:
 
 
 @pytest.mark.asyncio
-async def test_repl_dispatch_skills_lists_discovered_skills(monkeypatch, capsys) -> None:
+async def test_repl_dispatch_skills_lists_discovered_skills(
+    monkeypatch, capsys
+) -> None:
     from lion_code.skills import SkillDefinition
 
     monkeypatch.setattr(
