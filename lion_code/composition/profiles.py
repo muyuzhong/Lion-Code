@@ -31,21 +31,23 @@ def _normalize_blank_prompt(profile) -> None:
 
 @dataclass(frozen=True, slots=True)
 class MinimalProfile:
-    """零内置 Capability 的最小产品：只注册调用方 tools。"""
+    """零内置 Capability 的最小产品：只注册调用方 tools 与第三方扩展。"""
 
     config: AgentConfig
     dependencies: AgentDependencies
     tools: tuple[LionTool, ...] = ()
     system_prompt: str | None = None
+    extension_specs: tuple[CapabilitySpec, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tools", tuple(self.tools))
+        object.__setattr__(self, "extension_specs", tuple(self.extension_specs))
         _normalize_blank_prompt(self)
 
 
 @dataclass(frozen=True, slots=True)
 class CodingProfile:
-    """Coding 产品形态：backend 绑定的 Coding 工具套件与安全策略。"""
+    """Coding 产品形态：backend 绑定的 Coding 工具套件、安全策略与第三方扩展。"""
 
     config: AgentConfig
     dependencies: AgentDependencies
@@ -54,9 +56,11 @@ class CodingProfile:
     )
     extra_tools: tuple[LionTool, ...] = ()
     system_prompt: str | None = None
+    extension_specs: tuple[CapabilitySpec, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "extra_tools", tuple(self.extra_tools))
+        object.__setattr__(self, "extension_specs", tuple(self.extension_specs))
         _normalize_blank_prompt(self)
 
 

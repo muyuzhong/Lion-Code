@@ -21,8 +21,10 @@ Kernel context policy and are the only generic provider-context preparation path
 ## Current composition
 
 `MinimalProfile` constructs an empty CapabilityRegistry. `CodingProfile` adds
-Coding tools and Coding Harness policy, but no Capability. `FullProfile` adds
-Plan, SubAgent, Skill, and caller `extension_specs`. Every Profile produces a
+Coding tools and Coding Harness policy, but no built-in Capability. `FullProfile`
+adds Plan, SubAgent, and Skill built-in Capabilities. Caller `extension_specs`
+are orthogonal to the Product preset: every Profile forwards them into the
+CapabilityRegistry. Every Profile produces a
 feature-neutral `MetaAgent`; capability services remain private to the graph.
 No Profile creates or names a Memory, Dream, Learning, Null, Deprecated, Legacy,
 or fallback object.

@@ -197,6 +197,49 @@ def test_coding_graph_never_composes_full_capabilities(tmp_path, monkeypatch):
     assert composition.plan is None
 
 
+def test_minimal_and_coding_profiles_compose_extension_specs(tmp_path, monkeypatch):
+    """extension_specs 与 Profile 正交：Minimal/Coding 挂第三方 Capability 同样生效。"""
+    from lion_code.capabilities.types import CapabilitySpec
+
+    monkeypatch.chdir(tmp_path)
+    spec = CapabilitySpec(
+        name="memory-extension",
+        prompt_layers=(_ExamplePromptLayer(),),
+    )
+    profiles = (
+        MinimalProfile(
+            config=AgentConfig(api_key="test-key", terminal_output=False),
+            dependencies=AgentDependencies(),
+            tools=(_tool("caller_tool"),),
+            extension_specs=(spec,),
+        ),
+        CodingProfile(
+            config=AgentConfig(api_key="test-key", terminal_output=False),
+            dependencies=AgentDependencies(),
+            extension_specs=(spec,),
+        ),
+    )
+    for profile in profiles:
+        with patch(
+            "lion_code.composition.agent_builder.create_provider",
+            return_value=_fake_provider(),
+        ):
+            composition = build_agent_composition(profile)
+
+        assert len(composition.capability_registry.prompt_layers) == 1
+        # 扩展不带内置 Capability：不产出 Full 专属 runtime
+        assert composition.plan is None
+        assert composition.subagent_factory is None
+        assert composition.skill_runtime is None
+        assert "example extension prompt layer" in (
+            composition.prompt_composer.get_system()
+        )
+        if isinstance(profile, MinimalProfile):
+            assert {t.name for t in composition.tool_registry.all_tools()} == {
+                "caller_tool"
+            }
+
+
 class _ExamplePromptLayer:
     layer_id = "example"
 
