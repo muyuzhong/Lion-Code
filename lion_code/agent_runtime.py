@@ -9,8 +9,7 @@
 
 Core 在每轮调用模型前会重新执行 ``get_tools``、``get_system`` 与
 ``prepare_context``，因此本运行时不缓存这些值。权限与结果策略完全由
-ToolRuntime 的中间件负责，运行时不再额外注入 ``before_tool_call`` /
-``after_tool_call``。
+ToolRuntime 的中间件负责，运行时不再额外注入 per-tool 钩子。
 """
 
 from __future__ import annotations
@@ -140,9 +139,6 @@ class LionAgentRuntime:
                 prepare_context=prepare_context,
                 max_turns=max_turns,
                 before_tool_calls=before_tool_calls,
-                # 权限和结果策略由 ToolRuntime 中间件负责，不在运行时层注入。
-                before_tool_call=None,
-                after_tool_call=None,
             ),
             cancellation=cancellation,
         )

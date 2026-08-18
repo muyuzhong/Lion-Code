@@ -40,14 +40,9 @@ from lion_code.core.provider_events import (
 )
 from lion_code.core.tools import AgentTool, AgentToolResult
 
-BeforeToolCall = Callable[[ToolCall], Awaitable[tuple[bool, str | None]]]
 BeforeToolCalls = Callable[
     [AssistantMessage],
     Awaitable[str | None] | str | None,
-]
-AfterToolCall = Callable[
-    [ToolCall, AgentToolResult, bool],
-    Awaitable[tuple[AgentToolResult, bool]],
 ]
 GetTools = Callable[[], Sequence[AgentTool]]
 GetSystem = Callable[[], str]
@@ -86,8 +81,6 @@ async def run_agent_loop(
     get_steering_messages: Callable[[], Sequence[AgentMessage]] | None = None,
     get_follow_up_messages: Callable[[], Sequence[AgentMessage]] | None = None,
     before_tool_calls: BeforeToolCalls | None = None,
-    before_tool_call: BeforeToolCall | None = None,
-    after_tool_call: AfterToolCall | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run the provider/tool loop and emit Pi-compatible agent events."""
     if prompts:
@@ -215,8 +208,6 @@ async def run_agent_loop(
                         call_batch[0],
                         tool_by_name,
                         signal,
-                        before_tool_call,
-                        after_tool_call,
                     ):
                         yield event
                         if isinstance(event, ToolExecutionEndEvent):
@@ -238,8 +229,6 @@ async def run_agent_loop(
                     call_batch,
                     tool_by_name,
                     signal,
-                    before_tool_call,
-                    after_tool_call,
                 ):
                     yield event
                     if isinstance(event, ToolExecutionEndEvent):
@@ -292,8 +281,6 @@ async def _run_parallel_tool_batch(
     calls: Sequence[ToolCall],
     tools: Mapping[str, AgentTool],
     signal: CancellationView | None,
-    before_tool_call: BeforeToolCall | None,
-    after_tool_call: AfterToolCall | None,
 ) -> AsyncIterator[AgentEvent]:
     """实时转发并行工具事件，并按调用顺序提交最终消息。"""
     queue: asyncio.Queue[tuple[int, AgentEvent | None, BaseException | None]] = (
@@ -307,8 +294,6 @@ async def _run_parallel_tool_batch(
                 call,
                 tools,
                 signal,
-                before_tool_call,
-                after_tool_call,
                 include_start=False,
             ):
                 await queue.put((index, event, None))
@@ -404,8 +389,6 @@ async def _execute_tool_call(
     call: ToolCall,
     tools: Mapping[str, AgentTool],
     signal: CancellationView | None,
-    before_tool_call: BeforeToolCall | None,
-    after_tool_call: AfterToolCall | None,
     *,
     include_start: bool = True,
 ) -> AsyncIterator[AgentEvent]:
@@ -428,15 +411,7 @@ async def _execute_tool_call(
             result = _error_result(str(exc))
             is_error = True
         else:
-            blocked = False
-            block_reason: str | None = None
-            if before_tool_call is not None:
-                blocked, block_reason = await before_tool_call(prepared_call)
-
-            if blocked:
-                result = _error_result(block_reason or "Tool execution was blocked")
-                is_error = True
-            elif signal is not None and signal.is_cancelled():
+            if signal is not None and signal.is_cancelled():
                 result = _error_result("Operation aborted")
                 is_error = True
             else:
@@ -459,9 +434,6 @@ async def _execute_tool_call(
                     )
                 result = outcome.result
                 is_error = outcome.is_error
-
-    if after_tool_call is not None:
-        result, is_error = await after_tool_call(prepared_call, result, is_error)
 
     yield ToolExecutionEndEvent(
         tool_call_id=call.id,

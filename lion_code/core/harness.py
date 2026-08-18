@@ -7,7 +7,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from inspect import isawaitable
-from typing import Literal
 
 from lion_code.core.cancellation import CancellationToken, CancellationView
 from lion_code.core.events import (
@@ -17,8 +16,6 @@ from lion_code.core.events import (
     MessageStartEvent,
 )
 from lion_code.core.loop import (
-    AfterToolCall,
-    BeforeToolCall,
     BeforeToolCalls,
     GetSystem,
     GetTools,
@@ -36,17 +33,12 @@ from lion_code.core.provider import ModelProvider
 from lion_code.core.tools import AgentTool
 
 EventListener = Callable[[AgentEvent], Awaitable[None] | None]
-QueueMode = Literal["one_at_a_time", "all"]
 
 
 @dataclass(frozen=True, slots=True)
 class QueuedMessages:
     steering: tuple[AgentMessage, ...] = ()
     follow_up: tuple[AgentMessage, ...] = ()
-
-    @property
-    def count(self) -> int:
-        return len(self.steering) + len(self.follow_up)
 
 
 @dataclass(slots=True)
@@ -59,10 +51,7 @@ class AgentHarnessConfig:
     get_tools: GetTools | None = None
     prepare_context: PrepareContext | None = None
     max_turns: int | None = None
-    queue_mode: QueueMode = "one_at_a_time"
     before_tool_calls: BeforeToolCalls | None = None
-    before_tool_call: BeforeToolCall | None = None
-    after_tool_call: AfterToolCall | None = None
 
 
 class AgentHarness:
@@ -103,13 +92,6 @@ class AgentHarness:
     @property
     def queued_messages(self) -> QueuedMessages:
         return QueuedMessages(tuple(self._steering_queue), tuple(self._follow_up_queue))
-
-    @property
-    def pending_message_count(self) -> int:
-        return self.queued_messages.count
-
-    def has_queued_messages(self) -> bool:
-        return bool(self._steering_queue or self._follow_up_queue)
 
     def append_message(self, message: AgentMessage) -> None:
         self._messages.append(message)
@@ -155,12 +137,6 @@ class AgentHarness:
         self._follow_up_queue.clear()
         return snapshot
 
-    def pop_latest_follow_up(self) -> AgentMessage | None:
-        return self._follow_up_queue.pop() if self._follow_up_queue else None
-
-    def pop_latest_steering(self) -> AgentMessage | None:
-        return self._steering_queue.pop() if self._steering_queue else None
-
     def prompt_message(self, message: AgentMessage) -> AsyncIterator[AgentEvent]:
         self._ensure_not_running()
         if self._owned_cancellation is not None:
@@ -201,8 +177,6 @@ class AgentHarness:
                 get_steering_messages=self._drain_steering_messages,
                 get_follow_up_messages=self._drain_follow_up_messages,
                 before_tool_calls=self._config.before_tool_calls,
-                before_tool_call=self._config.before_tool_call,
-                after_tool_call=self._config.after_tool_call,
             ):
                 await self._notify(event)
                 yield event
@@ -246,16 +220,7 @@ class AgentHarness:
     def _drain_queue(self, queue: deque[AgentMessage]) -> tuple[AgentMessage, ...]:
         if not queue:
             return ()
-        if self._config.queue_mode == "all":
-            messages = tuple(queue)
-            queue.clear()
-            return messages
         return (queue.popleft(),)
-
-    def append_interrupted_tool_results(self) -> int:
-        before = len(self._messages)
-        self._append_interrupted_tool_results()
-        return len(self._messages) - before
 
     def _append_interrupted_tool_results(self) -> tuple[ToolResultMessage, ...]:
         returned_ids = {

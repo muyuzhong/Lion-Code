@@ -219,16 +219,12 @@ class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provider.call_count, 2)
         self.assertEqual(harness.messages[-1].text, "final")
 
-    async def test_prepare_arguments_runs_before_hooks_and_execute(self) -> None:
+    async def test_prepare_arguments_runs_before_execute(self) -> None:
         observed: list[tuple[str, dict]] = []
 
         def prepare(arguments):
             observed.append(("prepare", dict(arguments)))
             return {"msg": arguments["legacy"]}
-
-        async def before(call):
-            observed.append(("before", dict(call.arguments)))
-            return False, None
 
         async def execute(tool_call_id, arguments, signal, on_update):
             observed.append(("execute", dict(arguments)))
@@ -273,7 +269,6 @@ class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
                         prepare_arguments=prepare,
                     )
                 ],
-                before_tool_call=before,
             )
         )
 
@@ -284,7 +279,6 @@ class TestHarnessToolLoop(unittest.IsolatedAsyncioTestCase):
             observed,
             [
                 ("prepare", {"legacy": "converted"}),
-                ("before", {"msg": "converted"}),
                 ("execute", {"msg": "converted"}),
             ],
         )
