@@ -91,10 +91,6 @@ class MetaAgent:
     def messages(self) -> tuple[AgentMessage, ...]:
         return self._runtime.core_runtime.messages
 
-    @property
-    def conversation(self) -> tuple[AgentMessage, ...]:
-        return self.messages
-
     def subscribe(self, listener: EventListener) -> Callable[[], None]:
         return self._runtime.core_runtime.subscribe(listener)
 

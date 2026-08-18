@@ -195,7 +195,7 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
         agent = self._agent(FakeProvider([_stop_event("previous")]))
         first = await agent.run("first")
 
-        agent.configure_api(api_key="")
+        agent.configure_provider(api_key="")
         second = await agent.run("second")
         await agent.close()
 
@@ -206,7 +206,7 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
         agent = self._agent(FakeProvider([_stop_event("previous")]))
         first = await agent.run_once("first")
 
-        agent.configure_api(api_key="")
+        agent.configure_provider(api_key="")
         second = await agent.run_once("second")
         await agent.close()
 

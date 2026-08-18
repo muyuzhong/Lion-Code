@@ -104,14 +104,10 @@ class AgentComposition:
     调用方按所选 capabilities 判空，不创建 Null 对象。
     """
 
-    permission_controller: PermissionController
     session_state: SessionIdentityState
     session_repository: SessionRepository
-    execution: ExecutionControl
     usage: UsageLedger
     budget: BudgetPolicy
-    read_file_state: dict[str, float]
-    pre_tool_use_hooks: list[Any]
     tool_registry: ToolRegistry
     plan: PlanRuntime | None
     subagent_factory: SubagentFactory | None
@@ -122,13 +118,9 @@ class AgentComposition:
     prompt_composer: PromptComposer
     tool_context: ToolContext
     permission_policy: ToolPermissionStrategy
-    result_store: ResultStore
     tool_runtime: ToolRuntime
-    context_manager: ContextManager
     provider_manager: ProviderManager
     runtime_coordinator: AgentRuntimeCoordinator
-    identity_port: RuntimeIdentityPort
-    session_port: SessionStatePort
     notices: NoticeController
     confirmation: ConfirmationController
     status_sink: SubagentStatusSink | None
@@ -230,14 +222,11 @@ def build_agent_composition(profile: Profile) -> AgentComposition:
     foundation = _build_foundation(selection)
     notices = foundation.notices
     confirmation = foundation.confirmation
-    permission_controller = foundation.permission_controller
     status_sink = foundation.status_sink
-    execution = foundation.execution
     usage = foundation.usage
     budget = foundation.budget
     session_state = foundation.session_state
     session_repository = foundation.session_repository
-    read_file_state = foundation.read_file_state
     tool_registry = foundation.tool_registry
     plan = foundation.plan
 
@@ -261,7 +250,6 @@ def build_agent_composition(profile: Profile) -> AgentComposition:
     prompt_composer = tooling_graph.prompt_composer
     tool_context = tooling_graph.tool_context
     permission_policy = tooling_graph.permission_policy
-    result_store = tooling_graph.result_store
     tool_runtime = tooling_graph.tool_runtime
     context_manager = tooling_graph.context_manager
     session_port = tooling_graph.session_port
@@ -276,14 +264,10 @@ def build_agent_composition(profile: Profile) -> AgentComposition:
         context_manager,
     )
     return AgentComposition(
-        permission_controller=permission_controller,
         session_state=session_state,
         session_repository=session_repository,
-        execution=execution,
         usage=usage,
         budget=budget,
-        read_file_state=read_file_state,
-        pre_tool_use_hooks=tool_context.hooks,
         tool_registry=tool_registry,
         plan=plan,
         subagent_factory=subagent_factory,
@@ -294,13 +278,9 @@ def build_agent_composition(profile: Profile) -> AgentComposition:
         prompt_composer=prompt_composer,
         tool_context=tool_context,
         permission_policy=permission_policy,
-        result_store=result_store,
         tool_runtime=tool_runtime,
-        context_manager=context_manager,
         provider_manager=provider_manager,
         runtime_coordinator=runtime_coordinator,
-        identity_port=identity_port,
-        session_port=session_port,
         notices=notices,
         confirmation=confirmation,
         status_sink=status_sink,

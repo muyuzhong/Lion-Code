@@ -366,7 +366,6 @@ def test_meta_agent_public_surface_is_feature_neutral() -> None:
         "compact",
         "configure_provider",
         "continue_",
-        "conversation",
         "cycle_thinking_level",
         "follow_up",
         "messages",

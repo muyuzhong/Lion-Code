@@ -34,9 +34,6 @@ from .prompt import (
     build_dynamic_system_context,
 )
 from .providers.factory import create_provider
-from .providers.thinking import (
-    ThinkingLevel,
-)
 from .session_identity import SessionIdentityState
 from .session_runtime import (
     SessionRecorder,
@@ -99,18 +96,6 @@ def _agent_print_subagent_end(agent_type: str, description: str) -> None:
 
 class Agent(MetaAgent):
     """供 CLI/Application 使用的 FullProfile backend adapter。"""
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        object.__setattr__(self, name, value)
-        if name != "_emit_notice":
-            return
-        notices = self.__dict__.get("_notice_controller")
-        if notices is None:
-            return
-        if getattr(value, "__self__", None) is self:
-            notices.set_notice_fn(None)
-        else:
-            notices.set_notice_fn(value)
 
     def __init__(
         self,
@@ -214,42 +199,25 @@ class Agent(MetaAgent):
 
         self.is_sub_agent = resolved_config.is_sub_agent
         self._current_task: asyncio.Task | None = None
-        self._identity_port = composition.identity_port
-        self._session_port = composition.session_port
         self._notice_controller = composition.notices
         self._confirmation = composition.confirmation
         self._status_sink = composition.status_sink
-        self._permission_controller = composition.permission_controller
         self._session_state = composition.session_state
         self._session_repository = composition.session_repository
         self._usage = composition.usage
         self._budget = composition.budget
-        self._read_file_state = composition.read_file_state
-        self._pre_tool_use_hooks = composition.pre_tool_use_hooks
         self.plan = composition.plan
         self.tool_registry = composition.tool_registry
         self._subagent_factory = composition.subagent_factory
         self._subagent_executor = composition.subagent_executor
-        self._skill_runtime = composition.skill_runtime
         self._capability_registry = composition.capability_registry
         self._capability_runtime = composition.capability_runtime
         self._prompt_composer = composition.prompt_composer
         self.tool_context = composition.tool_context
-        self._permission_policy = composition.permission_policy
-        self._result_store = composition.result_store
         self.tool_runtime = composition.tool_runtime
         self._provider_manager = composition.provider_manager
         self._runtime_coordinator = composition.runtime_coordinator
         self.confirm_fn = resolved_dependencies.confirm_fn
-
-    def _resolve_thinking_mode(self) -> str:
-        return self._provider_manager.view.thinking_mode
-
-    @property
-    def use_openai(self) -> bool:
-        """兼容旧 API 的 Provider kind 投影。"""
-
-        return self._provider_manager.view.provider_kind == "openai-compatible"
 
     @property
     def _core_runtime(self) -> LionAgentRuntime:
@@ -302,30 +270,20 @@ class Agent(MetaAgent):
         return self._runtime_coordinator.terminal_renderer
 
     @property
-    def _terminal_output(self) -> bool:
-        return self._identity_port._terminal_output
-
-    @_terminal_output.setter
-    def _terminal_output(self, enabled: bool) -> None:
-        self._identity_port._terminal_output = enabled
-        self._confirmation.terminal_output = enabled
-        self._status_sink.terminal_output = enabled
-
-    @property
     def effective_window(self) -> int:
-        return self._identity_port.effective_window
+        return self._runtime_coordinator._identity.effective_window
 
     @effective_window.setter
     def effective_window(self, value: int) -> None:
-        self._identity_port.effective_window = value
+        self._runtime_coordinator._identity.effective_window = value
 
     @property
     def _last_stop_reason(self) -> str | None:
-        return self._identity_port._last_stop_reason
+        return self._runtime_coordinator._identity._last_stop_reason
 
     @_last_stop_reason.setter
     def _last_stop_reason(self, value: str | None) -> None:
-        self._identity_port._last_stop_reason = value
+        self._runtime_coordinator._identity._last_stop_reason = value
 
     @property
     def confirm_fn(self) -> Callable[[str], Awaitable[bool]] | None:
@@ -335,11 +293,6 @@ class Agent(MetaAgent):
     def confirm_fn(self, fn: Callable[[str], Awaitable[bool]] | None) -> None:
         self._confirmation.confirm_fn = fn
 
-    def _create_terminal_renderer(self) -> TerminalRenderer:
-        """在调用时读取本模块 Renderer，保留既有动态 patch 锚点。"""
-
-        return self._identity_port._create_terminal_renderer()
-
     @property
     def is_processing(self) -> bool:
         return self._core_runtime.harness.is_running
@@ -347,10 +300,6 @@ class Agent(MetaAgent):
     @property
     def session_state(self) -> SessionIdentityState:
         return self._session_state
-
-    @property
-    def session_start_time(self) -> str:
-        return self._session_state.started_at
 
     @property
     def is_aborted(self) -> bool:
@@ -397,12 +346,6 @@ class Agent(MetaAgent):
     def token_usage(self) -> UsageSnapshot:
         return self._usage.snapshot()
 
-    def provider_config(self) -> dict[str, Any]:
-        return self.get_api_config()
-
-    def configure_provider(self, **kwargs: Any) -> None:
-        self.configure_api(**kwargs)
-
     # ─── Core Runtime ────────────────────────────────────────
 
     async def _ensure_core_session_ready(self) -> None:
@@ -438,15 +381,6 @@ class Agent(MetaAgent):
     ) -> None:
         self._notice_controller.emit(message, role=role)
 
-    def _emit_subagent_status(
-        self,
-        agent_type: str,
-        description: str,
-        *,
-        started: bool,
-    ) -> None:
-        self._status_sink.emit(agent_type, description, started=started)
-
     def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]] | None) -> None:
         self.confirm_fn = fn
 
@@ -463,36 +397,6 @@ class Agent(MetaAgent):
     @property
     def api_configured(self) -> bool:
         return self._provider_manager.api_configured
-
-    def get_api_config(self) -> dict:
-        """返回当前 Provider 配置的兼容投影。"""
-        return self._provider_manager.get_api_config()
-
-    def configure_api(
-        self,
-        *,
-        model: str | None = None,
-        api_key: str | None = None,
-        api_base: str | None = None,
-        anthropic_base_url: str | None = None,
-        use_openai: bool | None = None,
-    ) -> None:
-        """在空闲态原子切换模型/凭证，并保留 canonical history。"""
-        self._provider_manager.configure(
-            model=model,
-            api_key=api_key,
-            api_base=api_base,
-            anthropic_base_url=anthropic_base_url,
-            use_openai=use_openai,
-        )
-
-    def _build_core_provider(self, thinking_level: ThinkingLevel) -> ModelProvider:
-        """用当前凭证与指定档位构建一个新 Core Provider。"""
-        return self._provider_manager.build_provider(thinking_level)
-
-    def _create_provider(self, **kwargs: Any) -> ModelProvider:
-        """在调用时读取本模块 factory，保留测试替身的动态 patch 锚点。"""
-        return _agent_provider_factory(**kwargs)
 
     # ─── REPL 命令状态 ───────────────────────────────────────
 
@@ -585,13 +489,6 @@ class Agent(MetaAgent):
         await recorder.initialize()
         for message in legacy_session_messages(legacy):
             await recorder.record_message(message)
-
-    def _is_snippable_tool(self, name: str) -> bool:
-        try:
-            tool = self.tool_registry.resolve(name)
-        except LookupError:
-            return False
-        return tool.capabilities.result_policy == "snippable"
 
     # ─── 工具执行 ────────────────────────────────────────────
 
