@@ -1,7 +1,7 @@
 """不可变产品组合 Profile：组合选择的单一来源。
 
-Profile 只承载组合数据（Provider/依赖、tools、permission strategy、prompt、
-backend），不拥有 lifecycle、不解析服务、不暴露 runtime lookup。
+Profile 只承载组合数据（Provider/依赖、tools、prompt、backend），不拥有
+lifecycle、不解析服务、不暴露 runtime lookup。
 具体 Feature 名与构造 branch 只存在于 Composition Root。
 """
 
@@ -17,7 +17,6 @@ from ..tooling.execution import (
 
 if TYPE_CHECKING:
     from ..capabilities.types import CapabilitySpec
-    from ..tooling.permission import ToolPermissionStrategy
     from ..tooling.types import LionTool
     from .config import AgentConfig, AgentDependencies
 
@@ -37,7 +36,6 @@ class MinimalProfile:
     config: AgentConfig
     dependencies: AgentDependencies
     tools: tuple[LionTool, ...] = ()
-    permission_strategy: ToolPermissionStrategy | None = None
     system_prompt: str | None = None
 
     def __post_init__(self) -> None:
@@ -54,7 +52,6 @@ class CodingProfile:
     command_backend: CommandExecutionBackend = field(
         default_factory=LocalCommandExecutionBackend,
     )
-    permission_strategy: ToolPermissionStrategy | None = None
     extra_tools: tuple[LionTool, ...] = ()
     system_prompt: str | None = None
 
@@ -75,7 +72,6 @@ class FullProfile:
     command_backend: CommandExecutionBackend = field(
         default_factory=LocalCommandExecutionBackend,
     )
-    permission_strategy: ToolPermissionStrategy | None = None
     extra_tools: tuple[LionTool, ...] = ()
     system_prompt: str | None = None
     extension_specs: tuple[CapabilitySpec, ...] = ()

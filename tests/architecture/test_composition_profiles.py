@@ -152,7 +152,6 @@ def test_minimal_graph_only_contains_caller_tools(tmp_path, monkeypatch) -> None
 def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     backend = _RecordingBackend()
-    strategy = _AllowAllStrategy()
     profile = CodingProfile(
         config=AgentConfig(
             api_key="test-key",
@@ -161,7 +160,6 @@ def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypat
         ),
         dependencies=AgentDependencies(),
         command_backend=backend,
-        permission_strategy=strategy,
         extra_tools=(_tool("extra_tool"),),
     )
     with patch(
@@ -176,7 +174,7 @@ def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypat
     assert composition.capability_registry.tool_sources == ()
     assert composition.skill_runtime is None
     assert composition.plan is None
-    assert composition.permission_policy is strategy
+    assert isinstance(composition.permission_policy, PermissionPolicy)
 
     result = asyncio.run(
         composition.tool_runtime.execute(
@@ -221,7 +219,6 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
 
     monkeypatch.chdir(tmp_path)
     backend = _RecordingBackend()
-    strategy = _AllowAllStrategy()
     spec = CapabilitySpec(
         name="example-extension",
         prompt_layers=(_ExamplePromptLayer(),),
@@ -230,7 +227,6 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
         config=AgentConfig(api_key="test-key", terminal_output=False),
         dependencies=AgentDependencies(session_repository=_repo(tmp_path)),
         command_backend=backend,
-        permission_strategy=strategy,
         extension_specs=(spec,),
     )
     with patch(
@@ -245,7 +241,7 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
     assert composition.subagent_factory is not None
     assert composition.skill_runtime is not None
     assert composition.status_sink is not None
-    assert composition.permission_policy is strategy
+    assert isinstance(composition.permission_policy, PermissionPolicy)
     system = composition.prompt_composer.get_system()
     assert build_static_system_prompt() in system
     assert "example extension prompt layer" in system
