@@ -14,11 +14,13 @@ SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
 # AST tests and import-linter config both derive from those definitions.
 _CORE = BOUNDARIES[0]
 _SUPERVISOR = BOUNDARIES[1]
-_PROVIDERS = BOUNDARIES[2]
-_APPLICATION = BOUNDARIES[3]
-_TUI = BOUNDARIES[4]
-_CAPABILITIES = BOUNDARIES[5]
-_PRODUCTION = BOUNDARIES[6]
+_COMPOSITION = BOUNDARIES[2]
+_META_AGENT = BOUNDARIES[3]
+_PROVIDERS = BOUNDARIES[4]
+_APPLICATION = BOUNDARIES[5]
+_TUI = BOUNDARIES[6]
+_CAPABILITIES = BOUNDARIES[7]
+_PRODUCTION = BOUNDARIES[8]
 
 LEGACY_MESSAGE_SYMBOLS = frozenset({"_anthropic_messages", "_openai_messages"})
 HARNESS_MUTATION_METHODS = frozenset({"clear_queues", "follow_up", "replace_messages"})
@@ -971,6 +973,24 @@ def test_core_does_not_import_upper_runtime_layers() -> None:
     )
 
     assert not violations, f"Core imported an upper runtime layer: {violations}"
+
+
+def test_composition_does_not_import_product_facades_or_interfaces() -> None:
+    violations = _forbidden_imports(
+        _source_files("composition"),
+        forbidden=_COMPOSITION.forbidden_roots,
+    )
+
+    assert not violations, f"Composition imported an upper product layer: {violations}"
+
+
+def test_meta_agent_does_not_import_features_or_interfaces() -> None:
+    violations = _forbidden_imports(
+        [SOURCE_ROOT / "meta_agent.py"],
+        forbidden=_META_AGENT.forbidden_roots,
+    )
+
+    assert not violations, f"MetaAgent imported a product feature: {violations}"
 
 
 def test_provider_product_imports_are_core_or_local() -> None:

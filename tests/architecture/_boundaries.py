@@ -141,6 +141,32 @@ BOUNDARIES: tuple[Boundary, ...] = (
         ),
     ),
     Boundary(
+        contract_name="Composition 不依赖 Product Facade 与 Interfaces",
+        source_package="lion_code.composition",
+        forbidden=frozenset(
+            {
+                "agent",
+                "application",
+                "meta_agent",
+                "supervisor",
+                "tui",
+            }
+        ),
+        allow_indirect=True,
+    ),
+    Boundary(
+        contract_name="MetaAgent 不依赖 Product Features 与 Interfaces",
+        source_package="lion_code.meta_agent",
+        forbidden=frozenset(
+            {
+                "agent",
+                "application",
+                "supervisor",
+                "tui",
+            }
+        ),
+    ),
+    Boundary(
         contract_name="Providers 只依赖 Core 抽象",
         source_package="lion_code.providers",
         allowed=frozenset({"core", "providers"}),

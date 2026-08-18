@@ -1,0 +1,32 @@
+{
+  "id": "pr11-final-architecture-cleanup",
+  "name": "pr11-final-architecture-cleanup",
+  "title": "PR11 Final Architecture Cleanup",
+  "description": "Finalize Product Facade, Profile semantics, public API, dependency boundaries and legacy architecture guards.",
+  "status": "completed",
+  "dev_type": "backend",
+  "scope": "architecture",
+  "package": "lion_code",
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-17",
+  "completedAt": "2026-08-17",
+  "branch": "muyuzhong/pr11-final-architecture-cleanup",
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": "fb62c5aae544c51444ea24abac566c35bbef78b2",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "lion_code/meta_agent.py",
+    "lion_code/agent.py",
+    "lion_code/composition/",
+    "tests/architecture/",
+    "pyproject.toml"
+  ],
+  "notes": "Local PR10 is the accepted baseline; no subagents and no new Memory design.",
+  "meta": {}
+}

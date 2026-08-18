@@ -9,10 +9,8 @@ from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
-from .agent_runtime import (
-    AgentRunResult,
-    LionAgentRuntime,
-)
+from .agent_runtime import AgentRunResult as AgentRunResult
+from .agent_runtime import LionAgentRuntime
 from .composition import (
     AgentConfig,
     AgentDependencies,
@@ -25,10 +23,9 @@ from .context import (
     ModelLimitsResolver,
 )
 from .core.conversation import QueueSnapshot
-from .core.harness import EventListener
-from .core.messages import AgentMessage
 from .core.provider import ModelProvider
 from .hooks import load_pre_tool_use_hooks
+from .meta_agent import MetaAgent
 from .observers import TerminalRenderer
 from .permission_state import (
     PermissionMode,
@@ -100,8 +97,8 @@ def _agent_print_subagent_end(agent_type: str, description: str) -> None:
 # ─── Agent ──────────────────────────────────────────────────
 
 
-class Agent:
-    """协调模型调用、工具执行和会话状态的主运行时对象。"""
+class Agent(MetaAgent):
+    """供 CLI/Application 使用的 FullProfile backend adapter。"""
 
     def __setattr__(self, name: str, value: Any) -> None:
         object.__setattr__(self, name, value)
@@ -206,6 +203,15 @@ class Agent:
         assert composition.skill_runtime is not None
         assert composition.status_sink is not None
 
+        super().__init__(
+            runtime=composition.runtime_coordinator,
+            provider_manager=composition.provider_manager,
+            session_state=composition.session_state,
+            usage=composition.usage,
+            budget=composition.budget,
+            permission_mode=resolved_config.permission_mode,
+        )
+
         self.is_sub_agent = resolved_config.is_sub_agent
         self._current_task: asyncio.Task | None = None
         self._identity_port = composition.identity_port
@@ -238,18 +244,6 @@ class Agent:
 
     def _resolve_thinking_mode(self) -> str:
         return self._provider_manager.view.thinking_mode
-
-    @property
-    def model(self) -> str:
-        """当前模型的只读 ProviderView 投影。"""
-
-        return self._provider_manager.view.model
-
-    @property
-    def thinking(self) -> bool:
-        """兼容布尔 Thinking API 的只读投影。"""
-
-        return self._provider_manager.view.thinking_enabled
 
     @property
     def use_openai(self) -> bool:
@@ -355,18 +349,8 @@ class Agent:
         return self._session_state
 
     @property
-    def session_id(self) -> str:
-        return self._session_state.id
-
-    @property
     def session_start_time(self) -> str:
         return self._session_state.started_at
-
-    @property
-    def permission_mode(self) -> PermissionMode:
-        """返回当前权限模式的只读视图。"""
-
-        return self._permission_controller.mode
 
     @property
     def is_aborted(self) -> bool:
@@ -392,34 +376,8 @@ class Agent:
     def provider_name(self) -> str:
         return self._provider_manager.view.provider_kind
 
-    @property
-    def messages(self) -> tuple[AgentMessage, ...]:
-        return self._core_runtime.messages
-
-    def subscribe(self, listener: EventListener) -> Callable[[], None]:
-        return self._core_runtime.subscribe(listener)
-
-    async def prompt(self, content: str) -> None:
-        await self.chat(content)
-
-    async def continue_(self) -> None:
-        await self._core_runtime.continue_()
-
-    def steer(self, content: str) -> QueueSnapshot:
-        return self._core_runtime.steer(content)
-
-    def follow_up(self, content: str) -> QueueSnapshot:
-        return self._core_runtime.follow_up(content)
-
     def queue_snapshot(self) -> QueueSnapshot:
         return self._core_runtime.queue_snapshot()
-
-    def cancel(self) -> None:
-        self.abort()
-
-    @property
-    def cancelled(self) -> bool:
-        return self.is_aborted
 
     async def compact_for_overflow(self) -> bool:
         return await self.compact_core_context_for_overflow()
@@ -435,9 +393,6 @@ class Agent:
 
     async def restore_latest(self) -> bool:
         return await self.restore_latest_session()
-
-    async def new_session(self) -> None:
-        await self.clear_history()
 
     def token_usage(self) -> UsageSnapshot:
         return self.get_token_usage()
@@ -534,34 +489,6 @@ class Agent:
             use_openai=use_openai,
         )
 
-    def set_thinking(self, enabled: bool) -> str:
-        """切换 Thinking，并把实际生效级别写入当前 Core Session。"""
-        return self._provider_manager.set_thinking(enabled)
-
-    # ─── Core 路径 Thinking 档位(Tau 6 档)─────────────────────
-
-    @property
-    def thinking_level(self) -> str:
-        """Core 路径当前 thinking 档位(off..xhigh)。"""
-        return self._provider_manager.view.thinking_level
-
-    @property
-    def available_thinking_levels(self) -> tuple[str, ...]:
-        """当前后端支持的 thinking 档位(v1 两后端均返回全 6 档)。"""
-        return self._provider_manager.available_thinking_levels
-
-    def set_thinking_level(self, level: ThinkingLevel | str) -> ThinkingLevel:
-        """设定 thinking 档位并热重建 Core Provider,持久化档位变更。
-
-        与布尔 ``set_thinking(bool)`` 接口互不影响:本方法采用
-        Tau 6 档词汇;档位经归一化,未变则直接返回,不重建不落盘。
-        """
-        return self._provider_manager.set_thinking_level(level)
-
-    def cycle_thinking_level(self) -> ThinkingLevel:
-        """循环到下一档并持久化(供 TUI shift+tab 与 /thinking 无参调用)。"""
-        return self._provider_manager.cycle_thinking_level()
-
     def _build_core_provider(self, thinking_level: ThinkingLevel) -> ModelProvider:
         """用当前凭证与指定档位构建一个新 Core Provider。"""
         return self._provider_manager.build_provider(thinking_level)
@@ -569,32 +496,6 @@ class Agent:
     def _create_provider(self, **kwargs: Any) -> ModelProvider:
         """在调用时读取本模块 factory，保留测试替身的动态 patch 锚点。"""
         return _agent_provider_factory(**kwargs)
-
-    # ─── 主对话入口 ──────────────────────────────────────────
-
-    async def chat(self, user_message: str) -> None:
-        await self._runtime_coordinator.chat(user_message)
-
-    # ─── 子 Agent 单次运行入口 ───────────────────────────────
-
-    async def run_once(self, prompt: str) -> dict:
-        return await self._runtime_coordinator.run_once(prompt)
-
-    # ─── 结构化单次运行入口（评测 / 非终端消费者）────────────
-
-    async def run(self, prompt: str, *, timeout: float | None = None) -> AgentRunResult:
-        """运行一次并返回结构化结果，供评测系统等不依赖终端文本的消费者使用。
-
-        与 chat() 的差异：捕获最终文本、轮次、token、成本与停止原因，并在模型异常
-        或超时时返回结构化结果而非抛出。turns 口径与 max_turns 一致，只计执行了工具
-        的轮次，不含末尾纯文本轮。timeout 到期后直接取消承载 chat() 的任务。
-        chat() 可能吞掉 CancelledError，这里统一改写原因。
-
-        注意：tool_error 当前不会触发——工具异常由 ToolRuntime 转成错误内容回传，
-        Agent 会继续运行直到 completed 或其他边界；该枚举值保留供未来需要时使用。
-        调用方负责在结束时 await agent.close() 释放 Capability 等外部资源。
-        """
-        return await self._runtime_coordinator.run(prompt, timeout=timeout)
 
     # ─── REPL 命令状态 ───────────────────────────────────────
 
@@ -619,9 +520,6 @@ class Agent:
         self._emit_notice(
             f"Tokens: {usage.input_tokens} in / {usage.output_tokens} out{cache_info}\n  Estimated cost: ${usage.cost_usd:.4f}{budget_info}{turn_info}"
         )
-
-    async def compact(self) -> None:
-        await self._runtime_coordinator.compact()
 
     # ─── 会话持久化 ──────────────────────────────────────────
 
@@ -716,12 +614,6 @@ class Agent:
             arguments=inp,
         )
         return result.content
-
-    # ─── 外部资源与 Capability 生命周期 ─────────────────────
-
-    async def close(self) -> None:
-        """释放 Capability 等外部资源，确保进程正常退出（issue #8）。"""
-        await self._runtime_coordinator.close()
 
     async def _confirm_hook_trust(self, message: str) -> bool:
         # 项目 Hook 信任独立于工具权限；--yolo 也不能替仓库代码自动取得信任。

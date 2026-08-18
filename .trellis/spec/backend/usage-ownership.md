@@ -1,13 +1,13 @@
 # Usage Ownership
 
 This contract defines the current usage-accounting boundary for one Lion Code
-`Agent` session. It is executable architecture, not a migration plan.
+Agent session. It is executable architecture, not a migration plan.
 
 ## 1. Scope and Trigger
 
 Apply this guide whenever a change reads, records, resets, displays, or limits
 model, child-agent, Skill, response, turn, prompt-window, or cost usage.
-It covers `usage.py`, Core event adapters, the Agent composition root,
+It covers `usage.py`, Core event adapters, the Composition Root,
 `AgentRuntimeCoordinator`, session lifecycle, Application, TUI, and all child
 execution paths. `Supervisor` is deliberately outside this ownership graph and
 must not create, mirror, read or persist usage/budget state.
@@ -16,7 +16,7 @@ The ownership rule is strict:
 
 - One `UsageLedger` owns every mutable usage value for one Agent session.
 - One `BudgetPolicy` evaluates frozen Ledger projections.
-- `Agent` is the only production composition root for both objects and passes
+- `build_agent_composition()` is the only production construction path for both objects and passes
   those exact instances to the Runtime.
 - There is no compatibility layer, migration path, mirror, synchronization
   cursor, fallback total, or second writer.
@@ -64,14 +64,15 @@ class UsageLedger:
     def snapshot(self) -> UsageSnapshot: ...
 ~~~
 
-The external read boundary is `Agent.get_token_usage() -> UsageSnapshot`, then
-`LionCodingSession.token_usage() -> UsageSnapshot`. TUI and other frontend
+The general public read boundary is `MetaAgent.usage -> UsageSnapshot`; the
+internal Full product host also supplies `Agent.get_token_usage()` to
+`LionCodingSession.token_usage()`. TUI and other frontend
 consumers read named snapshot fields; they never receive the Ledger or an
 untyped usage dictionary.
 
-`Agent.run()` returns an `AgentRunResult` whose `turns`, input, output, cache
+`MetaAgent.run()` returns an `AgentRunResult` whose `turns`, input, output, cache
 read, and estimated cost are deltas between snapshots taken immediately before
-and after that invocation. `Agent.run_once()` returns the same invocation-local
+and after that invocation. `MetaAgent.run_once()` returns the same invocation-local
 input/output delta in its existing dictionary response. Earlier session usage
 must not leak into either result.
 
@@ -139,7 +140,7 @@ may rebuild observers and reset that Ledger; they must not replace it.
 ### Composition and imports
 
 There is exactly one production `UsageLedger()` construction and one production
-`BudgetPolicy()` construction, both in `Agent.__init__`. Tests may construct
+`BudgetPolicy()` construction, both in `composition/agent_builder.py`. Tests may construct
 isolated instances. Ledger fields are private and may be assigned, deleted, or
 mutated only inside `lion_code/usage.py`; all other production writers use its
 commands.
@@ -267,4 +268,5 @@ Wrong: hand a Ledger or dictionary to TUI. Correct: Application returns
 `UsageSnapshot`, and TUI renders its named fields.
 
 Wrong: hide a second constructor or Ledger write behind an alias or dynamic
-setter. Correct: construct only in Agent and mutate only through Ledger commands.
+setter. Correct: construct only in the Composition Root and mutate only through
+Ledger commands.

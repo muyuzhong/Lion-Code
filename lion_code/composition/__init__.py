@@ -7,9 +7,7 @@ from .profiles import (
     CodingProfile,
     FullProfile,
     MinimalProfile,
-    ProductFacadeKind,
     Profile,
-    SkillComposition,
 )
 
 __all__ = [
@@ -20,8 +18,6 @@ __all__ = [
     "CodingProfile",
     "FullProfile",
     "MinimalProfile",
-    "ProductFacadeKind",
     "Profile",
-    "SkillComposition",
     "build_agent_composition",
 ]

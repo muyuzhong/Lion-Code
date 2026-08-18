@@ -9,24 +9,27 @@
 
 ```text
 lion_code/
-├── __main__.py          # CLI / REPL entry point and process-level error boundary
-├── agent.py             # Public Agent facade and compatibility delegates
-├── composition/         # AgentConfig/Dependencies and the one-shot object graph root
-├── provider_manager.py  # ProviderState/View and Provider/Thinking commands
-├── application/         # LionCodingSession, application events and slash commands
-├── core/                # Canonical messages, events, harness, loops and session protocol
-├── providers/           # Built-in Anthropic and OpenAI-compatible HTTP providers
-├── tooling/             # Tool definitions, registry, permissions and middleware runtime
-├── adapters/            # Boundary adapters between Lion tooling and Core tools
-├── session_runtime/     # JSONL repository/recorder and legacy JSON read-migration
-├── observers/           # Event consumers such as terminal and usage renderers
-└── tui/                 # The Textual frontend only
+├── __init__.py          # Profile/MetaAgent/Capability/Supervisor public API
+├── __main__.py          # CLI / REPL process boundary
+├── meta_agent.py        # Feature-neutral public Agent facade
+├── agent.py             # Internal Full product host used by Application/CLI
+├── composition/         # Profiles and the one-shot object graph root
+├── core/                # Canonical messages, events, loop and generic Harness
+├── agent_runtime.py     # Kernel/Harness run coordinator
+├── capabilities/        # CapabilitySpec, registry, runtime and built-in adapters
+├── tooling/             # Tool definitions, registry, permissions and middleware
+├── context/             # Provider-context preparation and compaction policy
+├── session_runtime/     # Canonical JSONL repository and recorder
+├── providers/           # Anthropic and OpenAI-compatible HTTP providers
+├── application/         # LionCodingSession and frontend-facing ports
+├── supervisor.py        # Agent-external goal/retry/scheduler/checkpoint plane
+└── tui/                 # Textual interface
 ```
 
-Other root modules such as `supervisor.py`, `hooks.py`, `skills.py`,
-and `tools.py` are existing feature modules. Keep a change close
-to its current owner instead of moving it merely to make a generic layered
-diagram look cleaner.
+Other root modules such as `hooks.py`, `skills.py`, `plan_runtime.py`,
+`skill_runtime.py`, and `subagent_runtime.py` are existing feature owners. Keep
+a change close to its current owner instead of moving it merely to make a
+generic layered diagram look cleaner.
 
 ## Placement rules
 
@@ -37,11 +40,12 @@ diagram look cleaner.
   `lion_code/application/`.  `lion_code/application/session.py` turns Agent
   events into `LionSessionEvent` values; `application/commands.py` owns slash
   command parsing and dispatch.
-- Put Agent object-graph construction in `lion_code/composition/`.  The builder
-  owns concrete runtime wiring and default capability registration; `agent.py`
-  keeps the public facade and application-facing delegates.  The composition
-  result is explicit and one-shot: no builder, container, or service locator is
-  retained by runtime or domain modules.
+- Put Agent object-graph construction in `lion_code/composition/`. The builder
+  owns concrete runtime wiring and Profile-selected capability registration;
+  `meta_agent.py` is the only feature-neutral public facade, while `agent.py`
+  is the internal Full product host for existing Application delegates. The
+  composition result is explicit and one-shot: no builder, container, or
+  service locator is retained by runtime or domain modules.
 - Put provider-specific HTTP/request/stream handling in `lion_code/providers/`.
   `providers/factory.py`, `providers/anthropic.py`, and
   `providers/openai_compatible.py` are the current protocol boundary.
@@ -53,6 +57,10 @@ diagram look cleaner.
   make the TUI or a provider write session files directly.
 - Put Textual widgets, state and rendering in `lion_code/tui/`; non-Textual
   terminal event rendering belongs in `lion_code/observers/terminal.py`.
+- Put autonomous goal, scheduler, retry and checkpoint control only in
+  `supervisor.py`. Supervisor consumes an `AgentFactory` returning the public
+  `AgentPort`; Profiles, MetaAgent, Kernel, Harness and Capabilities do not know
+  that Supervisor exists.
 - There is no catch-all `utils/` package.  Keep a helper private to its owning
   module unless it has a clear runtime boundary; then place it in the matching
   package rather than creating an unowned utility bucket.
@@ -79,7 +87,8 @@ diagram look cleaner.
 
 | Concern | Current example |
 |---|---|
-| Process boundary | `lion_code/__main__.py` parses CLI options, constructs the `Agent` facade, and starts the TUI or REPL. |
+| Public product API | `lion_code/__init__.py` exports Profiles, `MetaAgent`, `CapabilitySpec`, and Supervisor ports. |
+| Process boundary | `lion_code/__main__.py` parses CLI options, constructs the internal Full product host, and starts the TUI or REPL. |
 | Application bridge | `lion_code/application/session.py::LionCodingSession._drive` subscribes to Agent events and yields application events. |
 | Tool execution | `lion_code/tooling/runtime.py::ToolRuntime.execute` resolves a registered tool and runs the middleware chain. |
 | Persistence | `lion_code/session_runtime/repository.py::SessionRepository` and `recorder.py::SessionRecorder` split read/replay from append-only writes. |

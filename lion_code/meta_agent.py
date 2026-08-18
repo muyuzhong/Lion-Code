@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Sequence
 
 from .agent_runtime import AgentRunResult, AgentRuntimeCoordinator
-from .capabilities.registry import CapabilityRegistry
 from .composition import (
     NEUTRAL_SYSTEM_PROMPT,
     AgentConfig,
@@ -13,7 +12,6 @@ from .composition import (
     CodingProfile,
     MinimalProfile,
     Profile,
-    SkillComposition,
     build_agent_composition,
 )
 from .composition.agent_builder import AgentComposition
@@ -42,7 +40,6 @@ class MetaAgent:
 
     __slots__ = (
         "_budget",
-        "_capability_registry",
         "_closed",
         "_permission_mode",
         "_provider_manager",
@@ -59,7 +56,6 @@ class MetaAgent:
         session_state: SessionIdentityState,
         usage: UsageLedger,
         budget: BudgetPolicy,
-        capability_registry: CapabilityRegistry,
         permission_mode: PermissionMode,
     ) -> None:
         self._runtime = runtime
@@ -67,7 +63,6 @@ class MetaAgent:
         self._session_state = session_state
         self._usage = usage
         self._budget = budget
-        self._capability_registry = capability_registry
         self._permission_mode = permission_mode
         self._closed = False
 
@@ -208,8 +203,16 @@ def _build_meta_facade(
         session_state=composition.session_state,
         usage=composition.usage,
         budget=composition.budget,
-        capability_registry=composition.capability_registry,
         permission_mode=permission_mode,
+    )
+
+
+def build_profile_agent(profile: Profile) -> MetaAgent:
+    """从任一不可变 Profile 构造只暴露通用 API 的 MetaAgent。"""
+
+    return _build_meta_facade(
+        build_agent_composition(profile),
+        profile.config.permission_mode,
     )
 
 
@@ -254,7 +257,7 @@ def build_meta_agent(
         tools=tuple(tools),
         system_prompt=system_prompt or _META_SYSTEM_PROMPT,
     )
-    return _build_meta_facade(build_agent_composition(profile), permission_mode)
+    return build_profile_agent(profile)
 
 
 def build_coding_agent(
@@ -273,7 +276,6 @@ def build_coding_agent(
     command_backend: CommandExecutionBackend | None = None,
     extra_tools: Sequence[LionTool] = (),
     tool_registry: ToolRegistry | None = None,
-    skill: SkillComposition | None = None,
 ) -> MetaAgent:
     """构建 Coding 产品形态：backend 绑定的 Coding 工具与 Meta facade。
 
@@ -301,9 +303,13 @@ def build_coding_agent(
         command_backend=backend,
         extra_tools=tuple(extra_tools),
         system_prompt=system_prompt,
-        skill=skill,
     )
-    return _build_meta_facade(build_agent_composition(profile), permission_mode)
+    return build_profile_agent(profile)
 
 
-__all__ = ["MetaAgent", "build_coding_agent", "build_meta_agent"]
+__all__ = [
+    "MetaAgent",
+    "build_coding_agent",
+    "build_meta_agent",
+    "build_profile_agent",
+]

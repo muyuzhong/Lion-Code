@@ -1,6 +1,6 @@
 # Runtime and Layer Boundaries
 
-This contract describes the post-PR9 runtime. The repository has one canonical
+This contract describes the final post-PR11 runtime. The repository has one canonical
 Core history and one JSONL session writer. Project Memory, Dream, and Learning
 are removed; this document must not describe replacement objects or adapters.
 
@@ -12,18 +12,21 @@ test seams. Neither owns mutable runtime state.
 
 `build_agent_composition(profile)` is the one-shot Composition Root. It creates
 state owners, Provider and permission ports, tools, ContextManager, selected
-capabilities, Core runtime, and the coordinator. `Agent` remains the public
-facade and does not retain a builder, registry, project-Memory repository, or
-legacy command delegate.
+capabilities, Core runtime, and the coordinator. `AgentComposition` is the
+one-shot runtime graph. `build_profile_agent(profile)` wraps every selected graph
+in the same feature-neutral `MetaAgent`. The internal `Agent` product host subclasses
+that facade only to retain Application/CLI-specific operations; it is not part
+of the package-root public API. No facade retains a builder, CapabilityRegistry,
+project-Memory repository, or legacy command delegate.
 
 Profiles select the graph:
 
-- `MinimalProfile`: caller tools, neutral prompt, empty CapabilityRegistry, and
-  the Meta facade.
-- `CodingProfile`: Coding tools with optional Skill composition and the Meta
-  facade.
+- `MinimalProfile`: MetaAgent, caller tools, neutral prompt, and an empty
+  CapabilityRegistry.
+- `CodingProfile`: MetaAgent plus Coding tools and Coding Harness policy, with
+  an empty CapabilityRegistry.
 - `FullProfile`: Coding tools plus Plan, SubAgent, default Skill, and supplied
-  extension specs with the Full facade.
+  extension specs, still behind MetaAgent.
 
 No profile creates a Memory, Dream, Learning, Null, Deprecated, Legacy, or
 fallback object.
@@ -93,7 +96,10 @@ canonical session JSONL path.
 ## Verification obligations
 
 Architecture tests must assert that removed production modules and exact legacy
-symbols are absent. The guard must explicitly allow generic `memory` wording and
-`core/session/memory.py`. Run focused composition, Capability, session, provider,
+symbols are absent. A current-architecture manifest keeps the specifically
+removed Memory Capability symbols at zero; the enduring legacy scanner still
+allows a future Capability-owned Memory implementation and
+`core/session/memory.py`, without permitting the old ports, modules or coupling
+to return. Run focused composition, Capability, session, provider,
 application, and prompt tests before the full suite, then run compile, import
 linting, residual scans, and the repository quality gates.

@@ -59,6 +59,9 @@ context preparation and compaction remain owned by `ContextManager` and
 6. The built-in graph contains Plan, SubAgent, and Skill capabilities where the
    selected Profile requires them. No Memory, Dream, or Learning capability is
    registered or replaced by a placeholder.
+7. The zero-extension registry is valid. FullProfile must also remain runnable
+   when any one of Plan, Skill, SubAgent, or a third-party `CapabilitySpec` is
+   omitted; Kernel and Harness do not branch on a capability name.
 
 ## Retained built-ins
 
@@ -70,3 +73,6 @@ context preparation and compaction remain owned by `ContextManager` and
 
 Future capabilities may add the existing generic slots or closeable resources,
 but must not add a second history store, writer, or context projection path.
+The legacy-removal guard rejects only the deleted architecture and explicitly
+does not reserve the generic name `MemoryCapability`; a new Memory system is a
+separate design task and is not specified here.
