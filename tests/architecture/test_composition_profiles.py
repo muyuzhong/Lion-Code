@@ -41,7 +41,7 @@ from lion_code.session_runtime import SessionRepository
 from lion_code.supervisor import RetryPolicy, Supervisor, VolatileCheckpointStore
 from lion_code.tooling.builtin import BUILTIN_TOOL_NAMES
 from lion_code.tooling.execution import LocalCommandExecutionBackend
-from lion_code.tooling.permission import PermissionDecision, PermissionPolicy
+from lion_code.tooling.permission import PermissionPolicy
 from lion_code.tooling.types import LionTool, ToolResult
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -59,16 +59,6 @@ class _RecordingBackend:
     def run(self, command: str, *, timeout_ms: float = 30000.0) -> str:
         self.calls.append((command, timeout_ms))
         return f"backend-ran: {command}"
-
-
-class _AllowAllStrategy:
-    """验证 identity 传递的最小 ToolPermissionStrategy 实现。"""
-
-    def check_hard_boundaries(self, *, tool, arguments, mode):
-        return None
-
-    def check(self, *, tool, arguments, mode):
-        return PermissionDecision("allow")
 
 
 async def _noop_execute(_context, _tool_call_id, _arguments, _on_update):
@@ -152,7 +142,6 @@ def test_minimal_graph_only_contains_caller_tools(tmp_path, monkeypatch) -> None
 def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     backend = _RecordingBackend()
-    strategy = _AllowAllStrategy()
     profile = CodingProfile(
         config=AgentConfig(
             api_key="test-key",
@@ -161,7 +150,6 @@ def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypat
         ),
         dependencies=AgentDependencies(),
         command_backend=backend,
-        permission_strategy=strategy,
         extra_tools=(_tool("extra_tool"),),
     )
     with patch(
@@ -176,7 +164,7 @@ def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypat
     assert composition.capability_registry.tool_sources == ()
     assert composition.skill_runtime is None
     assert composition.plan is None
-    assert composition.permission_policy is strategy
+    assert isinstance(composition.permission_policy, PermissionPolicy)
 
     result = asyncio.run(
         composition.tool_runtime.execute(
@@ -221,7 +209,6 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
 
     monkeypatch.chdir(tmp_path)
     backend = _RecordingBackend()
-    strategy = _AllowAllStrategy()
     spec = CapabilitySpec(
         name="example-extension",
         prompt_layers=(_ExamplePromptLayer(),),
@@ -230,7 +217,6 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
         config=AgentConfig(api_key="test-key", terminal_output=False),
         dependencies=AgentDependencies(session_repository=_repo(tmp_path)),
         command_backend=backend,
-        permission_strategy=strategy,
         extension_specs=(spec,),
     )
     with patch(
@@ -245,7 +231,7 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
     assert composition.subagent_factory is not None
     assert composition.skill_runtime is not None
     assert composition.status_sink is not None
-    assert composition.permission_policy is strategy
+    assert isinstance(composition.permission_policy, PermissionPolicy)
     system = composition.prompt_composer.get_system()
     assert build_static_system_prompt() in system
     assert "example extension prompt layer" in system

@@ -137,7 +137,6 @@ class _ProfileSelection:
     caller_tools: tuple[LionTool, ...]
     base_prompt: str
     dynamic_prompt_enabled: bool
-    permission_strategy: ToolPermissionStrategy | None
     command_backend: CommandExecutionBackend | None
     extension_specs: tuple[CapabilitySpec, ...]
 
@@ -302,7 +301,6 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
             caller_tools=profile.tools,
             base_prompt=profile.system_prompt or NEUTRAL_SYSTEM_PROMPT,
             dynamic_prompt_enabled=False,
-            permission_strategy=profile.permission_strategy,
             command_backend=None,
             extension_specs=(),
         )
@@ -315,7 +313,6 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
             caller_tools=profile.extra_tools,
             base_prompt=profile.system_prompt or build_static_system_prompt(),
             dynamic_prompt_enabled=profile.system_prompt is None,
-            permission_strategy=profile.permission_strategy,
             command_backend=profile.command_backend,
             extension_specs=(),
         )
@@ -330,7 +327,6 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
             caller_tools=profile.extra_tools,
             base_prompt=profile.system_prompt or build_static_system_prompt(),
             dynamic_prompt_enabled=profile.system_prompt is None,
-            permission_strategy=profile.permission_strategy,
             command_backend=profile.command_backend,
             extension_specs=profile.extension_specs,
         )
@@ -608,9 +604,7 @@ def _build_tooling_graph(
         hooks=foundation.hooks_loader(),
         confirm_hook_trust=foundation.confirmation.confirm_hook_trust,
     )
-    permission_policy = selection.permission_strategy or PermissionPolicy(
-        cwd=foundation.cwd
-    )
+    permission_policy = PermissionPolicy(cwd=foundation.cwd)
     result_store = ResultStore()
     tool_runtime = ToolRuntime(
         foundation.tool_registry,
