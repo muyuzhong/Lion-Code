@@ -222,12 +222,13 @@
         "F"
       ],
       "fingerprints": [
-        "lion_code/__main__.py:212:main:E:31",
         "lion_code/__main__.py:118:run_repl:D:27",
+        "lion_code/__main__.py:212:main:E:31",
         "lion_code/application/session.py:321:LionCodingSession._drive:D:28",
         "lion_code/core/loop.py:68:run_agent_loop:F:44",
         "lion_code/core/session/jsonl.py:59:_migrate_message:D:24",
-        "lion_code/providers/stream.py:90:canonicalize_provider_stream:D:29",
+        "lion_code/providers/anthropic.py:168:_AnthropicStreamParser.feed:D:24",
+        "lion_code/providers/stream.py:95:canonicalize_provider_stream:D:29",
         "lion_code/session_runtime/legacy.py:123:_anthropic_messages:D:24",
         "lion_code/tui/adapter.py:24:TuiEventAdapter.apply:D:21",
         "lion_code/tui/app.py:1040:LionTuiApp._apply_streaming_transcript_event:E:32"
