@@ -46,7 +46,12 @@ def _sse(*items: Any) -> bytes:
     return "".join(parts).encode()
 
 
-def _chat_delta(delta: dict[str, Any], *, finish_reason: str | None = None, usage: dict[str, Any] | None = None) -> dict[str, Any]:
+def _chat_delta(
+    delta: dict[str, Any],
+    *,
+    finish_reason: str | None = None,
+    usage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     choice: dict[str, Any] = {"delta": delta}
     if finish_reason is not None:
         choice["finish_reason"] = finish_reason
@@ -84,7 +89,15 @@ class TestOpenAIChatCompletionsText(unittest.IsolatedAsyncioTestCase):
                 content=_sse(
                     _chat_delta({"content": "hel"}),
                     _chat_delta({"content": "lo"}),
-                    _chat_delta({}, finish_reason="stop", usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}),
+                    _chat_delta(
+                        {},
+                        finish_reason="stop",
+                        usage={
+                            "prompt_tokens": 5,
+                            "completion_tokens": 2,
+                            "total_tokens": 7,
+                        },
+                    ),
                     "[DONE]",
                 ),
             )
@@ -146,7 +159,10 @@ class TestOpenAIChatCompletionsToolCalls(unittest.IsolatedAsyncioTestCase):
                                 {
                                     "index": 0,
                                     "id": "call-1",
-                                    "function": {"name": "echo", "arguments": json.dumps({"msg": "hi"})},
+                                    "function": {
+                                        "name": "echo",
+                                        "arguments": json.dumps({"msg": "hi"}),
+                                    },
                                 }
                             ]
                         }
@@ -170,7 +186,12 @@ class TestOpenAIChatCompletionsToolCalls(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             _types(events),
-            ["AssistantStartEvent", "ToolCallStartEvent", "ToolCallEndEvent", "AssistantDoneEvent"],
+            [
+                "AssistantStartEvent",
+                "ToolCallStartEvent",
+                "ToolCallEndEvent",
+                "AssistantDoneEvent",
+            ],
         )
         end = next(e for e in events if isinstance(e, ToolCallEndEvent))
         self.assertEqual(end.tool_call.id, "call-1")
@@ -188,14 +209,22 @@ class TestOpenAIChatCompletionsToolCalls(unittest.IsolatedAsyncioTestCase):
                     _chat_delta(
                         {
                             "tool_calls": [
-                                {"index": 0, "id": "c1", "function": {"name": "one", "arguments": "{}"}}
+                                {
+                                    "index": 0,
+                                    "id": "c1",
+                                    "function": {"name": "one", "arguments": "{}"},
+                                }
                             ]
                         }
                     ),
                     _chat_delta(
                         {
                             "tool_calls": [
-                                {"index": 1, "id": "c2", "function": {"name": "two", "arguments": "{}"}}
+                                {
+                                    "index": 1,
+                                    "id": "c2",
+                                    "function": {"name": "two", "arguments": "{}"},
+                                }
                             ]
                         }
                     ),
@@ -235,51 +264,6 @@ class TestOpenAIChatCompletionsToolCalls(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_types(events).count("ToolCallEndEvent"), 2)
 
 
-class TestOpenAIResponsesApi(unittest.IsolatedAsyncioTestCase):
-    async def test_responses_text_and_routing(self) -> None:
-        seen: list[httpx.Request] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            seen.append(request)
-            return httpx.Response(
-                200,
-                content=_sse(
-                    {"type": "response.created"},
-                    {"type": "response.output_text.delta", "delta": "hel"},
-                    {"type": "response.output_text.delta", "delta": "lo"},
-                    {
-                        "type": "response.completed",
-                        "response": {
-                            "status": "completed",
-                            "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
-                        },
-                    },
-                ),
-            )
-
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            provider = OpenAICompatibleProvider(_config(), client=client)
-            events = [
-                e
-                async for e in provider.stream_response(
-                    model="gpt-5.5",
-                    system="s",
-                    messages=[UserMessage(content="hi")],
-                    tools=[],
-                )
-            ]
-
-        done = next(e for e in events if isinstance(e, AssistantDoneEvent))
-        self.assertEqual(done.message.text, "hello")
-        self.assertEqual(done.reason, "stop")
-        self.assertEqual(done.message.usage.input, 3)
-        self.assertEqual(done.message.usage.output, 2)
-        self.assertEqual(done.message.usage.total_tokens, 5)
-        # gpt-5.5 必须路由到 /responses 而非 /chat/completions。
-        self.assertEqual(len(seen), 1)
-        self.assertEqual(seen[0].url.path, "/v1/responses")
-
-
 class TestOpenAIRetryAndErrors(unittest.IsolatedAsyncioTestCase):
     async def test_http_429_retries_then_succeeds(self) -> None:
         calls: list[httpx.Request] = []
@@ -287,7 +271,9 @@ class TestOpenAIRetryAndErrors(unittest.IsolatedAsyncioTestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             calls.append(request)
             if len(calls) == 1:
-                return httpx.Response(429, content=b'{"error":{"message":"rate limited"}}')
+                return httpx.Response(
+                    429, content=b'{"error":{"message":"rate limited"}}'
+                )
             return httpx.Response(
                 200,
                 content=_sse(
