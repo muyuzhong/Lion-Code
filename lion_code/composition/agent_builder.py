@@ -302,7 +302,7 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
             base_prompt=profile.system_prompt or NEUTRAL_SYSTEM_PROMPT,
             dynamic_prompt_enabled=False,
             command_backend=None,
-            extension_specs=(),
+            extension_specs=profile.extension_specs,
         )
     if isinstance(profile, CodingProfile):
         return _ProfileSelection(
@@ -314,7 +314,7 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
             base_prompt=profile.system_prompt or build_static_system_prompt(),
             dynamic_prompt_enabled=profile.system_prompt is None,
             command_backend=profile.command_backend,
-            extension_specs=(),
+            extension_specs=profile.extension_specs,
         )
     if isinstance(profile, FullProfile):
         return _ProfileSelection(
