@@ -92,6 +92,6 @@ checkpoint 只作执行控制（README:247），可走独立提案删除。
 
 ## 落地
 
-- 提交: `32d68b9`
+- 提交: `4b76c1e`
 - PR: #56（标题：refactor: 清理 Supervisor 平面内部死面（run_timeout / should_retry cancelled / 冗余结果与持久化字段））
 - 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 待绿。
