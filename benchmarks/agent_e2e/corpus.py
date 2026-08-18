@@ -1,4 +1,10 @@
-"""Lion 历史回放任务集的公开卡、私有证据与准入检查。"""
+"""Lion 历史回放任务集的公开卡、私有证据与准入检查。
+
+当前生效为 v2 资产（`corpus_assets/public_catalog.v2.*`，30 题、可执行）。
+`corpus_assets/public_catalog.v1.*` 为 SHA-256 钉定的历史归档，其中部分条目
+引用 PR9/PR7b 已删除的 Dream/Memory/Learning/MCP 与 legacy TUI 文件，属
+不可执行的历史语义，仅供追溯，不参与准入校验。
+"""
 
 from __future__ import annotations
 
@@ -14,7 +20,7 @@ from .catalog import validate_catalog
 from .models import Catalog, TaskResources, TaskSpec, TaskSplit, TaskStatus
 
 CORPUS_ID = "lion-historical-replay"
-CORPUS_VERSION = "v1"
+CORPUS_VERSION = "v2"
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PRIVATE_VERIFIER_IDENTITY = "lion-historical-patch-provenance/v1"
 _REPOSITORY = "https://github.com/muyuzhong/Lion-Code"
@@ -347,15 +353,19 @@ def _task(
 
 _PUBLIC_TASKS: tuple[TaskSpec, ...] = (
     _task("lion-cross-file-refactor-01", "cross_file_refactor", TaskSplit.REGRESSION, "3370351f2cfc4a30927e79a50f0ab9276880e6ef", "55136a2acf17a2643dac9885fa7556e9902aa782568fc97fb61b7fc26c7a8e68", "收敛 Core-only runtime 的依赖与文档边界，删除已经失效的旧路径引用，并保持测试和基准入口一致。", "python -m pytest -q tests/test_context_formal_benchmark.py", ("lion_code/agent_runtime.py", "benchmarks/context_management/formal_benchmark.py", "tests/test_context_formal_benchmark.py"), 4),
-    _task("lion-cross-file-refactor-02", "cross_file_refactor", TaskSplit.REGRESSION, "1f95fb02ac9afc546b3b3f44705d86ce1607a43b", "bc30736737c96b03c2c1669e8bfdee1f3dfa0651dd9223dbc61b91e8b8b51440", "移除 legacy TUI 与全局输出桥，让默认 TUI 和 Agent 观察器保留单一输出所有权。", "python -m pytest -q tests/application/test_coding_session.py", ("lion_code/agent.py", "lion_code/application/session.py", "lion_code/tui/app.py"), 5),
-    _task("lion-cross-file-refactor-03", "cross_file_refactor", TaskSplit.REGRESSION, "9e92d09f9619d3985a31bf54878c487e1a268d0c", "7ae4f1d8ebe99fa01bae11abc01406e65672482ad297ec0569e8eb288b71228c", "把会话持久化收敛到 JSONL 单一路径，并保持 Dream 和集成恢复行为一致。", "python -m pytest -q tests/integration/test_agent_core_runtime.py", ("lion_code/dream.py", "lion_code/session.py", "tests/integration/test_agent_core_runtime.py"), 3),
-    _task("lion-cross-file-refactor-04", "cross_file_refactor", TaskSplit.REGRESSION, "53571928af1a45670c34eaaab595028e2ae03d61", "79cace39e8dbcb85035fcc4fc406c0e818868ea08620259a3d770ebae3541281", "删除 SDK 专属对话和旧压缩路径，使 Agent、记忆协调器和 Core 集成只依赖规范运行时。", "python -m pytest -q tests/memory_runtime/test_core_integration.py", ("lion_code/agent.py", "lion_code/memory_runtime/coordinator.py", "tests/memory_runtime/test_core_integration.py"), 5),
-    _task("lion-cross-file-refactor-05", "cross_file_refactor", TaskSplit.HOLDOUT, "563121ffcaa973106e513fa22bdfeefbcf7fc396", "6278a9e2141189a701628a4f9af1bd71892b974d379f01acbaf6f46cdae692f4", "收敛 Core Provider 单一路径，确保应用会话、Agent 和自动化路径不再保留平行 provider 状态。", "python -m pytest -q tests/integration/test_agent_core_runtime.py", ("lion_code/agent.py", "lion_code/application/session.py", "lion_code/autonomy.py"), 5),
-    _task("lion-cross-file-refactor-06", "cross_file_refactor", TaskSplit.HOLDOUT, "e2bde092c0b422f9628fa93a320220e806063620", "3ce9150e45a15ecd358cc173ff0e0cf37626a828f780239f4b6cca5e8f951798", "将 side query 全面迁移到 Core Provider，统一 Dream、记忆查询和一次性 provider 的使用边界。", "python -m pytest -q tests/providers/test_oneshot.py", ("lion_code/agent.py", "lion_code/dream.py", "lion_code/providers/oneshot.py"), 4),
-    _task("lion-cross-file-refactor-07", "cross_file_refactor", TaskSplit.HOLDOUT, "96d8cd18d0604d149ca260e9aaaf53bb25e92e9c", "07a29085048b6ca3d2896a142693cef852f00a6c864d72b67d4ee350dd0fbfc6", "重命名旧 TUI 模块，为新 TUI 腾出包名，同时保持命令行和遗留测试的兼容入口。", "python -m pytest -q tests/test_legacy_tui.py", ("lion_code/__main__.py", "lion_code/legacy_tui.py", "tests/test_legacy_tui.py"), 3),
+    _task("lion-cross-file-refactor-02", "cross_file_refactor", TaskSplit.REGRESSION, "1f95fb02ac9afc546b3b3f44705d86ce1607a43b", "bc30736737c96b03c2c1669e8bfdee1f3dfa0651dd9223dbc61b91e8b8b51440", "移除 legacy TUI 与全局输出桥，让默认 TUI 和 Agent 观察器保留单一输出所有权。", "python -m pytest -q tests/integration/test_application_coding_session.py", ("lion_code/agent.py", "lion_code/application/session.py", "lion_code/tui/app.py"), 5),
+
+
+    _task("lion-cross-file-refactor-05", "cross_file_refactor", TaskSplit.HOLDOUT, "563121ffcaa973106e513fa22bdfeefbcf7fc396", "6278a9e2141189a701628a4f9af1bd71892b974d379f01acbaf6f46cdae692f4", "收敛 Core Provider 单一路径，确保应用会话、Agent 和自动化路径不再保留平行 provider 状态。", "python -m pytest -q tests/integration/test_agent_core_runtime.py", ("lion_code/agent.py", "lion_code/application/session.py"), 5),
+
+
     _task("lion-cross-file-refactor-08", "cross_file_refactor", TaskSplit.HOLDOUT, "886e78833aea32b92e2ffaf0ce126c6faab357af", "796ea0ff04e6d6b09ab85157a235469119ba745631291f535054c975386d6fb4", "把上下文管理基准迁移到 ContextManager，统一正式基准、数据集和断言的入口。", "python -m pytest -q tests/test_context_formal_benchmark.py", ("benchmarks/context_management/benchmark.py", "benchmarks/context_management/formal_benchmark.py", "tests/test_context_formal_benchmark.py"), 3),
     _task("lion-cross-file-refactor-09", "cross_file_refactor", TaskSplit.HOLDOUT, "f986aa74e7ab0a66583a8bc55913f6a3540a41b4", "58de6a669284b7f99df028c5d19d2041ec028a31fcbce7cd4c2e36455333e4ec", "引入供应商无关的上下文投影，使 Agent 和 ContextManager 共享模型限制、估算和策略类型。", "python -m pytest -q tests/context/test_projector.py", ("lion_code/agent.py", "lion_code/context/projector.py", "tests/context/test_projector.py"), 5),
     _task("lion-cross-file-refactor-10", "cross_file_refactor", TaskSplit.HOLDOUT, "f82b6710749fc1e530dc17c1c304ca42162ca386", "5f40b01799cef393f66030f9e03f64c3f246e437995838b41d956503f3ecbbab", "适配 Lion 工具运行时到 portable Core，同时保证 adapter 与集成工具循环的行为契约。", "python -m pytest -q tests/adapters/test_tool_adapter.py", ("lion_code/adapters/tool_adapter.py", "tests/adapters/test_tool_adapter.py", "tests/integration/test_core_tool_runtime.py"), 4),
+    _task("lion-cross-file-refactor-11", "cross_file_refactor", TaskSplit.REGRESSION, "aaed55440568bf58ccf9139d34241314a0c8ee45", "c2b403dbfba9be7fc2b63b02c926ab62ce233642b6ce49760b00e2a57a819911", "折叠两个 provider 适配器间重复的流式信封与工具函数，让 Anthropic 与 OpenAI-compatible 后端共享统一的流式解析、超时与错误映射边界。", "python -m pytest -q tests/providers/test_anthropic.py tests/providers/test_openai_compatible.py", ("lion_code/providers/anthropic.py", "lion_code/providers/http.py", "lion_code/providers/http_errors.py", "lion_code/providers/openai_compatible.py", "lion_code/providers/stream.py"), 4),
+    _task("lion-cross-file-refactor-12", "cross_file_refactor", TaskSplit.REGRESSION, "731316423ec2d714e1e12783425731f40113a9a3", "15f6e7ba37b1e67539cabc2058bf2379d7e43ac2930211f06b9ad3de39903b3e", "清理内部 Agent 宿主与 AgentComposition 的死面：移除镜像字段、无引用方法、别名堆叠与死 __setattr__，收敛组合边界。", "python -m pytest -q tests/integration/test_agent_core_runtime.py", ("lion_code/agent.py", "lion_code/composition/agent_builder.py", "lion_code/meta_agent.py", "tests/integration/test_agent_core_runtime.py"), 4),
+    _task("lion-cross-file-refactor-13", "cross_file_refactor", TaskSplit.HOLDOUT, "286d7fe4c40089e63fe3d5d00e02dd1712e8f4cd", "883076b6e5d339fbb36e8849c126474e2ad9444da9e3a64004ac8b9c85099fab", "删除 AgentEndEvent 双转录的 messages 负载，让事件只承载单一转录，保持 Core 循环与应用会话的事件契约一致。", "python -m pytest -q tests/core/test_harness.py", ("lion_code/core/events.py", "lion_code/core/loop.py", "lion_code/application/events.py", "lion_code/application/session.py"), 3),
+    _task("lion-cross-file-refactor-14", "cross_file_refactor", TaskSplit.HOLDOUT, "871f33b7b471a46107e4afc5156d42eb5c235e9d", "a43cbc7e0f154d2320cdf996c8a1147fda8b99c11591c2f1acd46d36b16f8dcb", "删除 AgentTool 无人读取的渲染/准备/展示面，只保留被生产路径消费的工具契约与适配器边界。", "python -m pytest -q tests/adapters/test_tool_adapter.py", ("lion_code/core/tools.py", "lion_code/tooling/types.py", "lion_code/adapters/tool_adapter.py", "lion_code/tui/state.py", "lion_code/tui/widgets.py"), 3),
     _task("lion-bugfix-01", "bugfix", TaskSplit.HOLDOUT, "70fe53710d6ad04fcca116842df8d9968f7f987b", "2f8e12c72b7038b3ae6dde07780a6bcc0b254fd1b53b930cf966a9d6b5ca97f6", "修复流式 TUI 输出在连续增量到达时的闪烁，同时保留现有渲染顺序。", "python -m pytest -q tests/tui/test_tui_app.py", ("lion_code/tui/app.py", "lion_code/tui/widgets.py", "tests/tui/test_tui_app.py"), 3),
     _task("lion-bugfix-02", "bugfix", TaskSplit.REGRESSION, "82b28d7d02e72bdee38f8205d5969cd9b1697ad4", "264f4a518788dcf52f899c051fd2fd4d226d0357b3482a51a0018e9622f2ca5b", "按实际渲染行裁剪补全窗口，避免长候选在 TUI 中越界或遮挡。", "python -m pytest -q tests/tui/test_tui_app.py", ("lion_code/tui/app.py", "tests/tui/test_tui_app.py"), 2),
     _task("lion-bugfix-03", "bugfix", TaskSplit.REGRESSION, "d3ee6f6252d2ba97646d2c098f0208edc56d763f", "0a8680a2530d8d275ea153eb7f8cff0ed1c55d8ed798abba0a9e16648ea4c365", "归一化 Windows 文件拖拽路径，使带引号、空格和反斜杠的路径能够可靠插入输入框。", "python -m pytest -q tests/tui/test_tui_file_drop.py", ("lion_code/tui/file_drop.py", "tests/tui/test_tui_file_drop.py"), 2),
@@ -365,8 +375,8 @@ _PUBLIC_TASKS: tuple[TaskSpec, ...] = (
     _task("lion-bugfix-07", "bugfix", TaskSplit.REGRESSION, "74a91844ddde9fdf44a66a0620efc5395fe3ffe8", "92c724ab5c9beb15283540d11d92a90b3fbd69dc8025f7087befc9870f2ca2f0", "保留 Provider 的用户取消语义，不把取消转换成普通模型错误或额外重试。", "python -m pytest -q tests/providers/test_anthropic.py tests/providers/test_openai_compatible.py", ("lion_code/providers/anthropic.py", "lion_code/providers/openai_compatible.py", "lion_code/providers/stream.py"), 4),
     _task("lion-bugfix-08", "bugfix", TaskSplit.REGRESSION, "74ea3bc0f9674a2caedea90d3c7ca9949ba2721a", "dd68dee9d9e7cafdadb9e2841d22bb157caf42fc64ff37ec532173c7ac973b68", "将 Core 终态同步回 Agent，确保结构化结果、停止原因和前端观察器读取同一状态。", "python -m pytest -q tests/integration/test_agent_core_runtime.py", ("lion_code/agent.py", "tests/integration/test_agent_core_runtime.py"), 3),
     _task("lion-bugfix-09", "bugfix", TaskSplit.REGRESSION, "c65bf81a6a7ef8e1a0784414ded8dcfdaea4008b", "cb297625d6ad01ca5b3d45e960588a2cab893745d40c6a0a7424aa19cbcbc563", "当 TUI 正在处理模型请求时阻止新的命令分发，避免并发命令破坏会话状态。", "python -m pytest -q tests/tui/test_tui_app.py", ("lion_code/tui/app.py", "tests/tui/test_tui_app.py"), 2),
-    _task("lion-bugfix-10", "bugfix", TaskSplit.REGRESSION, "87407595a8f75ceb26b76e91d5954a4ec03868c5", "b18cc7c2dbcb75d7b84b8fb56a8c67e6eb8e155485aa12179056b7fd303d7011", "模型热配完成后重绑应用会话 Runtime，防止后续命令仍指向旧 provider 或旧状态。", "python -m pytest -q tests/application/test_coding_session.py", ("lion_code/application/session.py", "tests/application/test_coding_session.py"), 3),
-    _task("lion-feature-01", "feature", TaskSplit.REGRESSION, "ff85b953f3894fcc195297514acd267d0be23cf4", "f95945100c1054db8cd8ff32c6e502e01fbf61990ce779e8821a9a051073ffc2", "为上下文溢出加入受控压缩和一次自动重试链，并保持应用会话事件的可观察顺序。", "python -m pytest -q tests/application/test_coding_session.py", ("lion_code/agent.py", "lion_code/application/session.py", "tests/application/test_coding_session.py"), 5),
+    _task("lion-bugfix-10", "bugfix", TaskSplit.REGRESSION, "87407595a8f75ceb26b76e91d5954a4ec03868c5", "b18cc7c2dbcb75d7b84b8fb56a8c67e6eb8e155485aa12179056b7fd303d7011", "模型热配完成后重绑应用会话 Runtime，防止后续命令仍指向旧 provider 或旧状态。", "python -m pytest -q tests/integration/test_application_coding_session.py", ("lion_code/application/session.py", "tests/integration/test_application_coding_session.py"), 3),
+    _task("lion-feature-01", "feature", TaskSplit.REGRESSION, "ff85b953f3894fcc195297514acd267d0be23cf4", "f95945100c1054db8cd8ff32c6e502e01fbf61990ce779e8821a9a051073ffc2", "为上下文溢出加入受控压缩和一次自动重试链，并保持应用会话事件的可观察顺序。", "python -m pytest -q tests/integration/test_application_coding_session.py", ("lion_code/agent.py", "lion_code/application/session.py", "tests/integration/test_application_coding_session.py"), 5),
     _task("lion-feature-02", "feature", TaskSplit.REGRESSION, "223bbfb3257a2b4e1d4f5d8494b26d84a6c41ef8", "e8f5313da327002fb5db9a85b41d8a914d1672a9f9ba5e7ac4f59d5b2ae6ee0d", "将 TUI 终端通知接入 AgentSettled，使完成态通知只显示一次且不抢占流式输出。", "python -m pytest -q tests/tui/test_tui_app.py", ("lion_code/tui/app.py", "tests/tui/test_tui_app.py"), 2),
     _task("lion-feature-03", "feature", TaskSplit.REGRESSION, "ab36504cf53acbb1ccd3e53f49381d71c7284313", "de70f30a2c7b126b5cd76831d7f565c4efb06a8548485c96c4e34307ec5617e9", "把六档 thinking 配置接入 Core 路径，并让 Agent、应用命令、provider factory 和 TUI 使用同一配置。", "python -m pytest -q tests/providers/test_thinking.py", ("lion_code/agent.py", "lion_code/application/session.py", "lion_code/providers/thinking.py"), 5),
     _task("lion-feature-04", "feature", TaskSplit.REGRESSION, "26968194652ef3c19d9edc96141efe74525d0a34", "e353789c0536e5ee2c30199acf02032a4e97cc6d32fcec32324d30b2ae18ee95", "让子 Agent 复用 Core Runtime 和父级工具边界，同时保持子任务结果能够汇总回根 Agent。", "python -m pytest -q tests/integration/test_agent_core_runtime.py", ("lion_code/agent.py", "lion_code/tui/app.py", "tests/integration/test_agent_core_runtime.py"), 4),
@@ -375,7 +385,7 @@ _PUBLIC_TASKS: tuple[TaskSpec, ...] = (
     _task("lion-feature-07", "feature", TaskSplit.HOLDOUT, "cc182a6c69b547ccb6f23901efe5ce32c1336e14", "3e4a5a14d00017f81ea0cbded628aba7f22391f28ad4e53e5b21da82a0f7a283", "增加 `/model` 选择器，统一 provider 设置、应用会话和 TUI 的模型切换体验。", "python -m pytest -q tests/application/test_provider_settings.py", ("lion_code/application/commands.py", "lion_code/application/provider_settings.py", "lion_code/tui/app.py"), 4),
     _task("lion-feature-08", "feature", TaskSplit.HOLDOUT, "73e758311f0d636cc3b40ae58c400272cbc1d845", "20bcb00ddeea10f01fa01ebc120ea8bce4b326fd8051f8ce825a7536aa4df3b2", "增加命令补全和主题选择列表，保证输入组件、应用会话和 TUI 焦点行为一致。", "python -m pytest -q tests/tui/test_tui_autocomplete.py", ("lion_code/application/session.py", "lion_code/tui/app.py", "lion_code/tui/prompt_input.py"), 3),
     _task("lion-feature-09", "feature", TaskSplit.HOLDOUT, "9a6eb03dfe8cbc58d9f918746ebf5299db44ad8f", "4590745df4239f4e2f692de1ddbf07b0871fcc9fd726d1cdbf8bda4dc6718b4e", "接入精简 TUI 主应用作为默认入口，并保持 CLI 和 TUI 入口的稳定启动契约。", "python -m pytest -q tests/tui/test_tui_app.py", ("lion_code/__main__.py", "lion_code/tui/__init__.py", "lion_code/tui/app.py"), 4),
-    _task("lion-feature-10", "feature", TaskSplit.HOLDOUT, "6a3471124181844b66a69c80861a8441a85748a0", "250275d131744b308a1c791f8e742c71bc24307b47ae8c6f8839378d7f91cea5", "扩展 LionCodingSession 的属性面并落地默认命令注册表，使上层 TUI 能通过稳定接口驱动会话。", "python -m pytest -q tests/application/test_coding_session.py", ("lion_code/application/commands.py", "lion_code/application/session.py", "tests/application/test_coding_session.py"), 3),
+    _task("lion-feature-10", "feature", TaskSplit.HOLDOUT, "6a3471124181844b66a69c80861a8441a85748a0", "250275d131744b308a1c791f8e742c71bc24307b47ae8c6f8839378d7f91cea5", "扩展 LionCodingSession 的属性面并落地默认命令注册表，使上层 TUI 能通过稳定接口驱动会话。", "python -m pytest -q tests/integration/test_application_coding_session.py", ("lion_code/application/commands.py", "lion_code/application/session.py", "tests/integration/test_application_coding_session.py"), 3),
 )
 
 
@@ -390,6 +400,10 @@ _GOLD_REVISIONS: Mapping[str, str] = {
     "lion-cross-file-refactor-08": "43d0819ae64eaca71cad93aa87f982066ee8b7a4",
     "lion-cross-file-refactor-09": "047c1875c64c0788ddd73201c3fab2edd580eabb",
     "lion-cross-file-refactor-10": "44718f1338e0a7913042004f33f5021a365b8d19",
+    "lion-cross-file-refactor-11": "e8820c446ece0417c1d13baebdb0e7627aba1c1d",
+    "lion-cross-file-refactor-12": "1f38a7817a71f9c7fe129698f89b10f4e26d6865",
+    "lion-cross-file-refactor-13": "5dee11bc089111c87dd082ef1c5d4d97e0d9c174",
+    "lion-cross-file-refactor-14": "1c0eda50b06f93558629b6aeded64a14bc9003ad",
     "lion-bugfix-01": "f82959e2d9326965de6ff060e3cd08879eca3f8a",
     "lion-bugfix-02": "b29e9fe05d6a3c9c3751c8178d23badc241645f9",
     "lion-bugfix-03": "82b28d7d02e72bdee38f8205d5969cd9b1697ad4",

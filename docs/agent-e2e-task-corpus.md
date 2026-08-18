@@ -1,22 +1,33 @@
-# Lion 自建编码 Agent 任务集（V1）
+# Lion 自建编码 Agent 任务集（V2）
 
 ## 目的
 
-V1 从 Lion 的真实 Git 历史提取 30 个可复现的历史回放任务，用于编码
+V2 从 Lion 的真实 Git 历史提取 30 个可复现的历史回放任务，用于编码
 Agent 的快速回归与 holdout 评估。任务分为跨文件重构、缺陷修复、特性开发
 三类，各 10 条；公开 task card 由 `benchmarks.agent_e2e.corpus` 生成。
 
 供 evaluator 装载的冻结公开 catalog 位于
-`benchmarks/agent_e2e/corpus_assets/public_catalog.v1.json`，同目录的
-`public_catalog.v1.sha256` 是其 canonical JSON SHA-256。源代码中的
+`benchmarks/agent_e2e/corpus_assets/public_catalog.v2.json`，同目录的
+`public_catalog.v2.sha256` 是其 canonical JSON SHA-256。源代码中的
 `bundled_catalog()` 是该资产的生成源；测试会阻止二者漂移。
-`public_catalog.v1.lock.json` 锁定本轮的完整 30 题选择；每次正式实验仍应把
+`public_catalog.v2.lock.json` 锁定本轮的完整 30 题选择；每次正式实验仍应把
 这个 catalog lock 连同 profile 冻结进自己的 manifest。
 
 这是一套可审计的初始任务来源，不是一份已经测得的模型成绩：当前环境没有
 真实 Docker backend，且 V1 的准入 verifier 只证明 historical patch 的来源、
 可重放性和稳定性。它不能替代语义 hidden test，也不能产生 `task_resolved`
 或官方成功率。
+
+## 版本历史
+
+- **v1**：从 Lion 真实历史提取的 30 题首发集。部分条目引用的模块（Dream/
+  Memory/Learning/MCP 与 legacy TUI，见 PR9/PR7b）已从代码库移除，这些条目
+  在 v1 中作为 SHA-256 钉定资产保留原样，但已无法在**当前工作树**上执行。
+- **v2**：退役 4 条失效 entry（`refactor-03/04/06/07`，其核心模块已删除、
+  无法改写），改写 5 条的失效路径（refactor-02/05、bugfix-10、feature-01/10），
+  并从真实 Git 历史补齐 4 条跨文件重构任务（refactor-11/12/13/14，对应
+  #57/#55/#48/#52 提交），保持 30 题 / 10・10・10 / 18・12 配比不变。
+  `corpus_assets/public_catalog.v2.*` 为当前生效资产，v1 三件套原样保留。
 
 ## 公开与私有边界
 
@@ -68,14 +79,14 @@ container verifier 后，每题还必须补做 base fail、gold pass 三次和�
 |---|---|---|---|
 | lion-cross-file-refactor-01 | 跨文件重构 | regression | 收敛 Core-only runtime 的依赖与文档边界 |
 | lion-cross-file-refactor-02 | 跨文件重构 | regression | 移除 legacy TUI 与全局输出桥 |
-| lion-cross-file-refactor-03 | 跨文件重构 | regression | 收敛 JSONL 会话持久化路径 |
-| lion-cross-file-refactor-04 | 跨文件重构 | regression | 删除 SDK 专属对话与旧压缩路径 |
 | lion-cross-file-refactor-05 | 跨文件重构 | holdout | 收敛 Core Provider 单一路径 |
-| lion-cross-file-refactor-06 | 跨文件重构 | holdout | 将 side query 迁移到 Core Provider |
-| lion-cross-file-refactor-07 | 跨文件重构 | holdout | 重命名旧 TUI 并保持兼容入口 |
 | lion-cross-file-refactor-08 | 跨文件重构 | holdout | 将上下文基准迁移到 ContextManager |
 | lion-cross-file-refactor-09 | 跨文件重构 | holdout | 建立供应商无关的上下文投影 |
 | lion-cross-file-refactor-10 | 跨文件重构 | holdout | 适配 Lion tool runtime 到 portable Core |
+| lion-cross-file-refactor-11 | 跨文件重构 | regression | 折叠两个 provider 适配器的重复流式与工具面 |
+| lion-cross-file-refactor-12 | 跨文件重构 | regression | 清理 Agent/AgentComposition 死面 |
+| lion-cross-file-refactor-13 | 跨文件重构 | holdout | 删除 AgentEndEvent 双转录负载 |
+| lion-cross-file-refactor-14 | 跨文件重构 | holdout | 删除 AgentTool 无人读取的渲染面 |
 | lion-bugfix-01 | 缺陷修复 | holdout | 修复流式 TUI 输出闪烁 |
 | lion-bugfix-02 | 缺陷修复 | regression | 按渲染行裁剪补全窗口 |
 | lion-bugfix-03 | 缺陷修复 | regression | 归一化 Windows 文件拖拽路径 |
