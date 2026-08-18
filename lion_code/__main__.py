@@ -9,15 +9,11 @@ import signal
 import sys
 
 from .agent import Agent
+from .application.commands import CommandResult
 from .application.session import LionCodingSession
 from .config import load_api_config
 from .permission_state import PermissionMode
-from .skills import (
-    discover_skills,
-    execute_skill,
-    get_skill_by_name,
-    resolve_skill_prompt,
-)
+from .skills import discover_skills
 from .ui import (
     print_error,
     print_info,
@@ -58,6 +54,65 @@ def _resolve_permission_mode(args: argparse.Namespace) -> PermissionMode:
     if args.dont_ask:
         return "dontAsk"
     return "default"
+
+
+def _print_repl_skills() -> None:
+    """REPL 的 /skills 展示：与 TUI 共享 skills 发现，只做终端呈现。"""
+
+    skills = discover_skills()
+    if not skills:
+        print_info("No skills found. Add skills to .claude/skills/<name>/SKILL.md")
+        return
+    print_info(f"{len(skills)} skills:")
+    for s in skills:
+        tag = f"/{s.name}" if s.user_invocable else s.name
+        print(f"    {tag} ({s.source}) — {s.description}")
+
+
+async def _dispatch_repl_command(agent: Agent, result: CommandResult) -> bool:
+    """按 ``CommandResult`` 意图分发 REPL 命令；返回 True 表示退出。
+
+    单一命令入口在 ``application/commands.py``，REPL 只做呈现
+    （runtime-boundaries.md 禁止 REPL 自建第二套分发器）。
+    """
+
+    if not result.handled:
+        print_info(
+            "未知命令 — 可用: /model /clear /plan /cost /compact "
+            "/skills /thinking /resume /quit"
+        )
+        return False
+    if result.exit_requested:
+        print("\nBye!\n")
+        return True
+    if result.new_session_requested:
+        await agent.clear_history()
+    elif result.plan_toggle_requested:
+        print_info(f"Plan mode: {agent.toggle_plan_mode()}")
+    elif result.cost_requested:
+        agent.show_cost()
+    elif result.compact_summary is not None:
+        try:
+            await agent.compact()
+        except Exception as e:
+            print_error(str(e))
+    elif result.skill_prompt is not None:
+        try:
+            await agent.chat(result.skill_prompt)
+        except Exception as e:
+            if "abort" not in str(e).lower():
+                print_error(str(e))
+    elif result.skills_list_requested:
+        _print_repl_skills()
+    elif result.model_picker_requested:
+        print_info("Usage: /model <name>")
+    elif result.resume_session_id is not None or result.resume_picker_requested:
+        print_info("REPL 不支持 /resume；请用 --resume 启动")
+    elif result.theme is not None or result.theme_picker_requested:
+        print_info("主题仅 TUI 可用")
+    elif result.message:
+        print_info(result.message)
+    return False
 
 
 async def run_repl(agent: Agent) -> None:
@@ -138,55 +193,10 @@ async def run_repl(agent: Agent) -> None:
             break
 
         if inp.startswith("/"):
-            command_session.handle_command(inp)
-
-        # 内置 REPL 命令在普通对话前分发，避免被误送给模型。
-        if inp == "/clear":
-            await agent.clear_history()
+            result = command_session.handle_command(inp)
+            if await _dispatch_repl_command(agent, result):
+                break
             continue
-        if inp == "/plan":
-            agent.toggle_plan_mode()
-            continue
-        if inp == "/cost":
-            agent.show_cost()
-            continue
-        if inp == "/compact":
-            try:
-                await agent.compact()
-            except Exception as e:
-                print_error(str(e))
-            continue
-        if inp == "/skills":
-            skills = discover_skills()
-            if not skills:
-                print_info("No skills found. Add skills to .claude/skills/<name>/SKILL.md")
-            else:
-                print_info(f"{len(skills)} skills:")
-                for s in skills:
-                    tag = f"/{s.name}" if s.user_invocable else s.name
-                    print(f"    {tag} ({s.source}) — {s.description}")
-            continue
-
-        # 非内置的斜杠命令按 `/<skill-name> [args]` 尝试解析。
-        if inp.startswith("/"):
-            space_idx = inp.find(" ")
-            cmd_name = inp[1:space_idx] if space_idx > 0 else inp[1:]
-            cmd_args = inp[space_idx + 1:] if space_idx > 0 else ""
-            skill = get_skill_by_name(cmd_name)
-            if skill and skill.user_invocable:
-                print_info(f"Invoking skill: {skill.name}")
-                try:
-                    if skill.context == "fork":
-                        result = execute_skill(skill.name, cmd_args)
-                        if result:
-                            await agent.chat(f'Use the skill tool to invoke "{skill.name}" with args: {cmd_args or "(none)"}')
-                    else:
-                        resolved = resolve_skill_prompt(skill, cmd_args)
-                        await agent.chat(resolved)
-                except Exception as e:
-                    if "abort" not in str(e).lower():
-                        print_error(str(e))
-                continue
 
         # 其余输入进入普通对话路径。
         try:
