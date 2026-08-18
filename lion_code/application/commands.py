@@ -2,8 +2,7 @@
 
 阶段 2 只迁入数据结构与注册/解析/执行骨架;Lion 内置命令集
 (/clear /plan /cost /compact /model …)按迁移计划在阶段 3 注册。
-``CommandResult`` 保留 Tau 的完整意图标志集,便于 app.py 的命令分发
-原样迁入;Lion 不使用的标志(如 login/logout)恒为默认值。
+``CommandResult`` 只保留当前实现 set/read 的意图标志。
 """
 
 from __future__ import annotations
@@ -62,22 +61,10 @@ class CommandResult:
     handled: bool
     exit_requested: bool = False
     clear_requested: bool = False
-    reload_requested: bool = False
     new_session_requested: bool = False
     compact_summary: str | None = None
-    export_requested: bool = False
-    export_destination: Path | None = None
-    export_format: str | None = None
     resume_session_id: str | None = None
     resume_picker_requested: bool = False
-    prompts_picker_requested: bool = False
-    tree_picker_requested: bool = False
-    login_picker_requested: bool = False
-    custom_provider_login_requested: bool = False
-    login_provider: str | None = None
-    login_method: str | None = None
-    logout_picker_requested: bool = False
-    logout_provider: str | None = None
     model_picker_requested: bool = False
     tools_picker_requested: bool = False
     scoped_models_picker_requested: bool = False

@@ -98,19 +98,9 @@ class AnthropicProvider:
             client = self._get_client()
             api_key = self._config.api_key
             base_url = self._config.base_url
-            auth_headers: dict[str, str] = {}
-            if self._config.credential_resolver is not None:
-                auth = await self._config.credential_resolver()
-                api_key = auth.api_key
-                if auth.base_url is not None:
-                    base_url = auth.base_url.rstrip("/")
-                    if not base_url.endswith("/v1"):
-                        base_url = f"{base_url}/v1"
-                auth_headers.update(auth.headers or {})
             payload = _build_messages_payload(
                 model=model,
                 system=system,
-                oauth_system_prompt=self._config.oauth_system_prompt,
                 messages=messages,
                 tools=tools,
                 max_tokens=self._config.max_tokens,
@@ -122,12 +112,8 @@ class AnthropicProvider:
                 "anthropic-version": ANTHROPIC_VERSION,
                 "content-type": "application/json",
                 **(dict(self._config.headers or {})),
-                **auth_headers,
+                "x-api-key": api_key,
             }
-            if self._config.bearer_auth:
-                headers.setdefault("Authorization", f"Bearer {api_key}")
-            else:
-                headers["x-api-key"] = api_key
             url = f"{base_url.rstrip('/')}/messages"
 
             attempt = 0
@@ -343,7 +329,6 @@ def _build_messages_payload(
     model: str,
     system: str,
     messages: list[AgentMessage],
-    oauth_system_prompt: str | None = None,
     tools: list[AgentTool],
     max_tokens: int | None = None,
     thinking_budget_tokens: int | None = None,
@@ -357,14 +342,7 @@ def _build_messages_payload(
         "model": model,
         "max_tokens": resolved_max_tokens,
         "stream": True,
-        "system": (
-            [
-                {"type": "text", "text": oauth_system_prompt},
-                {"type": "text", "text": system},
-            ]
-            if oauth_system_prompt
-            else system
-        ),
+        "system": system,
         "messages": [_anthropic_message(message) for message in messages],
     }
     if thinking_mode == "disabled":

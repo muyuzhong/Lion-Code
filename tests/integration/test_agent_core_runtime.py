@@ -622,18 +622,17 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         previous_provider = agent.core_runtime.provider
         agent.configure_api(model="claude-sonnet-4-6")
         self.assertIs(agent.core_runtime.provider, previous_provider)
-        self.assertEqual(agent.set_thinking(True), "adaptive")
+        agent.set_thinking_level("high")
         await agent.close()
 
         state = await self._session_repository.load(agent.session_id)
         self.assertEqual(state.model, "claude-sonnet-4-6")
-        self.assertEqual(state.thinking_level, "adaptive")
+        self.assertEqual(state.thinking_level, "high")
 
         restored, _ = self._make_agent([], registry)
         self.assertTrue(await restored.restore_core_session(agent.session_id))
         self.assertEqual(restored.model, "claude-sonnet-4-6")
-        # Core 路径恢复采用 Tau 档位;旧 SDK 词汇 "adaptive" 被 coerce 为 "medium"。
-        self.assertEqual(restored.thinking_level, "medium")
+        self.assertEqual(restored.thinking_level, "high")
 
     async def test_legacy_json_is_migrated_without_deleting_source(self) -> None:
         session_id = "legacy01"

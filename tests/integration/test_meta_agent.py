@@ -380,7 +380,6 @@ def test_meta_agent_public_surface_is_feature_neutral() -> None:
         "run",
         "run_once",
         "session_id",
-        "set_thinking",
         "set_thinking_level",
         "steer",
         "subscribe",

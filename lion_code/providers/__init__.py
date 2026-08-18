@@ -9,7 +9,6 @@ from .anthropic import AnthropicProvider
 from .config import (
     AnthropicConfig,
     OpenAICompatibleConfig,
-    RuntimeProviderAuth,
 )
 from .events import (
     AssistantDoneEvent,
@@ -38,5 +37,4 @@ __all__ = [
     "OpenAICompatibleConfig",
     "OpenAICompatibleProvider",
     "RuntimeModelLimits",
-    "RuntimeProviderAuth",
 ]

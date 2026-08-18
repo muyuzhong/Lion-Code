@@ -13,12 +13,9 @@ from .events import (
     CompactionReason,
     CompactionStartEvent,
     LionSessionEvent,
-    ProviderChangedEvent,
     QueueUpdateEvent,
     SessionAgentEndEvent,
-    SessionChangedEvent,
     SessionOwnEvent,
-    ThinkingLevelChangedEvent,
 )
 from .ports import (
     CodingSessionBackend,
@@ -43,15 +40,12 @@ __all__ = [
     "ConversationPort",
     "LionCodingSession",
     "LionSessionEvent",
-    "ProviderChangedEvent",
     "QueueSnapshot",
     "QueueUpdateEvent",
     "SessionAgentEndEvent",
-    "SessionChangedEvent",
     "SessionOwnEvent",
     "SessionPort",
     "SettingsPort",
     "StreamingBehavior",
-    "ThinkingLevelChangedEvent",
     "UsagePort",
 ]
