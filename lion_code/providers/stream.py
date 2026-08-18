@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Mapping
+from typing import Any, Protocol
+
+import httpx
 
 from lion_code.core.cancellation import CancellationView
 from lion_code.core.messages import (
@@ -37,6 +40,8 @@ from .events import (
     ToolCallEndEvent,
     ToolCallStartEvent,
 )
+from .http_errors import provider_http_error_message
+from .retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 
 
 def _snapshot(message: AssistantMessage) -> AssistantMessage:
@@ -214,3 +219,155 @@ async def canonicalize_provider_stream(
         error.error_message = "Provider stream ended without a terminal event"
         error.usage = Usage()
         yield AssistantErrorEvent(reason="error", error=error)
+
+
+def parse_sse_line(line: str) -> str | None:
+    """Return the ``data:`` payload of an SSE line, or ``None`` otherwise."""
+    if not line.startswith("data:"):
+        return None
+    return line.removeprefix("data:").strip()
+
+def int_or_none(value: object) -> int | None:
+    """Return an int (excluding bool) or ``None``."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def is_transient_status(status_code: int) -> bool:
+    """Return whether an HTTP status is worth a provider retry."""
+    return status_code in {408, 409, 425, 429} or status_code >= 500
+
+
+def tool_build_finalize(
+    builders: Mapping[int, Any],
+) -> list[Any]:
+    """Finalize ordered tool builders into ``ToolCall`` objects."""
+    return [builder.build(index) for index, builder in sorted(builders.items())]
+
+
+class ProviderStreamParser(Protocol):
+    """Per-endpoint SSE handler driven by the shared streaming envelope."""
+
+    # True once any model output (text/thinking/tool args) has been emitted;
+    # the envelope uses it to decide whether a mid-stream drop is retryable.
+    emitted_content: bool
+    # True when the parser already emitted a terminal error event and the
+    # envelope must not call finalize().
+    fatal: bool
+
+    def feed(self, event: str) -> tuple[list[ProviderEvent], bool]:
+        """Consume one SSE ``data:`` payload, returning (events, should_stop)."""
+        ...
+
+    def finalize(self) -> list[ProviderEvent]:
+        """Return the trailing tool-call and response-end events."""
+        ...
+
+
+async def stream_provider_post(
+    *,
+    client: httpx.AsyncClient,
+    url: str,
+    payload: Mapping[str, Any],
+    headers: Mapping[str, str],
+    signal: CancellationView | None,
+    max_retries: int,
+    max_retry_delay_seconds: float,
+    provider_name: str,
+    model: str,
+    parser_factory: Callable[[], ProviderStreamParser],
+) -> AsyncIterator[ProviderEvent]:
+    """Run the shared streaming POST + retry envelope for a given endpoint.
+
+    The per-endpoint differences (SSE chunk handling and final-message
+    assembly) live in the ``ProviderStreamParser`` produced by
+    ``parser_factory``; everything else — HTTP, status/network retries,
+    cancellation, and the opening ``response_start`` event — is shared.
+    """
+    attempt = 0
+    while True:
+        parser = parser_factory()
+        try:
+            async with client.stream(
+                "POST", url, json=payload, headers=headers
+            ) as response:
+                if response.status_code >= 400:
+                    body = await response.aread()
+                    body_text = body.decode(errors="replace")
+                    if (
+                        attempt < max_retries
+                        and is_transient_status(response.status_code)
+                    ):
+                        delay = retry_delay_seconds(
+                            attempt,
+                            max_delay_seconds=max_retry_delay_seconds,
+                        )
+                        yield provider_retry_event(
+                            attempt=attempt,
+                            max_retries=max_retries,
+                            delay_seconds=delay,
+                            reason=f"HTTP {response.status_code}",
+                            data={
+                                "status_code": response.status_code,
+                                "body": body_text,
+                            },
+                        )
+                        attempt += 1
+                        if not await wait_for_retry(delay, signal=signal):
+                            return
+                        continue
+                    yield ProviderErrorEvent(
+                        message=provider_http_error_message(
+                            provider_name=provider_name,
+                            status_code=response.status_code,
+                            body=body_text,
+                            model=model,
+                        ),
+                        data={
+                            "status_code": response.status_code,
+                            "body": body_text,
+                            "attempts": attempt + 1,
+                        },
+                    )
+                    return
+
+                yield ProviderResponseStartEvent(model=model)
+                async for line in response.aiter_lines():
+                    if signal is not None and signal.is_cancelled():
+                        return
+                    event = parse_sse_line(line)
+                    if event is None:
+                        continue
+                    events, stop = parser.feed(event)
+                    for parser_event in events:
+                        yield parser_event
+                    if stop:
+                        break
+                if not parser.fatal:
+                    for parser_event in parser.finalize():
+                        yield parser_event
+                return
+        except httpx.HTTPError as exc:
+            if not parser.emitted_content and attempt < max_retries:
+                delay = retry_delay_seconds(
+                    attempt,
+                    max_delay_seconds=max_retry_delay_seconds,
+                )
+                yield provider_retry_event(
+                    attempt=attempt,
+                    max_retries=max_retries,
+                    delay_seconds=delay,
+                    reason="network error",
+                    data={
+                        "error": str(exc),
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                attempt += 1
+                if not await wait_for_retry(delay, signal=signal):
+                    return
+                continue
+            yield ProviderErrorEvent(
+                message=str(exc),
+                data={"attempts": attempt + 1},
+            )
+            return
