@@ -243,6 +243,10 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         await agent.chat("hello")
 
         self.assertEqual(agent.effective_window, 120_000)
+        agent.effective_window = 111_000
+        self.assertEqual(agent.effective_window, 111_000)
+        agent._last_stop_reason = "max_turns"
+        self.assertEqual(agent._last_stop_reason, "max_turns")
         self.assertEqual(fake.discovered_models, [agent.model])
 
     async def test_abort_during_core_setup_stops_before_provider(self) -> None:
