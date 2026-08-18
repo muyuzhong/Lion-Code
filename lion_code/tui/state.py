@@ -8,11 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from lion_code.application.skills import Skill
 from lion_code.core.messages import (
     AgentMessage,
     AssistantMessage,
-    BranchSummaryMessage,
-    CompactionSummaryMessage,
     CustomMessage,
     TextContent,
     ThinkingContent,
@@ -21,8 +20,8 @@ from lion_code.core.messages import (
 )
 from lion_code.core.tools import AgentToolResult, ToolCall
 from lion_code.core.types import JSONValue
+
 from .markup import CustomMessageMarkup, ToolCallMarkup, ToolResultMarkup
-from lion_code.application.skills import Skill
 from .themes import TranscriptRole
 
 ChatItemRole = TranscriptRole
@@ -309,18 +308,6 @@ class TuiState:
                     message.tool_name,
                     AgentToolResult(content=message.content, details=message.details),
                     message.is_error,
-                )
-            elif isinstance(message, BranchSummaryMessage):
-                self.add_item(
-                    "branch_summary",
-                    "Branch summary (Ctrl+O to expand)",
-                    tool_result_text=message.summary,
-                )
-            elif isinstance(message, CompactionSummaryMessage):
-                self.add_item(
-                    "compaction_summary",
-                    "Compaction summary (Ctrl+O to expand)",
-                    tool_result_text=message.summary,
                 )
 
     def add_assistant_message(

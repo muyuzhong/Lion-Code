@@ -31,9 +31,6 @@ from lion_code.core.loop import run_agent_loop
 from lion_code.core.messages import (
     AgentMessage,
     AssistantMessage,
-    BashExecutionMessage,
-    BranchSummaryMessage,
-    CompactionSummaryMessage,
     CustomMessage,
     ImageContent,
     TextContent,
