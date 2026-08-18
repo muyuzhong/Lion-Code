@@ -329,7 +329,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         await agent.chat("second")
 
         self.assertEqual(fake.call_count, 3)
-        self.assertEqual(agent.get_token_usage().turns, 2)
+        self.assertEqual(agent.token_usage().turns, 2)
         self.assertEqual(agent._last_stop_reason, "max_turns")
         self.assertTrue(agent._core_runtime.messages[-1].is_error)
         self.assertIn("Turn limit reached", agent._core_runtime.messages[-1].text)
@@ -453,7 +453,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertIn("first question", raw_message_texts)
         self.assertIn("first answer", raw_message_texts)
         self.assertEqual(agent._core_runtime.messages, state.messages)
-        usage = agent.get_token_usage()
+        usage = agent.token_usage()
         self.assertEqual(usage.last_prompt_tokens, 0)
         self.assertEqual(usage.input_tokens, 160_000)
         self.assertEqual(usage.responses, 3)
@@ -567,7 +567,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         second._usage.record_child_usage(9, 8)
         second._usage.record_turn()
         self.assertTrue(await second.restore_core_session(session_id))
-        self.assertEqual(second.get_token_usage(), UsageSnapshot())
+        self.assertEqual(second.token_usage(), UsageSnapshot())
         await second.chat("second question")
 
         self.assertEqual(second.session_id, session_id)
@@ -610,7 +610,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             self._session_repository.storage_for(agent.session_id).path.exists()
         )
         self.assertEqual(agent._core_runtime.messages, ())
-        self.assertEqual(agent.get_token_usage(), UsageSnapshot())
+        self.assertEqual(agent.token_usage(), UsageSnapshot())
         self.assertIs(agent._usage, usage)
         self.assertIsNot(agent._runtime_coordinator._usage_observer, usage_observer)
         self.assertIs(agent._runtime_coordinator._usage_observer._ledger, usage)
@@ -804,7 +804,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertIs(agent.tool_context.permission, permission)
         self.assertEqual(permission.mode, "default")
         self.assertEqual(agent.permission_mode, "default")
-        usage = agent.get_token_usage()
+        usage = agent.token_usage()
         self.assertEqual((usage.input_tokens, usage.output_tokens), (18, 5))
         self.assertEqual(usage.responses, 2)
         self.assertEqual(usage.last_prompt_tokens, 10)
@@ -1024,7 +1024,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         await agent.chat("second")
 
-        self.assertEqual(agent.get_token_usage().input_tokens, 2_000)
+        self.assertEqual(agent.token_usage().input_tokens, 2_000)
         self.assertEqual(agent._last_stop_reason, "max_cost")
         self.assertEqual(new_fake.call_count, 1)
         self.assertTrue(agent._core_runtime.messages[-1].is_error)

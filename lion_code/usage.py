@@ -18,13 +18,11 @@ class UsageSnapshot:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
-    reasoning_tokens: int = 0
     turns: int = 0
     responses: int = 0
     last_prompt_tokens: int = 0
     last_response_at: float | None = None
     cost_usd: float = 0.0
-    reported_cost_usd: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,8 +72,6 @@ class UsageLedger:
         "_last_prompt_tokens",
         "_last_response_at",
         "_output_tokens",
-        "_reasoning_tokens",
-        "_reported_cost_usd",
         "_responses",
         "_turns",
     )
@@ -85,12 +81,10 @@ class UsageLedger:
         self._output_tokens = 0
         self._cache_read_tokens = 0
         self._cache_write_tokens = 0
-        self._reasoning_tokens = 0
         self._turns = 0
         self._responses = 0
         self._last_prompt_tokens = 0
         self._last_response_at: float | None = None
-        self._reported_cost_usd = 0.0
 
     def record_model_usage(
         self,
@@ -104,8 +98,6 @@ class UsageLedger:
         self._output_tokens += usage.output
         self._cache_read_tokens += usage.cache_read
         self._cache_write_tokens += usage.cache_write
-        self._reasoning_tokens += usage.reasoning or 0
-        self._reported_cost_usd += usage.cost.total
         self._responses += 1
         self._last_prompt_tokens = usage.total_tokens or (
             usage.input + usage.cache_read + usage.cache_write + usage.output
@@ -130,12 +122,10 @@ class UsageLedger:
         self._output_tokens = 0
         self._cache_read_tokens = 0
         self._cache_write_tokens = 0
-        self._reasoning_tokens = 0
         self._turns = 0
         self._responses = 0
         self._last_prompt_tokens = 0
         self._last_response_at = None
-        self._reported_cost_usd = 0.0
 
     def reset_context_tracking(self) -> None:
         """只清空上下文窗口 prompt 跟踪，保留累计 usage。"""
@@ -150,7 +140,6 @@ class UsageLedger:
             output_tokens=self._output_tokens,
             cache_read_tokens=self._cache_read_tokens,
             cache_write_tokens=self._cache_write_tokens,
-            reasoning_tokens=self._reasoning_tokens,
             turns=self._turns,
             responses=self._responses,
             last_prompt_tokens=self._last_prompt_tokens,
@@ -162,5 +151,4 @@ class UsageLedger:
                 + self._output_tokens * 15
             )
             / _MILLION,
-            reported_cost_usd=self._reported_cost_usd,
         )
