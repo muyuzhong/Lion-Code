@@ -90,7 +90,6 @@ async def run_agent_loop(
     after_tool_call: AfterToolCall | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run the provider/tool loop and emit Pi-compatible agent events."""
-    new_messages = list(prompts)
     if prompts:
         messages.extend(prompts)
 
@@ -103,11 +102,10 @@ async def run_agent_loop(
     if max_turns is not None and max_turns < 1:
         error = _error_message(model, "max_turns must be at least 1")
         messages.append(error)
-        new_messages.append(error)
         yield MessageStartEvent(message=error)
         yield MessageEndEvent(message=error)
         yield TurnEndEvent(message=error)
-        yield AgentEndEvent(messages=new_messages)
+        yield AgentEndEvent()
         return
 
     turn = 1
@@ -123,7 +121,6 @@ async def run_agent_loop(
 
             for message in pending:
                 messages.append(message)
-                new_messages.append(message)
                 yield MessageStartEvent(message=message)
                 yield MessageEndEvent(message=message)
             pending = ()
@@ -133,11 +130,10 @@ async def run_agent_loop(
                     model, f"Agent stopped after max_turns={max_turns}"
                 )
                 messages.append(error)
-                new_messages.append(error)
                 yield MessageStartEvent(message=error)
                 yield MessageEndEvent(message=error)
                 yield TurnEndEvent(message=error)
-                yield AgentEndEvent(messages=new_messages)
+                yield AgentEndEvent()
                 return
 
             # Resolve tools per turn so dynamically discovered, lazily activated,
@@ -181,11 +177,10 @@ async def run_agent_loop(
                 yield MessageEndEvent(message=assistant)
 
             messages.append(assistant)
-            new_messages.append(assistant)
             if assistant.stop_reason in {"error", "aborted"}:
                 yield _TERMINAL_EVENT_TYPES[assistant.stop_reason](message=assistant)
                 yield TurnEndEvent(message=assistant)
-                yield AgentEndEvent(messages=new_messages)
+                yield AgentEndEvent()
                 return
 
             tool_results: list[ToolResultMessage] = []
@@ -208,11 +203,10 @@ async def run_agent_loop(
                         )
                         tool_results.append(message)
                         messages.append(message)
-                        new_messages.append(message)
                         yield MessageStartEvent(message=message)
                         yield MessageEndEvent(message=message)
                     yield TurnEndEvent(message=assistant, tool_results=tool_results)
-                    yield AgentEndEvent(messages=new_messages)
+                    yield AgentEndEvent()
                     return
             terminate_flags: list[bool] = []
             for call_batch in _tool_call_batches(calls, tool_by_name):
@@ -232,7 +226,6 @@ async def run_agent_loop(
                         ):
                             tool_results.append(event.message)
                             messages.append(event.message)
-                            new_messages.append(event.message)
                     continue
 
                 for call in call_batch:
@@ -256,7 +249,6 @@ async def run_agent_loop(
                     ):
                         tool_results.append(event.message)
                         messages.append(event.message)
-                        new_messages.append(event.message)
 
             has_more_tools = bool(calls) and not (
                 len(terminate_flags) == len(calls) and all(terminate_flags)
@@ -272,7 +264,7 @@ async def run_agent_loop(
             continue
         break
 
-    yield AgentEndEvent(messages=new_messages)
+    yield AgentEndEvent()
 
 
 def _tool_call_batches(

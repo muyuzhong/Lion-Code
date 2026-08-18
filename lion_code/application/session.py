@@ -477,7 +477,6 @@ class LionCodingSession:
     ) -> LionSessionEvent:
         if isinstance(event, AgentEndEvent):
             return SessionAgentEndEvent(
-                messages=event.messages,
                 will_retry=will_retry,
             )
         return event

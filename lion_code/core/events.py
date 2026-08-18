@@ -18,7 +18,6 @@ class AgentStartEvent(WireModel):
 
 class AgentEndEvent(WireModel):
     type: Literal["agent_end"] = "agent_end"
-    messages: list[AgentMessage] = Field(default_factory=list)
 
 
 class TurnStartEvent(WireModel):
