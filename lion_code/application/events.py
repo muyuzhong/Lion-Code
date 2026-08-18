@@ -22,7 +22,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from lion_code.core.events import AgentEvent
-from lion_code.core.messages import AgentMessage, WireModel
+from lion_code.core.messages import WireModel
 
 type CompactionReason = Literal["manual", "threshold", "overflow"]
 type SessionChangeReason = Literal["new", "resume", "clear"]
@@ -32,7 +32,6 @@ class SessionAgentEndEvent(WireModel):
     """包装底层 AgentEnd:一次 Agent 循环结束,但本轮可能尚未归位。"""
 
     type: Literal["session_agent_end"] = "session_agent_end"
-    messages: list[AgentMessage] = Field(default_factory=list)
     will_retry: bool = False
 
 

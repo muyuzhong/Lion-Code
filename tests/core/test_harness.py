@@ -17,6 +17,7 @@ from lion_code.core import (
     ToolCall,
     ToolExecutionEndEvent,
     ToolExecutionUpdateEvent,
+    TurnEndEvent,
 )
 from lion_code.core.provider_events import AssistantDoneEvent
 
@@ -522,6 +523,82 @@ class TestStructuredToolError(unittest.IsolatedAsyncioTestCase):
         messages = harness.messages
         self.assertTrue(messages[2].is_error)
         self.assertEqual(messages[2].text, "denied by policy")
+
+
+
+class TestAgentEndTerminalPaths(unittest.IsolatedAsyncioTestCase):
+    async def test_max_turns_zero_emits_agent_end(self) -> None:
+        harness = AgentHarness(
+            AgentHarnessConfig(
+                provider=FakeProvider([]),
+                model="fake",
+                system="test",
+                max_turns=0,
+            )
+        )
+
+        events = [event async for event in harness.prompt("hello")]
+
+        self.assertEqual(
+            sum(isinstance(event, AgentEndEvent) for event in events), 1
+        )
+
+    async def test_max_turns_exceeded_after_steering_emits_agent_end(self) -> None:
+        async def execute(tool_call_id, arguments, signal, on_update):
+            return AgentToolResult(
+                content=[TextContent(text="ok")],
+                details={},
+            )
+
+        provider = FakeProvider(
+            [
+                AssistantDoneEvent(
+                    reason="toolUse",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[ToolCall(id="c1", name="echo", arguments={})],
+                        stop_reason="toolUse",
+                    ),
+                ),
+                AssistantDoneEvent(
+                    reason="stop",
+                    message=AssistantMessage(
+                        model="fake",
+                        content=[TextContent(text="done")],
+                        stop_reason="stop",
+                    ),
+                ),
+            ]
+        )
+        harness = AgentHarness(
+            AgentHarnessConfig(
+                provider=provider,
+                model="fake",
+                system="test",
+                tools=[
+                    AgentTool(
+                        name="echo",
+                        label="Echo",
+                        description="echo",
+                        parameters={},
+                        execute_fn=execute,
+                    )
+                ],
+                max_turns=1,
+            )
+        )
+
+        events: list = []
+        first_turn_end = False
+        async for event in harness.prompt("hello"):
+            events.append(event)
+            if isinstance(event, TurnEndEvent) and not first_turn_end:
+                first_turn_end = True
+                harness.steer("next")
+
+        self.assertEqual(
+            sum(isinstance(event, AgentEndEvent) for event in events), 1
+        )
 
 
 if __name__ == "__main__":

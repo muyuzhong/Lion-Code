@@ -40,7 +40,7 @@ def _run_events(message: AssistantMessage) -> list:
     return [
         AgentStartEvent(),
         MessageEndEvent(message=message),
-        AgentEndEvent(messages=[message]),
+        AgentEndEvent(),
     ]
 
 
