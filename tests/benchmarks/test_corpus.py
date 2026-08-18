@@ -16,11 +16,11 @@ from benchmarks.agent_e2e.corpus import (
     bundled_catalog,
     bundled_private_evidence,
     run_historical_preflight,
+    validate_active_resources_exist,
     validate_bundled_corpus,
     validate_corpus,
 )
 from benchmarks.agent_e2e.models import Catalog, TaskSplit
-
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _PUBLIC_CATALOG_PATH = (
@@ -141,3 +141,11 @@ class TestHistoricalReplayCorpus(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestActiveResourceExistenceGate(unittest.TestCase):
+    def test_v2_catalog_rejects_missing_validation_file(self) -> None:
+        catalog = bundled_catalog()
+        stale = catalog.model_copy(update={"catalog_version": "v2"})
+        with self.assertRaisesRegex(CorpusAdmissionError, "缺失文件"):
+            validate_active_resources_exist(stale)
