@@ -77,8 +77,6 @@ class LionTool:
     parameters: Mapping[str, JSONValue]
     execute_fn: ToolExecutor
     capabilities: ToolCapabilities = ToolCapabilities()
-    prompt_snippet: str | None = None
-    prompt_guidelines: tuple[str, ...] = ()
     execution_mode: Literal["sequential", "parallel"] = "sequential"
 
     async def execute(

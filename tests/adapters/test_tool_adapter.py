@@ -67,10 +67,8 @@ class TestToolMetadataMapping(unittest.TestCase):
         core_tool = adapt_lion_tool(lion_tool, runtime)
 
         self.assertEqual(core_tool.name, "echo")
-        self.assertEqual(core_tool.label, "echo")
         self.assertEqual(core_tool.description, "echo")
         self.assertEqual(core_tool.parameters, lion_tool.parameters)
-        self.assertEqual(core_tool.prompt_snippet, lion_tool.prompt_snippet)
 
 
 class TestResultMapping(unittest.IsolatedAsyncioTestCase):

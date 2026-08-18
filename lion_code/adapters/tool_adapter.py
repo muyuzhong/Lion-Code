@@ -84,12 +84,9 @@ def adapt_lion_tool(tool: LionTool, runtime: ToolRuntime) -> AgentTool:
 
     return AgentTool(
         name=tool.name,
-        label=tool.label,
         description=tool.description,
         parameters=tool.parameters,
         execute_fn=execute,
-        prompt_snippet=tool.prompt_snippet,
-        prompt_guidelines=tool.prompt_guidelines,
         execution_mode=execution_mode,
     )
 

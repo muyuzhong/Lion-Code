@@ -28,7 +28,6 @@ def _noop_tool() -> AgentTool:
 
     return AgentTool(
         name="noop",
-        label="Noop",
         description="no-op tool",
         parameters={},
         execute_fn=execute,
@@ -144,7 +143,6 @@ class TestHarnessCancel(unittest.IsolatedAsyncioTestCase):
                 tools=[
                     AgentTool(
                         name="capture",
-                        label="Capture",
                         description="capture cancellation signal",
                         parameters={},
                         execute_fn=execute,

@@ -41,8 +41,8 @@ class ChatItem:
     text: str
     tool_call_id: str | None = None
     tool_result_text: str | None = None
-    # The raw result object, kept alongside the formatted text so the tool's
-    # `render_result` (resolved lazily, like `render_call`) can format it.
+    # The raw result object, kept alongside the formatted text so the
+    # tool-result renderer can format it.
     tool_result: AgentToolResult | None = None
     update_text: str | None = None
     tool_name: str | None = None
@@ -120,7 +120,7 @@ class TuiState:
 
         Resolved lazily at render time (like custom markup) so tool calls
         restored before the extension runtime connects still pick up their
-        tool's `render_call` on the next redraw. ``None`` means "no renderer"
+        tool-call renderer on the next redraw. ``None`` means "no renderer"
         and the caller falls back to the generic ``item.text``.
         """
         if item.role != "tool":
@@ -135,11 +135,11 @@ class TuiState:
         return line
 
     def resolve_tool_result(self, item: ChatItem, *, expanded: bool) -> str | None:
-        """Render a tool item's result via its tool's `render_result`, or ``None``.
+        """Render a tool item's result via the tool-result renderer, or ``None``.
 
         Resolved lazily at render time (like `resolve_tool_invocation`) so
         results restored before the extension runtime connects still pick up
-        their tool's `render_result` on the next redraw. ``None`` means "no
+        their tool-result renderer on the next redraw. ``None`` means "no
         renderer" and the caller falls back to the generic result block.
         """
         if item.role != "tool" or item.tool_result is None or self.tool_result_renderer is None:

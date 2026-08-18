@@ -1238,7 +1238,7 @@ def _transcript_plain_body_text(
         return Text(text, style=body_style, overflow="fold", no_wrap=False)
 
     if result_markup is not None:
-        # The tool's `render_result` markup replaces the generic result block;
+        # The tool-result renderer markup replaces the generic result block;
         # the invocation line keeps its usual status-accented rendering.
         invocation_text = _render_transcript_tool_invocation(
             invocation if invocation else item.text,
