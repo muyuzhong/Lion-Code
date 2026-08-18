@@ -1,12 +1,4 @@
-"""OpenAI-compatible chat completions provider.
-
-Most OpenAI-compatible models are served over `/chat/completions`. Newer
-reasoning models (e.g. ``gpt-5.5``/``gpt-5.4`` and the ``*-codex`` family)
-reject the combination of function tools and ``reasoning_effort`` on that
-endpoint and require ``/v1/responses`` instead. This adapter routes those
-models to the Responses API at request time while leaving every other model on
-the original chat-completions path unchanged.
-"""
+"""OpenAI-compatible chat completions provider."""
 
 from __future__ import annotations
 
@@ -46,24 +38,9 @@ from .http_errors import provider_http_error_message
 from .retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from .stream import canonicalize_provider_stream
 
-# Models that reject function tools + reasoning_effort on /chat/completions and
-# must use the /v1/responses endpoint instead.
-_RESPONSES_ONLY_PREFIXES: tuple[str, ...] = ("gpt-5.5", "gpt-5.4")
-
-
-def _use_responses_api(model: str) -> bool:
-    """Return whether ``model`` must be served over the Responses API."""
-    normalized = model.strip().lower()
-    if "codex" in normalized:
-        return True
-    return any(normalized.startswith(prefix) for prefix in _RESPONSES_ONLY_PREFIXES)
-
 
 class OpenAICompatibleProvider:
-    """Provider adapter for OpenAI-compatible `/chat/completions` APIs.
-
-    Models that require it are transparently served over `/v1/responses`.
-    """
+    """Provider adapter for OpenAI-compatible `/chat/completions` APIs."""
 
     def __init__(
         self,
@@ -91,7 +68,7 @@ class OpenAICompatibleProvider:
         signal: CancellationView | None = None,
     ) -> AsyncIterator[AssistantMessageEvent]:
         """Stream one response as Pi-compatible assistant message events."""
-        raw = self._stream_provider_events(
+        raw = self._stream_chat_completions(
             model=model, system=system, messages=messages, tools=tools, signal=signal
         )
         return canonicalize_provider_stream(
@@ -99,32 +76,6 @@ class OpenAICompatibleProvider:
             api=self._config.api,
             provider=getattr(self._config, "provider_name", "openai-compatible"),
             model=model,
-            signal=signal,
-        )
-
-    def _stream_provider_events(
-        self,
-        *,
-        model: str,
-        system: str,
-        messages: list[AgentMessage],
-        tools: list[AgentTool],
-        signal: CancellationView | None = None,
-    ) -> AsyncIterator[ProviderEvent]:
-        """Stream one model response as provider-neutral events."""
-        if self._config.api == "openai-responses" or _use_responses_api(model):
-            return self._stream_responses(
-                model=model,
-                system=system,
-                messages=messages,
-                tools=tools,
-                signal=signal,
-            )
-        return self._stream_chat_completions(
-            model=model,
-            system=system,
-            messages=messages,
-            tools=tools,
             signal=signal,
         )
 
@@ -155,32 +106,6 @@ class OpenAICompatibleProvider:
             url=f"{self._config.base_url.rstrip('/')}/chat/completions",
             payload=payload,
             parser_factory=_ChatStreamParser,
-            signal=signal,
-        )
-
-    def _stream_responses(
-        self,
-        *,
-        model: str,
-        system: str,
-        messages: list[AgentMessage],
-        tools: list[AgentTool],
-        signal: CancellationView | None = None,
-    ) -> AsyncIterator[ProviderEvent]:
-        """Stream one `/v1/responses` response as provider-neutral events."""
-        payload = _build_responses_payload(
-            model=model,
-            system=system,
-            messages=messages,
-            tools=tools,
-            reasoning_effort=self._config.reasoning_effort,
-            max_tokens=self._config.max_tokens,
-        )
-        return self._stream(
-            model=model,
-            url=f"{self._config.base_url.rstrip('/')}/responses",
-            payload=payload,
-            parser_factory=_ResponsesStreamParser,
             signal=signal,
         )
 
@@ -440,132 +365,6 @@ class _ChatStreamParser:
         return events
 
 
-class _ResponsesStreamParser:
-    """Parser for OpenAI `/v1/responses` SSE events."""
-
-    def __init__(self) -> None:
-        self.emitted_content = False
-        self.fatal = False
-        self._content_parts: list[str] = []
-        self._thinking_parts: list[str] = []
-        self._reasoning_items: dict[str, dict[str, JSONValue]] = {}
-        self._tool_call_builders: dict[str, _ResponsesToolCallBuilder] = {}
-        self._status: str | None = None
-        self._usage: Usage | None = None
-
-    def feed(self, event: str) -> tuple[list[ProviderEvent], bool]:
-        # The Responses API has no [DONE] sentinel; it ends with a terminal
-        # event (completed/incomplete/failed) handled below.
-        if event == "[DONE]":
-            return [], False
-
-        chunk = _loads_object(event)
-        if chunk is None:
-            return [], False
-
-        chunk_type = chunk.get("type")
-        if not isinstance(chunk_type, str):
-            return [], False
-
-        if chunk_type in ("response.output_text.delta", "response.refusal.delta"):
-            delta = chunk.get("delta")
-            if isinstance(delta, str) and delta:
-                self.emitted_content = True
-                self._content_parts.append(delta)
-                return [ProviderTextDeltaEvent(delta=delta)], False
-
-        elif chunk_type in (
-            "response.reasoning_summary_text.delta",
-            "response.reasoning_text.delta",
-        ):
-            delta = chunk.get("delta")
-            if isinstance(delta, str) and delta:
-                self.emitted_content = True
-                self._thinking_parts.append(delta)
-                return [ProviderThinkingDeltaEvent(delta=delta)], False
-
-        elif chunk_type == "response.output_item.added":
-            item = chunk.get("item")
-            _register_reasoning_item(self._reasoning_items, item)
-            _register_responses_item(
-                self._tool_call_builders,
-                item,
-                output_index=chunk.get("output_index"),
-            )
-
-        elif chunk_type == "response.function_call_arguments.delta":
-            item_id = chunk.get("item_id")
-            if isinstance(item_id, str):
-                builder = self._tool_call_builders.setdefault(item_id, _ResponsesToolCallBuilder())
-                builder.add_arguments_delta(chunk.get("delta"))
-                self.emitted_content = True
-
-        elif chunk_type == "response.function_call_arguments.done":
-            item_id = chunk.get("item_id")
-            if isinstance(item_id, str):
-                builder = self._tool_call_builders.setdefault(item_id, _ResponsesToolCallBuilder())
-                builder.set_final(arguments=chunk.get("arguments"))
-
-        elif chunk_type == "response.output_item.done":
-            item = chunk.get("item")
-            _register_reasoning_item(self._reasoning_items, item)
-            _finalize_responses_item(
-                self._tool_call_builders,
-                item,
-                output_index=chunk.get("output_index"),
-            )
-
-        elif chunk_type in ("response.completed", "response.incomplete"):
-            self._status = _responses_finish_reason(chunk)
-            self._usage = _usage_from_responses_event(chunk) or self._usage
-            return [], True
-
-        elif chunk_type == "response.failed":
-            self.fatal = True
-            return [_responses_failure_event(chunk)], True
-
-        elif chunk_type == "error":
-            self.fatal = True
-            return [
-                ProviderErrorEvent(message=_responses_error_message(chunk), data={"event": chunk})
-            ], True
-
-        return [], False
-
-    def finalize(self) -> list[ProviderEvent]:
-        tool_calls = [
-            builder.build(index)
-            for index, builder in enumerate(_ordered_builders(self._tool_call_builders))
-        ]
-        events: list[ProviderEvent] = [
-            ProviderToolCallEvent(tool_call=tool_call) for tool_call in tool_calls
-        ]
-        finish_reason = _normalize_finish_reason(self._status, has_tool_calls=bool(tool_calls))
-        content = assistant_content("".join(self._content_parts), tool_calls)
-        if self._thinking_parts:
-            content.insert(
-                0,
-                ThinkingContent(
-                    thinking="".join(self._thinking_parts),
-                    thinking_signature=(
-                        dumps(next(iter(self._reasoning_items.values())))
-                        if self._reasoning_items
-                        else None
-                    ),
-                ),
-            )
-        events.append(
-            ProviderResponseEndEvent(
-                message=AssistantMessage(
-                    content=content,
-                    usage=self._usage or Usage(),
-                ),
-                finish_reason=finish_reason,
-            )
-        )
-        return events
-
-
 class _ToolCallBuilder:
     def __init__(self) -> None:
         self.id = ""
@@ -597,60 +396,6 @@ class _ToolCallBuilder:
 
         return ToolCall(
             id=self.id or f"tool-call-{index}",
-            name=self.name,
-            arguments=arguments,
-        )
-
-
-class _ResponsesToolCallBuilder:
-    """Accumulates a streamed Responses-API ``function_call`` output item."""
-
-    def __init__(
-        self,
-        *,
-        call_id: str = "",
-        name: str = "",
-        output_index: int = 0,
-    ) -> None:
-        self.call_id = call_id
-        self.name = name
-        self.output_index = output_index
-        self.arguments_parts: list[str] = []
-        self.arguments_final: str | None = None
-
-    def add_arguments_delta(self, delta: object) -> None:
-        if isinstance(delta, str):
-            self.arguments_parts.append(delta)
-
-    def set_final(
-        self,
-        *,
-        call_id: str | None = None,
-        name: str | None = None,
-        arguments: object = None,
-        output_index: int | None = None,
-    ) -> None:
-        if call_id:
-            self.call_id = call_id
-        if name:
-            self.name = name
-        if isinstance(arguments, str):
-            self.arguments_final = arguments
-        if output_index is not None:
-            self.output_index = output_index
-
-    def build(self, index: int) -> ToolCall:
-        arguments_text = (
-            self.arguments_final
-            if self.arguments_final is not None
-            else "".join(self.arguments_parts)
-        )
-        arguments = _loads_object(arguments_text) if arguments_text else {}
-        if arguments is None:
-            arguments = {"_raw_arguments": arguments_text}
-
-        return ToolCall(
-            id=self.call_id or f"tool-call-{index}",
             name=self.name,
             arguments=arguments,
         )
@@ -749,201 +494,6 @@ def _apply_chat_reasoning(
 
 def _string_compat(value: object, *, default: str) -> str:
     return value if isinstance(value, str) and value else default
-
-
-def _build_responses_payload(
-    *,
-    model: str,
-    system: str,
-    messages: list[AgentMessage],
-    tools: list[AgentTool],
-    reasoning_effort: str | None = None,
-    max_tokens: int | None = None,
-) -> dict[str, JSONValue]:
-    payload: dict[str, JSONValue] = {
-        "model": model,
-        "stream": True,
-        # Stay stateless: the full transcript is resent every turn, so there is
-        # no need for server-side retention. ``store: false`` also keeps the
-        # path usable for zero-data-retention orgs, which reject ``store: true``.
-        "store": False,
-        "instructions": system,
-        "input": _messages_to_responses_input(messages),
-    }
-    if max_tokens is not None:
-        payload["max_output_tokens"] = max_tokens
-    effort = _normalize_responses_effort(reasoning_effort)
-    if effort is not None:
-        # ``summary: auto`` streams ``response.reasoning_summary_text.delta``
-        # events so the agent's thinking is visible, mirroring the reasoning
-        # deltas surfaced on the chat-completions path.
-        payload["reasoning"] = {"effort": effort, "summary": "auto"}
-    if tools:
-        payload["tools"] = [_tool_to_responses(tool) for tool in tools]
-    return payload
-
-
-def _normalize_responses_effort(reasoning_effort: str | None) -> str | None:
-    """Map an internal reasoning level to a Responses-API effort, or drop it."""
-    if reasoning_effort is None:
-        return None
-    normalized = reasoning_effort.strip().lower()
-    if normalized in ("", "none"):
-        return None
-    return normalized
-
-
-def _messages_to_responses_input(
-    messages: list[AgentMessage],
-) -> list[JSONValue]:
-    items: list[JSONValue] = []
-    for message in messages:
-        if isinstance(message, UserMessage):
-            items.append({"role": "user", "content": message.text})
-        elif isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, ThinkingContent) and block.thinking_signature:
-                    try:
-                        reasoning_item = loads(block.thinking_signature)
-                    except (TypeError, ValueError):
-                        reasoning_item = None
-                    if isinstance(reasoning_item, dict):
-                        items.append(reasoning_item)
-            if message.text:
-                items.append({"role": "assistant", "content": message.text})
-            for tool_call in message.tool_calls:
-                items.append(
-                    {
-                        "type": "function_call",
-                        "call_id": tool_call.id,
-                        "name": tool_call.name,
-                        "arguments": dumps(tool_call.arguments),
-                    }
-                )
-        elif isinstance(message, ToolResultMessage):
-            items.append(
-                {
-                    "type": "function_call_output",
-                    "call_id": message.tool_call_id,
-                    "output": message.text,
-                }
-            )
-    return items
-
-
-def _tool_to_responses(tool: AgentTool) -> dict[str, JSONValue]:
-    return {
-        "type": "function",
-        "name": tool.name,
-        "description": tool.description,
-        "parameters": dict(tool.input_schema),
-    }
-
-
-def _register_reasoning_item(
-    items: dict[str, dict[str, JSONValue]],
-    item: object,
-) -> None:
-    if not isinstance(item, Mapping) or item.get("type") != "reasoning":
-        return
-    item_id = item.get("id")
-    if isinstance(item_id, str):
-        items[item_id] = dict(item)
-
-
-def _register_responses_item(
-    builders: dict[str, _ResponsesToolCallBuilder],
-    item: object,
-    *,
-    output_index: object,
-) -> None:
-    if not isinstance(item, Mapping) or item.get("type") != "function_call":
-        return
-    item_id = item.get("id")
-    if not isinstance(item_id, str):
-        return
-    raw_arguments = item.get("arguments")
-    builder = builders.setdefault(item_id, _ResponsesToolCallBuilder())
-    builder.set_final(
-        call_id=_str_or_none(item.get("call_id")),
-        name=_str_or_none(item.get("name")),
-        arguments=raw_arguments if isinstance(raw_arguments, str) and raw_arguments else None,
-        output_index=_int_or_none(output_index),
-    )
-
-
-def _finalize_responses_item(
-    builders: dict[str, _ResponsesToolCallBuilder],
-    item: object,
-    *,
-    output_index: object,
-) -> None:
-    if not isinstance(item, Mapping) or item.get("type") != "function_call":
-        return
-    item_id = item.get("id")
-    if not isinstance(item_id, str):
-        return
-    builder = builders.setdefault(item_id, _ResponsesToolCallBuilder())
-    builder.set_final(
-        call_id=_str_or_none(item.get("call_id")),
-        name=_str_or_none(item.get("name")),
-        arguments=item.get("arguments"),
-        output_index=_int_or_none(output_index),
-    )
-
-
-def _ordered_builders(
-    builders: dict[str, _ResponsesToolCallBuilder],
-) -> list[_ResponsesToolCallBuilder]:
-    return [
-        builder for _, builder in sorted(builders.items(), key=lambda pair: pair[1].output_index)
-    ]
-
-
-def _responses_finish_reason(chunk: Mapping[str, Any]) -> str | None:
-    response = chunk.get("response")
-    if isinstance(response, Mapping):
-        status = response.get("status")
-        if isinstance(status, str):
-            return status
-    return None
-
-
-def _normalize_finish_reason(status: str | None, *, has_tool_calls: bool) -> str:
-    """Map a Responses-API status to chat-completions-style finish reasons."""
-    if has_tool_calls:
-        return "tool_calls"
-    if status == "incomplete":
-        return "length"
-    return "stop"
-
-
-def _responses_failure_event(chunk: Mapping[str, Any]) -> ProviderErrorEvent:
-    message = "Provider response failed"
-    response = chunk.get("response")
-    if isinstance(response, Mapping):
-        error = response.get("error")
-        if isinstance(error, Mapping):
-            error_message = error.get("message")
-            if isinstance(error_message, str) and error_message:
-                message = error_message
-    return ProviderErrorEvent(message=message, data={"event": dict(chunk)})
-
-
-def _responses_error_message(chunk: Mapping[str, Any]) -> str:
-    message = chunk.get("message")
-    if isinstance(message, str) and message:
-        return message
-    error = chunk.get("error")
-    if isinstance(error, Mapping):
-        nested = error.get("message")
-        if isinstance(nested, str) and nested:
-            return nested
-    return "Provider stream error"
-
-
-def _str_or_none(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
 
 
 def _system_message(system: str) -> dict[str, JSONValue]:
@@ -1068,44 +618,6 @@ def _parse_chunk_usage(raw: Mapping[str, Any]) -> Usage:
         cache_write=cache_write,
         reasoning=reasoning,
         total_tokens=fresh_input + output + cache_read + cache_write,
-    )
-
-
-def _usage_from_responses_event(chunk: Mapping[str, Any]) -> Usage | None:
-    """Parse billed usage from a `/v1/responses` terminal event.
-
-    Mirrors the Codex adapter's ``_usage_from_response``: ``cached_tokens`` are
-    cache reads subtracted from ``input_tokens`` to leave fresh input, the
-    Responses API does not report cache writes (``cache_write`` stays 0), and
-    cost is left unset because Tau has no per-model pricing table.
-    """
-    response = chunk.get("response")
-    if not isinstance(response, Mapping):
-        return None
-    raw = response.get("usage")
-    if not isinstance(raw, Mapping):
-        return None
-    input_details = raw.get("input_tokens_details")
-    cache_read = (
-        _int_or_zero(input_details.get("cached_tokens"))
-        if isinstance(input_details, Mapping)
-        else 0
-    )
-    output_details = raw.get("output_tokens_details")
-    # Leave reasoning None (not 0) when the provider reports no breakdown,
-    # honoring the "None = not reported" contract on Usage.
-    reasoning = (
-        _int_or_zero(output_details.get("reasoning_tokens"))
-        if isinstance(output_details, Mapping)
-        else None
-    )
-    return Usage(
-        input=max(0, _int_or_zero(raw.get("input_tokens")) - cache_read),
-        output=_int_or_zero(raw.get("output_tokens")),
-        cache_read=cache_read,
-        cache_write=0,
-        reasoning=reasoning,
-        total_tokens=_int_or_zero(raw.get("total_tokens")),
     )
 
 
