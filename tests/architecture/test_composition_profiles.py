@@ -140,7 +140,7 @@ def test_minimal_graph_only_contains_caller_tools(tmp_path, monkeypatch) -> None
         "caller_a",
         "caller_b",
     }
-    assert composition.capability_registry.names == ()
+    assert composition.capability_registry.tool_sources == ()
     assert composition.plan is None
     assert composition.subagent_factory is None
     assert composition.subagent_executor is None
@@ -173,7 +173,7 @@ def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypat
     names = {tool.name for tool in composition.tool_registry.all_tools()}
     assert BUILTIN_TOOL_NAMES <= names
     assert {"tool_search", "extra_tool"} <= names
-    assert composition.capability_registry.names == ()
+    assert composition.capability_registry.tool_sources == ()
     assert composition.skill_runtime is None
     assert composition.plan is None
     assert composition.permission_policy is strategy
@@ -202,7 +202,7 @@ def test_coding_graph_never_composes_full_capabilities(tmp_path, monkeypatch):
     ):
         composition = build_agent_composition(profile)
 
-    assert composition.capability_registry.names == ()
+    assert composition.capability_registry.tool_sources == ()
     assert composition.skill_runtime is None
     assert composition.subagent_executor is None
     assert composition.subagent_factory is None
@@ -239,12 +239,8 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
     ):
         composition = build_agent_composition(profile)
 
-    assert set(composition.capability_registry.names) >= {
-        "skill",
-        "subagent",
-        "plan",
-        "example-extension",
-    }
+    assert len(composition.capability_registry.tool_sources) == 3
+    assert len(composition.capability_registry.prompt_layers) == 2
     assert composition.plan is not None
     assert composition.subagent_factory is not None
     assert composition.skill_runtime is not None

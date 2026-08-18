@@ -44,12 +44,6 @@ class _FullCapability:
         self._events.append(f"{self._name}:render")
         return f"{self._name} prompt"
 
-    async def before_turn(self, _user_message: str) -> None:
-        self._events.append(f"{self._name}:before")
-
-    async def after_turn(self) -> None:
-        self._events.append(f"{self._name}:after")
-
     async def on_new_session(self) -> None:
         self._events.append(f"{self._name}:new")
 
@@ -60,22 +54,18 @@ class _FullCapability:
         self._events.append(f"{self._name}:close")
 
 
-def _full_spec(
-    capability: _FullCapability, *, requires: frozenset[str] = frozenset()
-) -> CapabilitySpec:
+def _full_spec(capability: _FullCapability) -> CapabilitySpec:
     return CapabilitySpec(
         name=capability._name,
         tool_sources=(capability,),
         prompt_layers=(capability,),
-        turn_participants=(capability,),
         session_participants=(capability,),
         resources=(capability,),
-        requires=requires,
     )
 
 
 @pytest.mark.asyncio
-async def test_full_spi_capability_contributes_and_dispatches_all_slots() -> None:
+async def test_full_spi_capability_contributes_and_dispatches_slots() -> None:
     events: list[str] = []
     capability = _FullCapability(events)
     registry = CapabilityRegistry()
@@ -89,8 +79,6 @@ async def test_full_spi_capability_contributes_and_dispatches_all_slots() -> Non
 
     await lifecycle.on_new_session()
     await lifecycle.on_restore_session()
-    await lifecycle.before_turn("question")
-    await lifecycle.after_turn()
     result = (
         await registry.tool_sources[0]
         .tools()[0]
@@ -104,36 +92,26 @@ async def test_full_spi_capability_contributes_and_dispatches_all_slots() -> Non
         "full:render",
         "full:new",
         "full:restore",
-        "full:before",
-        "full:after",
         "full:tool",
         "full:close",
     ]
 
 
 @pytest.mark.asyncio
-async def test_capability_runtime_preserves_dependency_order_and_closes_once() -> None:
+async def test_capability_runtime_closes_once_in_reverse_registration_order() -> None:
     events: list[str] = []
-    dependency = _FullCapability(events, "dependency")
-    dependent = _FullCapability(events, "dependent")
+    first = _FullCapability(events, "first")
+    second = _FullCapability(events, "second")
     registry = CapabilityRegistry()
-    registry.register(_full_spec(dependent, requires=frozenset({"dependency"})))
-    registry.register(_full_spec(dependency))
+    registry.register(_full_spec(first))
+    registry.register(_full_spec(second))
     lifecycle = CapabilityRuntime(registry)
 
-    await lifecycle.before_turn("question")
-    await lifecycle.after_turn()
+    await lifecycle.on_new_session()
     await lifecycle.close()
     await lifecycle.close()
 
-    assert events == [
-        "dependency:before",
-        "dependent:before",
-        "dependency:after",
-        "dependent:after",
-        "dependent:close",
-        "dependency:close",
-    ]
+    assert events == ["first:new", "second:new", "second:close", "first:close"]
 
 
 @pytest.mark.asyncio
@@ -155,14 +133,11 @@ async def test_c_any_capability_can_be_omitted_from_generic_runtime(
             registry.register(_full_spec(capabilities[name]))
     lifecycle = CapabilityRuntime(registry)
 
-    assert registry.names == tuple(name for name in names if name != omitted)
     assert len(registry.tool_sources) == 3
     assert len(registry.prompt_layers) == 3
 
     await lifecycle.on_new_session()
     await lifecycle.on_restore_session()
-    await lifecycle.before_turn("question")
-    await lifecycle.after_turn()
     await lifecycle.close()
 
     assert not any(event.startswith(f"{omitted}:") for event in events)
@@ -171,6 +146,4 @@ async def test_c_any_capability_can_be_omitted_from_generic_runtime(
             continue
         assert f"{name}:new" in events
         assert f"{name}:restore" in events
-        assert f"{name}:before" in events
-        assert f"{name}:after" in events
         assert f"{name}:close" in events
