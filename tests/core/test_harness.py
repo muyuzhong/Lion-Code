@@ -17,9 +17,9 @@ from lion_code.core import (
     ToolCall,
     ToolExecutionEndEvent,
     ToolExecutionUpdateEvent,
+    TurnEndEvent,
 )
 from lion_code.core.provider_events import AssistantDoneEvent
-from lion_code.core import TurnEndEvent
 
 from .fakes import FakeProvider
 
