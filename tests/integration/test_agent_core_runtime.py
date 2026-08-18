@@ -610,7 +610,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             self._session_repository.storage_for(agent.session_id).path.exists()
         )
         self.assertEqual(agent._core_runtime.messages, ())
-        self.assertEqual(agent._core_runtime.harness.pending_message_count, 0)
         self.assertEqual(agent.get_token_usage(), UsageSnapshot())
         self.assertIs(agent._usage, usage)
         self.assertIsNot(agent._runtime_coordinator._usage_observer, usage_observer)

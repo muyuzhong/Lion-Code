@@ -42,8 +42,8 @@ def adapt_lion_tool(tool: LionTool, runtime: ToolRuntime) -> AgentTool:
     Execution is delegated to ``ToolRuntime.execute`` so Lion's middleware chain
     (cancellation, pre-tool hooks, permission, read-before-write freshness, result
     persistence, audit) runs exactly once per call. The host must not install a
-    parallel ``before_tool_call``/``after_tool_call`` policy on the harness, or
-    permission and result policy would execute twice.
+    parallel per-tool hook policy on the harness, or permission and result
+    policy would execute twice.
     """
 
     async def execute(
