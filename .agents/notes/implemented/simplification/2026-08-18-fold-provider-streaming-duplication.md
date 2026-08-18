@@ -62,3 +62,9 @@
   两个适配器共用的参数），不收未来假设；不满足即拆回两份。
 - 两个适配器的重试判定在细节上（如 OAI 对 429 的 Retry-After 处理，若有）需逐
   行对齐——对齐时以 `test_stream.py`/`test_openai_compatible.py` 现有断言为准。
+
+## 落地
+
+- 提交: `274f033`
+- PR: #57（标题：refactor: 折叠两个 provider 适配器间重复的流式信封与工具函数（不合并适配器））
+- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 待绿。

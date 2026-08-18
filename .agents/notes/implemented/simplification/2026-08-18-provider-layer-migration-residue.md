@@ -61,3 +61,9 @@ Provider/application 层有三组互不相关的迁移残留，共同点是「�
 - `RuntimeProviderAuth` 若是给未来 OAuth/自定义认证 embedder 的公共类型，删除
   是公共 API 缩减——当前零生产者零消费者，`AGENTS.md` 明示不做向后兼容，可接受。
 - `set_thinking` 若被 TUI 未来「Thinking 开关节能」复用，恢复成本 4 行。
+
+## 落地
+
+- 提交: `e428556`
+- PR: #54（标题：refactor: 清理 Provider 层迁移残留（死认证旋钮、死 thinking 方法、vendored 死声明））
+- 门禁证据: 定向测试全绿（排除 5 个已知环境性/既有失败：test_coding_session_ports、test_composition_profiles::test_all_profiles_return_meta_facade、test_capability_migration::test_session_participant、test_agent_core_runtime::test_plan_clear、test_cli::test_repl_routes_generic_command）；CI Quality gates 待绿。
