@@ -8,7 +8,9 @@ dist/
 *.egg-info/
 /tags
 .lion-code/
-.agents
+.agents/*
+!.agents/notes/
+!.agents/notes/**
 .coverage
 htmlcov/
 .mypy_cache/
