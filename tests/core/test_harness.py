@@ -559,7 +559,6 @@ class TestAgentEndTerminalPaths(unittest.IsolatedAsyncioTestCase):
                 tools=[
                     AgentTool(
                         name="echo",
-                        label="Echo",
                         description="echo",
                         parameters={},
                         execute_fn=execute,
