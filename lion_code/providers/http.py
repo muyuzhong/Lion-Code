@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from json import JSONDecodeError, loads
 from typing import Any
 
 import httpx
@@ -67,3 +68,12 @@ def create_async_client(**kwargs: Any) -> httpx.AsyncClient:
 
     with normalized_proxy_environment():
         return httpx.AsyncClient(**kwargs)
+
+
+def loads_object(value: str) -> dict[str, Any] | None:
+    """Parse a JSON object payload, tolerating both JSON and ``ValueError``."""
+    try:
+        parsed = loads(value)
+    except (JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None

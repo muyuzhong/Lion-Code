@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Mapping
-from json import JSONDecodeError, dumps, loads
+from json import dumps
 from typing import Any, Protocol
 
 import httpx
@@ -26,17 +26,18 @@ from ._provider_events import (
     ProviderErrorEvent,
     ProviderEvent,
     ProviderResponseEndEvent,
-    ProviderResponseStartEvent,
     ProviderTextDeltaEvent,
     ProviderThinkingDeltaEvent,
     ProviderToolCallEvent,
 )
 from .config import OpenAICompatibleConfig
 from .events import AssistantMessageEvent
-from .http import create_async_client
-from .http_errors import provider_http_error_message
-from .retry import provider_retry_event, retry_delay_seconds, wait_for_retry
-from .stream import canonicalize_provider_stream
+from .http import create_async_client, loads_object
+from .stream import (
+    canonicalize_provider_stream,
+    int_or_none,
+    stream_provider_post,
+)
 
 
 class OpenAICompatibleProvider:
@@ -122,8 +123,8 @@ class OpenAICompatibleProvider:
 
         The per-endpoint differences (SSE chunk handling and final-message
         assembly) live in the ``_StreamParser`` produced by ``parser_factory``;
-        everything else — HTTP, status/network retries, cancellation, the
-        opening ``response_start`` event — is identical across endpoints.
+        everything else — HTTP, status/network retries, cancellation, and the
+        opening ``response_start`` event — lives in ``stream_provider_post``.
         """
 
         async def iterator() -> AsyncIterator[ProviderEvent]:
@@ -135,96 +136,19 @@ class OpenAICompatibleProvider:
             if not has_authorization:
                 headers["Authorization"] = f"Bearer {api_key}"
 
-            attempt = 0
-            while True:
-                parser = parser_factory()
-                try:
-                    async with client.stream(
-                        "POST", request_url, json=payload, headers=headers
-                    ) as response:
-                        if response.status_code >= 400:
-                            body = await response.aread()
-                            body_text = body.decode(errors="replace")
-                            if self._should_retry(attempt, status_code=response.status_code):
-                                delay = retry_delay_seconds(
-                                    attempt,
-                                    max_delay_seconds=self._config.max_retry_delay_seconds,
-                                )
-                                yield provider_retry_event(
-                                    attempt=attempt,
-                                    max_retries=self._config.max_retries,
-                                    delay_seconds=delay,
-                                    reason=f"HTTP {response.status_code}",
-                                    data={
-                                        "status_code": response.status_code,
-                                        "body": body_text,
-                                    },
-                                )
-                                attempt += 1
-                                if not await wait_for_retry(delay, signal=signal):
-                                    return
-                                continue
-                            yield ProviderErrorEvent(
-                                message=provider_http_error_message(
-                                    provider_name=self._config.provider_name,
-                                    status_code=response.status_code,
-                                    body=body_text,
-                                    model=model,
-                                ),
-                                data={
-                                    "status_code": response.status_code,
-                                    "body": body_text,
-                                    "attempts": attempt + 1,
-                                },
-                            )
-                            return
-
-                        yield ProviderResponseStartEvent(model=model)
-
-                        async for line in response.aiter_lines():
-                            if signal is not None and signal.is_cancelled():
-                                return
-
-                            event = _parse_sse_line(line)
-                            if event is None:
-                                continue
-
-                            events, stop = parser.feed(event)
-                            for parser_event in events:
-                                yield parser_event
-                            if stop:
-                                break
-
-                        if parser.fatal:
-                            return
-                        for parser_event in parser.finalize():
-                            yield parser_event
-                        return
-                except httpx.HTTPError as exc:
-                    if not parser.emitted_content and self._should_retry(attempt):
-                        delay = retry_delay_seconds(
-                            attempt,
-                            max_delay_seconds=self._config.max_retry_delay_seconds,
-                        )
-                        yield provider_retry_event(
-                            attempt=attempt,
-                            max_retries=self._config.max_retries,
-                            delay_seconds=delay,
-                            reason="network error",
-                            data={
-                                "error": str(exc),
-                                "error_type": type(exc).__name__,
-                            },
-                        )
-                        attempt += 1
-                        if not await wait_for_retry(delay, signal=signal):
-                            return
-                        continue
-                    yield ProviderErrorEvent(
-                        message=str(exc),
-                        data={"attempts": attempt + 1},
-                    )
-                    return
+            async for event in stream_provider_post(
+                client=client,
+                url=request_url,
+                payload=payload,
+                headers=headers,
+                signal=signal,
+                max_retries=self._config.max_retries,
+                max_retry_delay_seconds=self._config.max_retry_delay_seconds,
+                provider_name=self._config.provider_name,
+                model=model,
+                parser_factory=parser_factory,
+            ):
+                yield event
 
         return iterator()
 
@@ -232,11 +156,6 @@ class OpenAICompatibleProvider:
         if self._client is None:
             self._client = create_async_client(timeout=self._config.timeout_seconds)
         return self._client
-
-    def _should_retry(self, attempt: int, *, status_code: int | None = None) -> bool:
-        if attempt >= self._config.max_retries:
-            return False
-        return status_code is None or _is_transient_status(status_code)
 
 
 class _StreamParser(Protocol):
@@ -275,7 +194,7 @@ class _ChatStreamParser:
         if event == "[DONE]":
             return [], True
 
-        chunk = _loads_object(event)
+        chunk = loads_object(event)
         if chunk is None:
             self.fatal = True
             return [ProviderErrorEvent(message="Provider returned invalid JSON chunk")], True
@@ -378,7 +297,7 @@ class _ToolCallBuilder:
 
     def build(self, index: int) -> ToolCall:
         arguments_text = "".join(self.arguments_parts)
-        arguments = _loads_object(arguments_text) if arguments_text else {}
+        arguments = loads_object(arguments_text) if arguments_text else {}
         if arguments is None:
             arguments = {"_raw_arguments": arguments_text}
 
@@ -537,23 +456,6 @@ def _tool_call_to_openai(tool_call: ToolCall) -> dict[str, JSONValue]:
     }
 
 
-def _parse_sse_line(line: str) -> str | None:
-    line = line.strip()
-    if not line or not line.startswith("data:"):
-        return None
-    return line.removeprefix("data:").strip()
-
-
-def _loads_object(value: str) -> dict[str, JSONValue] | None:
-    try:
-        loaded = loads(value)
-    except JSONDecodeError:
-        return None
-    if isinstance(loaded, dict):
-        return loaded
-    return None
-
-
 def _first_choice(chunk: Mapping[str, Any]) -> Mapping[str, Any] | None:
     choices = chunk.get("choices")
     if not isinstance(choices, list) or not choices:
@@ -566,10 +468,6 @@ def _first_choice(chunk: Mapping[str, Any]) -> Mapping[str, Any] | None:
 
 def _int_or_zero(value: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
-
-
-def _int_or_none(value: object) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _parse_chunk_usage(raw: Mapping[str, Any]) -> Usage:
@@ -585,13 +483,13 @@ def _parse_chunk_usage(raw: Mapping[str, Any]) -> Usage:
     cached_tokens: int | None = None
     cache_write = 0
     if isinstance(prompt_details, Mapping):
-        cached_tokens = _int_or_none(prompt_details.get("cached_tokens"))
+        cached_tokens = int_or_none(prompt_details.get("cached_tokens"))
         cache_write = _int_or_zero(prompt_details.get("cache_write_tokens"))
     # Nullish fallback, matching Pi's `cached_tokens ?? prompt_cache_hit_tokens
     # ?? 0` (DeepSeek reports cache hits in prompt_cache_hit_tokens): a reported
     # 0 does not fall through.
     if cached_tokens is None:
-        cached_tokens = _int_or_none(raw.get("prompt_cache_hit_tokens"))
+        cached_tokens = int_or_none(raw.get("prompt_cache_hit_tokens"))
     cache_read = cached_tokens or 0
     fresh_input = max(0, prompt_tokens - cache_read - cache_write)
     output = _int_or_zero(raw.get("completion_tokens"))
@@ -622,7 +520,3 @@ def _thinking_delta(delta: Mapping[str, Any]) -> tuple[str, str] | None:
         if isinstance(value, str) and value:
             return field_name, value
     return None
-
-
-def _is_transient_status(status_code: int) -> bool:
-    return status_code in {408, 409, 425, 429} or status_code >= 500
