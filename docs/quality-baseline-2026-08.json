@@ -243,7 +243,7 @@
         "lion_code/providers/thinking.py:104:unused variable 'provider_kind':100",
         "lion_code/providers/thinking.py:113:unused variable 'provider_kind':100",
         "tests/benchmarks/test_external_anchor.py:65:unused variable 'output_dir':100",
-        "tests/test_agent_run.py:74:unsatisfiable 'if' condition:100"
+        "tests/test_agent_run.py:67:unsatisfiable 'if' condition:100"
       ]
     }
   },
