@@ -243,6 +243,10 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         await agent.chat("hello")
 
         self.assertEqual(agent.effective_window, 120_000)
+        agent.effective_window = 111_000
+        self.assertEqual(agent.effective_window, 111_000)
+        agent._last_stop_reason = "max_turns"
+        self.assertEqual(agent._last_stop_reason, "max_turns")
         self.assertEqual(fake.discovered_models, [agent.model])
 
     async def test_abort_during_core_setup_stops_before_provider(self) -> None:
@@ -620,7 +624,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         agent, _ = self._make_agent([_stop_event()], registry)
         await agent.chat("hello")
         previous_provider = agent.core_runtime.provider
-        agent.configure_api(model="claude-sonnet-4-6")
+        agent.configure_provider(model="claude-sonnet-4-6")
         self.assertIs(agent.core_runtime.provider, previous_provider)
         agent.set_thinking_level("high")
         await agent.close()
@@ -940,7 +944,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         with patch(
             "lion_code.agent.create_provider", return_value=new_fake
         ) as mock_create:
-            agent.configure_api(api_key="new-key", api_base="https://new.test/v1")
+            agent.configure_provider(api_key="new-key", api_base="https://new.test/v1")
 
         mock_create.assert_called_once_with(
             api_key="new-key", api_base="https://new.test/v1", thinking_level="off"
@@ -966,7 +970,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         agent, provider = self._make_agent([], ToolRegistry())
         runtime = agent.core_runtime
         compactor = agent._context_compactor
-        config = agent.get_api_config()
+        config = agent.provider_config()
 
         with (
             patch(
@@ -975,7 +979,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             ),
             self.assertRaisesRegex(RuntimeError, "bad provider config"),
         ):
-            agent.configure_api(
+            agent.configure_provider(
                 model="new-model",
                 api_key="new-key",
                 api_base="https://new.test/v1",
@@ -984,25 +988,25 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertIs(agent.core_runtime, runtime)
         self.assertIs(agent.core_runtime.provider, provider)
         self.assertIs(agent._context_compactor, compactor)
-        self.assertEqual(agent.get_api_config(), config)
+        self.assertEqual(agent.provider_config(), config)
         self.assertFalse(provider.closed)
 
     async def test_configure_api_rejects_busy_runtime_without_changes(self) -> None:
         agent, provider = self._make_agent([], ToolRegistry())
-        config = agent.get_api_config()
+        config = agent.provider_config()
         agent.core_runtime.harness._running = True
         try:
             with (
                 patch("lion_code.agent.create_provider") as create,
                 self.assertRaisesRegex(RuntimeError, "运行中"),
             ):
-                agent.configure_api(api_key="new-key")
+                agent.configure_provider(api_key="new-key")
         finally:
             agent.core_runtime.harness._running = False
 
         create.assert_not_called()
         self.assertIs(agent.core_runtime.provider, provider)
-        self.assertEqual(agent.get_api_config(), config)
+        self.assertEqual(agent.provider_config(), config)
 
     async def test_configure_api_keeps_usage_for_cost_budget(self) -> None:
         registry = ToolRegistry()
@@ -1019,7 +1023,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         new_fake = FakeProvider([_tooluse_event("c2", usage=Usage(input=1_000))])
         with patch("lion_code.agent.create_provider", return_value=new_fake):
-            agent.configure_api(api_key="new-key")
+            agent.configure_provider(api_key="new-key")
 
         await agent.chat("second")
 
@@ -1041,7 +1045,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 terminal_output=False,
             )
 
-        self.assertFalse(agent.use_openai)
         self.assertIsNotNone(agent.core_runtime)
 
         await agent.chat("hello")
@@ -1059,7 +1062,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         with patch(
             "lion_code.agent.create_provider", return_value=new_fake
         ) as mock_create:
-            agent.configure_api(use_openai=False, api_key="ak")
+            agent.configure_provider(use_openai=False, api_key="ak")
 
         self.assertIn("anthropic_base_url", mock_create.call_args.kwargs)
         self.assertEqual(
@@ -1137,7 +1140,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         agent, fake = self._make_agent([_stop_event("done")], ToolRegistry())
         old_runtime = agent._core_runtime
 
-        agent.configure_api(model="new-model")
+        agent.configure_provider(model="new-model")
 
         self.assertIs(agent._core_runtime, old_runtime)
         self.assertEqual(agent._core_runtime.harness.config.model, "new-model")

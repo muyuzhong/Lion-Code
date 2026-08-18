@@ -135,7 +135,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
                 api_base="https://old.example.test/v1",
                 api_key="old-key",
             )
-        parent.configure_api(
+        parent.configure_provider(
             model="current-model",
             api_base="https://new.example.test/v1",
             api_key="new-key",

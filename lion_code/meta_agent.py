@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
+from typing import Any
 
 from .agent_runtime import AgentRunResult, AgentRuntimeCoordinator
 from .composition import (
@@ -91,10 +92,6 @@ class MetaAgent:
     def messages(self) -> tuple[AgentMessage, ...]:
         return self._runtime.core_runtime.messages
 
-    @property
-    def conversation(self) -> tuple[AgentMessage, ...]:
-        return self.messages
-
     def subscribe(self, listener: EventListener) -> Callable[[], None]:
         return self._runtime.core_runtime.subscribe(listener)
 
@@ -140,22 +137,8 @@ class MetaAgent:
     def provider_config(self) -> dict[str, bool | str]:
         return self._provider_manager.get_api_config()
 
-    def configure_provider(
-        self,
-        *,
-        model: str | None = None,
-        api_key: str | None = None,
-        api_base: str | None = None,
-        anthropic_base_url: str | None = None,
-        use_openai: bool | None = None,
-    ) -> None:
-        self._provider_manager.configure(
-            model=model,
-            api_key=api_key,
-            api_base=api_base,
-            anthropic_base_url=anthropic_base_url,
-            use_openai=use_openai,
-        )
+    def configure_provider(self, **kwargs: Any) -> None:
+        self._provider_manager.configure(**kwargs)
 
     @property
     def thinking(self) -> bool:

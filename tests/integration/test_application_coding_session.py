@@ -618,7 +618,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
     async def test_configure_provider_rejects_unsettled_session(self) -> None:
         session, agent, provider = self._make_session([])
-        config = agent.get_api_config()
+        config = agent.provider_config()
         session._running = True
         try:
             with (
@@ -631,7 +631,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
         create.assert_not_called()
         self.assertIs(agent.core_runtime.provider, provider)
-        self.assertEqual(agent.get_api_config(), config)
+        self.assertEqual(agent.provider_config(), config)
 
     # ─── Thinking 档位 ────────────────────────────────────────
 
