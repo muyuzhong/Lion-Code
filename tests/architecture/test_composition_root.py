@@ -138,7 +138,7 @@ async def test_example_capability_needs_only_spec_registration_and_tests(
             )
         )
 
-    assert "example" in composition.capability_registry.names
+    assert len(composition.capability_registry.prompt_layers) == 2
     assert "example capability prompt" in composition.prompt_composer.get_system()
     await composition.capability_runtime.on_new_session()
     assert participant.new_sessions == 1

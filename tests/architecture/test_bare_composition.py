@@ -2,7 +2,7 @@
 
 验收：
 1. CapabilityRegistry() 为空是合法状态。
-2. registry names == () 时对象图仍能构造。
+2. 空 CapabilityRegistry（零扩展）时对象图仍能构造。
 3. Bare composition 不创建 Plan/SubAgent/Skill。
 4. 不存在为了构造通过而增加的 Null Feature（缺失即 None，不造假对象）。
 5. Tool Runtime 不依赖外部工具协议实现。
@@ -109,15 +109,14 @@ def test_capability_registry_empty_is_legal_state(tmp_path, monkeypatch) -> None
     from lion_code.capabilities import CapabilityRegistry
 
     registry = CapabilityRegistry()
-    assert registry.names == ()
     assert registry.tool_sources == ()
     assert registry.prompt_layers == ()
 
 
 def test_bare_graph_constructs_with_empty_registry(tmp_path, monkeypatch) -> None:
-    """registry names == () 时对象图仍能构造。"""
+    """空 CapabilityRegistry（零扩展）时对象图仍能构造。"""
     composition = _bare_composition(tmp_path, monkeypatch)
-    assert composition.capability_registry.names == ()
+    assert composition.capability_registry.tool_sources == ()
     assert composition.tool_runtime is not None
     assert composition.runtime_coordinator is not None
 

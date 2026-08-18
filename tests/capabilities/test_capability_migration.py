@@ -22,17 +22,6 @@ from lion_code.capabilities import (
 from lion_code.capabilities.skill import _SkillToolSource
 
 
-class _RecordingTurnParticipant:
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    async def before_turn(self, _user_message: str) -> None:
-        self.calls.append("before")
-
-    async def after_turn(self) -> None:
-        self.calls.append("after")
-
-
 class _RecordingSessionParticipant:
     def __init__(self, session_id: Callable[[], str]) -> None:
         self._session_id = session_id
@@ -130,14 +119,12 @@ class TestCapabilityBoundaryCompliance:
         spec = create_skill_capability(_CAPABILITY_DEPENDENCY)
         assert spec.name == "skill"
         assert len(spec.tool_sources) == 1
-        assert spec.turn_participants == ()
         assert spec.resources == ()
 
     def test_subagent_capability_spec_is_tool_source_only(self) -> None:
         spec = create_subagent_capability(_CAPABILITY_DEPENDENCY)
         assert spec.name == "subagent"
         assert len(spec.tool_sources) == 1
-        assert spec.turn_participants == ()
         assert spec.resources == ()
 
 
@@ -174,46 +161,8 @@ class TestAgentCompositionWithCapabilities:
             terminal_output=False,
         )
 
-        names = set(agent._capability_registry.names)  # noqa: SLF001
-        assert "skill" in names
-        assert "subagent" in names
-        assert "plan" in names
-
-    def test_capability_runtime_before_turn_runs_without_external_tools(self) -> None:
-        """CapabilityRuntime.before_turn 在无外部工具 Capability 时是合法空转。"""
-        from lion_code.agent import Agent
-
-        agent = Agent(
-            api_key="test-key",
-            terminal_output=False,
-        )
-
-        asyncio.run(agent._capability_runtime.before_turn("question"))  # noqa: SLF001
-        asyncio.run(agent.close())
-
-    def test_capability_runtime_after_turn_runs_on_early_chat_exit(self) -> None:
-        """轮次结束钩子覆盖未配置 API 时的提前返回。"""
-        from lion_code.agent import Agent
-
-        agent = Agent(
-            api_key="test-key",
-            terminal_output=False,
-        )
-        agent.configure_api(api_key="")
-        participant = _RecordingTurnParticipant()
-        agent._capability_registry.register(  # noqa: SLF001
-            CapabilitySpec(
-                name="test-turn-lifecycle",
-                turn_participants=(participant,),
-            )
-        )
-
-        try:
-            asyncio.run(agent.chat("hello"))
-        finally:
-            asyncio.run(agent.close())
-
-        assert participant.calls == ["after"]
+        sources = agent._capability_registry.tool_sources  # noqa: SLF001
+        assert len(sources) == 3
 
     def test_session_participant_runs_after_new_identity_transition(self) -> None:
         """Session callbacks observe the new identity before Core is reset."""

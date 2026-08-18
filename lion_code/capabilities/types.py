@@ -52,20 +52,6 @@ class PromptLayer(Protocol):
     def render(self) -> str: ...
 
 
-class TurnParticipant(Protocol):
-    """Participates in the per-turn execution lifecycle.
-
-    ``before_turn`` is called before the Provider stream starts; ``after_turn``
-    is called after the turn completes (including tool loops).  Only
-    capabilities that genuinely need per-turn hooks should implement this
-    protocol.
-    """
-
-    async def before_turn(self, user_message: str) -> None: ...
-
-    async def after_turn(self) -> None: ...
-
-
 class SessionParticipant(Protocol):
     """Participates in session lifecycle transitions.
 
@@ -90,8 +76,8 @@ class CapabilitySpec:
     """Immutable description of a Capability's contributions.
 
     A Capability declares what it provides through extension slots.  The
-    ``CapabilityRegistry`` aggregates these contributions after resolving
-    dependency ordering.
+    ``CapabilityRegistry`` aggregates these contributions in registration
+    order.
 
     Parameters
     ----------
@@ -101,33 +87,24 @@ class CapabilitySpec:
         ``ToolSource`` instances whose tools should be registered.
     prompt_layers:
         ``PromptLayer`` instances whose fragments should be composed.
-    turn_participants:
-        ``TurnParticipant`` instances that need per-turn hooks.
     session_participants:
         ``SessionParticipant`` instances that need session lifecycle hooks.
     resources:
         ``AsyncCloseable`` instances that must be closed on shutdown.
-    requires:
-        Names of other capabilities that must be initialized before this one.
-        Dependency ordering is explicit—no priority numbers.
     """
 
     name: str
     tool_sources: tuple[ToolSource, ...] = ()
     prompt_layers: tuple[PromptLayer, ...] = ()
-    turn_participants: tuple[TurnParticipant, ...] = ()
     session_participants: tuple[SessionParticipant, ...] = ()
     resources: tuple[AsyncCloseable, ...] = ()
-    requires: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tool_sources", tuple(self.tool_sources))
         object.__setattr__(self, "prompt_layers", tuple(self.prompt_layers))
-        object.__setattr__(self, "turn_participants", tuple(self.turn_participants))
         object.__setattr__(
             self, "session_participants", tuple(self.session_participants)
         )
         object.__setattr__(self, "resources", tuple(self.resources))
-        object.__setattr__(self, "requires", frozenset(self.requires))
         if not self.name:
             raise ValueError("CapabilitySpec.name must be a non-empty string")

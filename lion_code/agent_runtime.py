@@ -718,28 +718,24 @@ class AgentRuntimeCoordinator:
         identity = self._identity
         self._execution.begin()
         identity._last_stop_reason = None
-        try:
-            if not identity.api_configured:
-                identity._emit_notice(
-                    "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
-                    "或在 TUI 中用 /model 配置。",
-                    role="error",
-                )
-                return
-            await self.ensure_core_session_ready()
-            if self._execution.cancelled:
-                return
-            await self.compact_core_context_if_needed()
-            if self._execution.cancelled:
-                return
-            await self._capabilities.before_turn(user_message)
-            await self._runtime.prompt(user_message)
-            self.sync_core_outcome()
-            self._core_compaction_required = self._context_manager.should_compact(
-                self.context_runtime_state()
+        if not identity.api_configured:
+            identity._emit_notice(
+                "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
+                "或在 TUI 中用 /model 配置。",
+                role="error",
             )
-        finally:
-            await self._capabilities.after_turn()
+            return
+        await self.ensure_core_session_ready()
+        if self._execution.cancelled:
+            return
+        await self.compact_core_context_if_needed()
+        if self._execution.cancelled:
+            return
+        await self._runtime.prompt(user_message)
+        self.sync_core_outcome()
+        self._core_compaction_required = self._context_manager.should_compact(
+            self.context_runtime_state()
+        )
 
     async def run_once(self, prompt: str) -> dict[str, Any]:
         """运行一次并返回捕获的文本与本次 token 差值。"""

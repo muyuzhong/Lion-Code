@@ -10,10 +10,6 @@ from .registry import CapabilityRegistry
 class CapabilityLifecycle(Protocol):
     """Runtime 与 SessionLifecycle 共用的生命周期端口。"""
 
-    async def before_turn(self, user_message: str) -> None: ...
-
-    async def after_turn(self) -> None: ...
-
     async def on_new_session(self) -> None: ...
 
     async def on_restore_session(self) -> None: ...
@@ -27,14 +23,6 @@ class CapabilityRuntime:
     def __init__(self, registry: CapabilityRegistry) -> None:
         self._registry = registry
         self._closed = False
-
-    async def before_turn(self, user_message: str) -> None:
-        for participant in self._registry.turn_participants:
-            await participant.before_turn(user_message)
-
-    async def after_turn(self) -> None:
-        for participant in self._registry.turn_participants:
-            await participant.after_turn()
 
     async def on_new_session(self) -> None:
         for participant in self._registry.session_participants:

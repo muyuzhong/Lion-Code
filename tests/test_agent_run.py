@@ -11,13 +11,6 @@ from unittest.mock import patch
 from core.fakes import FakeProvider
 
 from lion_code.agent import Agent, AgentRunResult
-from lion_code.capabilities.types import CapabilitySpec
-from lion_code.composition import (
-    AgentConfig,
-    AgentDependencies,
-    FullProfile,
-    build_agent_composition,
-)
 from lion_code.core import AssistantMessage, TextContent, ToolCall, Usage
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 from lion_code.session_runtime import SessionRepository
@@ -111,9 +104,7 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
         return agent
 
     async def test_completed_run_returns_structured_core_result(self) -> None:
-        provider = FakeProvider(
-            [_stop_event(usage=Usage(input=12, output=7))]
-        )
+        provider = FakeProvider([_stop_event(usage=Usage(input=12, output=7))])
         agent = self._agent(provider)
 
         result = await agent.run("hi")
@@ -244,48 +235,6 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.stop_reason, "aborted")
         self.assertTrue(agent.is_aborted)
-
-    async def test_timeout_covers_initial_capability_turn(self) -> None:
-        class SlowTurnParticipant:
-            async def before_turn(self, _user_message: str) -> None:
-                await asyncio.sleep(0.2)
-
-            async def after_turn(self) -> None:
-                return None
-
-        provider = FakeProvider([_stop_event()])
-        spec = CapabilitySpec(
-            name="slow-init",
-            turn_participants=(SlowTurnParticipant(),),
-        )
-        with patch(
-            "lion_code.composition.agent_builder.create_provider",
-            return_value=provider,
-        ):
-            composition = build_agent_composition(
-                FullProfile(
-                    config=AgentConfig(
-                        api_key="test-key",
-                        terminal_output=False,
-                    ),
-                    dependencies=AgentDependencies(
-                        session_repository=self._session_repository,
-                    ),
-                    extension_specs=(spec,),
-                )
-            )
-        runtime = composition.runtime_coordinator
-
-        with (
-            patch("lion_code.observers.terminal.start_spinner"),
-            patch("lion_code.observers.terminal.stop_spinner"),
-        ):
-            result = await runtime.run("hi", timeout=0.01)
-        await runtime.close()
-
-        self.assertEqual(result.stop_reason, "timeout")
-        self.assertTrue(runtime.execution.cancelled)
-        self.assertLess(result.wall_time_seconds, 0.2)
 
 
 if __name__ == "__main__":
