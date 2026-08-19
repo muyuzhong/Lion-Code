@@ -11,12 +11,17 @@ The package is split into physical boundaries visible in the directory tree:
 - **Kernel** — `core/`, `context/`, `tooling/`, `providers/`, `session_runtime/`,
   `permission_state.py`, `usage.py`.  Kernel is independently understandable and
   never imports the Agent Runtime, Composition, or Application.
-- **Agent Runtime** — `runtime/` owns the single-session Agent lifecycle
-  coordination: `agent.py` (AgentRuntimeCoordinator / LionAgentRuntime),
-  `execution.py` (ExecutionControl), `session_lifecycle.py` (SessionLifecycle),
-  `session_identity.py` (SessionIdentityState), and `provider.py`
-  (ProviderManager / ProviderState).  The Runtime may use Kernel, Context and
-  Tooling, but never Composition, Capability, Application or TUI.
+- **Agent Runtime** — `runtime/` owns the single-session Agent lifecycle through
+  four owners plus state owners: `agent.py` (AgentRuntime — operation
+  orchestration only), `conversation.py` (ConversationRuntime — AgentHarness,
+  canonical active messages, live provider/model, run capture, retired provider
+  close), `session.py` (SessionRuntime — session identity, repository, recorder
+  lifecycle, provider configuration-entry port), `context.py` (ContextRuntime —
+  context manager/compactor, model limits cache, compaction state),
+  `execution.py` (ExecutionControl), `session_identity.py`
+  (SessionIdentityState), and `provider.py` (ProviderController /
+  ProviderState).  The Runtime may use Kernel, Context and Tooling, but never
+  Composition, Application or TUI.
 - **Capability** — `capabilities/` plus the runtime-support owners
   `plan_runtime.py`, `skill_runtime.py`, `subagent_factory.py`, and
   `subagent_runtime.py`.  Capabilities never import the Agent engine,
@@ -47,9 +52,29 @@ The composition inputs are three orthogonal axes:
 `build_agent_composition(profile, config=config, bindings=bindings)` is the
 one-shot Composition Root and the only place where the three axes meet. It
 creates state owners, Provider and permission ports, tools, ContextManager,
-selected capabilities, Core runtime, and the coordinator. `AgentComposition`
-is the one-shot runtime graph; it does not retain the profile, config, or
-bindings. `build_profile_agent(profile, config=config, bindings=bindings)`
+selected capabilities, the four Runtime owners, and the ProviderController —
+in one topologically sorted pass with no deferred post-construction binding:
+
+```text
+foundation → ContextRuntime → ConversationRuntime → SessionRuntime
+          → AgentRuntime → ProviderController
+```
+
+`AgentComposition` is the one-shot layered graph; it does not retain the
+profile, config, or bindings, and never returns a flat bag of everything:
+
+```text
+AgentComposition
+├── runtime         agent / conversation / session / context /
+│                   provider_controller / usage / budget
+├── capabilities    registry / runtime / plan / subagent_factory /
+│                   subagent_executor / skill_runtime
+├── tooling         registry / runtime / context / permission_policy /
+│                   prompt_composer
+└── interaction     notices / confirmation / status_sink
+```
+
+`build_profile_agent(profile, config=config, bindings=bindings)`
 wraps every selected graph in the same feature-neutral `MetaAgent`. The
 internal `Agent` product host subclasses that facade only to retain
 Application/CLI-specific operations; it is not part of the package-root public
@@ -80,12 +105,30 @@ commands through narrow ports:
 - `SessionIdentityState` owns the session id and start time.
 - `ExecutionControl` owns cancellation transitions.
 - `PermissionController` owns permission mode and confirmations.
-- `ProviderManager` owns provider configuration and thinking state.
+- `ProviderController` owns provider configuration and thinking state; it
+  commands ConversationRuntime (`replace_provider` / `set_model` /
+  `retire_provider`), ContextRuntime (`replace_context_compactor` /
+  `invalidate_model_limit_cache`), and SessionRuntime
+  (`record_configuration_change`). It is never referenced by AgentRuntime in
+  either direction.
 - `UsageLedger` and `BudgetPolicy` own usage and budget decisions.
 - `PlanRuntime` owns Plan state.
-- `SessionRepository` replays JSONL and `SessionRecorder` appends events.
-- `ContextManager` and `ContextCompactor` prepare and compact provider context.
-- `AgentRuntimeCoordinator` owns Core run orchestration and event capture.
+- `SessionRuntime` owns session lifecycle and the recorder; `SessionRepository`
+  replays JSONL and `SessionRecorder` appends events. Provider configuration
+  changes are recorded through the SessionRuntime recorder port.
+- `ContextRuntime` owns the context manager, the provider-derived compactor,
+  the model-limits cache, `effective_window`, and all compaction decision
+  state (compaction flag, in-flight compaction task).
+- `ConversationRuntime` owns the AgentHarness, the canonical active messages,
+  the live provider/model, run output capture, and retired-provider close.
+- `AgentRuntime` owns run orchestration order and stop-reason projection only;
+  it holds no provider, context, or session mutable state.
+
+Runtime must not query `ProviderController` for the current model, provider,
+or context limits: live model/provider come from ConversationRuntime and
+limits from ContextRuntime. `DeferredProviderRuntimePort`,
+`DeferredModelContextControl`, `DeferredBackgroundScheduler`, and
+`SessionRecorderConfigurationRecorder` are deleted and must not return.
 
 Observers and frontends must not cache writable mirrors or access Core/Harness
 containers directly.
@@ -94,11 +137,19 @@ containers directly.
 
 ```text
 Core messages/events
-  -> SessionLifecycle
+  -> SessionRuntime (recorder ownership)
   -> SessionRecorder -> JsonlSessionStorage -> <session-id>.jsonl
-  -> SessionRepository -> SessionState replay
-  -> ContextManager / ContextCompactor -> Provider request
+  -> SessionRuntime.load -> immutable SessionRestoreState
+  -> facade: ProviderController.restore_configuration + AgentRuntime.restore
+  -> ContextRuntime.prepare/compact -> Provider request
 ```
+
+`AgentRuntime` operations compose the owners in a fixed order, e.g. chat:
+`SessionRuntime.ensure_ready` (after `ConversationRuntime.flush` and
+`ContextRuntime.resolve_model_limits`) → `ContextRuntime` compaction decision
+→ `ConversationRuntime.prompt` → stop-reason projection. Session restore is
+the explicit facade orchestration above; SessionRuntime never calls back into
+the ProviderController.
 
 `lion_code/core/session/memory.py` remains the JSONL compaction-entry module.
 Its name is historical session terminology, not a project Memory subsystem.
@@ -144,6 +195,10 @@ allows a future Capability-owned Memory implementation and
 to return. Import-direction contracts live in `tests/architecture/_boundaries.py`
 and the import-linter config in `pyproject.toml`; they keep Kernel independent
 of the Agent Runtime (`runtime/`) and keep Runtime free of Composition/Application
-dependencies. Run focused composition, Capability, session, provider,
+dependencies. `tests/architecture/test_runtime_ownership.py` additionally proves
+the PR3 object graph: AgentRuntime and ProviderController never reference each
+other, the Deferred wiring symbols stay deleted, each Runtime owner's mutable
+state stays single-owner, and the runtime package keeps no Application/TUI
+imports. Run focused composition, Capability, session, provider,
 application, and Runtime tests before the full suite, then run compile, import
 linting, residual scans, and the repository quality gates.

@@ -147,7 +147,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
             recorder = agent._session_recorder
             usage = agent._usage
-            usage_observer = agent._runtime_coordinator._usage_observer
+            usage_observer = agent._agent_runtime._usage_observer
             self.assertIsNotNone(recorder)
             self.assertTrue(recorder.initialized)
             self.assertEqual(usage.snapshot().responses, 1)
@@ -156,7 +156,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             self.assertIs(agent._session_recorder, recorder)
             self.assertIs(agent._usage, usage)
             self.assertIs(
-                agent._runtime_coordinator._usage_observer,
+                agent._agent_runtime._usage_observer,
                 usage_observer,
             )
             self.assertIsNone(agent._terminal_renderer)

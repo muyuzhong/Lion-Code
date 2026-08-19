@@ -8,7 +8,7 @@ from .registry import CapabilityRegistry
 
 
 class CapabilityLifecycle(Protocol):
-    """Runtime 与 SessionLifecycle 共用的生命周期端口。"""
+    """Runtime 与 SessionRuntime 共用的生命周期端口。"""
 
     async def on_new_session(self) -> None: ...
 

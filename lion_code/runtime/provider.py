@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 
 from ..context import (
     ContextCompactor,
@@ -22,13 +22,11 @@ from ..providers.thinking import (
 
 ProviderKind = Literal["anthropic", "openai-compatible"]
 ProviderFactory = Callable[..., ModelProvider]
-BackgroundOperation = Callable[[], Coroutine[Any, Any, object]]
-BackgroundScheduler = Callable[[BackgroundOperation], None]
 
 
 @dataclass(slots=True)
 class ProviderState:
-    """Provider 配置的可变权威状态，只由 ``ProviderManager`` 提交更新。"""
+    """Provider 配置的可变权威状态，只由 ``ProviderController`` 提交更新。"""
 
     model: str
     provider_kind: ProviderKind
@@ -41,7 +39,7 @@ class ProviderState:
 
 @dataclass(frozen=True, slots=True)
 class ProviderView:
-    """供 Runtime、应用和 Session 消费的 Provider 只读投影。"""
+    """供应用和 Session 消费的 Provider 只读投影。"""
 
     model: str
     provider_kind: ProviderKind
@@ -62,7 +60,7 @@ class ProviderView:
 
 
 class ProviderRuntimePort(Protocol):
-    """当前 Core Runtime 的 Provider/model 命令。"""
+    """ConversationRuntime 暴露给 ProviderController 的 live Provider/model 命令。"""
 
     @property
     def is_running(self) -> bool: ...
@@ -71,9 +69,11 @@ class ProviderRuntimePort(Protocol):
 
     def set_model(self, model: str) -> None: ...
 
+    def retire_provider(self, provider: ModelProvider) -> None: ...
+
 
 class ModelContextControl(Protocol):
-    """Provider 派生的上下文服务与模型限制缓存控制。"""
+    """ContextRuntime 暴露给 ProviderController 的派生服务命令。"""
 
     def replace_context_compactor(self, compactor: ContextCompactor) -> None: ...
 
@@ -81,7 +81,7 @@ class ModelContextControl(Protocol):
 
 
 class ConfigurationRecorder(Protocol):
-    """已有 SessionRecorder 的配置变更适配器。"""
+    """SessionRuntime 暴露给 ProviderController 的配置变更记录端口。"""
 
     def record_configuration_change(
         self,
@@ -106,29 +106,58 @@ def _model_supports_adaptive_thinking(model: str) -> bool:
     return "opus-4-6" in model_name or "sonnet-4-6" in model_name
 
 
-class ProviderManager:
+def build_provider_for_state(
+    factory: ProviderFactory,
+    state: ProviderState,
+    level: ThinkingLevel,
+) -> ModelProvider:
+    """按 ProviderState 构建一个尚未安装的 Provider 实例。
+
+    Composition Root 用它构建 initial provider；ProviderController 用它构建
+    切换目标 provider。两者共享同一构造规则，不重复实现。
+    """
+
+    if state.provider_kind == "openai-compatible":
+        return factory(
+            api_key=state.api_key,
+            api_base=state.openai_base_url,
+            thinking_level=level,
+        )
+    return factory(
+        api_key=state.api_key,
+        anthropic_base_url=state.anthropic_base_url,
+        thinking_level=level,
+    )
+
+
+class ProviderController:
     """拥有 ProviderState，并以命令方式完成配置与 Thinking 变更。
 
-    Manager 不持有 Agent、Runtime 或会话历史。所有可能失败的 Provider 与派生
-    服务都在 Runtime/State 变更前构建；成功后才按固定顺序提交并刷新外部投影。
+    只通过三个窄端口对外作用，不持有 AgentRuntime，也不被其反向持有：
+    - ``conversation`` -- replace_provider / set_model / retire_provider / is_running
+    - ``context`` -- 派生 compactor 与模型限制缓存失效
+    - ``recorder`` -- 配置变更 Entry 记录（SessionRuntime 窄端口）
+
+    所有可能失败的 Provider 与派生服务都在 Runtime/State 变更前构建；
+    成功后才按固定顺序提交并刷新外部投影。
     """
 
     def __init__(
         self,
         *,
         state: ProviderState,
-        runtime: ProviderRuntimePort,
+        conversation: ProviderRuntimePort,
         context: ModelContextControl,
         recorder: ConfigurationRecorder,
         provider_factory: ProviderFactory,
-        schedule_background_operation: BackgroundScheduler,
+        get_live_model: Callable[[], str],
     ) -> None:
         self._state = state
-        self._runtime = runtime
+        self._conversation = conversation
         self._context = context
         self._recorder = recorder
         self._provider_factory = provider_factory
-        self._schedule_background_operation = schedule_background_operation
+        self._get_live_model = get_live_model
 
     @property
     def view(self) -> ProviderView:
@@ -301,7 +330,11 @@ class ProviderManager:
             if level is None
             else normalize_thinking_level(level)
         )
-        return self._build_provider_for_state(self._state, normalized)
+        return build_provider_for_state(
+            self._provider_factory,
+            self._state,
+            normalized,
+        )
 
     def _resolve_target_state(
         self,
@@ -378,25 +411,29 @@ class ProviderManager:
         provider: ModelProvider | None = None
         compactor: ProviderContextCompactor | None = None
         if provider_changed:
-            provider = self._build_provider_for_state(target, target.thinking_level)
+            provider = build_provider_for_state(
+                self._provider_factory,
+                target,
+                target.thinking_level,
+            )
             compactor = ProviderContextCompactor(
                 provider=provider,
-                get_model=lambda: self.model,
+                get_model=self._get_live_model,
             )
 
         previous_provider: ModelProvider | None = None
         if provider is not None:
             try:
-                previous_provider = self._runtime.replace_provider(provider)
-                self._runtime.set_model(target.model)
+                previous_provider = self._conversation.replace_provider(provider)
+                self._conversation.set_model(target.model)
             except BaseException:
                 if previous_provider is not None:
-                    self._runtime.replace_provider(previous_provider)
-                    self._runtime.set_model(previous.model)
-                self._schedule_provider_close(provider)
+                    self._conversation.replace_provider(previous_provider)
+                    self._conversation.set_model(previous.model)
+                self._conversation.retire_provider(provider)
                 raise
         elif model_changed:
-            self._runtime.set_model(target.model)
+            self._conversation.set_model(target.model)
 
         self._state = target
         if provider_changed:
@@ -412,24 +449,7 @@ class ProviderManager:
                 self.view,
             )
         if previous_provider is not None:
-            self._schedule_provider_close(previous_provider)
-
-    def _build_provider_for_state(
-        self,
-        state: ProviderState,
-        level: ThinkingLevel,
-    ) -> ModelProvider:
-        if state.provider_kind == "openai-compatible":
-            return self._provider_factory(
-                api_key=state.api_key,
-                api_base=state.openai_base_url,
-                thinking_level=level,
-            )
-        return self._provider_factory(
-            api_key=state.api_key,
-            anthropic_base_url=state.anthropic_base_url,
-            thinking_level=level,
-        )
+            self._conversation.retire_provider(previous_provider)
 
     def _provider_configuration_changed(
         self,
@@ -461,28 +481,18 @@ class ProviderManager:
         )
 
     def _reject_if_running(self, message: str) -> None:
-        if self._runtime.is_running:
+        if self._conversation.is_running:
             raise RuntimeError(message)
-
-    def _schedule_provider_close(self, provider: ModelProvider) -> None:
-        close = getattr(provider, "aclose", None)
-        if close is None:
-            return
-
-        async def close_provider() -> object:
-            await close()
-            return None
-
-        self._schedule_background_operation(close_provider)
 
 
 __all__ = [
     "ConfigurationRecorder",
     "ModelContextControl",
+    "ProviderController",
     "ProviderFactory",
     "ProviderKind",
-    "ProviderManager",
     "ProviderRuntimePort",
     "ProviderState",
     "ProviderView",
+    "build_provider_for_state",
 ]

@@ -5,7 +5,7 @@ Plan 模式、子 Agent、权限与预算控制。整体分层参考 Claude Code
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
@@ -37,8 +37,7 @@ from .prompt import (
 )
 from .providers.factory import create_provider
 from .runtime.agent import AgentRunResult as AgentRunResult
-from .runtime.agent import LionAgentRuntime
-from .runtime.session_identity import SessionIdentityState
+from .runtime.conversation import ConversationRuntime
 from .session_runtime import (
     SessionRecorder,
     SessionRepository,
@@ -194,108 +193,97 @@ class Agent(MetaAgent):
             bindings=resolved_bindings,
         )
         # Agent 是 Full Product：显式选择全部内置能力，Feature 字段必然存在。
-        assert composition.plan is not None
-        assert composition.subagent_factory is not None
-        assert composition.subagent_executor is not None
-        assert composition.skill_runtime is not None
-        assert composition.status_sink is not None
+        assert composition.capabilities.plan is not None
+        assert composition.capabilities.subagent_factory is not None
+        assert composition.capabilities.subagent_executor is not None
+        assert composition.capabilities.skill_runtime is not None
+        assert composition.interaction.status_sink is not None
 
         super().__init__(
-            runtime=composition.runtime_coordinator,
-            provider_manager=composition.provider_manager,
-            session_state=composition.session_state,
-            usage=composition.usage,
-            budget=composition.budget,
+            agent_runtime=composition.runtime.agent,
+            provider_controller=composition.runtime.provider_controller,
+            conversation=composition.runtime.conversation,
+            session=composition.runtime.session,
+            usage=composition.runtime.usage,
+            budget=composition.runtime.budget,
             permission_mode=resolved_config.permission_mode,
         )
 
         self.is_sub_agent = resolved_config.is_sub_agent
         self._current_task: asyncio.Task | None = None
-        self._notice_controller = composition.notices
-        self._confirmation = composition.confirmation
-        self._status_sink = composition.status_sink
-        self._session_state = composition.session_state
-        self._session_repository = composition.session_repository
-        self._usage = composition.usage
-        self._budget = composition.budget
-        self.plan = composition.plan
-        self.tool_registry = composition.tool_registry
-        self._subagent_factory = composition.subagent_factory
-        self._subagent_executor = composition.subagent_executor
-        self._capability_registry = composition.capability_registry
-        self._capability_runtime = composition.capability_runtime
-        self._prompt_composer = composition.prompt_composer
-        self.tool_context = composition.tool_context
-        self.tool_runtime = composition.tool_runtime
-        self._provider_manager = composition.provider_manager
-        self._runtime_coordinator = composition.runtime_coordinator
+        self._agent_runtime = composition.runtime.agent
+        self._conversation = composition.runtime.conversation
+        self._context = composition.runtime.context
+        self._provider_controller = composition.runtime.provider_controller
+        self._session_repository = composition.runtime.session.repository
+        self._notice_controller = composition.interaction.notices
+        self._confirmation = composition.interaction.confirmation
+        self._status_sink = composition.interaction.status_sink
+        self._session_state = composition.runtime.session.state
+        self._usage = composition.runtime.usage
+        self._budget = composition.runtime.budget
+        self.plan = composition.capabilities.plan
+        self.tool_registry = composition.tooling.registry
+        self._subagent_factory = composition.capabilities.subagent_factory
+        self._subagent_executor = composition.capabilities.subagent_executor
+        self._capability_registry = composition.capabilities.registry
+        self._capability_runtime = composition.capabilities.runtime
+        self._prompt_composer = composition.tooling.prompt_composer
+        self.tool_context = composition.tooling.context
+        self.tool_runtime = composition.tooling.runtime
         self.confirm_fn = resolved_bindings.interaction.confirm_fn
 
+    # ─── Runtime Owner 只读视图 ───────────────────────────────
+
     @property
-    def _core_runtime(self) -> LionAgentRuntime:
+    def _core_runtime(self) -> ConversationRuntime:
         """兼容暴露唯一 Core Runtime；实际所有权在运行时协调器。"""
 
-        return self._runtime_coordinator.core_runtime
-
-    @_core_runtime.setter
-    def _core_runtime(self, value: LionAgentRuntime) -> None:
-        self._runtime_coordinator.core_runtime = value
+        return self._conversation
 
     @property
     def _session_recorder(self) -> SessionRecorder | None:
-        return self._runtime_coordinator.session_recorder
-
-    @_session_recorder.setter
-    def _session_recorder(self, value: SessionRecorder | None) -> None:
-        self._runtime_coordinator.session_recorder = value
+        return self._agent_runtime.session.recorder
 
     @property
     def _context_compactor(self) -> ContextCompactor | None:
-        return self._runtime_coordinator.context_compactor
+        return self._context.context_compactor
 
     @_context_compactor.setter
-    def _context_compactor(self, value: ContextCompactor | None) -> None:
-        self._runtime_coordinator.context_compactor = value
+    def _context_compactor(self, value: ContextCompactor) -> None:
+        self._context.replace_context_compactor(value)
 
     @property
     def _context_manager(self) -> ContextManager:
-        return self._runtime_coordinator.context_manager
+        return self._context.context_manager
 
     @property
     def _resolved_model_limits_for(self) -> tuple[int, str] | None:
-        return self._runtime_coordinator.resolved_model_limits_for
-
-    @_resolved_model_limits_for.setter
-    def _resolved_model_limits_for(self, value: tuple[int, str] | None) -> None:
-        self._runtime_coordinator.resolved_model_limits_for = value
+        return self._context.resolved_model_limits_for
 
     @property
     def _core_compaction_required(self) -> bool:
-        return self._runtime_coordinator.core_compaction_required
-
-    @_core_compaction_required.setter
-    def _core_compaction_required(self, value: bool) -> None:
-        self._runtime_coordinator.core_compaction_required = value
+        return self._context.compaction_required
 
     @property
     def _terminal_renderer(self) -> TerminalRenderer | None:
-        return self._runtime_coordinator.terminal_renderer
+        return self._agent_runtime._terminal_renderer
 
     @property
     def effective_window(self) -> int:
-        return self._runtime_coordinator._identity.effective_window
+        return self._context.effective_window
 
     @effective_window.setter
     def effective_window(self, value: int) -> None:
-        self._runtime_coordinator._identity.effective_window = value
+        self._context.effective_window = value
 
     @property
     def _last_stop_reason(self) -> str | None:
-        return self._runtime_coordinator._identity._last_stop_reason
+        return self._agent_runtime.last_stop_reason
 
     @_last_stop_reason.setter
     def _last_stop_reason(self, value: str | None) -> None:
-        self._runtime_coordinator._identity._last_stop_reason = value
+        self._agent_runtime.last_stop_reason = value
 
     @property
     def confirm_fn(self) -> Callable[[str], Awaitable[bool]] | None:
@@ -307,25 +295,25 @@ class Agent(MetaAgent):
 
     @property
     def is_processing(self) -> bool:
-        return self._core_runtime.harness.is_running
+        return self._conversation.is_running
 
     @property
-    def session_state(self) -> SessionIdentityState:
+    def session_state(self):
         return self._session_state
 
     @property
     def is_aborted(self) -> bool:
         """最近一次运行是否已收到取消请求。"""
 
-        return self._runtime_coordinator.execution.cancelled
+        return self._agent_runtime.execution.cancelled
 
     @property
-    def core_runtime(self) -> LionAgentRuntime:
+    def core_runtime(self) -> ConversationRuntime:
         """返回供应用会话层订阅事件与读取消息快照的 Core Runtime。"""
-        return self._core_runtime
+        return self._conversation
 
     def abort(self) -> None:
-        self._runtime_coordinator.abort()
+        self._agent_runtime.abort()
 
     # 应用层只通过这些语义方法访问会话，不接触 Core Runtime 的所有权细节。
 
@@ -335,10 +323,10 @@ class Agent(MetaAgent):
 
     @property
     def provider_name(self) -> str:
-        return self._provider_manager.view.provider_kind
+        return self._provider_controller.view.provider_kind
 
     def queue_snapshot(self) -> QueueSnapshot:
-        return self._core_runtime.queue_snapshot()
+        return self._conversation.queue_snapshot()
 
     async def compact_for_overflow(self) -> bool:
         return await self.compact_core_context_for_overflow()
@@ -361,19 +349,13 @@ class Agent(MetaAgent):
     # ─── Core Runtime ────────────────────────────────────────
 
     async def _ensure_core_session_ready(self) -> None:
-        await self._runtime_coordinator.ensure_core_session_ready()
+        await self._agent_runtime.ensure_ready()
 
     async def compact_core_context_for_overflow(self) -> bool:
-        return await self._runtime_coordinator.compact_core_context_for_overflow()
-
-    def _schedule_background_operation(
-        self,
-        operation: Callable[[], Coroutine[Any, Any, object]],
-    ) -> None:
-        self._runtime_coordinator.schedule_background_operation(operation)
+        return await self._agent_runtime.compact_for_overflow()
 
     def set_terminal_output(self, enabled: bool) -> None:
-        self._runtime_coordinator.set_terminal_output(enabled)
+        self._agent_runtime.set_terminal_output(enabled)
         self._confirmation.terminal_output = enabled
         self._status_sink.terminal_output = enabled
 
@@ -408,13 +390,13 @@ class Agent(MetaAgent):
 
     @property
     def api_configured(self) -> bool:
-        return self._provider_manager.api_configured
+        return self._provider_controller.api_configured
 
     # ─── REPL 命令状态 ───────────────────────────────────────
 
     async def clear_history(self) -> None:
         """结束当前会话并创建新 Session；旧 append-only 历史保持可恢复。"""
-        await self._runtime_coordinator.clear_history()
+        await self.new_session()
 
     def show_cost(self) -> None:
         usage = self._usage.snapshot()
@@ -438,7 +420,7 @@ class Agent(MetaAgent):
 
     async def restore_core_session(self, session_id: str) -> bool:
         """从 JSONL 重建 Harness 唯一历史，并继续追加同一 Session。"""
-        return await self._runtime_coordinator.restore_core_session(session_id)
+        return await self._restore_core_session(session_id)
 
     async def restore_session_id(self, session_id: str) -> bool:
         """优先恢复 JSONL；Core 遇到旧 JSON 时原地迁移且保留源文件。"""

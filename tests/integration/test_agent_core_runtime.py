@@ -29,7 +29,7 @@ from lion_code.core import (
 )
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 from lion_code.providers import RuntimeModelLimits
-from lion_code.runtime.provider import ProviderManager
+from lion_code.runtime.provider import ProviderController
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
@@ -598,7 +598,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         previous_session_id = agent.session_id
         session_view = agent.tool_context.session
         usage = agent._usage
-        usage_observer = agent._runtime_coordinator._usage_observer
+        usage_observer = agent._agent_runtime._usage_observer
         previous_path = self._session_repository.storage_for(previous_session_id).path
         agent._core_runtime.harness.follow_up("queued")
         for _ in range(3):
@@ -616,8 +616,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent._core_runtime.messages, ())
         self.assertEqual(agent.token_usage(), UsageSnapshot())
         self.assertIs(agent._usage, usage)
-        self.assertIsNot(agent._runtime_coordinator._usage_observer, usage_observer)
-        self.assertIs(agent._runtime_coordinator._usage_observer._ledger, usage)
+        self.assertIsNot(agent._agent_runtime._usage_observer, usage_observer)
+        self.assertIs(agent._agent_runtime._usage_observer._ledger, usage)
 
     async def test_model_and_thinking_changes_are_restored(self) -> None:
         registry = ToolRegistry()
@@ -927,7 +927,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             AsyncMock(side_effect=RuntimeError("reset failed")),
         ):
             with self.assertRaisesRegex(RuntimeError, "reset failed"):
-                await agent._runtime_coordinator.apply_plan_context_reset()
+                await agent._agent_runtime.apply_plan_context_reset()
 
         self.assertEqual(agent.plan.pending_context_reset, pending)
         await agent.close()
@@ -935,7 +935,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_configure_api_replaces_provider_in_existing_runtime(self) -> None:
         """换 key/base 原位替换 Provider，并保留 Harness 与 canonical history。"""
         agent, old_fake = self._make_agent([_stop_event("done")], ToolRegistry())
-        self.assertIsInstance(agent._provider_manager, ProviderManager)
+        self.assertIsInstance(agent._provider_controller, ProviderController)
         await agent.chat("hello")
         old_runtime = agent._core_runtime
         old_compactor = agent._context_compactor

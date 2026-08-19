@@ -114,17 +114,17 @@ def test_capability_registry_empty_is_legal_state(tmp_path, monkeypatch) -> None
 def test_bare_graph_constructs_with_empty_registry(tmp_path, monkeypatch) -> None:
     """空 CapabilityRegistry（零扩展）时对象图仍能构造。"""
     composition = _bare_composition(tmp_path, monkeypatch)
-    assert composition.capability_registry.tool_sources == ()
-    assert composition.tool_runtime is not None
-    assert composition.runtime_coordinator is not None
+    assert composition.capabilities.registry.tool_sources == ()
+    assert composition.tooling.runtime is not None
+    assert composition.runtime.agent is not None
 
 
 def test_bare_graph_creates_no_feature_objects(tmp_path, monkeypatch) -> None:
     """Bare composition 不创建 Plan/SubAgent/Skill。"""
     composition = _bare_composition(tmp_path, monkeypatch)
     for field in _FEATURE_FIELDS:
-        assert getattr(composition, field) is None, field
-    assert composition.status_sink is None
+        assert getattr(composition.capabilities, field) is None, field
+    assert composition.interaction.status_sink is None
 
 
 def test_full_product_has_all_features(tmp_path, monkeypatch) -> None:
@@ -139,7 +139,7 @@ def test_full_product_has_all_features(tmp_path, monkeypatch) -> None:
             FullProfile(), config=config, bindings=bindings
         )
     for field in _FEATURE_FIELDS:
-        assert getattr(composition, field) is not None, field
+        assert getattr(composition.capabilities, field) is not None, field
 
 
 def test_tool_runtime_does_not_import_external_tool_protocol() -> None:

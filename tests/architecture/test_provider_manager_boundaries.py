@@ -119,7 +119,7 @@ def test_provider_state_and_view_have_explicit_boundaries() -> None:
     )
 
 
-def test_provider_manager_has_no_agent_dependency_or_constructor_argument() -> None:
+def test_provider_controller_has_no_agent_dependency_or_constructor_argument() -> None:
     tree = _tree(SOURCE_ROOT / "runtime" / "provider.py")
     imported_names = {
         alias.name
@@ -129,10 +129,10 @@ def test_provider_manager_has_no_agent_dependency_or_constructor_argument() -> N
     }
     assert all("agent" not in name.casefold() for name in imported_names)
 
-    manager = _class(tree, "ProviderManager")
+    controller = _class(tree, "ProviderController")
     init = next(
         node
-        for node in manager.body
+        for node in controller.body
         if isinstance(node, ast.FunctionDef) and node.name == "__init__"
     )
     assert all(argument.arg.casefold() != "agent" for argument in init.args.args)
@@ -143,11 +143,11 @@ def test_provider_manager_has_no_agent_dependency_or_constructor_argument() -> N
     )
 
 
-def test_provider_state_field_writes_are_confined_to_provider_manager() -> None:
+def test_provider_state_field_writes_are_confined_to_provider_controller() -> None:
     violations: list[str] = []
     for path in (
         SOURCE_ROOT / "agent.py",
-        SOURCE_ROOT / "runtime" / "session_lifecycle.py",
+        SOURCE_ROOT / "runtime" / "session.py",
     ):
         if _attribute_assignments(
             _tree(path),
@@ -163,15 +163,15 @@ def test_agent_has_no_provider_mutable_mirrors() -> None:
     assert not REMOVED_AGENT_MIRRORS & _self_assignments(agent_class)
 
 
-def test_session_restore_uses_provider_manager_command() -> None:
-    tree = _tree(SOURCE_ROOT / "runtime" / "session_lifecycle.py")
-    source = (SOURCE_ROOT / "runtime" / "session_lifecycle.py").read_text(
-        encoding="utf-8"
-    )
+def test_session_restore_uses_provider_controller_command() -> None:
+    """restore 编排在 facade：SessionRuntime 不触达 ProviderController。"""
 
-    assert "provider_manager.restore_configuration" in source
+    meta_agent_source = (SOURCE_ROOT / "meta_agent.py").read_text(encoding="utf-8")
+    assert "provider_controller.restore_configuration" in meta_agent_source
+
+    session_tree = _tree(SOURCE_ROOT / "runtime" / "session.py")
     assert not _attribute_assignments(
-        tree,
+        session_tree,
         {
             "model",
             "_thinking_level",
@@ -185,5 +185,37 @@ def test_session_restore_uses_provider_manager_command() -> None:
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "_apply_core_thinking_level"
-        for node in ast.walk(tree)
+        for node in ast.walk(session_tree)
+    )
+    session_source = (SOURCE_ROOT / "runtime" / "session.py").read_text(
+        encoding="utf-8"
+    )
+    # SessionRuntime 只允许经 TYPE_CHECKING 引用 ProviderView 注解，不得出现
+    # ProviderController 的运行时引用、回指 callback 或配置恢复调用。
+    assert "provider_controller" not in session_source
+    session_tree = _tree(SOURCE_ROOT / "runtime" / "session.py")
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "restore_configuration"
+        for node in ast.walk(session_tree)
+    )
+    provider_imports = [
+        node
+        for node in ast.walk(session_tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module
+        and "provider" in node.module
+    ]
+    assert all(
+        [alias.name for alias in node.names] == ["ProviderView"]
+        for node in provider_imports
+    ), "runtime/session.py 只允许 TYPE_CHECKING import ProviderView"
+    type_checking_lines = {
+        node.lineno
+        for node in ast.walk(session_tree)
+        if isinstance(node, ast.Name) and node.id == "TYPE_CHECKING"
+    }
+    assert all(node.lineno > max(type_checking_lines) for node in provider_imports), (
+        "ProviderView import 必须位于 TYPE_CHECKING 块内"
     )

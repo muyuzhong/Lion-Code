@@ -25,9 +25,10 @@ from .core.provider import ModelProvider
 from .hooks import load_pre_tool_use_hooks
 from .permission_state import PermissionMode
 from .providers.thinking import ThinkingLevel
-from .runtime.agent import AgentRunResult, AgentRuntimeCoordinator
-from .runtime.provider import ProviderFactory, ProviderManager
-from .runtime.session_identity import SessionIdentityState
+from .runtime.agent import AgentRunResult, AgentRuntime
+from .runtime.conversation import ConversationRuntime
+from .runtime.provider import ProviderController, ProviderFactory
+from .runtime.session import SessionRuntime
 from .session_runtime import SessionRepository
 from .tooling import (
     CommandExecutionBackend,
@@ -41,31 +42,40 @@ _META_SYSTEM_PROMPT = NEUTRAL_SYSTEM_PROMPT
 
 
 class MetaAgent:
-    """只暴露通用对话、会话、Provider、事件与用量能力的 facade。"""
+    """只暴露通用对话、会话、Provider、事件与用量能力的 facade。
+
+    facade 是 Runtime 平面与 Provider 平面之间唯一的显式协调点：
+    new_session 把当前 Provider 视图传给 AgentRuntime，restore 先由
+    SessionRuntime 产出不可变快照、再命令 ProviderController 恢复配置、
+    最后交给 AgentRuntime 回放。
+    """
 
     __slots__ = (
+        "_agent_runtime",
         "_budget",
         "_closed",
+        "_conversation",
         "_permission_mode",
-        "_provider_manager",
-        "_runtime",
-        "_session_state",
+        "_provider_controller",
+        "_session",
         "_usage",
     )
 
     def __init__(
         self,
         *,
-        runtime: AgentRuntimeCoordinator,
-        provider_manager: ProviderManager,
-        session_state: SessionIdentityState,
+        agent_runtime: AgentRuntime,
+        provider_controller: ProviderController,
+        conversation: ConversationRuntime,
+        session: SessionRuntime,
         usage: UsageLedger,
         budget: BudgetPolicy,
         permission_mode: PermissionMode,
     ) -> None:
-        self._runtime = runtime
-        self._provider_manager = provider_manager
-        self._session_state = session_state
+        self._agent_runtime = agent_runtime
+        self._provider_controller = provider_controller
+        self._conversation = conversation
+        self._session = session
         self._usage = usage
         self._budget = budget
         self._permission_mode = permission_mode
@@ -77,61 +87,77 @@ class MetaAgent:
         *,
         timeout: float | None = None,
     ) -> AgentRunResult:
-        return await self._runtime.run(prompt, timeout=timeout)
+        return await self._agent_runtime.run(prompt, timeout=timeout)
 
     async def run_once(self, prompt: str) -> dict:
         """执行单轮 fork 语义；供 SubAgent/Skill child runtime 使用。"""
-        return await self._runtime.run_once(prompt)
+        return await self._agent_runtime.run_once(prompt)
 
     async def chat(self, prompt: str) -> None:
-        await self._runtime.chat(prompt)
+        await self._agent_runtime.chat(prompt)
 
     async def prompt(self, content: str) -> None:
         await self.chat(content)
 
     async def continue_(self) -> None:
-        await self._runtime.core_runtime.continue_()
+        await self._conversation.continue_()
 
     @property
     def messages(self) -> tuple[AgentMessage, ...]:
-        return self._runtime.core_runtime.messages
+        return self._conversation.messages
 
     def subscribe(self, listener: EventListener) -> Callable[[], None]:
-        return self._runtime.core_runtime.subscribe(listener)
+        return self._conversation.subscribe(listener)
 
     def steer(self, content: str) -> QueueSnapshot:
-        return self._runtime.core_runtime.steer(content)
+        return self._conversation.steer(content)
 
     def follow_up(self, content: str) -> QueueSnapshot:
-        return self._runtime.core_runtime.follow_up(content)
+        return self._conversation.follow_up(content)
 
     def cancel(self) -> None:
-        self._runtime.abort()
+        self._agent_runtime.abort()
 
     @property
     def cancelled(self) -> bool:
-        return self._runtime.execution.cancelled
+        return self._agent_runtime.execution.cancelled
 
     async def compact(self) -> None:
-        await self._runtime.compact()
+        await self._agent_runtime.compact()
 
     @property
     def session_id(self) -> str:
-        return self._session_state.id
+        return self._session.state.id
 
     async def new_session(self) -> None:
-        await self._runtime.clear_history()
+        """结束当前会话并创建新 Session；Recorder 初始配置取自当前 Provider 视图。"""
+        view = self._provider_controller.view
+        await self._agent_runtime.new_session(
+            model=view.model,
+            thinking_level=view.thinking_level,
+        )
+
+    async def _restore_core_session(self, session_id: str) -> bool:
+        """显式跨 Owner 编排：load → restore_configuration → AgentRuntime.restore。"""
+        state = await self._session.load(session_id)
+        if state is None:
+            return False
+        self._provider_controller.restore_configuration(
+            model=state.model,
+            thinking_level=state.thinking_level,
+        )
+        return await self._agent_runtime.restore(state)
 
     async def restore(self, session_id: str) -> bool:
-        return await self._runtime.restore_core_session(session_id)
+        return await self._restore_core_session(session_id)
 
     @property
     def provider(self) -> ModelProvider:
-        return self._runtime.core_runtime.provider
+        return self._conversation.provider
 
     @property
     def model(self) -> str:
-        return self._provider_manager.model
+        return self._provider_controller.model
 
     @property
     def permission_mode(self) -> PermissionMode:
@@ -139,28 +165,28 @@ class MetaAgent:
         return self._permission_mode
 
     def provider_config(self) -> dict[str, bool | str]:
-        return self._provider_manager.get_api_config()
+        return self._provider_controller.get_api_config()
 
     def configure_provider(self, **kwargs: Any) -> None:
-        self._provider_manager.configure(**kwargs)
+        self._provider_controller.configure(**kwargs)
 
     @property
     def thinking(self) -> bool:
-        return self._provider_manager.thinking
+        return self._provider_controller.thinking
 
     @property
     def thinking_level(self) -> ThinkingLevel:
-        return self._provider_manager.thinking_level
+        return self._provider_controller.thinking_level
 
     @property
     def available_thinking_levels(self) -> tuple[ThinkingLevel, ...]:
-        return self._provider_manager.available_thinking_levels
+        return self._provider_controller.available_thinking_levels
 
     def set_thinking_level(self, level: ThinkingLevel | str) -> ThinkingLevel:
-        return self._provider_manager.set_thinking_level(level)
+        return self._provider_controller.set_thinking_level(level)
 
     def cycle_thinking_level(self) -> ThinkingLevel:
-        return self._provider_manager.cycle_thinking_level()
+        return self._provider_controller.cycle_thinking_level()
 
     @property
     def usage(self) -> UsageSnapshot:
@@ -173,7 +199,7 @@ class MetaAgent:
     async def close(self) -> None:
         if self._closed:
             return
-        await self._runtime.close()
+        await self._agent_runtime.close()
         self._closed = True
 
 
@@ -181,12 +207,14 @@ def _build_meta_facade(
     composition: AgentComposition,
     permission_mode: PermissionMode,
 ) -> MetaAgent:
+    runtime = composition.runtime
     return MetaAgent(
-        runtime=composition.runtime_coordinator,
-        provider_manager=composition.provider_manager,
-        session_state=composition.session_state,
-        usage=composition.usage,
-        budget=composition.budget,
+        agent_runtime=runtime.agent,
+        provider_controller=runtime.provider_controller,
+        conversation=runtime.conversation,
+        session=runtime.session,
+        usage=runtime.usage,
+        budget=runtime.budget,
         permission_mode=permission_mode,
     )
 

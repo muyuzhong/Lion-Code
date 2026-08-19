@@ -1,63 +1,27 @@
-"""Core Agent Runtime 的组装与单会话协调。
+"""AgentRuntime：一次 Agent operation 中各 Runtime Owner 的调用顺序编排。
 
-组装关系：
+AgentRuntime 不拥有 Provider/Context/Session 的任何 mutable 状态，也不感知
+ProviderController。它只按固定顺序调用三个 Owner，并把 Core 终态投影为对外结果：
 
-- ``get_system`` -- 动态读取 Plan/Skill 之后的系统提示；
-- ``get_tools`` -- 每轮读取当前 Registry 激活的工具；
-- ``prepare_context`` -- 后续接入 Lion Context Manager；
-- ``ToolRuntime`` -- 权限、Hook、新鲜度、持久化、审计等中间件。
-
-Core 在每轮调用模型前会重新执行 ``get_tools``、``get_system`` 与
-``prepare_context``，因此本运行时不缓存这些值。权限与结果策略完全由
-ToolRuntime 的中间件负责，运行时不再额外注入 per-tool 钩子。
+- SessionRuntime.ensure_ready → ContextRuntime.prepare/compact →
+  ConversationRuntime.prompt → 结果投影。
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from ..adapters import adapt_active_tools
-from ..capabilities import CapabilityLifecycle
-from ..context import (
-    ContextCompactor,
-    ContextManager,
-    ContextRuntimeState,
-    ModelLimitsResolver,
-    ProviderContextCompactor,
-    effective_window_tokens,
-    fallback_model_limits,
-)
-from ..core import (
-    AgentHarness,
-    AgentHarnessConfig,
-    AgentMessage,
-    EventListener,
-    QueueSnapshot,
-)
-from ..core.cancellation import CancellationView
-from ..core.events import (
-    AgentEvent,
-    CompactionCompletedEvent,
-    CompactionStartedEvent,
-    MessageEndEvent,
-    MessageUpdateEvent,
-)
-from ..core.loop import BeforeToolCalls, PrepareContext
-from ..core.messages import AssistantMessage, UserMessage, message_text
-from ..core.provider import ModelProvider
-from ..core.provider_events import TextDeltaEvent
+from ..core.events import CompactionCompletedEvent, CompactionStartedEvent
+from ..core.messages import AssistantMessage, UserMessage
 from ..observers import TerminalRenderer, UsageObserver
-from ..session_runtime import SessionRecorder, SessionRepository
-from ..tooling import ToolRuntime
 from ..usage import BudgetPolicy, UsageLedger
+from .context import ContextRuntime
+from .conversation import ConversationRuntime
 from .execution import ExecutionControl
-from .provider import ProviderManager
-from .session_identity import SessionIdentityState
-from .session_lifecycle import SessionLifecycle
+from .session import SessionRestoreState, SessionRuntime
 
 StopReason = Literal[
     "completed",
@@ -68,11 +32,6 @@ StopReason = Literal[
     "tool_error",
     "aborted",
 ]
-
-# 通用 Harness 的绝对迭代保险上限，与用户预算解耦：预算的 max_turns 只经
-# UsageLedger 在 Core 工具边界生效（见 before_core_tool_calls），这里仅防止
-# 无工具调用的纯文本死循环（usage-ownership.md §1 禁止把预算值传给 Harness）。
-_ITERATION_SAFETY_CAP = 200
 
 
 @dataclass(slots=True)
@@ -92,7 +51,7 @@ class AgentRunResult:
 
 
 def _recent_context_boundary(
-    messages: tuple[AgentMessage, ...],
+    messages: tuple[Any, ...],
     *,
     keep_user_boundaries: int = 1,
 ) -> int:
@@ -108,155 +67,13 @@ def _recent_context_boundary(
     return len(messages)
 
 
-class LionAgentRuntime:
-    """组装 Provider + Core Harness + ToolRuntime 的应用运行时。"""
-
-    def __init__(
-        self,
-        *,
-        provider: ModelProvider,
-        model: str,
-        get_system: Callable[[], str],
-        tool_runtime: ToolRuntime,
-        cancellation: CancellationView | None = None,
-        cancel_callback: Callable[[], None] | None = None,
-        prepare_context: PrepareContext | None = None,
-        max_turns: int | None = None,
-        before_tool_calls: BeforeToolCalls | None = None,
-    ) -> None:
-        self._provider = provider
-        self._tool_runtime = tool_runtime
-        self._cancel_callback = cancel_callback
-
-        self.harness = AgentHarness(
-            AgentHarnessConfig(
-                provider=provider,
-                model=model,
-                system=get_system(),
-                get_system=get_system,
-                tools=[],
-                get_tools=lambda: adapt_active_tools(self._tool_runtime),
-                prepare_context=prepare_context,
-                max_turns=max_turns,
-                before_tool_calls=before_tool_calls,
-            ),
-            cancellation=cancellation,
-        )
-
-    def subscribe(self, listener: EventListener) -> Callable[[], None]:
-        """注册一个同步或异步的 Agent 事件监听器，返回取消订阅回调。"""
-        return self.harness.subscribe(listener)
-
-    async def emit(self, event: AgentEvent) -> None:
-        """通过 Harness 的同一订阅流发布运行时事件。"""
-
-        await self.harness.emit(event)
-
-    async def prompt(self, content: str) -> None:
-        """驱动一次完整对话：消费完 harness 产生的全部事件。"""
-        async for _ in self.harness.prompt(content):
-            pass
-
-    async def continue_(self) -> None:
-        """使用当前 Harness 上下文继续运行，不追加新的用户消息。"""
-        async for _ in self.harness.continue_():
-            pass
-
-    def set_model(self, model: str) -> None:
-        """更新后续 Provider 请求使用的模型。"""
-        self.harness.config.model = model
-
-    def replace_provider(self, provider: ModelProvider) -> ModelProvider:
-        """热替换后续 Provider 请求使用的 provider,返回旧 provider。
-
-        与 ``set_model`` 同理:Harness 每轮 live 读取 ``config.provider``,
-        故直接改 live 配置即生效。旧 provider 的连接资源由调用方负责回收
-        (Agent 用 ``_schedule_background_operation`` 排程其 ``aclose``)。
-        """
-        previous = self._provider
-        self._provider = provider
-        self.harness.config.provider = provider
-        return previous
-
-    @property
-    def provider(self) -> ModelProvider:
-        """返回摘要与模型限制发现所复用的 Provider。"""
-
-        return self._provider
-
-    async def replace_active_context(self, messages: Sequence[AgentMessage]) -> None:
-        """替换模型活跃上下文；durable history 仍由 SessionRecorder 保留。"""
-
-        self.harness.clear_queues()
-        self.harness.replace_messages(messages)
-
-    async def reset_active_context(self, content: str) -> None:
-        """只替换模型活跃上下文；durable history 由 SessionRecorder 保留。"""
-
-        await self.replace_active_context([UserMessage(content=content)])
-
-    def cancel(self) -> None:
-        """请求取消当前正在进行的模型流。"""
-        if self._cancel_callback is not None:
-            self._cancel_callback()
-            return
-        self.harness.cancel()
-
-    async def aclose(self) -> None:
-        """关闭由 Provider 持有的连接资源。"""
-        close = getattr(self._provider, "aclose", None)
-        if close is not None:
-            await close()
-
-    @property
-    def messages(self) -> tuple[AgentMessage, ...]:
-        """返回当前对话的消息快照。"""
-        return self.harness.messages
-
-    def steer(self, content: str) -> QueueSnapshot:
-        """将新的用户消息加入流中操作队列。"""
-
-        self.harness.steer(content)
-        return self.queue_snapshot()
-
-    def follow_up(self, content: str) -> QueueSnapshot:
-        """将新的用户消息加入本轮后续队列。"""
-
-        self.harness.follow_up(content)
-        return self.queue_snapshot()
-
-    def queue_snapshot(self) -> QueueSnapshot:
-        """返回只包含文本的队列快照，不泄漏 Harness 类型。"""
-
-        queued = self.harness.queued_messages
-        return QueueSnapshot(
-            steering=tuple(message_text(message) for message in queued.steering),
-            follow_up=tuple(message_text(message) for message in queued.follow_up),
-        )
-
-    @property
-    def cancelled(self) -> bool:
-        """返回运行协调器的取消视图。"""
-
-        return self.harness._cancellation.is_cancelled()
-
-
-# ─── 窄端口：按 coordinator 实际访问模式分组 ──────────────────
-
-
 class RuntimeIdentityHost(Protocol):
-    """模型标识、终端渲染与中止/通知所需的宿主边界。"""
+    """AgentRuntime 编排所需的宿主边界：API 就绪态、终端渲染与通知。"""
 
-    is_sub_agent: bool
     _terminal_output: bool
-    _last_stop_reason: str | None
-    effective_window: int
 
     @property
     def api_configured(self) -> bool: ...
-
-    @property
-    def is_aborted(self) -> bool: ...
 
     def _create_terminal_renderer(self) -> TerminalRenderer: ...
 
@@ -268,240 +85,75 @@ class RuntimeIdentityHost(Protocol):
     ) -> None: ...
 
 
-class SessionStateHost(Protocol):
-    """会话标识、仓库与工具上下文所需的宿主边界。"""
-
-    _session_repository: SessionRepository
-    tool_context: Any
-
-    @property
-    def session_state(self) -> SessionIdentityState: ...
-
-
-class AgentRuntimeCoordinator:
-    """拥有一个 Agent 的 Core 生命周期，但不反向依赖 Agent 实现。
-
-    通过两个窄端口访问宿主能力，并直接接收 Usage Owner 与预算规则：
-    - ``identity`` -- 模型标识、终端渲染、中止与通知
-    - ``session`` -- 会话标识、仓库与工具上下文
-    """
+class AgentRuntime:
+    """只负责编排一次 Agent operation 如何按顺序调用三个 Runtime Owner。"""
 
     def __init__(
         self,
         *,
+        conversation: ConversationRuntime,
+        session: SessionRuntime,
+        context: ContextRuntime,
+        identity: RuntimeIdentityHost,
+        execution: ExecutionControl,
         usage: UsageLedger,
         budget: BudgetPolicy,
-        identity: RuntimeIdentityHost,
-        session: SessionStateHost,
-        execution: ExecutionControl,
-        capabilities: CapabilityLifecycle,
-        get_system: Callable[[], str],
-        provider: ModelProvider,
-        model: str,
-        tool_runtime: ToolRuntime,
-        context_manager: ContextManager,
-        context_compactor: ContextCompactor | None,
-        model_limits_resolver: ModelLimitsResolver,
-        provider_manager: ProviderManager,
     ) -> None:
+        self._conversation = conversation
+        self._session = session
+        self._context = context
+        self._identity = identity
+        self._execution = execution
         self._usage = usage
         self._budget = budget
-        self._identity = identity
-        self._session = session
-        self._execution = execution
-        self._capabilities = capabilities
-        self._context_manager = context_manager
-        self._context_compactor = context_compactor
-        self._model_limits_resolver = model_limits_resolver
-        self._provider_manager = provider_manager
-        self._resolved_model_limits_for: tuple[int, str] | None = None
-        self._core_compaction_required = False
-        self._last_context_actions: tuple[Any, ...] = ()
-        self._core_compaction_task: asyncio.Task[str] | None = None
-        self._background_tasks: set[asyncio.Task[object]] = set()
-        self._background_errors: list[BaseException] = []
-        self._output_buffer: list[str] | None = None
-        self._captured_assistant_text: str | None = None
+        self._last_stop_reason: str | None = None
+        self._observer_unsubscribers: list[Any] = []
         self._terminal_renderer: TerminalRenderer | None = None
-        self._terminal_renderer_unsubscribe: Callable[[], None] | None = None
+        self._terminal_renderer_unsubscribe: Any = None
         self._usage_observer: UsageObserver | None = None
-        self._session_recorder: SessionRecorder | None = None
-        self._observer_unsubscribers: list[Callable[[], None]] = []
-        self._runtime = LionAgentRuntime(
-            provider=provider,
-            model=model,
-            get_system=get_system,
-            tool_runtime=tool_runtime,
-            cancellation=execution.cancellation,
-            cancel_callback=execution.cancel,
-            prepare_context=self.prepare_core_context,
-            max_turns=_ITERATION_SAFETY_CAP,
-            before_tool_calls=self.before_core_tool_calls,
-        )
-        if self._context_compactor is None:
-            self._context_compactor = ProviderContextCompactor(
-                provider=provider,
-                get_model=lambda: self._provider_manager.view.model,
-            )
-        self._session_lifecycle = SessionLifecycle(self, capabilities)
-        self.reset_core_observers()
+        conversation.bind_before_tool_calls(self.before_core_tool_calls)
+        self.reset_observers()
 
     @property
-    def core_runtime(self) -> LionAgentRuntime:
-        """返回唯一持有活跃 Provider 与 canonical messages 的 Core Runtime。"""
+    def conversation(self) -> ConversationRuntime:
+        return self._conversation
 
-        return self._runtime
+    @property
+    def session(self) -> SessionRuntime:
+        return self._session
 
-    @core_runtime.setter
-    def core_runtime(self, value: LionAgentRuntime) -> None:
-        self._runtime = value
+    @property
+    def context(self) -> ContextRuntime:
+        return self._context
 
     @property
     def execution(self) -> ExecutionControl:
         return self._execution
 
     @property
-    def session_recorder(self) -> SessionRecorder | None:
-        return self._session_recorder
+    def last_stop_reason(self) -> str | None:
+        return self._last_stop_reason
 
-    @session_recorder.setter
-    def session_recorder(self, value: SessionRecorder | None) -> None:
-        self._session_recorder = value
+    @last_stop_reason.setter
+    def last_stop_reason(self, value: str | None) -> None:
+        self._last_stop_reason = value
 
-    @property
-    def context_compactor(self) -> ContextCompactor | None:
-        return self._context_compactor
+    # ─── 状态边界收敛 ─────────────────────────────────────────
 
-    @context_compactor.setter
-    def context_compactor(self, value: ContextCompactor | None) -> None:
-        self._context_compactor = value
+    async def ensure_ready(self) -> None:
+        """收敛后台清理、解析模型限制并恢复 Recorder 写入位置。"""
 
-    @property
-    def context_manager(self) -> ContextManager:
-        return self._context_manager
-
-    def replace_context_compactor(self, compactor: ContextCompactor) -> None:
-        """替换当前 Provider 对应的上下文压缩器。"""
-
-        self._context_compactor = compactor
-
-    @property
-    def provider_manager(self) -> ProviderManager:
-        """返回 Provider 配置命令的唯一 Owner。"""
-
-        return self._provider_manager
-
-    @property
-    def is_running(self) -> bool:
-        return self._runtime.harness.is_running
-
-    def invalidate_model_limit_cache(self, model: str) -> None:
-        """使模型限制重新解析，并清除旧模型的压缩决策。"""
-
-        self._resolved_model_limits_for = None
-        self._core_compaction_required = False
-        self._identity.effective_window = effective_window_tokens(
-            fallback_model_limits(model)
+        await self._conversation.flush_background_operations()
+        await self._context.resolve_model_limits(
+            self._conversation.provider,
+            self._conversation.model,
         )
+        await self._session.ensure_ready()
 
-    @property
-    def resolved_model_limits_for(self) -> tuple[int, str] | None:
-        return self._resolved_model_limits_for
-
-    @resolved_model_limits_for.setter
-    def resolved_model_limits_for(self, value: tuple[int, str] | None) -> None:
-        self._resolved_model_limits_for = value
-
-    @property
-    def core_compaction_required(self) -> bool:
-        return self._core_compaction_required
-
-    @core_compaction_required.setter
-    def core_compaction_required(self, value: bool) -> None:
-        self._core_compaction_required = value
-
-    @property
-    def terminal_renderer(self) -> TerminalRenderer | None:
-        return self._terminal_renderer
-
-    @property
-    def session_lifecycle(self) -> SessionLifecycle:
-        """返回拥有 clear/restore/compact/close 的会话生命周期协调器。"""
-        return self._session_lifecycle
-
-    async def prepare_core_context(
-        self, messages: list[AgentMessage]
-    ) -> list[AgentMessage]:
-        """通过 ContextManager 准备 Provider context，不改写 canonical history 或 JSONL。"""
-
-        state = self.context_runtime_state()
-        prepared = self._context_manager.prepare(messages, state)
-        self._last_context_actions = prepared.actions
-        self._core_compaction_required = prepared.compaction_required
-        return list(prepared.messages)
-
-    async def capture_core_text(self, event: AgentEvent) -> None:
-        """为 run_once/run 捕获本次助手文本，不参与终端或 TUI 渲染。"""
-
-        if self._output_buffer is None:
-            return
-        if isinstance(event, MessageUpdateEvent) and isinstance(
-            event.assistant_message_event, TextDeltaEvent
-        ):
-            self._output_buffer.append(event.assistant_message_event.delta)
-        elif isinstance(event, MessageEndEvent) and isinstance(
-            event.message, AssistantMessage
-        ):
-            self._captured_assistant_text = event.message.text
-
-    def last_core_assistant(self) -> AssistantMessage | None:
-        return next(
-            (
-                message
-                for message in reversed(self._runtime.messages)
-                if isinstance(message, AssistantMessage)
-            ),
-            None,
-        )
-
-    def sync_core_outcome(self) -> None:
-        """把 Core 的 canonical 终态映射回 Agent 对外状态。"""
-
-        assistant = self.last_core_assistant()
-        if assistant is None:
-            return
-        identity = self._identity
-        if self._execution.cancelled or assistant.stop_reason == "aborted":
-            self._execution.cancel()
-            identity._last_stop_reason = "aborted"
-        elif assistant.stop_reason == "error":
-            identity._last_stop_reason = "model_error"
-        elif identity._last_stop_reason is None:
-            identity._last_stop_reason = "completed"
-
-    def before_core_tool_calls(self, _assistant: AssistantMessage) -> str | None:
-        """在工具调用前记录 turn，并用同一 BudgetPolicy 检查累计用量。"""
-
-        self._usage.record_turn()
-        decision = self._budget.check(self._usage.snapshot())
-        if not decision.exceeded:
-            return None
-        self._identity._last_stop_reason = decision.kind
-        try:
-            self._identity._emit_notice(f"Budget exceeded: {decision.reason}")
-        except UnicodeError:
-            pass
-        return decision.reason
-
-    def reset_session_usage(self) -> None:
-        self._usage.reset()
-        self._identity._last_stop_reason = None
-
-    def reset_core_observers(self) -> None:
+    def reset_observers(self) -> None:
         """按 Usage -> Session -> Renderer -> capture 的稳定顺序重建观察器。"""
 
         identity = self._identity
-        session = self._session
         for unsubscribe in self._observer_unsubscribers:
             unsubscribe()
         self._observer_unsubscribers.clear()
@@ -510,63 +162,92 @@ class AgentRuntimeCoordinator:
             identity._create_terminal_renderer() if identity._terminal_output else None
         )
         self._usage_observer = UsageObserver(self._usage)
-        if identity.is_sub_agent:
-            self._session_recorder = None
-        else:
-            provider_view = self._provider_manager.view
-            self._session_recorder = SessionRecorder(
-                session_id=session.session_state.id,
-                model=provider_view.model,
-                thinking_level=provider_view.thinking_level,
-                cwd=session.tool_context.cwd,
-                storage=session._session_repository.storage_for(
-                    session.session_state.id
-                ),
-            )
         self._observer_unsubscribers.append(
-            self._runtime.subscribe(self._usage_observer.handle)
+            self._conversation.subscribe(self._usage_observer.handle)
         )
-        if self._session_recorder is not None:
+        if self._session.recorder is not None:
             self._observer_unsubscribers.append(
-                self._runtime.subscribe(self._session_recorder.handle)
+                self._conversation.subscribe(self._session.recorder.handle)
             )
         if self._terminal_renderer is not None:
-            self._terminal_renderer_unsubscribe = self._runtime.subscribe(
+            self._terminal_renderer_unsubscribe = self._conversation.subscribe(
                 self._terminal_renderer.handle
             )
             self._observer_unsubscribers.append(self._terminal_renderer_unsubscribe)
         self._observer_unsubscribers.append(
-            self._runtime.subscribe(self.capture_core_text)
+            self._conversation.subscribe(self._conversation.capture_event)
         )
 
-    async def ensure_core_session_ready(self) -> None:
-        await self.flush_background_operations()
-        await self.resolve_core_model_limits()
-        if self._session_recorder is not None:
-            await self._session_recorder.initialize()
+    def reset_session_usage(self) -> None:
+        self._usage.reset()
+        self._last_stop_reason = None
 
-    async def resolve_core_model_limits(self) -> None:
-        model = self._provider_manager.view.model
-        key = (id(self._runtime.provider), model)
-        if self._resolved_model_limits_for == key:
+    # ─── Kernel 工具边界钩子与终态投影 ────────────────────────
+
+    def before_core_tool_calls(self, _assistant: AssistantMessage) -> str | None:
+        """在工具调用前记录 turn，并用同一 BudgetPolicy 检查累计用量。"""
+
+        self._usage.record_turn()
+        decision = self._budget.check(self._usage.snapshot())
+        if not decision.exceeded:
+            return None
+        self._last_stop_reason = decision.kind
+        try:
+            self._identity._emit_notice(f"Budget exceeded: {decision.reason}")
+        except UnicodeError:
+            pass
+        return decision.reason
+
+    def sync_conversation_outcome(self) -> None:
+        """把 Core 的 canonical 终态映射回对外 stop reason。"""
+
+        assistant = self._conversation.last_assistant()
+        if assistant is None:
             return
-        limits = await self._model_limits_resolver.resolve(
-            self._runtime.provider,
-            model,
-        )
-        self._identity.effective_window = effective_window_tokens(limits)
-        self._resolved_model_limits_for = key
+        if self._execution.cancelled or assistant.stop_reason == "aborted":
+            self._execution.cancel()
+            self._last_stop_reason = "aborted"
+        elif assistant.stop_reason == "error":
+            self._last_stop_reason = "model_error"
+        elif self._last_stop_reason is None:
+            self._last_stop_reason = "completed"
 
-    def context_runtime_state(self) -> ContextRuntimeState:
-        usage = self._usage.snapshot()
-        return ContextRuntimeState(
-            effective_window_tokens=self._identity.effective_window,
-            last_prompt_tokens=usage.last_prompt_tokens,
-            last_model_call_at=usage.last_response_at,
-            now=time.time(),
-        )
+    # ─── 会话操作：new / restore / compact ────────────────────
 
-    async def compact_core_context_if_needed(
+    async def new_session(self, *, model: str, thinking_level: str) -> None:
+        """结束当前会话并创建新 Session；旧 append-only 历史保持可恢复。"""
+
+        await self._session.new_session(model=model, thinking_level=thinking_level)
+        self._context.on_session_reset()
+        await self._conversation.replace_active_context([])
+        self.reset_observers()
+        await self.ensure_ready()
+        self.reset_session_usage()
+        self._identity._emit_notice("Conversation cleared.")
+
+    async def restore(self, state: SessionRestoreState) -> bool:
+        """回放恢复快照到唯一活跃上下文；配置恢复由上层 facade 先行完成。"""
+
+        await self._session.restore(
+            state,
+            model=state.model or self._conversation.model,
+        )
+        self._context.on_session_reset()
+        await self._conversation.replace_active_context(state.messages)
+        self.reset_observers()
+        await self.ensure_ready()
+        self.reset_session_usage()
+        self._identity._emit_notice(
+            f"Session restored ({len(state.messages)} messages)."
+        )
+        return True
+
+    async def compact(self) -> None:
+        await self.ensure_ready()
+        if await self.compact_if_needed(force=True, reason="manual"):
+            self._identity._emit_notice("Conversation compacted.")
+
+    async def compact_if_needed(
         self,
         *,
         force: bool = False,
@@ -575,15 +256,13 @@ class AgentRuntimeCoordinator:
     ) -> bool:
         """在新用户轮次前写入 CompactionEntry 并回放唯一活跃上下文。"""
 
-        if self._session_recorder is None or self._context_compactor is None:
+        if self._session.recorder is None or self._context.context_compactor is None:
             return False
-        if not force and not self._context_manager.should_compact(
-            self.context_runtime_state()
-        ):
+        if not force and not self._context.should_compact_now():
             return False
 
-        messages = self._runtime.messages
-        entry_ids = await self._session_recorder.context_entry_ids()
+        messages = self._conversation.messages
+        entry_ids = await self._session.context_entry_ids()
         if len(entry_ids) != len(messages):
             raise RuntimeError("Session context does not match active Harness messages")
 
@@ -601,152 +280,69 @@ class AgentRuntimeCoordinator:
         if not replaced_ids:
             return False
 
-        await self._runtime.emit(CompactionStartedEvent(reason=reason))
+        await self._conversation.emit(CompactionStartedEvent(reason=reason))
         try:
-            if self._execution.cancelled:
-                raise asyncio.CancelledError
-            task = asyncio.create_task(
-                self._context_compactor.summarize(summary_messages)
-            )
-            self._core_compaction_task = task
-            try:
-                summary = await task
-            finally:
-                if self._core_compaction_task is task:
-                    self._core_compaction_task = None
-            if self._execution.cancelled:
-                raise asyncio.CancelledError
-            await self._session_recorder.record_compaction(
+            summary = await self._context.summarize(summary_messages)
+            await self._session.record_compaction(
                 summary=summary,
                 replaces_entry_ids=replaced_ids,
             )
-            state = await self._session._session_repository.load(
-                self._session.session_state.id
-            )
+            state = await self._session.load(self._session.state.id)
             if state is None:
                 raise RuntimeError("Session disappeared after compaction")
-            await self._runtime.replace_active_context(state.messages)
+            await self._conversation.replace_active_context(state.messages)
             self._usage.reset_context_tracking()
-            self._last_context_actions = ()
-            self._core_compaction_required = False
+            self._context.on_compacted()
         except asyncio.CancelledError:
-            await self._runtime.emit(
+            await self._conversation.emit(
                 CompactionCompletedEvent(reason=reason, aborted=True)
             )
             raise
-        await self._runtime.emit(CompactionCompletedEvent(reason=reason))
+        await self._conversation.emit(CompactionCompletedEvent(reason=reason))
         return True
 
-    async def compact_core_context_for_overflow(self) -> bool:
+    async def compact_for_overflow(self) -> bool:
         """强制压缩旧上下文，保留最近成功轮次和当前失败 prompt。"""
 
-        return await self.compact_core_context_if_needed(
+        return await self.compact_if_needed(
             force=True,
             keep_user_boundaries=2,
             reason="overflow",
         )
 
-    def schedule_background_operation(
-        self,
-        operation: Callable[[], Coroutine[Any, Any, object]],
-    ) -> None:
-        """从同步生命周期入口提交异步清理，下个状态边界会收敛异常。"""
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            asyncio.run(operation())
-            return
-        task: asyncio.Task[object] = loop.create_task(operation())
-        self._background_tasks.add(task)
-
-        def collect_result(done: asyncio.Task[object]) -> None:
-            self._background_tasks.discard(done)
-            try:
-                done.result()
-            except BaseException as error:
-                self._background_errors.append(error)
-
-        task.add_done_callback(collect_result)
-
-    async def flush_background_operations(self) -> None:
-        pending = tuple(self._background_tasks)
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
-        if self._background_errors:
-            raise self._background_errors.pop(0)
-
-    def set_terminal_output(self, enabled: bool) -> None:
-        """切换终端观察器，绝不重建 UsageObserver 或 SessionRecorder。"""
-
-        identity = self._identity
-        if enabled == identity._terminal_output:
-            return
-        if self._runtime.harness.is_running:
-            raise RuntimeError("Agent 运行中，无法切换终端输出")
-        if enabled:
-            identity._terminal_output = True
-            self._terminal_renderer = identity._create_terminal_renderer()
-            self._terminal_renderer_unsubscribe = self._runtime.subscribe(
-                self._terminal_renderer.handle
-            )
-            self._observer_unsubscribers.append(self._terminal_renderer_unsubscribe)
-            return
-        unsubscribe = self._terminal_renderer_unsubscribe
-        if unsubscribe is not None:
-            unsubscribe()
-            self._observer_unsubscribers.remove(unsubscribe)
-        self._terminal_renderer_unsubscribe = None
-        self._terminal_renderer = None
-        identity._terminal_output = False
-
-    def abort(self) -> None:
-        """同时取消 Core 流和可能在运行的压缩任务。"""
-
-        self._execution.cancel()
-        self._identity._last_stop_reason = "aborted"
-        if self._core_compaction_task is not None:
-            self._core_compaction_task.cancel()
+    # ─── run 编排 ─────────────────────────────────────────────
 
     async def chat(self, user_message: str) -> None:
-        """执行一次完整用户轮，保持 Capability/Core/JSONL 的既有时序。"""
+        """执行一次完整用户轮，保持 Session/Context/Core 的既有时序。"""
 
-        identity = self._identity
         self._execution.begin()
-        identity._last_stop_reason = None
-        if not identity.api_configured:
-            identity._emit_notice(
+        self._last_stop_reason = None
+        if not self._identity.api_configured:
+            self._identity._emit_notice(
                 "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
                 "或在 TUI 中用 /model 配置。",
                 role="error",
             )
             return
-        await self.ensure_core_session_ready()
+        await self.ensure_ready()
         if self._execution.cancelled:
             return
-        await self.compact_core_context_if_needed()
+        await self.compact_if_needed()
         if self._execution.cancelled:
             return
-        await self._runtime.prompt(user_message)
-        self.sync_core_outcome()
-        self._core_compaction_required = self._context_manager.should_compact(
-            self.context_runtime_state()
-        )
+        await self._conversation.prompt(user_message)
+        self.sync_conversation_outcome()
+        self._context.evaluate_compaction_required()
 
     async def run_once(self, prompt: str) -> dict[str, Any]:
         """运行一次并返回捕获的文本与本次 token 差值。"""
 
-        self._output_buffer = []
-        self._captured_assistant_text = None
+        self._conversation.begin_run_capture()
         before = self._usage.snapshot()
         try:
             await self.chat(prompt)
-            text = "".join(self._output_buffer)
-            if not text:
-                text = self._captured_assistant_text or ""
         finally:
-            self._output_buffer = None
-            self._captured_assistant_text = None
+            text = self._conversation.end_run_capture()
         after = self._usage.snapshot()
         return {
             "text": text,
@@ -764,12 +360,9 @@ class AgentRuntimeCoordinator:
     ) -> AgentRunResult:
         """执行一次并把取消、超时和 Provider 异常投影为结构化结果。"""
 
-        identity = self._identity
-        session = self._session
         before = self._usage.snapshot()
         start = time.monotonic()
-        self._output_buffer = []
-        self._captured_assistant_text = None
+        self._conversation.begin_run_capture()
         timed_out = False
         timeout_handle = None
         run_task = asyncio.current_task()
@@ -789,9 +382,9 @@ class AgentRuntimeCoordinator:
         error: str | None = None
         try:
             await self.chat(prompt)
-            stop_reason = identity._last_stop_reason or "completed"
+            stop_reason = self._last_stop_reason or "completed"
             if stop_reason == "model_error":
-                assistant = self.last_core_assistant()
+                assistant = self._conversation.last_assistant()
                 error = (
                     assistant.error_message
                     if assistant is not None and assistant.error_message
@@ -806,18 +399,14 @@ class AgentRuntimeCoordinator:
         finally:
             if timeout_handle is not None:
                 timeout_handle.cancel()
-            final_text = "".join(self._output_buffer or [])
-            if not final_text:
-                final_text = self._captured_assistant_text or ""
-            self._output_buffer = None
-            self._captured_assistant_text = None
+            final_text = self._conversation.end_run_capture()
 
         if timed_out:
             stop_reason = "timeout"
             error = error or f"timeout after {timeout}s"
         after = self._usage.snapshot()
         return AgentRunResult(
-            session_id=session.session_state.id,
+            session_id=self._session.state.id,
             final_text=final_text,
             stop_reason=stop_reason,
             turns=after.turns - before.turns,
@@ -829,16 +418,46 @@ class AgentRuntimeCoordinator:
             error=error,
         )
 
-    # ─── SessionLifecycle 委托 ────────────────────────────────
+    # ─── 终端观察器与中止 ─────────────────────────────────────
 
-    async def clear_history(self) -> None:
-        await self._session_lifecycle.clear_history()
+    def set_terminal_output(self, enabled: bool) -> None:
+        """切换终端观察器，绝不重建 UsageObserver 或 SessionRecorder。"""
 
-    async def restore_core_session(self, session_id: str) -> bool:
-        return await self._session_lifecycle.restore_core_session(session_id)
+        identity = self._identity
+        if enabled == identity._terminal_output:
+            return
+        if self._conversation.is_running:
+            raise RuntimeError("Agent 运行中，无法切换终端输出")
+        if enabled:
+            identity._terminal_output = True
+            self._terminal_renderer = identity._create_terminal_renderer()
+            self._terminal_renderer_unsubscribe = self._conversation.subscribe(
+                self._terminal_renderer.handle
+            )
+            self._observer_unsubscribers.append(self._terminal_renderer_unsubscribe)
+            return
+        unsubscribe = self._terminal_renderer_unsubscribe
+        if unsubscribe is not None:
+            unsubscribe()
+            self._observer_unsubscribers.remove(unsubscribe)
+        self._terminal_renderer_unsubscribe = None
+        self._terminal_renderer = None
+        identity._terminal_output = False
 
-    async def compact(self) -> None:
-        await self._session_lifecycle.compact()
+    def abort(self) -> None:
+        """同时取消 Core 流和可能在运行的压缩任务。"""
+
+        self._execution.cancel()
+        self._last_stop_reason = "aborted"
+        self._context.cancel_pending_compaction()
 
     async def close(self) -> None:
-        await self._session_lifecycle.close()
+        """按既有 finally 链回收后台任务、Provider 与 Capability 资源。"""
+
+        try:
+            await self._conversation.flush_background_operations()
+        finally:
+            try:
+                await self._session.close()
+            finally:
+                await self._conversation.aclose()

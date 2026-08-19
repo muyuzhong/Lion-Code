@@ -16,7 +16,7 @@ class SessionView(Protocol):
 
 
 class SessionIdentityState:
-    """保存活动会话标识；构造完成后仅由 SessionLifecycle 重置。"""
+    """保存活动会话标识；构造完成后仅由 SessionRuntime 重置。"""
 
     __slots__ = ("_id", "_started_at")
 

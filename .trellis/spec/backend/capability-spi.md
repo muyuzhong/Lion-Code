@@ -41,7 +41,7 @@ context preparation and compaction remain owned by `ContextManager` and
 
 ## Invariants
 
-1. `lion_code.capabilities` does not import `Agent`, `AgentRuntimeCoordinator`,
+1. `lion_code.capabilities` does not import `Agent`, `AgentRuntime`,
    or `AgentHarness`.
 2. `CapabilitySpec` is frozen and normalizes all sequence contributions to
    tuples.
