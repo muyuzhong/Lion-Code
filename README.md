@@ -357,7 +357,12 @@ Lion-Code/
 │   ├── meta_agent.py           # feature-neutral 公共 Agent facade
 │   ├── agent.py                # Application/CLI 使用的内部 Full 产品宿主
 │   ├── composition/            # Profile 与一次性 Composition Root
-│   ├── agent_runtime.py        # Kernel/Harness 运行协调
+│   ├── runtime/                # Agent Runtime 物理边界（Agent 生命周期协调）
+│   │   ├── agent.py            # AgentRuntimeCoordinator / LionAgentRuntime
+│   │   ├── execution.py        # ExecutionControl（取消命令）
+│   │   ├── session_lifecycle.py# SessionLifecycle（clear/restore/compact/close）
+│   │   ├── session_identity.py # SessionIdentityState / SessionView
+│   │   └── provider.py         # ProviderManager / ProviderState
 │   ├── core/                   # Agent Kernel、Harness 与规范协议
 │   │   ├── loop.py             # 异步生成器：整个工具使用周期
 │   │   ├── harness.py          # 配置、事件总线、消息队列
