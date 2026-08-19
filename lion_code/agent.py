@@ -9,8 +9,6 @@ from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
-from .agent_runtime import AgentRunResult as AgentRunResult
-from .agent_runtime import LionAgentRuntime
 from .composition import (
     AgentConfig,
     AgentDependencies,
@@ -34,7 +32,9 @@ from .prompt import (
     build_dynamic_system_context,
 )
 from .providers.factory import create_provider
-from .session_identity import SessionIdentityState
+from .runtime.agent import AgentRunResult as AgentRunResult
+from .runtime.agent import LionAgentRuntime
+from .runtime.session_identity import SessionIdentityState
 from .session_runtime import (
     SessionRecorder,
     SessionRepository,

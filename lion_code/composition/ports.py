@@ -5,18 +5,18 @@ from __future__ import annotations
 from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
-from ..agent_runtime import AgentRuntimeCoordinator
 from ..context import ContextCompactor
 from ..core.provider import ModelProvider
 from ..observers import TerminalRenderer
 from ..permission_state import PermissionController
-from ..provider_manager import (
+from ..runtime.agent import AgentRuntimeCoordinator
+from ..runtime.provider import (
     ConfigurationRecorder,
     ModelContextControl,
     ProviderRuntimePort,
     ProviderView,
 )
-from ..session_identity import SessionIdentityState
+from ..runtime.session_identity import SessionIdentityState
 from ..session_runtime import SessionRecorder, SessionRepository
 
 

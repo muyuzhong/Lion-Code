@@ -20,9 +20,9 @@ from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from lion_code.adapters import adapt_active_tools
-from lion_code.capabilities import CapabilityLifecycle
-from lion_code.context import (
+from ..adapters import adapt_active_tools
+from ..capabilities import CapabilityLifecycle
+from ..context import (
     ContextCompactor,
     ContextManager,
     ContextRuntimeState,
@@ -31,33 +31,33 @@ from lion_code.context import (
     effective_window_tokens,
     fallback_model_limits,
 )
-from lion_code.core import (
+from ..core import (
     AgentHarness,
     AgentHarnessConfig,
     AgentMessage,
     EventListener,
     QueueSnapshot,
 )
-from lion_code.core.cancellation import CancellationView
-from lion_code.core.events import (
+from ..core.cancellation import CancellationView
+from ..core.events import (
     AgentEvent,
     CompactionCompletedEvent,
     CompactionStartedEvent,
     MessageEndEvent,
     MessageUpdateEvent,
 )
-from lion_code.core.loop import BeforeToolCalls, PrepareContext
-from lion_code.core.messages import AssistantMessage, UserMessage, message_text
-from lion_code.core.provider import ModelProvider
-from lion_code.core.provider_events import TextDeltaEvent
-from lion_code.execution_control import ExecutionControl
-from lion_code.observers import TerminalRenderer, UsageObserver
-from lion_code.provider_manager import ProviderManager
-from lion_code.session_identity import SessionIdentityState
-from lion_code.session_lifecycle import SessionLifecycle
-from lion_code.session_runtime import SessionRecorder, SessionRepository
-from lion_code.tooling import ToolRuntime
-from lion_code.usage import BudgetPolicy, UsageLedger
+from ..core.loop import BeforeToolCalls, PrepareContext
+from ..core.messages import AssistantMessage, UserMessage, message_text
+from ..core.provider import ModelProvider
+from ..core.provider_events import TextDeltaEvent
+from ..observers import TerminalRenderer, UsageObserver
+from ..session_runtime import SessionRecorder, SessionRepository
+from ..tooling import ToolRuntime
+from ..usage import BudgetPolicy, UsageLedger
+from .execution import ExecutionControl
+from .provider import ProviderManager
+from .session_identity import SessionIdentityState
+from .session_lifecycle import SessionLifecycle
 
 StopReason = Literal[
     "completed",

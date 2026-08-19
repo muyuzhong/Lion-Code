@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING, Any
 
 from ..core.cancellation import CancellationView
 from ..permission_state import PermissionView
-from ..session_identity import SessionView
 from .types import JSONValue, ToolResult
 
 if TYPE_CHECKING:
+    from ..runtime.session_identity import SessionView
     from .registry import ToolRegistry
     from .types import LionTool
 
