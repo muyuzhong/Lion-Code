@@ -94,7 +94,7 @@ def _attribute_assignments(
 
 
 def test_provider_state_and_view_have_explicit_boundaries() -> None:
-    tree = _tree(SOURCE_ROOT / "provider_manager.py")
+    tree = _tree(SOURCE_ROOT / "runtime" / "provider.py")
     state = _class(tree, "ProviderState")
     view = _class(tree, "ProviderView")
 
@@ -120,7 +120,7 @@ def test_provider_state_and_view_have_explicit_boundaries() -> None:
 
 
 def test_provider_manager_has_no_agent_dependency_or_constructor_argument() -> None:
-    tree = _tree(SOURCE_ROOT / "provider_manager.py")
+    tree = _tree(SOURCE_ROOT / "runtime" / "provider.py")
     imported_names = {
         alias.name
         for node in ast.walk(tree)
@@ -145,7 +145,10 @@ def test_provider_manager_has_no_agent_dependency_or_constructor_argument() -> N
 
 def test_provider_state_field_writes_are_confined_to_provider_manager() -> None:
     violations: list[str] = []
-    for path in (SOURCE_ROOT / "agent.py", SOURCE_ROOT / "session_lifecycle.py"):
+    for path in (
+        SOURCE_ROOT / "agent.py",
+        SOURCE_ROOT / "runtime" / "session_lifecycle.py",
+    ):
         if _attribute_assignments(
             _tree(path),
             PROVIDER_FIELDS,
@@ -161,8 +164,10 @@ def test_agent_has_no_provider_mutable_mirrors() -> None:
 
 
 def test_session_restore_uses_provider_manager_command() -> None:
-    tree = _tree(SOURCE_ROOT / "session_lifecycle.py")
-    source = (SOURCE_ROOT / "session_lifecycle.py").read_text(encoding="utf-8")
+    tree = _tree(SOURCE_ROOT / "runtime" / "session_lifecycle.py")
+    source = (SOURCE_ROOT / "runtime" / "session_lifecycle.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "provider_manager.restore_configuration" in source
     assert not _attribute_assignments(

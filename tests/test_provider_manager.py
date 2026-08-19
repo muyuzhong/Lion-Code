@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from lion_code.provider_manager import ProviderManager, ProviderState
+from lion_code.runtime.provider import ProviderManager, ProviderState
 
 
 class _Provider:

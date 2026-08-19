@@ -151,7 +151,7 @@ def test_legacy_scanner_rejects_old_modules_and_coupling_symbols() -> None:
     assert (SOURCE_ROOT / "session_memory_coordinator.py").name in REMOVED_MODULES
     samples = {
         Path("composition/agent_builder.py"): "_CAP_MEMORY = 'memory'",
-        Path("provider_manager.py"): "class ProviderTextQueryService: pass",
+        Path("runtime/provider.py"): "class ProviderTextQueryService: pass",
         Path("capabilities/memory.py"): "class SessionMemoryCoordinator: pass",
     }
     for path, source in samples.items():

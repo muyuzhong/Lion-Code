@@ -7,7 +7,7 @@ from pathlib import Path
 
 from lion_code.core.cancellation import CancellationToken
 from lion_code.permission_state import PermissionController, PermissionState
-from lion_code.session_identity import SessionIdentityState
+from lion_code.runtime.session_identity import SessionIdentityState
 from lion_code.tooling.builtin import BUILTIN_TOOL_NAMES, create_builtin_tools
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.execution import LocalCommandExecutionBackend

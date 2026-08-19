@@ -15,13 +15,13 @@ from unittest.mock import patch
 
 from core.fakes import FakeProvider
 
-from lion_code.agent_runtime import AgentRuntimeCoordinator, LionAgentRuntime
 from lion_code.core import AssistantMessage, TextContent, ToolCall, TurnEndEvent, Usage
 from lion_code.core.cancellation import CancellationToken
 from lion_code.core.provider_events import AssistantDoneEvent
 from lion_code.observers import TerminalRenderer, UsageObserver
 from lion_code.permission_state import PermissionController, PermissionState
-from lion_code.session_identity import SessionIdentityState
+from lion_code.runtime.agent import AgentRuntimeCoordinator, LionAgentRuntime
+from lion_code.runtime.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
@@ -113,7 +113,7 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
             [
                 sys.executable,
                 "-c",
-                "import sys; import lion_code.agent_runtime; "
+                "import sys; import lion_code.runtime.agent; "
                 "assert 'lion_code.agent' not in sys.modules",
             ],
             check=True,

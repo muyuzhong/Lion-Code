@@ -106,7 +106,7 @@ layers:
 
 以下文件/目录名字带 "runtime"/"core runtime"，但**不属于 Kernel**；归属已被清单重定义：
 
-1. `tests/runtime/` → **harness**。测的是 `lion_code/agent_runtime.py`（coordinator）+ observers，
+1. `tests/runtime/` → **Agent Runtime**。测的是 `lion_code/runtime/agent.py`（coordinator）+ observers，
    不是 Kernel "core runtime"。
 2. `tests/session_runtime/` → **harness**。是 SessionRecorder/SessionRepository/JSONL 持久化，
    不是 agent runtime。

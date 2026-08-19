@@ -17,7 +17,7 @@ from lion_code.core import (
     TurnEndEvent,
 )
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
-from lion_code.execution_control import ExecutionControl
+from lion_code.runtime.execution import ExecutionControl
 
 from .fakes import FakeProvider
 

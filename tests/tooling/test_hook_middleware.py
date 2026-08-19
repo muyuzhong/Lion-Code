@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from lion_code.core.cancellation import CancellationToken
 from lion_code.hooks import HookChainResult, HookOutcome, HookResult
 from lion_code.permission_state import PermissionController, PermissionState
-from lion_code.session_identity import SessionIdentityState
+from lion_code.runtime.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.middleware import PermissionMiddleware, PreToolHookMiddleware
 from lion_code.tooling.registry import ToolRegistry

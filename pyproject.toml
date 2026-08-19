@@ -116,22 +116,22 @@ name = "Core 不依赖上层运行时包"
 type = "forbidden"
 source_modules = ["lion_code.core"]
 forbidden_modules = [
-    "lion_code.providers",
-    "lion_code.tooling",
+    "lion_code.agent",
     "lion_code.application",
+    "lion_code.capabilities",
+    "lion_code.composition",
     "lion_code.observers",
-    "lion_code.tui",
     "lion_code.permission_state",
     "lion_code.plan_runtime",
+    "lion_code.providers",
+    "lion_code.runtime",
+    "lion_code.session_runtime",
     "lion_code.skill_runtime",
     "lion_code.subagent_runtime",
-    "lion_code.usage",
-    "lion_code.session_runtime",
-    "lion_code.capabilities",
     "lion_code.supervisor",
-    "lion_code.agent",
-    "lion_code.agent_runtime",
-    "lion_code.composition",
+    "lion_code.tooling",
+    "lion_code.tui",
+    "lion_code.usage",
 ]
 ignore_imports = []
 allow_indirect_imports = "False"
@@ -142,16 +142,13 @@ type = "forbidden"
 source_modules = ["lion_code.supervisor"]
 forbidden_modules = [
     "lion_code.agent",
-    "lion_code.agent_runtime",
     "lion_code.application",
     "lion_code.capabilities",
     "lion_code.composition",
     "lion_code.context",
     "lion_code.permission_state",
-    "lion_code.provider_manager",
     "lion_code.providers",
-    "lion_code.session_identity",
-    "lion_code.session_lifecycle",
+    "lion_code.runtime",
     "lion_code.session_runtime",
     "lion_code.skill_runtime",
     "lion_code.subagent_runtime",
@@ -196,15 +193,11 @@ source_modules = ["lion_code.providers"]
 forbidden_modules = [
     "lion_code.adapters",
     "lion_code.agent",
-    "lion_code.provider_manager",
-    "lion_code.agent_runtime",
     "lion_code.application",
-    "lion_code.supervisor",
     "lion_code.capabilities",
     "lion_code.composition",
     "lion_code.config",
     "lion_code.context",
-    "lion_code.execution_control",
     "lion_code.frontmatter",
     "lion_code.hooks",
     "lion_code.meta_agent",
@@ -213,14 +206,14 @@ forbidden_modules = [
     "lion_code.plan_runtime",
     "lion_code.project_identity",
     "lion_code.prompt",
-    "lion_code.session_identity",
-    "lion_code.session_lifecycle",
+    "lion_code.runtime",
     "lion_code.session_runtime",
     "lion_code.skill_runtime",
     "lion_code.skills",
     "lion_code.subagent",
     "lion_code.subagent_factory",
     "lion_code.subagent_runtime",
+    "lion_code.supervisor",
     "lion_code.tooling",
     "lion_code.tools",
     "lion_code.tui",
@@ -235,7 +228,9 @@ allow_indirect_imports = "False"
 name = "Application 不依赖 TUI"
 type = "forbidden"
 source_modules = ["lion_code.application"]
-forbidden_modules = ["lion_code.tui"]
+forbidden_modules = [
+    "lion_code.tui",
+]
 ignore_imports = []
 allow_indirect_imports = "False"
 
@@ -246,12 +241,9 @@ source_modules = ["lion_code.tui"]
 forbidden_modules = [
     "lion_code.adapters",
     "lion_code.agent",
-    "lion_code.agent_runtime",
-    "lion_code.supervisor",
     "lion_code.capabilities",
     "lion_code.composition",
     "lion_code.context",
-    "lion_code.execution_control",
     "lion_code.frontmatter",
     "lion_code.hooks",
     "lion_code.meta_agent",
@@ -259,18 +251,17 @@ forbidden_modules = [
     "lion_code.permission_state",
     "lion_code.plan_runtime",
     "lion_code.project_identity",
-    "lion_code.provider_manager",
     "lion_code.providers",
-    "lion_code.session_identity",
-    "lion_code.session_lifecycle",
+    "lion_code.runtime",
     "lion_code.session_runtime",
     "lion_code.skill_runtime",
     "lion_code.skills",
     "lion_code.subagent",
     "lion_code.subagent_factory",
     "lion_code.subagent_runtime",
-    "lion_code.tools",
+    "lion_code.supervisor",
     "lion_code.tooling",
+    "lion_code.tools",
     "lion_code.ui",
     "lion_code.usage",
 ]
@@ -279,12 +270,13 @@ ignore_imports = []
 allow_indirect_imports = "True"
 
 [[tool.importlinter.contracts]]
-name = "Capabilities 不依赖 Agent 引擎"
+name = "Capabilities 不依赖 Agent 宿主与 Application/TUI"
 type = "forbidden"
 source_modules = ["lion_code.capabilities"]
 forbidden_modules = [
     "lion_code.agent",
-    "lion_code.agent_runtime",
+    "lion_code.application",
+    "lion_code.tui",
 ]
 ignore_imports = []
 allow_indirect_imports = "False"
@@ -293,6 +285,9 @@ allow_indirect_imports = "False"
 name = "生产代码不导入测试与基准"
 type = "forbidden"
 source_modules = ["lion_code"]
-forbidden_modules = ["tests", "benchmarks"]
+forbidden_modules = [
+    "benchmarks",
+    "tests",
+]
 ignore_imports = []
 allow_indirect_imports = "False"

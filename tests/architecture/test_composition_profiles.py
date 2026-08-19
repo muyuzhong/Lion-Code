@@ -442,7 +442,7 @@ def test_subagent_factory_reuses_coding_composition_entrypoint() -> None:
     assert not {
         (level, module)
         for level, module, _name in imports
-        if level == 1 and module in {"agent", "agent_runtime"}
+        if level == 1 and module in {"agent", "runtime"}
     }
     assert any(
         isinstance(node, ast.Call)
@@ -507,9 +507,7 @@ def test_kernel_and_harness_do_not_import_profiles() -> None:
         *sorted((SOURCE_ROOT / "session_runtime").rglob("*.py")),
         *sorted((SOURCE_ROOT / "observers").rglob("*.py")),
         *sorted((SOURCE_ROOT / "adapters").rglob("*.py")),
-        SOURCE_ROOT / "agent_runtime.py",
-        SOURCE_ROOT / "session_lifecycle.py",
-        SOURCE_ROOT / "provider_manager.py",
+        *sorted((SOURCE_ROOT / "runtime").rglob("*.py")),
     ]
     for path in scanned:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
