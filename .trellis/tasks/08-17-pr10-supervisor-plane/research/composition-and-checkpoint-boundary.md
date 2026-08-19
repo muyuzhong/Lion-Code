@@ -17,7 +17,7 @@
 
 - `core.events.AgentEvent` 是公开的 discriminated event union，覆盖 Agent/turn/message/tool/compaction/failure/cancel 生命周期（`lion_code/core/events.py:15-110`）。`core.harness.AgentHarness.subscribe` 接收 `AgentEvent` listener 并返回 unsubscribe callback（`lion_code/core/harness.py:120-152`）。Supervisor 应只消费这些公开值，不读取 harness、registry、transcript 或 coordinator。
 - `tests/core/test_event_contract.py` 明确将这个 event contract 定义为未来 Supervisor 可以消费的公共 seam，并校验十类 public event；PR10 应在此基础上增加 Supervisor 的阶段映射测试，而不是暴露私有 runtime。
-- `AgentRunResult` 还携带 `session_id`、`stop_reason`、`error`、计时和 usage 等字段（`lion_code/agent_runtime.py:75-87`），但该模块是 Agent/Harness 实现层。Supervisor 只定义一个 structural public-result protocol，读取 session id、stop reason 和 error；不导入 `lion_code.agent_runtime`，不保存 final text、messages 或 usage。
+- `AgentRunResult` 还携带 `session_id`、`stop_reason`、`error`、计时和 usage 等字段（PR1 后位于 `lion_code/runtime/agent.py:79-91`），但该模块是 Agent Runtime 实现层。Supervisor 只定义一个 structural public-result protocol，读取 session id、stop reason 和 error；不导入 `lion_code.runtime.agent`，不保存 final text、messages 或 usage。
 
 ### 3. Session artifacts are not Supervisor state
 
