@@ -33,7 +33,7 @@ _NON_KERNEL_STRING = "<relevant-memory>"
 _SUPERVISOR_MODULES = ("supervisor.py",)
 _SUPERVISOR_FORBIDDEN_IMPORTS = (
     "lion_code.agent",
-    "lion_code.agent_runtime",
+    "lion_code.runtime",
     "lion_code.core.harness",
 )
 _SUPERVISOR_FORBIDDEN_ATTRS = (

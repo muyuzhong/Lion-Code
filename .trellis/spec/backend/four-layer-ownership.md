@@ -1,22 +1,28 @@
 # Four-Layer Ownership
 
-This is the final ownership map after PR11. It documents executable boundaries,
-not historical implementation or future Memory design.
+This is the ownership map after the Runtime boundary PR. It documents executable
+boundaries, not historical implementation or future Memory design.
 
 ## Ownership map
 
 | Boundary | Current owners | Must not own |
 | --- | --- | --- |
-| Kernel | `core/`, `context/`, `session_runtime/`, `provider_manager.py`, `execution_control.py`, `permission_state.py`, `usage.py` | Product capabilities, frontend state, project feature stores |
-| Harness | `agent_runtime.py`, `session_lifecycle.py` | Profile selection, a second history, service locator, or deleted legacy graph |
-| Capability | `capabilities/`, `plan_runtime.py`, `skill_runtime.py`, `subagent_factory.py`, `subagent_runtime.py` | Provider/session ownership, broad Agent dependencies, Memory/Dream/Learning replacements |
+| Kernel | `core/`, `context/`, `tooling/`, `providers/`, `session_runtime/`, `permission_state.py`, `usage.py` | Product capabilities, Agent Runtime state, frontend state, project feature stores |
+| Agent Runtime | `runtime/` (`agent.py`, `execution.py`, `session_lifecycle.py`, `session_identity.py`, `provider.py`) | Profile selection, a second history, service locator, deleted legacy graph, Composition/Application deps |
+| Capability | `capabilities/`, `plan_runtime.py`, `skill_runtime.py`, `subagent_factory.py`, `subagent_runtime.py` | Provider/session ownership, Agent host, Application/TUI, Memory/Dream/Learning replacements |
 | Composition | `composition/`, `meta_agent.py` | Frontend behavior, Supervisor policy, retained runtime container, feature API leakage |
-| Interfaces | `__init__.py`, `__main__.py`, `application/`, `tui/`, internal `agent.py` host | Direct Kernel/Harness ownership, duplicate persistence, public legacy feature facade |
+| Interfaces | `__init__.py`, `__main__.py`, `application/`, `tui/`, internal `agent.py` host | Direct Kernel/Agent Runtime ownership, duplicate persistence, public legacy feature facade |
 | Supervisor | `supervisor.py` | Agent content, usage, permissions, tools, Profile internals, canonical session writes |
 
 `CapabilityRegistry` aggregates immutable contributions and closeable resources;
 it is not a service locator. `ContextManager` and `ContextCompactor` remain
 Kernel context policy and are the only generic provider-context preparation path.
+
+`AgentHarness` at `core/harness.py` is a Kernel stateful-loop wrapper, distinct
+from the Agent Runtime coordinator. The `runtime/` package is the physical home
+of the Agent Runtime layer: `AgentRuntimeCoordinator`, `LionAgentRuntime`,
+`ExecutionControl`, `SessionLifecycle`, `SessionIdentityState`, and
+`ProviderManager`/`ProviderState`.
 
 ## Current composition
 
@@ -37,7 +43,7 @@ compaction entry model at `core/session/memory.py` is retained. It must not be
 confused with the removed project-level Memory files or repositories.
 
 Application code consumes semantic ports from `application/ports.py`. It owns
-frontend event bridging and overflow retry policy; it does not inspect Harness
+frontend event bridging and overflow retry policy; it does not inspect Runtime
 queues or cache Core runtime objects. TUI code reaches the runtime through the
 application session.
 
@@ -60,6 +66,7 @@ context compaction remain active ownership contracts.
 `tests/architecture/test_legacy_memory_removal.py` checks exact removed modules
 and the current zero-symbol manifest, while its enduring legacy scanner allows a
 future Capability-owned Memory shape and the canonical `core/session/memory.py`.
-Other architecture tests cover import direction,
+Other architecture tests cover import direction
+(`_boundaries.py` + import-linter; Kernel keeps zero Agent Runtime imports),
 composition profiles, zero-extension, capability lifecycle, session persistence,
-provider ownership, application ports, and TUI/runtime direction.
+provider ownership, application ports, and TUI/Runtime direction.

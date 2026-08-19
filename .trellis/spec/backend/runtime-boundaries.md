@@ -1,8 +1,35 @@
 # Runtime and Layer Boundaries
 
-This contract describes the final post-PR11 runtime. The repository has one canonical
+This contract describes the current runtime. The repository has one canonical
 Core history and one JSONL session writer. Project Memory, Dream, and Learning
 are removed; this document must not describe replacement objects or adapters.
+
+## Physical layers
+
+The package is split into physical boundaries visible in the directory tree:
+
+- **Kernel** — `core/`, `context/`, `tooling/`, `providers/`, `session_runtime/`,
+  `permission_state.py`, `usage.py`.  Kernel is independently understandable and
+  never imports the Agent Runtime, Composition, or Application.
+- **Agent Runtime** — `runtime/` owns the single-session Agent lifecycle
+  coordination: `agent.py` (AgentRuntimeCoordinator / LionAgentRuntime),
+  `execution.py` (ExecutionControl), `session_lifecycle.py` (SessionLifecycle),
+  `session_identity.py` (SessionIdentityState), and `provider.py`
+  (ProviderManager / ProviderState).  The Runtime may use Kernel, Context and
+  Tooling, but never Composition, Capability, Application or TUI.
+- **Capability** — `capabilities/` plus the runtime-support owners
+  `plan_runtime.py`, `skill_runtime.py`, `subagent_factory.py`, and
+  `subagent_runtime.py`.  Capabilities never import the Agent engine,
+  Application or TUI.
+- **Composition** — `composition/` and `meta_agent.py`; the Composition Root
+  knows the Agent Runtime and wires the graph.
+- **Supervisor** — `supervisor.py`, consuming only the public Agent event /
+  result / session contracts.
+- **Interfaces** — package root public API, `__main__.py`, `application/`,
+  `tui/`, and the internal `agent.py` product host.
+
+`AgentHarness` at `core/harness.py` is a Kernel stateful-loop wrapper; it is not
+the Agent Runtime.
 
 ## Composition root
 
@@ -14,10 +41,10 @@ test seams. Neither owns mutable runtime state.
 state owners, Provider and permission ports, tools, ContextManager, selected
 capabilities, Core runtime, and the coordinator. `AgentComposition` is the
 one-shot runtime graph. `build_profile_agent(profile)` wraps every selected graph
-in the same feature-neutral `MetaAgent`. The internal `Agent` product host subclasses
-that facade only to retain Application/CLI-specific operations; it is not part
-of the package-root public API. No facade retains a builder, CapabilityRegistry,
-project-Memory repository, or legacy command delegate.
+in the same feature-neutral `MetaAgent`. The internal `Agent` product host
+subclasses that facade only to retain Application/CLI-specific operations; it is
+not part of the package-root public API. No facade retains a builder,
+CapabilityRegistry, project-Memory repository, or legacy command delegate.
 
 Profiles select the graph:
 
@@ -69,8 +96,8 @@ Event Stream behavior remain in scope and must keep their tests.
 `lion_code.application.ports` owns the protocol consumed by
 `LionCodingSession`. The application owns event bridging, settled-event timing,
 session commands, provider settings, and the one-at-most-one context-overflow
-compact/retry policy. Runtime owns primitive prompt, continuation, cancellation,
-and compaction operations.
+compact/retry policy. The Agent Runtime owns primitive prompt, continuation,
+cancellation, and compaction operations.
 
 The active slash surface contains session/history, provider, Plan, cost,
 compaction, theme, thinking, quit, and Skill commands. Former project-state and
@@ -100,6 +127,9 @@ symbols are absent. A current-architecture manifest keeps the specifically
 removed Memory Capability symbols at zero; the enduring legacy scanner still
 allows a future Capability-owned Memory implementation and
 `core/session/memory.py`, without permitting the old ports, modules or coupling
-to return. Run focused composition, Capability, session, provider,
-application, and prompt tests before the full suite, then run compile, import
+to return. Import-direction contracts live in `tests/architecture/_boundaries.py`
+and the import-linter config in `pyproject.toml`; they keep Kernel independent
+of the Agent Runtime (`runtime/`) and keep Runtime free of Composition/Application
+dependencies. Run focused composition, Capability, session, provider,
+application, and Runtime tests before the full suite, then run compile, import
 linting, residual scans, and the repository quality gates.

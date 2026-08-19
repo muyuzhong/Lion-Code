@@ -34,10 +34,7 @@ SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
 
 _BARE_GENERIC_FILES = (
     SOURCE_ROOT / "meta_agent.py",
-    SOURCE_ROOT / "agent_runtime.py",
-    SOURCE_ROOT / "provider_manager.py",
-    SOURCE_ROOT / "session_lifecycle.py",
-    SOURCE_ROOT / "execution_control.py",
+    *sorted((SOURCE_ROOT / "runtime").rglob("*.py")),
     SOURCE_ROOT / "permission_state.py",
     SOURCE_ROOT / "usage.py",
     *sorted((SOURCE_ROOT / "core").rglob("*.py")),

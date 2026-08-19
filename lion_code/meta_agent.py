@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
-from .agent_runtime import AgentRunResult, AgentRuntimeCoordinator
 from .composition import (
     NEUTRAL_SYSTEM_PROMPT,
     AgentConfig,
@@ -21,9 +20,10 @@ from .core import AgentMessage, EventListener, QueueSnapshot
 from .core.provider import ModelProvider
 from .hooks import load_pre_tool_use_hooks
 from .permission_state import PermissionMode
-from .provider_manager import ProviderFactory, ProviderManager
 from .providers.thinking import ThinkingLevel
-from .session_identity import SessionIdentityState
+from .runtime.agent import AgentRunResult, AgentRuntimeCoordinator
+from .runtime.provider import ProviderFactory, ProviderManager
+from .runtime.session_identity import SessionIdentityState
 from .session_runtime import SessionRepository
 from .tooling import (
     CommandExecutionBackend,

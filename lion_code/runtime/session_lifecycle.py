@@ -12,13 +12,13 @@ import uuid
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from lion_code.agent_runtime import (
+    from ..capabilities import CapabilityLifecycle
+    from .agent import (
         AgentRuntimeCoordinator,
         LionAgentRuntime,
         RuntimeIdentityHost,
         SessionStateHost,
     )
-    from lion_code.capabilities import CapabilityLifecycle
 
 
 class SessionLifecycle:

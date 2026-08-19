@@ -26,7 +26,7 @@ LEGACY_MESSAGE_SYMBOLS = frozenset({"_anthropic_messages", "_openai_messages"})
 HARNESS_MUTATION_METHODS = frozenset({"clear_queues", "follow_up", "replace_messages"})
 SESSION_RECORDER_SITES = {
     "agent.py": frozenset({"Agent._migrate_legacy_core_session"}),
-    "agent_runtime.py": frozenset({"AgentRuntimeCoordinator.reset_core_observers"}),
+    "runtime/agent.py": frozenset({"AgentRuntimeCoordinator.reset_core_observers"}),
 }
 JSONL_WRITER_SYMBOLS = frozenset({"JsonlSessionStorage", "entry_to_json_line"})
 REMOVED_SKILL_COMMAND_SYMBOLS = frozenset(
@@ -1012,14 +1012,15 @@ def test_tui_runtime_imports_stay_within_event_boundary() -> None:
     assert not violations, f"TUI bypassed application/core events: {violations}"
 
 
-def test_capabilities_do_not_import_agent_engine() -> None:
+def test_capabilities_do_not_import_agent_host_or_frontend() -> None:
     violations = _forbidden_imports(
         _source_files("capabilities"),
         forbidden=_CAPABILITIES.forbidden_roots,
     )
 
     assert not violations, (
-        f"Capability SPI must not depend on the Agent engine: {violations}"
+        f"Capability SPI must not depend on Agent host / Application / TUI: "
+        f"{violations}"
     )
 
 
@@ -1168,7 +1169,7 @@ def test_session_and_cancellation_state_have_single_owners() -> None:
         for path in _source_files()
         if _session_identity_reset_count(_tree(path))
     }
-    assert identity_resets == {"session_lifecycle.py": 2}
+    assert identity_resets == {"runtime/session_lifecycle.py": 2}
 
     identity_constructors = {
         _source_key(path): _named_constructor_count(_tree(path), "SessionIdentityState")
@@ -1191,7 +1192,7 @@ def test_session_and_cancellation_state_have_single_owners() -> None:
     }
     assert token_constructors == {
         "core/harness.py": 1,
-        "execution_control.py": 1,
+        "runtime/execution.py": 1,
     }
 
 
@@ -1259,7 +1260,7 @@ def test_usage_state_has_one_owner_and_command_only_writes() -> None:
     reset_sites = {
         _source_key(path): sorted(_attribute_call_sites(_tree(path), "reset"))
         for path in _source_files()
-        if _source_key(path) == "agent_runtime.py"
+        if _source_key(path) == "runtime/agent.py"
         and _attribute_call_sites(_tree(path), "reset")
     }
     context_reset_sites = {
@@ -1274,13 +1275,13 @@ def test_usage_state_has_one_owner_and_command_only_writes() -> None:
         "subagent_runtime.py": ["SubagentExecutor._run_child"],
     }
     assert record_turn_sites == {
-        "agent_runtime.py": ["AgentRuntimeCoordinator.before_core_tool_calls"]
+        "runtime/agent.py": ["AgentRuntimeCoordinator.before_core_tool_calls"]
     }
     assert reset_sites == {
-        "agent_runtime.py": ["AgentRuntimeCoordinator.reset_session_usage"]
+        "runtime/agent.py": ["AgentRuntimeCoordinator.reset_session_usage"]
     }
     assert context_reset_sites == {
-        "agent_runtime.py": [
+        "runtime/agent.py": [
             "AgentRuntimeCoordinator.compact_core_context_if_needed",
         ]
     }
@@ -1398,12 +1399,12 @@ def test_plan_state_has_one_owner_and_live_read_port() -> None:
         f"ToolContext Plan path mirrors must not return: {path_mirrors}"
     )
 
-    host_tree = _tree(SOURCE_ROOT / "agent_runtime.py")
+    host_tree = _tree(SOURCE_ROOT / "runtime" / "agent.py")
     host_fields = _class_annotated_fields(host_tree, "SessionStateHost")
     assert "plan" not in host_fields
     assert not _REMOVED_AGENT_PLAN_SYMBOLS & host_fields
 
-    lifecycle_tree = _tree(SOURCE_ROOT / "session_lifecycle.py")
+    lifecycle_tree = _tree(SOURCE_ROOT / "runtime" / "session_lifecycle.py")
     lifecycle_prompt_symbols = frozenset(
         {
             "_base_system_prompt",
@@ -1460,7 +1461,7 @@ def test_prompt_and_capability_lifecycle_boundaries() -> None:
     ):
         assert symbol not in plan_runtime_source
 
-    lifecycle_source = (SOURCE_ROOT / "session_lifecycle.py").read_text(
+    lifecycle_source = (SOURCE_ROOT / "runtime" / "session_lifecycle.py").read_text(
         encoding="utf-8"
     )
     assert "PlanRuntime" not in lifecycle_source
@@ -1881,7 +1882,7 @@ def test_domain_runtimes_use_only_narrow_dependencies() -> None:
                     imported.add(item.module)
         if filename == "supervisor.py":
             assert "lion_code.agent" not in imported
-            assert "lion_code.agent_runtime" not in imported
+            assert "lion_code.runtime" not in imported
 
         for node in tree.body:
             if not isinstance(node, ast.ClassDef) or node.name not in class_names:

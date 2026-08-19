@@ -12,7 +12,7 @@ from lion_code.permission_state import (
     PermissionMode,
     PermissionState,
 )
-from lion_code.session_identity import SessionIdentityState
+from lion_code.runtime.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.middleware import PermissionMiddleware
 from lion_code.tooling.permission import PermissionPolicy, reset_permission_cache

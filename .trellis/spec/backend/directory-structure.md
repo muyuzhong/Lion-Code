@@ -15,7 +15,12 @@ lion_code/
 ├── agent.py             # Internal Full product host used by Application/CLI
 ├── composition/         # Profiles and the one-shot object graph root
 ├── core/                # Canonical messages, events, loop and generic Harness
-├── agent_runtime.py     # Kernel/Harness run coordinator
+├── runtime/             # Agent Runtime: single-session lifecycle coordination
+│   ├── agent.py         # AgentRuntimeCoordinator / LionAgentRuntime
+│   ├── execution.py     # ExecutionControl (cancellation commands)
+│   ├── session_lifecycle.py  # SessionLifecycle (clear/restore/compact/close)
+│   ├── session_identity.py   # SessionIdentityState / SessionView
+│   └── provider.py      # ProviderManager / ProviderState
 ├── capabilities/        # CapabilitySpec, registry, runtime and built-in adapters
 ├── tooling/             # Tool definitions, registry, permissions and middleware
 ├── context/             # Provider-context preparation and compaction policy

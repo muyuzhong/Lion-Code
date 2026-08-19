@@ -14,17 +14,14 @@ SUPERVISOR_PATH = SOURCE_ROOT / "supervisor.py"
 
 _FORBIDDEN_IMPORTS = {
     "lion_code.agent",
-    "lion_code.agent_runtime",
+    "lion_code.runtime",
     "lion_code.application",
     "lion_code.capabilities",
     "lion_code.composition",
     "lion_code.context",
     "lion_code.core.harness",
     "lion_code.permission_state",
-    "lion_code.provider_manager",
     "lion_code.providers",
-    "lion_code.session_identity",
-    "lion_code.session_lifecycle",
     "lion_code.session_runtime",
     "lion_code.tooling",
     "lion_code.tui",

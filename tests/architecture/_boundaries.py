@@ -110,7 +110,7 @@ BOUNDARIES: tuple[Boundary, ...] = (
                 "capabilities",
                 "supervisor",
                 "agent",
-                "agent_runtime",
+                "runtime",
                 "composition",
             }
         ),
@@ -121,16 +121,13 @@ BOUNDARIES: tuple[Boundary, ...] = (
         forbidden=frozenset(
             {
                 "agent",
-                "agent_runtime",
+                "runtime",
                 "application",
                 "capabilities",
                 "composition",
                 "context",
                 "permission_state",
-                "provider_manager",
                 "providers",
-                "session_identity",
-                "session_lifecycle",
                 "session_runtime",
                 "skill_runtime",
                 "subagent_runtime",
@@ -192,12 +189,13 @@ BOUNDARIES: tuple[Boundary, ...] = (
         allow_indirect=True,
     ),
     Boundary(
-        contract_name="Capabilities 不依赖 Agent 引擎",
+        contract_name="Capabilities 不依赖 Agent 宿主与 Application/TUI",
         source_package="lion_code.capabilities",
         forbidden=frozenset(
             {
                 "agent",
-                "agent_runtime",
+                "application",
+                "tui",
             }
         ),
     ),

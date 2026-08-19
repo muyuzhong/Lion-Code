@@ -28,8 +28,8 @@ from lion_code.core import (
     Usage,
 )
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
-from lion_code.provider_manager import ProviderManager
 from lion_code.providers import RuntimeModelLimits
+from lion_code.runtime.provider import ProviderManager
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult

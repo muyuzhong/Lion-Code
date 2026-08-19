@@ -7,12 +7,12 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from lion_code.context import (
+from ..context import (
     ContextCompactor,
     ProviderContextCompactor,
 )
-from lion_code.core.provider import ModelProvider
-from lion_code.providers.thinking import (
+from ..core.provider import ModelProvider
+from ..providers.thinking import (
     ThinkingLevel,
     coerce_thinking_level,
     next_thinking_level,

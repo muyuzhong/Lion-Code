@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .core.cancellation import CancellationToken, CancellationView
+from ..core.cancellation import CancellationToken, CancellationView
 
 
 class ExecutionControl:

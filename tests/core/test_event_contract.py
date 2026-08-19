@@ -59,7 +59,7 @@ CONTRACT_EVENTS: dict[str, type[kernel_events.WireModel]] = {
 # Layers a Kernel contract module must never import (Supervisor dependency is one-way).
 _FORBIDDEN_IMPORTS = (
     "lion_code.agent",
-    "lion_code.agent_runtime",
+    "lion_code.runtime",
     "lion_code.tooling",
     "lion_code.providers",
     "lion_code.session_runtime",

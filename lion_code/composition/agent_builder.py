@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..agent_runtime import AgentRuntimeCoordinator
 from ..capabilities import (
     CapabilityRegistry,
     CapabilityRuntime,
@@ -29,7 +28,6 @@ from ..context import (
     effective_window_tokens,
     fallback_model_limits,
 )
-from ..execution_control import ExecutionControl
 from ..hooks import load_pre_tool_use_hooks
 from ..observers import TerminalRenderer
 from ..permission_state import PermissionController, PermissionState
@@ -39,10 +37,12 @@ from ..prompt import (
     build_dynamic_system_context,
     build_static_system_prompt,
 )
-from ..provider_manager import ProviderKind, ProviderManager, ProviderState
 from ..providers.factory import create_provider
 from ..providers.thinking import ThinkingLevel
-from ..session_identity import SessionIdentityState
+from ..runtime.agent import AgentRuntimeCoordinator
+from ..runtime.execution import ExecutionControl
+from ..runtime.provider import ProviderKind, ProviderManager, ProviderState
+from ..runtime.session_identity import SessionIdentityState
 from ..session_runtime import SessionRepository
 from ..skill_runtime import SkillRuntime
 from ..subagent_factory import ChildAgentConfig, SubagentFactory

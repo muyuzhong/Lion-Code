@@ -172,7 +172,7 @@ the checkpoint never pretends to contain an in-flight Agent runtime snapshot.
 - Kernel event modules remain dependency-free; Supervisor imports only public
   Core event contracts.
 - Supervisor must not import `lion_code.agent` or
-  `lion_code.agent_runtime`, or reference private Agent attributes.
+  `lion_code.runtime`, or reference private Agent attributes.
 - Agent, profiles and Composition Root must contain zero Supervisor imports,
   fields or construction branches.
 - Production Supervisor imports no removed project-state, dream or learning

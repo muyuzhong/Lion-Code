@@ -9,7 +9,7 @@ from pathlib import Path
 from lion_code.adapters import adapt_active_tools, adapt_lion_tool, to_core_result
 from lion_code.core import CancellationToken
 from lion_code.permission_state import PermissionController, PermissionState
-from lion_code.session_identity import SessionIdentityState
+from lion_code.runtime.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.middleware import CancellationMiddleware
 from lion_code.tooling.registry import ToolRegistry
