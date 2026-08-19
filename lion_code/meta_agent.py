@@ -115,6 +115,9 @@ class MetaAgent:
     def follow_up(self, content: str) -> QueueSnapshot:
         return self._conversation.follow_up(content)
 
+    def queue_snapshot(self) -> QueueSnapshot:
+        return self._conversation.queue_snapshot()
+
     def cancel(self) -> None:
         self._agent_runtime.abort()
 
@@ -122,8 +125,15 @@ class MetaAgent:
     def cancelled(self) -> bool:
         return self._agent_runtime.execution.cancelled
 
+    @property
+    def is_running(self) -> bool:
+        return self._conversation.is_running
+
     async def compact(self) -> None:
         await self._agent_runtime.compact()
+
+    async def compact_for_overflow(self) -> bool:
+        return await self._agent_runtime.compact_for_overflow()
 
     @property
     def session_id(self) -> str:
@@ -163,6 +173,14 @@ class MetaAgent:
     def permission_mode(self) -> PermissionMode:
         """构造时确定的权限模式只读投影。"""
         return self._permission_mode
+
+    @property
+    def provider_name(self) -> str:
+        return self._provider_controller.view.provider_kind
+
+    @property
+    def api_configured(self) -> bool:
+        return self._provider_controller.api_configured
 
     def provider_config(self) -> dict[str, bool | str]:
         return self._provider_controller.get_api_config()
