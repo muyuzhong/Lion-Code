@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from lion_code.core.conversation import QueueSnapshot
 from lion_code.core.events import AgentEvent
@@ -123,6 +123,7 @@ class ControlPort(Protocol):
     def toggle_plan_mode(self) -> str: ...
 
 
+@runtime_checkable
 class CodingSessionBackend(
     ConversationPort,
     SessionPort,

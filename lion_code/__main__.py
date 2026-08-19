@@ -8,7 +8,10 @@ import os
 import signal
 import sys
 
-from .agent import Agent
+from .adapters.coding_session_backend import (
+    CodingSessionBackendAdapter,
+    build_full_coding_backend,
+)
 from .application.commands import CommandResult
 from .application.session import LionCodingSession
 from .config import load_api_config
@@ -69,7 +72,9 @@ def _print_repl_skills() -> None:
         print(f"    {tag} ({s.source}) — {s.description}")
 
 
-async def _dispatch_repl_command(agent: Agent, result: CommandResult) -> bool:
+async def _dispatch_repl_command(
+    backend: CodingSessionBackendAdapter, result: CommandResult
+) -> bool:
     """按 ``CommandResult`` 意图分发 REPL 命令；返回 True 表示退出。
 
     单一命令入口在 ``application/commands.py``，REPL 只做呈现
@@ -86,19 +91,19 @@ async def _dispatch_repl_command(agent: Agent, result: CommandResult) -> bool:
         print("\nBye!\n")
         return True
     if result.new_session_requested:
-        await agent.clear_history()
+        await backend.clear_history()
     elif result.plan_toggle_requested:
-        print_info(f"Plan mode: {agent.toggle_plan_mode()}")
+        print_info(f"Plan mode: {backend.toggle_plan_mode()}")
     elif result.cost_requested:
-        agent.show_cost()
+        backend.show_cost()
     elif result.compact_summary is not None:
         try:
-            await agent.compact()
+            await backend.compact()
         except Exception as e:
             print_error(str(e))
     elif result.skill_prompt is not None:
         try:
-            await agent.chat(result.skill_prompt)
+            await backend.chat(result.skill_prompt)
         except Exception as e:
             if "abort" not in str(e).lower():
                 print_error(str(e))
@@ -115,7 +120,7 @@ async def _dispatch_repl_command(agent: Agent, result: CommandResult) -> bool:
     return False
 
 
-async def run_repl(agent: Agent) -> None:
+async def run_repl(backend: CodingSessionBackendAdapter) -> None:
     """运行交互式 REPL，并负责中断、审批和命令分发。"""
 
     async def confirm_fn(message: str) -> bool:
@@ -125,7 +130,7 @@ async def run_repl(agent: Agent) -> None:
         except EOFError:
             return False
 
-    agent.set_confirm_fn(confirm_fn)
+    backend.set_confirm_fn(confirm_fn)
 
     async def plan_approval_fn(plan_content: str) -> dict:
         print_plan_for_approval(plan_content)
@@ -150,8 +155,8 @@ async def run_repl(agent: Agent) -> None:
             else:
                 print("  Invalid choice. Enter 1, 2, 3, or 4.")
 
-    agent.set_plan_approval_fn(plan_approval_fn)
-    command_session = LionCodingSession(backend=agent, terminal_output=True)
+    backend.set_plan_approval_fn(plan_approval_fn)
+    command_session = LionCodingSession(backend=backend, terminal_output=True)
 
     sigint_count = 0
 
@@ -159,8 +164,8 @@ async def run_repl(agent: Agent) -> None:
         nonlocal sigint_count
         # `is_processing` 才表示主 Agent 是否有活动任务；`_output_buffer` 只服务于
         # 子 Agent，不能用它判断主 Agent 是否可中断。
-        if not agent.is_aborted and agent.is_processing:
-            agent.abort()
+        if not backend.is_aborted and backend.is_processing:
+            backend.abort()
             print("\n  (interrupted)")
             sigint_count = 0
             print_user_prompt()
@@ -194,19 +199,19 @@ async def run_repl(agent: Agent) -> None:
 
         if inp.startswith("/"):
             result = command_session.handle_command(inp)
-            if await _dispatch_repl_command(agent, result):
+            if await _dispatch_repl_command(backend, result):
                 break
             continue
 
         # 其余输入进入普通对话路径。
         try:
-            await agent.chat(inp)
+            await backend.chat(inp)
         except Exception as e:
             if "abort" not in str(e).lower():
                 print_error(str(e))
 
     # REPL 退出时必须回收 Capability 外部资源，否则终端进程可能无法正常结束（issue #8）。
-    await agent.close()
+    await backend.close()
 
 
 def main() -> None:
@@ -304,7 +309,7 @@ Examples:
         )
         sys.exit(1)
 
-    agent = Agent(
+    backend = build_full_coding_backend(
         permission_mode=permission_mode,
         model=model,
         thinking=args.thinking,
@@ -316,26 +321,26 @@ Examples:
     )
     if args.plan:
         # Plan 激活是 Plan Capability 命令（PR4 起 Permission 不再有 plan 模式）。
-        agent.toggle_plan_mode()
+        backend.toggle_plan_mode()
 
     if use_tui:
         # TUI 内自带输入循环，one-shot prompt 不适用。
         from .application.session import LionCodingSession
         from .tui.app import run_tui_app
 
-        run_tui_app(LionCodingSession(backend=agent), resume=args.resume)
+        run_tui_app(LionCodingSession(backend=backend), resume=args.resume)
         return
 
     async def run_cli() -> None:
         if args.resume:
-            await agent.restore_latest_session()
+            await backend.restore_latest()
         if prompt:
             try:
-                await agent.chat(prompt)
+                await backend.chat(prompt)
             finally:
-                await agent.close()
+                await backend.close()
             return
-        await run_repl(agent)
+        await run_repl(backend)
 
     try:
         asyncio.run(run_cli())
