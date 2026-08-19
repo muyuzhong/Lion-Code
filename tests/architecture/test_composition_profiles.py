@@ -21,10 +21,13 @@ from lion_code.agent import Agent
 from lion_code.composition import (
     NEUTRAL_SYSTEM_PROMPT,
     AgentConfig,
-    AgentDependencies,
     CodingProfile,
     FullProfile,
     MinimalProfile,
+    ProviderBindings,
+    RuntimeBindings,
+    SessionBindings,
+    ToolBindings,
     build_agent_composition,
 )
 from lion_code.composition.agent_builder import _normalize_profile
@@ -108,15 +111,17 @@ def _completed_provider(text: str) -> _CompletedProvider:
 
 def _minimal(tmp_path, monkeypatch, **profile_kwargs) -> object:
     monkeypatch.chdir(tmp_path)
-    profile_kwargs.setdefault(
-        "config", AgentConfig(api_key="test-key", terminal_output=False)
-    )
-    profile_kwargs.setdefault("dependencies", AgentDependencies())
+    profile_kwargs.setdefault("tools", ())
+    config = AgentConfig(api_key="test-key", terminal_output=False)
     with patch(
         "lion_code.composition.agent_builder.create_provider",
         return_value=_fake_provider(),
     ):
-        return build_agent_composition(MinimalProfile(**profile_kwargs))
+        return build_agent_composition(
+            MinimalProfile(**profile_kwargs),
+            config=config,
+            bindings=RuntimeBindings(),
+        )
 
 
 def test_minimal_graph_only_contains_caller_tools(tmp_path, monkeypatch) -> None:
@@ -142,21 +147,18 @@ def test_minimal_graph_only_contains_caller_tools(tmp_path, monkeypatch) -> None
 def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     backend = _RecordingBackend()
-    profile = CodingProfile(
-        config=AgentConfig(
-            api_key="test-key",
-            permission_mode="bypassPermissions",
-            terminal_output=False,
-        ),
-        dependencies=AgentDependencies(),
-        command_backend=backend,
-        extra_tools=(_tool("extra_tool"),),
+    profile = CodingProfile(extra_tools=(_tool("extra_tool"),))
+    config = AgentConfig(
+        api_key="test-key",
+        permission_mode="bypassPermissions",
+        terminal_output=False,
     )
+    bindings = RuntimeBindings(tool=ToolBindings(command_backend=backend))
     with patch(
         "lion_code.composition.agent_builder.create_provider",
         return_value=_fake_provider(),
     ):
-        composition = build_agent_composition(profile)
+        composition = build_agent_composition(profile, config=config, bindings=bindings)
 
     names = {tool.name for tool in composition.tool_registry.all_tools()}
     assert BUILTIN_TOOL_NAMES <= names
@@ -180,15 +182,15 @@ def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypat
 
 def test_coding_graph_never_composes_full_capabilities(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    profile = CodingProfile(
-        config=AgentConfig(api_key="test-key", terminal_output=False),
-        dependencies=AgentDependencies(),
-    )
+    profile = CodingProfile()
+    config = AgentConfig(api_key="test-key", terminal_output=False)
     with patch(
         "lion_code.composition.agent_builder.create_provider",
         return_value=_fake_provider(),
     ):
-        composition = build_agent_composition(profile)
+        composition = build_agent_composition(
+            profile, config=config, bindings=RuntimeBindings()
+        )
 
     assert composition.capability_registry.tool_sources == ()
     assert composition.skill_runtime is None
@@ -206,25 +208,25 @@ def test_minimal_and_coding_profiles_compose_extension_specs(tmp_path, monkeypat
         name="memory-extension",
         prompt_layers=(_ExamplePromptLayer(),),
     )
+    config = AgentConfig(api_key="test-key", terminal_output=False)
     profiles = (
-        MinimalProfile(
-            config=AgentConfig(api_key="test-key", terminal_output=False),
-            dependencies=AgentDependencies(),
-            tools=(_tool("caller_tool"),),
-            extension_specs=(spec,),
+        (
+            MinimalProfile(
+                tools=(_tool("caller_tool"),),
+                extension_specs=(spec,),
+            ),
+            config,
         ),
-        CodingProfile(
-            config=AgentConfig(api_key="test-key", terminal_output=False),
-            dependencies=AgentDependencies(),
-            extension_specs=(spec,),
-        ),
+        (CodingProfile(extension_specs=(spec,)), config),
     )
-    for profile in profiles:
+    for profile, profile_config in profiles:
         with patch(
             "lion_code.composition.agent_builder.create_provider",
             return_value=_fake_provider(),
         ):
-            composition = build_agent_composition(profile)
+            composition = build_agent_composition(
+                profile, config=profile_config, bindings=RuntimeBindings()
+            )
 
         assert len(composition.capability_registry.prompt_layers) == 1
         # 扩展不带内置 Capability：不产出 Full 专属 runtime
@@ -256,17 +258,20 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
         name="example-extension",
         prompt_layers=(_ExamplePromptLayer(),),
     )
-    profile = FullProfile(
-        config=AgentConfig(api_key="test-key", terminal_output=False),
-        dependencies=AgentDependencies(session_repository=_repo(tmp_path)),
-        command_backend=backend,
-        extension_specs=(spec,),
+    profile = FullProfile(extension_specs=(spec,))
+    bindings = RuntimeBindings(
+        session=SessionBindings(session_repository=_repo(tmp_path)),
+        tool=ToolBindings(command_backend=backend),
     )
     with patch(
         "lion_code.composition.agent_builder.create_provider",
         return_value=_fake_provider(),
     ):
-        composition = build_agent_composition(profile)
+        composition = build_agent_composition(
+            profile,
+            config=AgentConfig(api_key="test-key", terminal_output=False),
+            bindings=bindings,
+        )
 
     assert len(composition.capability_registry.tool_sources) == 3
     assert len(composition.capability_registry.prompt_layers) == 2
@@ -350,10 +355,11 @@ def test_all_profiles_return_meta_facade(tmp_path, monkeypatch):
             system_prompt="custom coding prompt",
         )
         full = build_profile_agent(
-            FullProfile(
-                config=AgentConfig(api_key="test-key", terminal_output=False),
-                dependencies=AgentDependencies(session_repository=_repo(tmp_path)),
-            )
+            FullProfile(),
+            config=AgentConfig(api_key="test-key", terminal_output=False),
+            bindings=RuntimeBindings(
+                session=SessionBindings(session_repository=_repo(tmp_path))
+            ),
         )
     assert isinstance(coding, MetaAgent)
     assert isinstance(full, MetaAgent)
@@ -369,7 +375,6 @@ def test_all_profiles_return_meta_facade(tmp_path, monkeypatch):
 def test_package_root_exports_only_final_product_api() -> None:
     assert set(lion_code.__all__) == {
         "AgentConfig",
-        "AgentDependencies",
         "AgentFactory",
         "AgentPort",
         "AsyncioScheduler",
@@ -379,25 +384,31 @@ def test_package_root_exports_only_final_product_api() -> None:
         "CodingProfile",
         "FullProfile",
         "Goal",
+        "InteractionBindings",
         "JsonCheckpointStore",
         "MetaAgent",
         "MinimalProfile",
         "Phase",
         "Profile",
+        "ProviderBindings",
         "PublicAgentEventListener",
         "PublicAgentResult",
         "RetryPolicy",
+        "RuntimeBindings",
         "Scheduler",
+        "SessionBindings",
         "Status",
         "Supervisor",
         "SupervisorResult",
         "SupervisorState",
+        "ToolBindings",
         "VolatileCheckpointStore",
         "build_coding_agent",
         "build_meta_agent",
         "build_profile_agent",
     }
     assert not hasattr(lion_code, "Agent")
+    assert not hasattr(lion_code, "AgentDependencies")
 
 
 def test_supervisor_factory_selects_profile_backed_meta_agent(
@@ -405,15 +416,16 @@ def test_supervisor_factory_selects_profile_backed_meta_agent(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     provider = _completed_provider("supervised")
-    profile = MinimalProfile(
-        config=AgentConfig(terminal_output=False),
-        dependencies=AgentDependencies(
-            provider=provider,
-            session_repository=_repo(tmp_path),
-        ),
-    )
+    profile = MinimalProfile()
     supervisor = Supervisor(
-        agent_factory=lambda: build_profile_agent(profile),
+        agent_factory=lambda: build_profile_agent(
+            profile,
+            config=AgentConfig(terminal_output=False),
+            bindings=RuntimeBindings(
+                provider=ProviderBindings(provider=provider),
+                session=SessionBindings(session_repository=_repo(tmp_path)),
+            ),
+        ),
         goal="run selected profile",
         retry_policy=RetryPolicy(max_attempts=1),
         checkpoint_store=VolatileCheckpointStore(),
@@ -538,7 +550,7 @@ def test_feature_construction_branches_live_only_in_normalize_profile() -> None:
         "_normalize_profile",
         "_build_capability_graph",
         "_build_foundation",
-        "_resolve_dependencies",
+        "_resolve_bindings",
     }
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -550,22 +562,43 @@ def test_feature_construction_branches_live_only_in_normalize_profile() -> None:
                 raise AssertionError(f"Feature branch 泄漏到 {node.name}: {inner.id}")
 
 
-def test_local_backend_is_default_and_protocol_matches() -> None:
-    profile = FullProfile(
-        config=AgentConfig(api_key="test-key"),
-        dependencies=AgentDependencies(),
-    )
-    assert isinstance(profile.command_backend, LocalCommandExecutionBackend)
-    selection = _normalize_profile(profile)
-    assert selection.command_backend is profile.command_backend
+def test_command_backend_is_a_runtime_binding_not_profile_field() -> None:
+    """command_backend 属于 ToolBindings，Profile 与归一化结果都不携带它。"""
+    from dataclasses import fields
 
-    minimal = MinimalProfile(
-        config=AgentConfig(api_key="test-key"),
-        dependencies=AgentDependencies(),
-    )
-    selection = _normalize_profile(minimal)
-    assert selection.command_backend is None
-    assert selection.builtin_tools is False
+    for profile_type in (MinimalProfile, CodingProfile, FullProfile):
+        field_names = {field.name for field in fields(profile_type)}
+        assert "command_backend" not in field_names
+        assert "config" not in field_names
+        assert "dependencies" not in field_names
+        assert "bindings" not in field_names
+
+    selection = _normalize_profile(CodingProfile())
+    selection_fields = {field.name for field in fields(selection)}
+    assert "command_backend" not in selection_fields
+    assert "config" not in selection_fields
+    assert "dependencies" not in selection_fields
+    assert selection.builtin_tools is True
+    assert _normalize_profile(MinimalProfile()).builtin_tools is False
+
+
+def test_default_bindings_fall_back_to_local_command_backend(
+    tmp_path, monkeypatch
+) -> None:
+    """默认 bindings 未注入 backend 时，Coding 内置工具落到本地实现。"""
+    monkeypatch.chdir(tmp_path)
+    with patch(
+        "lion_code.composition.agent_builder.create_provider",
+        return_value=_fake_provider(),
+    ):
+        composition = build_agent_composition(
+            CodingProfile(),
+            config=AgentConfig(api_key="test-key"),
+            bindings=RuntimeBindings(),
+        )
+
+    assert "run_shell" in {tool.name for tool in composition.tool_registry.all_tools()}
+    assert isinstance(LocalCommandExecutionBackend(), LocalCommandExecutionBackend)
 
 
 def test_permission_policy_satisfies_strategy_protocol() -> None:

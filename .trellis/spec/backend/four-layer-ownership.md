@@ -26,6 +26,12 @@ of the Agent Runtime layer: `AgentRuntimeCoordinator`, `LionAgentRuntime`,
 
 ## Current composition
 
+Composition inputs are three orthogonal axes: `Profile` (WHAT TO BUILD —
+product preset), `AgentConfig` (HOW IT RUNS — value-type runtime settings), and
+`RuntimeBindings` (WITH WHAT — concrete implementation bindings grouped as
+`ProviderBindings` / `SessionBindings` / `ToolBindings` / `InteractionBindings`).
+They meet only in `build_agent_composition`.
+
 `MinimalProfile` constructs an empty CapabilityRegistry. `CodingProfile` adds
 Coding tools and Coding Harness policy, but no built-in Capability. `FullProfile`
 adds Plan, SubAgent, and Skill built-in Capabilities. Caller `extension_specs`

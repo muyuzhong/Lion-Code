@@ -1,7 +1,9 @@
 """Agent Composition Root：一次性组装所有 concrete runtime。
 
-唯一入口是 ``build_agent_composition(profile)``：Profile 提供不可变组合选择，
-builder 一次性创建 graph。Feature-specific construction branch 只存在于
+唯一入口是 ``build_agent_composition(profile, config=config, bindings=bindings)``：
+三轴在此汇合——Profile 表达 WHAT TO BUILD（产品形态），AgentConfig 表达
+HOW IT RUNS（运行策略值），RuntimeBindings 表达 WITH WHAT（具体实现绑定）。
+这是唯一允许同时看见三者的地方；Feature-specific construction branch 只存在于
 ``_normalize_profile``，不进入 Kernel/Harness。
 """
 
@@ -48,7 +50,6 @@ from ..skill_runtime import SkillRuntime
 from ..subagent_factory import ChildAgentConfig, SubagentFactory
 from ..subagent_runtime import SubagentExecutor
 from ..tooling import (
-    CommandExecutionBackend,
     LocalCommandExecutionBackend,
     ToolPermissionStrategy,
     ToolRegistry,
@@ -69,7 +70,8 @@ from ..tooling.permission import PermissionPolicy
 from ..tooling.result_store import ResultStore
 from ..tooling.types import LionTool
 from ..usage import BudgetPolicy, UsageLedger
-from .config import AgentConfig, AgentDependencies
+from .bindings import RuntimeBindings
+from .config import AgentConfig
 from .ports import (
     ConfirmationController,
     DeferredBackgroundScheduler,
@@ -128,22 +130,19 @@ class AgentComposition:
 
 @dataclass(slots=True)
 class _ProfileSelection:
-    """Profile 归一化结果；builder 内部的一次性值，不导出。"""
+    """Profile 归一化结果：只含组合选择（WHAT），不含 config 与 bindings。"""
 
-    config: AgentConfig
-    dependencies: AgentDependencies
     capabilities: frozenset[str]
     builtin_tools: bool
     caller_tools: tuple[LionTool, ...]
     base_prompt: str
     dynamic_prompt_enabled: bool
-    command_backend: CommandExecutionBackend | None
     extension_specs: tuple[CapabilitySpec, ...]
 
 
 @dataclass(slots=True)
 class _FoundationGraph:
-    dependencies: AgentDependencies
+    bindings: RuntimeBindings
     cwd: Path
     provider_factory: Any
     hooks_loader: Any
@@ -165,8 +164,10 @@ class _FoundationGraph:
 
 
 @dataclass(slots=True)
-class _ResolvedDependencies:
-    dependencies: AgentDependencies
+class _ResolvedBindings:
+    """RuntimeBindings + AgentConfig 解析出的构造期值与控制器。"""
+
+    bindings: RuntimeBindings
     cwd: Path
     provider_factory: Any
     hooks_loader: Any
@@ -208,17 +209,22 @@ class _ToolingGraph:
     session_port: SessionStatePort
 
 
-def build_agent_composition(profile: Profile) -> AgentComposition:
+def build_agent_composition(
+    profile: Profile,
+    *,
+    config: AgentConfig,
+    bindings: RuntimeBindings,
+) -> AgentComposition:
     """按固定顺序创建 Agent object graph，并返回一次性 composition result。
 
-    Profile 是组合选择的唯一来源：``MinimalProfile`` 构造零内置 Capability 的
-    Bare 图，``CodingProfile`` 构造 backend 绑定的 Coding 工具形态，
-    ``FullProfile`` 固定组合 Plan/SubAgent/默认 Skill。
+    Profile / AgentConfig / RuntimeBindings 三轴只在此汇合：``MinimalProfile``
+    构造零内置 Capability 的 Bare 图，``CodingProfile`` 构造 Coding 工具形态，
+    ``FullProfile`` 固定组合 Plan/SubAgent/默认 Skill；config 提供运行策略，
+    bindings 提供全部 concrete infrastructure。
     """
 
     selection = _normalize_profile(profile)
-    config = selection.config
-    foundation = _build_foundation(selection)
+    foundation = _build_foundation(selection, config, bindings)
     notices = foundation.notices
     confirmation = foundation.confirmation
     status_sink = foundation.status_sink
@@ -287,39 +293,32 @@ def build_agent_composition(profile: Profile) -> AgentComposition:
 
 
 def _normalize_profile(profile: Profile) -> _ProfileSelection:
-    """把 Profile value 归一化为 builder 内部的一次性选择。
+    """把 Profile value 归一化为 builder 内部的一次性组合选择。
 
     Feature-specific construction branch 只存在于本函数：Profile 类型本身
-    表达内置 Capability 组合，不暴露任意 capability-name set。
+    表达内置 Capability 组合，不暴露任意 capability-name set；config 与
+    bindings 不在归一化范围内。
     """
     if isinstance(profile, MinimalProfile):
         return _ProfileSelection(
-            config=profile.config,
-            dependencies=profile.dependencies,
             capabilities=frozenset(),
             builtin_tools=False,
             caller_tools=profile.tools,
             base_prompt=profile.system_prompt or NEUTRAL_SYSTEM_PROMPT,
             dynamic_prompt_enabled=False,
-            command_backend=None,
             extension_specs=profile.extension_specs,
         )
     if isinstance(profile, CodingProfile):
         return _ProfileSelection(
-            config=profile.config,
-            dependencies=profile.dependencies,
             capabilities=frozenset(),
             builtin_tools=True,
             caller_tools=profile.extra_tools,
             base_prompt=profile.system_prompt or build_static_system_prompt(),
             dynamic_prompt_enabled=profile.system_prompt is None,
-            command_backend=profile.command_backend,
             extension_specs=profile.extension_specs,
         )
     if isinstance(profile, FullProfile):
         return _ProfileSelection(
-            config=profile.config,
-            dependencies=profile.dependencies,
             capabilities=frozenset(
                 {_CAP_SKILL, _CAP_SUBAGENT, _CAP_PLAN},
             ),
@@ -327,44 +326,46 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
             caller_tools=profile.extra_tools,
             base_prompt=profile.system_prompt or build_static_system_prompt(),
             dynamic_prompt_enabled=profile.system_prompt is None,
-            command_backend=profile.command_backend,
             extension_specs=profile.extension_specs,
         )
     raise TypeError(f"unsupported profile: {type(profile).__name__}")
 
 
-def _resolve_dependencies(
+def _resolve_bindings(
+    config: AgentConfig,
+    bindings: RuntimeBindings,
     selection: _ProfileSelection,
-) -> _ResolvedDependencies:
-    config = selection.config
-    deps = selection.dependencies
+) -> _ResolvedBindings:
     cwd = Path.cwd()
+    interaction = bindings.interaction
     notices = NoticeController(
-        print_info=deps.print_info or _noop_print,
-        print_error=deps.print_error or _noop_print,
+        print_info=interaction.print_info or _noop_print,
+        print_error=interaction.print_error or _noop_print,
     )
     confirmation = ConfirmationController(
         permission=PermissionController(PermissionState(mode=config.permission_mode)),
         terminal_output=config.terminal_output,
-        print_confirmation=deps.print_confirmation or _noop_print,
-        confirm_fn=deps.confirm_fn,
+        print_confirmation=interaction.print_confirmation or _noop_print,
+        confirm_fn=interaction.confirm_fn,
     )
     status_sink = None
     if selection.capabilities & {_CAP_SUBAGENT, _CAP_SKILL}:
         status_sink = SubagentStatusSink(
             terminal_output=config.terminal_output,
-            start=deps.print_sub_agent_start or _noop_status,
-            end=deps.print_sub_agent_end or _noop_status,
+            start=interaction.print_sub_agent_start or _noop_status,
+            end=interaction.print_sub_agent_end or _noop_status,
         )
-    return _ResolvedDependencies(
-        dependencies=deps,
+    return _ResolvedBindings(
+        bindings=bindings,
         cwd=cwd,
-        provider_factory=deps.provider_factory or create_provider,
-        hooks_loader=deps.pre_tool_use_hooks_loader or load_pre_tool_use_hooks,
-        dynamic_context_builder=(
-            deps.dynamic_system_context_builder or build_dynamic_system_context
+        provider_factory=bindings.provider.provider_factory or create_provider,
+        hooks_loader=(
+            bindings.tool.pre_tool_use_hooks_loader or load_pre_tool_use_hooks
         ),
-        renderer_factory=deps.terminal_renderer_factory or TerminalRenderer,
+        dynamic_context_builder=(
+            interaction.dynamic_system_context_builder or build_dynamic_system_context
+        ),
+        renderer_factory=interaction.terminal_renderer_factory or TerminalRenderer,
         notices=notices,
         confirmation=confirmation,
         permission_controller=confirmation.permission,
@@ -372,10 +373,12 @@ def _resolve_dependencies(
     )
 
 
-def _build_foundation(selection: _ProfileSelection) -> _FoundationGraph:
-    resolved = _resolve_dependencies(selection)
-    config = selection.config
-    deps = resolved.dependencies
+def _build_foundation(
+    selection: _ProfileSelection,
+    config: AgentConfig,
+    bindings: RuntimeBindings,
+) -> _FoundationGraph:
+    resolved = _resolve_bindings(config, bindings, selection)
     cwd = resolved.cwd
     provider_factory = resolved.provider_factory
     hooks_loader = resolved.hooks_loader
@@ -395,18 +398,18 @@ def _build_foundation(selection: _ProfileSelection) -> _FoundationGraph:
         uuid.uuid4().hex[:8],
         time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     )
-    session_repository = deps.session_repository or SessionRepository()
+    session_repository = bindings.session.session_repository or SessionRepository()
     read_file_state: dict[str, float] = {}
 
-    created_own_registry = deps.tool_registry is None
+    created_own_registry = bindings.tool.tool_registry is None
     if not created_own_registry and selection.caller_tools:
         raise ValueError("tool_registry cannot be combined with profile tools")
-    tool_registry = deps.tool_registry or ToolRegistry()
+    tool_registry = bindings.tool.tool_registry or ToolRegistry()
     if created_own_registry:
         for tool in selection.caller_tools:
             tool_registry.register(tool)
         if selection.builtin_tools:
-            backend = selection.command_backend or LocalCommandExecutionBackend()
+            backend = bindings.tool.command_backend or LocalCommandExecutionBackend()
             for tool in [*create_builtin_tools(backend), *create_internal_tools()]:
                 tool_registry.register(tool)
 
@@ -418,7 +421,7 @@ def _build_foundation(selection: _ProfileSelection) -> _FoundationGraph:
     else:
         plan = None
     return _FoundationGraph(
-        dependencies=deps,
+        bindings=bindings,
         cwd=cwd,
         provider_factory=provider_factory,
         hooks_loader=hooks_loader,
@@ -474,7 +477,7 @@ def _build_provider_graph(
         provider_factory=foundation.provider_factory,
         schedule_background_operation=background_scheduler,
     )
-    provider = foundation.dependencies.provider
+    provider = foundation.bindings.provider.provider
     if provider is None:
         provider = provider_manager.build_provider()
     return _ProviderGraph(
@@ -497,7 +500,7 @@ def _build_identity_port(
         terminal_output=config.terminal_output,
         effective_window=effective_window_tokens(fallback_model_limits(config.model)),
         api_configured=lambda: (
-            foundation.dependencies.provider is not None
+            foundation.bindings.provider.provider is not None
             or provider_manager.api_configured
         ),
         is_aborted=lambda: foundation.execution.cancelled,
@@ -621,7 +624,7 @@ def _build_tooling_graph(
             AuditMiddleware(),
         ],
     )
-    context_manager = foundation.dependencies.context_manager or ContextManager(
+    context_manager = foundation.bindings.session.context_manager or ContextManager(
         is_snippable_tool=lambda name: _is_snippable_tool(
             foundation.tool_registry, name
         )
@@ -664,9 +667,9 @@ def _build_runtime_coordinator(
         model=provider_graph.provider_manager.model,
         tool_runtime=tool_runtime,
         context_manager=context_manager,
-        context_compactor=foundation.dependencies.context_compactor,
+        context_compactor=foundation.bindings.session.context_compactor,
         model_limits_resolver=(
-            foundation.dependencies.model_limits_resolver or ModelLimitsResolver()
+            foundation.bindings.provider.model_limits_resolver or ModelLimitsResolver()
         ),
         provider_manager=provider_graph.provider_manager,
     )

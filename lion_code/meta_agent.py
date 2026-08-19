@@ -8,10 +8,14 @@ from typing import Any
 from .composition import (
     NEUTRAL_SYSTEM_PROMPT,
     AgentConfig,
-    AgentDependencies,
     CodingProfile,
+    InteractionBindings,
     MinimalProfile,
     Profile,
+    ProviderBindings,
+    RuntimeBindings,
+    SessionBindings,
+    ToolBindings,
     build_agent_composition,
 )
 from .composition.agent_builder import AgentComposition
@@ -187,12 +191,20 @@ def _build_meta_facade(
     )
 
 
-def build_profile_agent(profile: Profile) -> MetaAgent:
-    """从任一不可变 Profile 构造只暴露通用 API 的 MetaAgent。"""
+def build_profile_agent(
+    profile: Profile,
+    *,
+    config: AgentConfig,
+    bindings: RuntimeBindings,
+) -> MetaAgent:
+    """从任一不可变 Profile 构造只暴露通用 API 的 MetaAgent。
+
+    三轴输入只经此转发进 Composition Root，facade 不做任何组合决策。
+    """
 
     return _build_meta_facade(
-        build_agent_composition(profile),
-        profile.config.permission_mode,
+        build_agent_composition(profile, config=config, bindings=bindings),
+        config.permission_mode,
     )
 
 
@@ -216,28 +228,32 @@ def build_meta_agent(
     """构建固定空 CapabilityRegistry、只注册调用方工具的 MetaAgent。"""
 
     profile = MinimalProfile(
-        config=AgentConfig(
-            model=model,
-            permission_mode=permission_mode,
-            thinking=thinking,
-            max_cost_usd=max_cost_usd,
-            max_turns=max_turns,
-            terminal_output=False,
-        ),
-        dependencies=AgentDependencies(
-            confirm_fn=confirm_fn,
-            session_repository=session_repository,
-            context_manager=context_manager,
-            context_compactor=context_compactor,
-            model_limits_resolver=model_limits_resolver,
-            provider=provider,
-            provider_factory=provider_factory,
-            pre_tool_use_hooks_loader=lambda: [],
-        ),
         tools=tuple(tools),
         system_prompt=system_prompt or _META_SYSTEM_PROMPT,
     )
-    return build_profile_agent(profile)
+    config = AgentConfig(
+        model=model,
+        permission_mode=permission_mode,
+        thinking=thinking,
+        max_cost_usd=max_cost_usd,
+        max_turns=max_turns,
+        terminal_output=False,
+    )
+    bindings = RuntimeBindings(
+        provider=ProviderBindings(
+            provider=provider,
+            provider_factory=provider_factory,
+            model_limits_resolver=model_limits_resolver,
+        ),
+        session=SessionBindings(
+            session_repository=session_repository,
+            context_manager=context_manager,
+            context_compactor=context_compactor,
+        ),
+        tool=ToolBindings(pre_tool_use_hooks_loader=lambda: []),
+        interaction=InteractionBindings(confirm_fn=confirm_fn),
+    )
+    return build_profile_agent(profile, config=config, bindings=bindings)
 
 
 def build_coding_agent(
@@ -262,29 +278,30 @@ def build_coding_agent(
     子 Agent/Skill child graph 也走本入口；调用方可注入 caller-owned
     registry view 与 fake command backend 隔离副作用。
     """
-    backend = command_backend or LocalCommandExecutionBackend()
-    profile: Profile = CodingProfile(
-        config=AgentConfig(
-            model=model,
-            api_base=api_base,
-            anthropic_base_url=anthropic_base_url,
-            api_key=api_key,
-            permission_mode=permission_mode,
-            thinking=thinking,
-            max_cost_usd=max_cost_usd,
-            max_turns=max_turns,
-            is_sub_agent=is_sub_agent,
-            terminal_output=terminal_output,
-        ),
-        dependencies=AgentDependencies(
-            tool_registry=tool_registry,
-            pre_tool_use_hooks_loader=load_pre_tool_use_hooks,
-        ),
-        command_backend=backend,
+    profile = CodingProfile(
         extra_tools=tuple(extra_tools),
         system_prompt=system_prompt,
     )
-    return build_profile_agent(profile)
+    config = AgentConfig(
+        model=model,
+        api_base=api_base,
+        anthropic_base_url=anthropic_base_url,
+        api_key=api_key,
+        permission_mode=permission_mode,
+        thinking=thinking,
+        max_cost_usd=max_cost_usd,
+        max_turns=max_turns,
+        is_sub_agent=is_sub_agent,
+        terminal_output=terminal_output,
+    )
+    bindings = RuntimeBindings(
+        tool=ToolBindings(
+            tool_registry=tool_registry,
+            command_backend=command_backend or LocalCommandExecutionBackend(),
+            pre_tool_use_hooks_loader=load_pre_tool_use_hooks,
+        ),
+    )
+    return build_profile_agent(profile, config=config, bindings=bindings)
 
 
 __all__ = [

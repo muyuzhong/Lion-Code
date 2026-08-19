@@ -11,8 +11,12 @@ from typing import Any, Literal
 
 from .composition import (
     AgentConfig,
-    AgentDependencies,
     FullProfile,
+    InteractionBindings,
+    ProviderBindings,
+    RuntimeBindings,
+    SessionBindings,
+    ToolBindings,
     build_agent_composition,
 )
 from .context import (
@@ -118,7 +122,7 @@ class Agent(MetaAgent):
         is_sub_agent: bool = False,
         terminal_output: bool = True,
         config: AgentConfig | None = None,
-        dependencies: AgentDependencies | None = None,
+        bindings: RuntimeBindings | None = None,
     ) -> None:
         legacy_config = AgentConfig(
             permission_mode=permission_mode,
@@ -141,7 +145,7 @@ class Agent(MetaAgent):
         else:
             resolved_config = legacy_config
 
-        legacy_dependencies_supplied = any(
+        legacy_bindings_supplied = any(
             value is not None
             for value in (
                 confirm_fn,
@@ -152,35 +156,43 @@ class Agent(MetaAgent):
                 model_limits_resolver,
             )
         )
-        if dependencies is not None and legacy_dependencies_supplied:
+        if bindings is not None and legacy_bindings_supplied:
             raise ValueError(
-                "dependencies cannot be combined with legacy dependency arguments"
+                "bindings cannot be combined with legacy dependency arguments"
             )
-        resolved_dependencies = dependencies or AgentDependencies(
-            confirm_fn=confirm_fn,
-            tool_registry=tool_registry,
-            session_repository=session_repository,
-            context_manager=context_manager,
-            context_compactor=context_compactor,
-            model_limits_resolver=model_limits_resolver,
-            provider_factory=_agent_provider_factory,
-            pre_tool_use_hooks_loader=_agent_hooks_loader,
-            dynamic_system_context_builder=_agent_dynamic_context_builder,
-            terminal_renderer_factory=_agent_terminal_renderer_factory,
-            print_info=_agent_print_info,
-            print_error=_agent_print_error,
-            print_confirmation=_agent_print_confirmation,
-            print_sub_agent_start=_agent_print_subagent_start,
-            print_sub_agent_end=_agent_print_subagent_end,
+        resolved_bindings = bindings or RuntimeBindings(
+            provider=ProviderBindings(
+                provider_factory=_agent_provider_factory,
+                model_limits_resolver=model_limits_resolver,
+            ),
+            session=SessionBindings(
+                session_repository=session_repository,
+                context_manager=context_manager,
+                context_compactor=context_compactor,
+            ),
+            tool=ToolBindings(
+                tool_registry=tool_registry,
+                pre_tool_use_hooks_loader=_agent_hooks_loader,
+            ),
+            interaction=InteractionBindings(
+                confirm_fn=confirm_fn,
+                dynamic_system_context_builder=_agent_dynamic_context_builder,
+                terminal_renderer_factory=_agent_terminal_renderer_factory,
+                print_info=_agent_print_info,
+                print_error=_agent_print_error,
+                print_confirmation=_agent_print_confirmation,
+                print_sub_agent_start=_agent_print_subagent_start,
+                print_sub_agent_end=_agent_print_subagent_end,
+            ),
         )
         # Agent 是 Full Product：prompt/tools 等组合选择只经由 FullProfile 进入
         # Composition Root，facade 不再拼接 capability 集合。
-        profile = FullProfile(
+        profile = FullProfile(system_prompt=custom_system_prompt)
+        composition = build_agent_composition(
+            profile,
             config=resolved_config,
-            dependencies=resolved_dependencies,
-            system_prompt=custom_system_prompt,
+            bindings=resolved_bindings,
         )
-        composition = build_agent_composition(profile)
         # Agent 是 Full Product：显式选择全部内置能力，Feature 字段必然存在。
         assert composition.plan is not None
         assert composition.subagent_factory is not None
@@ -217,7 +229,7 @@ class Agent(MetaAgent):
         self.tool_runtime = composition.tool_runtime
         self._provider_manager = composition.provider_manager
         self._runtime_coordinator = composition.runtime_coordinator
-        self.confirm_fn = resolved_dependencies.confirm_fn
+        self.confirm_fn = resolved_bindings.interaction.confirm_fn
 
     @property
     def _core_runtime(self) -> LionAgentRuntime:

@@ -17,9 +17,10 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from lion_code.composition import (
     AgentConfig,
-    AgentDependencies,
     FullProfile,
     MinimalProfile,
+    RuntimeBindings,
+    ToolBindings,
     build_agent_composition,
 )
 from lion_code.prompt import (
@@ -89,7 +90,7 @@ _FEATURE_FIELDS = (
 def _bare_composition(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     config = AgentConfig(model="claude-opus-4-6", terminal_output=False)
-    dependencies = AgentDependencies(tool_registry=ToolRegistry())
+    bindings = RuntimeBindings(tool=ToolBindings(tool_registry=ToolRegistry()))
     provider = Mock()
     provider.aclose = AsyncMock()
     with patch(
@@ -97,7 +98,7 @@ def _bare_composition(tmp_path, monkeypatch):
         return_value=provider,
     ):
         return build_agent_composition(
-            MinimalProfile(config=config, dependencies=dependencies)
+            MinimalProfile(), config=config, bindings=bindings
         )
 
 
@@ -130,12 +131,12 @@ def test_full_product_has_all_features(tmp_path, monkeypatch) -> None:
     """FullProfile 显式选择后，Full Product 恢复全部 Feature。"""
     monkeypatch.chdir(tmp_path)
     config = AgentConfig(model="claude-opus-4-6", terminal_output=False)
-    dependencies = AgentDependencies(tool_registry=ToolRegistry())
+    bindings = RuntimeBindings(tool=ToolBindings(tool_registry=ToolRegistry()))
     provider = Mock()
     provider.aclose = AsyncMock()
     with patch("lion_code.agent.create_provider", return_value=provider):
         composition = build_agent_composition(
-            FullProfile(config=config, dependencies=dependencies)
+            FullProfile(), config=config, bindings=bindings
         )
     for field in _FEATURE_FIELDS:
         assert getattr(composition, field) is not None, field
