@@ -48,7 +48,14 @@ AgentFactory selects Profile
 MetaAgent
 ```
 
-Profile 只决定组装图，不把 feature 开关塞进通用配置：
+组合输入按三轴正交分离：`Profile` 表达 WHAT TO BUILD（产品形态），
+`AgentConfig` 表达 HOW IT RUNS（运行策略值），`RuntimeBindings` 表达
+WITH WHAT（`ProviderBindings` / `SessionBindings` / `ToolBindings` /
+`InteractionBindings` 四组 concrete 实现绑定）。三者只在
+`build_agent_composition(profile, config=config, bindings=bindings)` 汇合。
+
+Profile 只决定组装图，不把 feature 开关塞进通用配置，也不携带 config、
+bindings、provider 或呈现回调：
 
 - `MinimalProfile` = `MetaAgent` + caller tools + zero-extension registry
 - `CodingProfile` = `MetaAgent` + Coding Tools + Coding Harness policy

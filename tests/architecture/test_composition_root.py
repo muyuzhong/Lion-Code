@@ -13,9 +13,10 @@ from lion_code.capabilities.types import CapabilitySpec
 from lion_code.composition import (
     AgentComposition,
     AgentConfig,
-    AgentDependencies,
     FullProfile,
     MinimalProfile,
+    RuntimeBindings,
+    ToolBindings,
     build_agent_composition,
 )
 from lion_code.tooling.registry import ToolRegistry
@@ -82,28 +83,31 @@ def _called_names(node: ast.AST) -> set[str]:
     return names
 
 
-def test_config_dependencies_and_profiles_are_separate_frozen_values() -> None:
+def test_config_bindings_and_profiles_are_separate_frozen_values() -> None:
     config = AgentConfig()
-    dependencies = AgentDependencies()
-    profile = MinimalProfile(config=config, dependencies=dependencies)
+    bindings = RuntimeBindings()
+    profile = MinimalProfile()
 
     with pytest.raises(FrozenInstanceError):
         setattr(config, "model", "mutated")
     with pytest.raises(FrozenInstanceError):
-        setattr(dependencies, "context_manager", None)
+        setattr(bindings.tool, "tool_registry", None)
     with pytest.raises(FrozenInstanceError):
         setattr(profile, "system_prompt", "mutated")
 
     config_fields = {field.name for field in fields(config)}
-    dependency_fields = {field.name for field in fields(dependencies)}
+    binding_fields = {field.name for field in fields(bindings)}
     profile_fields = {field.name for field in fields(profile)}
     assert "tool_registry" not in config_fields
     assert "context_manager" not in config_fields
     assert "custom_system_prompt" not in config_fields
     assert "custom_tools" not in config_fields
-    assert "extra_capabilities" not in dependency_fields
-    assert "model" not in dependency_fields
-    assert "permission_mode" not in dependency_fields
+    assert "extra_capabilities" not in binding_fields
+    assert "model" not in binding_fields
+    assert "permission_mode" not in binding_fields
+    assert "config" not in profile_fields
+    assert "bindings" not in profile_fields
+    assert "dependencies" not in profile_fields
     assert "capabilities" not in profile_fields
 
 
@@ -126,16 +130,14 @@ async def test_example_capability_needs_only_spec_registration_and_tests(
         api_key="test-key",
         terminal_output=False,
     )
-    dependencies = AgentDependencies(tool_registry=ToolRegistry())
+    bindings = RuntimeBindings(tool=ToolBindings(tool_registry=ToolRegistry()))
     provider = Mock()
     provider.aclose = AsyncMock()
     with patch("lion_code.agent.create_provider", return_value=provider):
         composition = build_agent_composition(
-            FullProfile(
-                config=config,
-                dependencies=dependencies,
-                extension_specs=(spec,),
-            )
+            FullProfile(extension_specs=(spec,)),
+            config=config,
+            bindings=bindings,
         )
 
     assert len(composition.capability_registry.prompt_layers) == 2

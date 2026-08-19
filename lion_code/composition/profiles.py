@@ -1,24 +1,19 @@
-"""不可变产品组合 Profile：组合选择的单一来源。
+"""不可变产品组合 Profile（Composition Preset）：只表达 WHAT TO BUILD。
 
-Profile 只承载组合数据（Provider/依赖、tools、prompt、backend），不拥有
-lifecycle、不解析服务、不暴露 runtime lookup。
+Profile 只承载组合选择：内置 Capability 形态、调用方 tools、system prompt
+与第三方 extension_specs。运行策略（AgentConfig）与具体实现绑定
+（RuntimeBindings）不进入 Profile，三者在 Composition Root 汇合。
 具体 Feature 名与构造 branch 只存在于 Composition Root。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
-
-from ..tooling.execution import (
-    CommandExecutionBackend,
-    LocalCommandExecutionBackend,
-)
 
 if TYPE_CHECKING:
     from ..capabilities.types import CapabilitySpec
     from ..tooling.types import LionTool
-    from .config import AgentConfig, AgentDependencies
 
 NEUTRAL_SYSTEM_PROMPT = "You are a helpful assistant."
 
@@ -33,8 +28,6 @@ def _normalize_blank_prompt(profile) -> None:
 class MinimalProfile:
     """零内置 Capability 的最小产品：只注册调用方 tools 与第三方扩展。"""
 
-    config: AgentConfig
-    dependencies: AgentDependencies
     tools: tuple[LionTool, ...] = ()
     system_prompt: str | None = None
     extension_specs: tuple[CapabilitySpec, ...] = ()
@@ -47,13 +40,8 @@ class MinimalProfile:
 
 @dataclass(frozen=True, slots=True)
 class CodingProfile:
-    """Coding 产品形态：backend 绑定的 Coding 工具套件、安全策略与第三方扩展。"""
+    """Coding 产品形态：内置 Coding 工具套件、安全策略与第三方扩展。"""
 
-    config: AgentConfig
-    dependencies: AgentDependencies
-    command_backend: CommandExecutionBackend = field(
-        default_factory=LocalCommandExecutionBackend,
-    )
     extra_tools: tuple[LionTool, ...] = ()
     system_prompt: str | None = None
     extension_specs: tuple[CapabilitySpec, ...] = ()
@@ -68,14 +56,9 @@ class CodingProfile:
 class FullProfile:
     """Full 产品：Coding 形态 + Plan/SubAgent/默认 Skill。
 
-    第三方扩展以 immutable ``CapabilitySpec`` values 组合，不进入 dependencies。
+    第三方扩展以 immutable ``CapabilitySpec`` values 组合，与内置形态正交。
     """
 
-    config: AgentConfig
-    dependencies: AgentDependencies
-    command_backend: CommandExecutionBackend = field(
-        default_factory=LocalCommandExecutionBackend,
-    )
     extra_tools: tuple[LionTool, ...] = ()
     system_prompt: str | None = None
     extension_specs: tuple[CapabilitySpec, ...] = ()

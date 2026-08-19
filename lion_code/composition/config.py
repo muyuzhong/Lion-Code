@@ -1,25 +1,22 @@
-"""Agent 的用户配置与外部依赖入口。"""
+"""Agent 的用户可见运行配置（HOW IT RUNS）。
+
+只描述值型运行策略：model、endpoint、权限模式、thinking、预算与轮次等。
+不保存 mutable runtime object——具体实现绑定由 RuntimeBindings 承载。
+prompt、tools 等组合选择由 Profile 承载，不在本配置中。
+"""
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..context import ContextCompactor, ContextManager, ModelLimitsResolver
-    from ..core.provider import ModelProvider
     from ..permission_state import PermissionMode
-    from ..session_runtime import SessionRepository
-    from ..tooling import ToolRegistry
 
 
 @dataclass(frozen=True, slots=True)
 class AgentConfig:
-    """只描述用户可见的 Agent 运行配置，不保存运行时对象。
-
-    prompt、tools 等组合选择由 Profile 承载，不在本配置中。
-    """
+    """只描述用户可见的 Agent 运行配置，不保存运行时对象。"""
 
     model: str = "claude-opus-4-6"
     api_base: str | None = None
@@ -31,25 +28,3 @@ class AgentConfig:
     max_turns: int | None = None
     is_sub_agent: bool = False
     terminal_output: bool = True
-
-
-@dataclass(frozen=True, slots=True)
-class AgentDependencies:
-    """表示外部注入对象、工厂和测试 seam，不承担运行时状态所有权。"""
-
-    confirm_fn: Callable[[str], Awaitable[bool]] | None = None
-    tool_registry: ToolRegistry | None = None
-    session_repository: SessionRepository | None = None
-    context_manager: ContextManager | None = None
-    context_compactor: ContextCompactor | None = None
-    model_limits_resolver: ModelLimitsResolver | None = None
-    provider: ModelProvider | None = None
-    provider_factory: Callable[..., ModelProvider] | None = None
-    pre_tool_use_hooks_loader: Callable[[], list[Any]] | None = None
-    dynamic_system_context_builder: Callable[[Sequence[str]], str] | None = None
-    terminal_renderer_factory: Callable[[], Any] | None = None
-    print_info: Callable[[str], None] | None = None
-    print_error: Callable[[str], None] | None = None
-    print_confirmation: Callable[[str], None] | None = None
-    print_sub_agent_start: Callable[[str, str], None] | None = None
-    print_sub_agent_end: Callable[[str, str], None] | None = None

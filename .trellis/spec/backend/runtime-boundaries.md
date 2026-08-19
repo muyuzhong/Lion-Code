@@ -33,18 +33,28 @@ the Agent Runtime.
 
 ## Composition root
 
-`AgentConfig` is a frozen value object containing user/runtime settings.
-`AgentDependencies` contains injected repositories, factories, callbacks, and
-test seams. Neither owns mutable runtime state.
+The composition inputs are three orthogonal axes:
 
-`build_agent_composition(profile)` is the one-shot Composition Root. It creates
-state owners, Provider and permission ports, tools, ContextManager, selected
-capabilities, Core runtime, and the coordinator. `AgentComposition` is the
-one-shot runtime graph. `build_profile_agent(profile)` wraps every selected graph
-in the same feature-neutral `MetaAgent`. The internal `Agent` product host
-subclasses that facade only to retain Application/CLI-specific operations; it is
-not part of the package-root public API. No facade retains a builder,
-CapabilityRegistry, project-Memory repository, or legacy command delegate.
+- `Profile` — WHAT TO BUILD: an immutable composition preset (caller tools,
+  system prompt, `extension_specs`). It never carries config, bindings,
+  provider, repository, backend, or presentation callbacks.
+- `AgentConfig` — HOW IT RUNS: a frozen value object of user-visible runtime
+  settings only; it holds no mutable runtime objects.
+- `RuntimeBindings` — WITH WHAT: concrete implementation bindings grouped by
+  responsibility (`ProviderBindings`, `SessionBindings`, `ToolBindings`,
+  `InteractionBindings`). It is wiring, not a runtime-state owner.
+
+`build_agent_composition(profile, config=config, bindings=bindings)` is the
+one-shot Composition Root and the only place where the three axes meet. It
+creates state owners, Provider and permission ports, tools, ContextManager,
+selected capabilities, Core runtime, and the coordinator. `AgentComposition`
+is the one-shot runtime graph; it does not retain the profile, config, or
+bindings. `build_profile_agent(profile, config=config, bindings=bindings)`
+wraps every selected graph in the same feature-neutral `MetaAgent`. The
+internal `Agent` product host subclasses that facade only to retain
+Application/CLI-specific operations; it is not part of the package-root public
+API. No facade retains a builder, CapabilityRegistry, project-Memory
+repository, or legacy command delegate.
 
 Profiles select the graph:
 
@@ -54,6 +64,10 @@ Profiles select the graph:
   an empty CapabilityRegistry.
 - `FullProfile`: Coding tools plus Plan, SubAgent, default Skill, and supplied
   extension specs, still behind MetaAgent.
+
+`command_backend` is a `ToolBindings` entry (defaulting to the local backend);
+confirm callbacks, renderer factories, and print callbacks are
+`InteractionBindings` entries. Neither pollutes any Profile.
 
 No profile creates a Memory, Dream, Learning, Null, Deprecated, Legacy, or
 fallback object.

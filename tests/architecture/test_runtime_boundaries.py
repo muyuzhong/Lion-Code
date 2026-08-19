@@ -1596,14 +1596,32 @@ def test_removed_external_tool_protocol_stays_deleted() -> None:
 
 
 def test_removed_environment_field_stays_out_of_composition() -> None:
-    """PR7b 强否定：配置/依赖/组合结果不得重新携带外部工具环境字段。"""
+    """PR7b 强否定：配置/绑定/组合结果不得重新携带外部工具环境字段。"""
     from dataclasses import fields as dataclass_fields
 
-    from lion_code.composition import AgentComposition, AgentConfig, AgentDependencies
+    from lion_code.composition import (
+        AgentComposition,
+        AgentConfig,
+        InteractionBindings,
+        ProviderBindings,
+        RuntimeBindings,
+        SessionBindings,
+        ToolBindings,
+    )
 
     field_names = (
         {field.name for field in dataclass_fields(AgentConfig)}
-        | {field.name for field in dataclass_fields(AgentDependencies)}
+        | {field.name for field in dataclass_fields(RuntimeBindings)}
+        | {
+            field.name
+            for group in (
+                ProviderBindings,
+                SessionBindings,
+                ToolBindings,
+                InteractionBindings,
+            )
+            for field in dataclass_fields(group)
+        }
         | {field.name for field in dataclass_fields(AgentComposition)}
     )
     assert not field_names & {"tool_environment"}
