@@ -5,6 +5,14 @@
 HOW IT RUNS（运行策略值），RuntimeBindings 表达 WITH WHAT（具体实现绑定）。
 这是唯一允许同时看见三者的地方；Feature-specific construction branch 只存在于
 ``_normalize_profile``，不进入 Kernel/Harness。
+
+Object graph 按可拓扑排序的固定顺序构建，无 Deferred 二段式绑定：
+
+    foundation → ContextRuntime → ConversationRuntime → SessionRuntime
+              → AgentRuntime → ProviderController
+
+ProviderController 最后创建，构造时直接持有 Conversation/Context/Session
+三个窄端口；AgentRuntime 与 ProviderController 互不引用。
 """
 
 from __future__ import annotations
@@ -12,6 +20,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +36,7 @@ from ..capabilities import (
 from ..context import (
     ContextManager,
     ModelLimitsResolver,
+    ProviderContextCompactor,
     effective_window_tokens,
     fallback_model_limits,
 )
@@ -41,9 +51,18 @@ from ..prompt import (
 )
 from ..providers.factory import create_provider
 from ..providers.thinking import ThinkingLevel
-from ..runtime.agent import AgentRuntimeCoordinator
+from ..runtime.agent import AgentRuntime
+from ..runtime.context import ContextRuntime
+from ..runtime.conversation import ConversationRuntime
 from ..runtime.execution import ExecutionControl
-from ..runtime.provider import ProviderKind, ProviderManager, ProviderState
+from ..runtime.provider import (
+    ProviderController,
+    ProviderFactory,
+    ProviderKind,
+    ProviderState,
+    build_provider_for_state,
+)
+from ..runtime.session import SessionRuntime
 from ..runtime.session_identity import SessionIdentityState
 from ..session_runtime import SessionRepository
 from ..skill_runtime import SkillRuntime
@@ -74,14 +93,9 @@ from .bindings import RuntimeBindings
 from .config import AgentConfig
 from .ports import (
     ConfirmationController,
-    DeferredBackgroundScheduler,
-    DeferredModelContextControl,
-    DeferredProviderRuntimePort,
     NoticeController,
     PlanHost,
     RuntimeIdentityPort,
-    SessionRecorderConfigurationRecorder,
-    SessionStatePort,
     SubagentStatusSink,
 )
 from .profiles import (
@@ -99,33 +113,62 @@ _CAP_PLAN = "plan"
 
 
 @dataclass(slots=True)
-class AgentComposition:
-    """Composition Root 完成后交给 facade 的显式对象集合。
+class RuntimeComposition:
+    """Runtime 平面的分层组合结果：编排者、三个 Owner 与 Provider 命令面。"""
 
-    Feature 字段（plan / subagent）在 Bare 图中为 ``None``：
-    调用方按所选 capabilities 判空，不创建 Null 对象。
-    """
-
-    session_state: SessionIdentityState
-    session_repository: SessionRepository
+    agent: AgentRuntime
+    conversation: ConversationRuntime
+    session: SessionRuntime
+    context: ContextRuntime
+    provider_controller: ProviderController
     usage: UsageLedger
     budget: BudgetPolicy
-    tool_registry: ToolRegistry
+
+
+@dataclass(slots=True)
+class CapabilityComposition:
+    """Capability 平面：通用 registry/runtime 与 product controls。"""
+
+    registry: CapabilityRegistry
+    runtime: CapabilityRuntime
     plan: PlanRuntime | None
     subagent_factory: SubagentFactory | None
     subagent_executor: SubagentExecutor | None
     skill_runtime: SkillRuntime | None
-    capability_registry: CapabilityRegistry
-    capability_runtime: CapabilityRuntime
-    prompt_composer: PromptComposer
-    tool_context: ToolContext
+
+
+@dataclass(slots=True)
+class ToolingComposition:
+    """Tooling 平面：工具注册、执行运行时与提示组装。"""
+
+    registry: ToolRegistry
+    runtime: ToolRuntime
+    context: ToolContext
     permission_policy: ToolPermissionStrategy
-    tool_runtime: ToolRuntime
-    provider_manager: ProviderManager
-    runtime_coordinator: AgentRuntimeCoordinator
+    prompt_composer: PromptComposer
+
+
+@dataclass(slots=True)
+class InteractionComposition:
+    """Interaction 平面：通知、确认与子 Agent 状态呈现。"""
+
     notices: NoticeController
     confirmation: ConfirmationController
     status_sink: SubagentStatusSink | None
+
+
+@dataclass(slots=True)
+class AgentComposition:
+    """Composition Root 完成后交给 facade 的分层对象集合。
+
+    Feature 字段（plan / subagent / skill）在 Bare 图中为 ``None``：
+    调用方按所选 capabilities 判空，不创建 Null 对象。
+    """
+
+    runtime: RuntimeComposition
+    capabilities: CapabilityComposition
+    tooling: ToolingComposition
+    interaction: InteractionComposition
 
 
 @dataclass(slots=True)
@@ -144,10 +187,10 @@ class _ProfileSelection:
 class _FoundationGraph:
     bindings: RuntimeBindings
     cwd: Path
-    provider_factory: Any
-    hooks_loader: Any
-    dynamic_context_builder: Any
-    renderer_factory: Any
+    provider_factory: ProviderFactory
+    hooks_loader: Callable[[], list[Any]]
+    dynamic_context_builder: Callable[[list[str]], str]
+    renderer_factory: Callable[[], TerminalRenderer]
     notices: NoticeController
     confirmation: ConfirmationController
     permission_controller: PermissionController
@@ -161,32 +204,6 @@ class _FoundationGraph:
     tool_registry: ToolRegistry
     created_own_registry: bool
     plan: PlanRuntime | None
-
-
-@dataclass(slots=True)
-class _ResolvedBindings:
-    """RuntimeBindings + AgentConfig 解析出的构造期值与控制器。"""
-
-    bindings: RuntimeBindings
-    cwd: Path
-    provider_factory: Any
-    hooks_loader: Any
-    dynamic_context_builder: Any
-    renderer_factory: Any
-    notices: NoticeController
-    confirmation: ConfirmationController
-    permission_controller: PermissionController
-    status_sink: SubagentStatusSink | None
-
-
-@dataclass(slots=True)
-class _ProviderGraph:
-    provider_runtime_port: DeferredProviderRuntimePort
-    model_context_control: DeferredModelContextControl
-    configuration_recorder: SessionRecorderConfigurationRecorder
-    background_scheduler: DeferredBackgroundScheduler
-    provider_manager: ProviderManager
-    provider: Any
 
 
 @dataclass(slots=True)
@@ -206,7 +223,6 @@ class _ToolingGraph:
     result_store: ResultStore
     tool_runtime: ToolRuntime
     context_manager: ContextManager
-    session_port: SessionStatePort
 
 
 def build_agent_composition(
@@ -215,7 +231,7 @@ def build_agent_composition(
     config: AgentConfig,
     bindings: RuntimeBindings,
 ) -> AgentComposition:
-    """按固定顺序创建 Agent object graph，并返回一次性 composition result。
+    """按固定顺序创建 Agent object graph，并返回一次性分层 composition result。
 
     Profile / AgentConfig / RuntimeBindings 三轴只在此汇合：``MinimalProfile``
     构造零内置 Capability 的 Bare 图，``CodingProfile`` 构造 Coding 工具形态，
@@ -225,70 +241,133 @@ def build_agent_composition(
 
     selection = _normalize_profile(profile)
     foundation = _build_foundation(selection, config, bindings)
-    notices = foundation.notices
-    confirmation = foundation.confirmation
-    status_sink = foundation.status_sink
+    execution = foundation.execution
     usage = foundation.usage
-    budget = foundation.budget
     session_state = foundation.session_state
     session_repository = foundation.session_repository
-    tool_registry = foundation.tool_registry
-    plan = foundation.plan
 
-    provider_graph = _build_provider_graph(config, foundation)
-    provider_manager = provider_graph.provider_manager
-    identity_port = _build_identity_port(config, foundation, provider_manager)
+    provider_state = _build_provider_state(config)
+    initial_thinking_level: ThinkingLevel = "medium" if config.thinking else "off"
+    provider = foundation.bindings.provider.provider
+    if provider is None:
+        provider = build_provider_for_state(
+            foundation.provider_factory,
+            provider_state,
+            provider_state.thinking_level,
+        )
+
+    # controller 最后创建；identity port 的 api_configured 在 chat 时才求值，
+    # 届时 controller 已完成构造（同一函数作用域内的晚绑定 cell）。
+    provider_controller: ProviderController
+
+    identity_port = _build_identity_port(
+        foundation,
+        api_configured=lambda: (
+            foundation.bindings.provider.provider is not None
+            or provider_controller.api_configured
+        ),
+    )
 
     capability_graph = _build_capability_graph(
         foundation,
-        provider_manager,
         identity_port,
         selection,
+        child_config=lambda: _child_config(provider_controller, identity_port),
     )
-    subagent_factory = capability_graph.subagent_factory
-    subagent_executor = capability_graph.subagent_executor
-    skill_runtime = capability_graph.skill_runtime
-    capability_registry = capability_graph.capability_registry
-    capability_runtime = capability_graph.capability_runtime
 
-    tooling_graph = _build_tooling_graph(selection, foundation, capability_registry)
-    prompt_composer = tooling_graph.prompt_composer
-    tool_context = tooling_graph.tool_context
-    permission_policy = tooling_graph.permission_policy
-    tool_runtime = tooling_graph.tool_runtime
-    context_manager = tooling_graph.context_manager
-    session_port = tooling_graph.session_port
-    runtime_coordinator = _build_runtime_coordinator(
-        foundation,
-        provider_graph,
-        capability_runtime,
-        prompt_composer,
-        identity_port,
-        session_port,
-        tool_runtime,
-        context_manager,
+    tooling_graph = _build_tooling_graph(
+        selection, foundation, capability_graph.capability_registry
     )
-    return AgentComposition(
-        session_state=session_state,
-        session_repository=session_repository,
+
+    context = ContextRuntime(
+        context_manager=tooling_graph.context_manager,
+        context_compactor=foundation.bindings.session.context_compactor,
+        model_limits_resolver=(
+            foundation.bindings.provider.model_limits_resolver or ModelLimitsResolver()
+        ),
         usage=usage,
-        budget=budget,
-        tool_registry=tool_registry,
-        plan=plan,
-        subagent_factory=subagent_factory,
-        subagent_executor=subagent_executor,
-        skill_runtime=skill_runtime,
-        capability_registry=capability_registry,
-        capability_runtime=capability_runtime,
-        prompt_composer=prompt_composer,
-        tool_context=tool_context,
-        permission_policy=permission_policy,
-        tool_runtime=tool_runtime,
-        provider_manager=provider_manager,
-        runtime_coordinator=runtime_coordinator,
-        notices=notices,
-        confirmation=confirmation,
-        status_sink=status_sink,
+        execution=execution,
+        initial_effective_window=effective_window_tokens(
+            fallback_model_limits(config.model)
+        ),
+    )
+
+    conversation = ConversationRuntime(
+        provider=provider,
+        model=provider_state.model,
+        get_system=tooling_graph.prompt_composer.get_system,
+        tool_runtime=tooling_graph.tool_runtime,
+        cancellation=execution.cancellation,
+        cancel_callback=execution.cancel,
+        prepare_context=context.prepare_context,
+    )
+    if foundation.bindings.session.context_compactor is None:
+        context.replace_context_compactor(
+            ProviderContextCompactor(
+                provider=provider,
+                get_model=lambda: conversation.model,
+            )
+        )
+
+    session = SessionRuntime(
+        session_state=session_state,
+        repository=session_repository,
+        capabilities=capability_graph.capability_runtime,
+        is_sub_agent=config.is_sub_agent,
+        cwd=foundation.cwd,
+        initial_model=provider_state.model,
+        initial_thinking_level=initial_thinking_level,
+    )
+
+    agent_runtime = AgentRuntime(
+        conversation=conversation,
+        session=session,
+        context=context,
+        identity=identity_port,
+        execution=execution,
+        usage=usage,
+        budget=foundation.budget,
+    )
+
+    provider_controller = ProviderController(
+        state=provider_state,
+        conversation=conversation,
+        context=context,
+        recorder=session,
+        provider_factory=foundation.provider_factory,
+        get_live_model=lambda: conversation.model,
+    )
+
+    return AgentComposition(
+        runtime=RuntimeComposition(
+            agent=agent_runtime,
+            conversation=conversation,
+            session=session,
+            context=context,
+            provider_controller=provider_controller,
+            usage=usage,
+            budget=foundation.budget,
+        ),
+        capabilities=CapabilityComposition(
+            registry=capability_graph.capability_registry,
+            runtime=capability_graph.capability_runtime,
+            plan=foundation.plan,
+            subagent_factory=capability_graph.subagent_factory,
+            subagent_executor=capability_graph.subagent_executor,
+            skill_runtime=capability_graph.skill_runtime,
+        ),
+        tooling=ToolingComposition(
+            registry=foundation.tool_registry,
+            runtime=tooling_graph.tool_runtime,
+            context=tooling_graph.tool_context,
+            permission_policy=tooling_graph.permission_policy,
+            prompt_composer=tooling_graph.prompt_composer,
+        ),
+        interaction=InteractionComposition(
+            notices=foundation.notices,
+            confirmation=foundation.confirmation,
+            status_sink=foundation.status_sink,
+        ),
     )
 
 
@@ -331,6 +410,21 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
     raise TypeError(f"unsupported profile: {type(profile).__name__}")
 
 
+@dataclass(slots=True)
+class _ResolvedBindings:
+    """RuntimeBindings + AgentConfig 解析出的构造期值与控制器。"""
+
+    cwd: Path
+    provider_factory: ProviderFactory
+    hooks_loader: Callable[[], list[Any]]
+    dynamic_context_builder: Callable[[list[str]], str]
+    renderer_factory: Callable[[], TerminalRenderer]
+    notices: NoticeController
+    confirmation: ConfirmationController
+    permission_controller: PermissionController
+    status_sink: SubagentStatusSink | None
+
+
 def _resolve_bindings(
     config: AgentConfig,
     bindings: RuntimeBindings,
@@ -356,12 +450,9 @@ def _resolve_bindings(
             end=interaction.print_sub_agent_end or _noop_status,
         )
     return _ResolvedBindings(
-        bindings=bindings,
         cwd=cwd,
         provider_factory=bindings.provider.provider_factory or create_provider,
-        hooks_loader=(
-            bindings.tool.pre_tool_use_hooks_loader or load_pre_tool_use_hooks
-        ),
+        hooks_loader=bindings.tool.pre_tool_use_hooks_loader or load_pre_tool_use_hooks,
         dynamic_context_builder=(
             interaction.dynamic_system_context_builder or build_dynamic_system_context
         ),
@@ -443,10 +534,7 @@ def _build_foundation(
     )
 
 
-def _build_provider_graph(
-    config: AgentConfig,
-    foundation: _FoundationGraph,
-) -> _ProviderGraph:
+def _build_provider_state(config: AgentConfig) -> ProviderState:
     initial_provider_kind: ProviderKind = (
         "openai-compatible" if config.api_base else "anthropic"
     )
@@ -457,53 +545,25 @@ def _build_provider_graph(
         "",
     )
     initial_thinking_level: ThinkingLevel = "medium" if config.thinking else "off"
-    provider_runtime_port = DeferredProviderRuntimePort()
-    model_context_control = DeferredModelContextControl()
-    configuration_recorder = SessionRecorderConfigurationRecorder()
-    background_scheduler = DeferredBackgroundScheduler()
-    provider_manager = ProviderManager(
-        state=ProviderState(
-            model=config.model,
-            provider_kind=initial_provider_kind,
-            api_key=initial_api_key,
-            openai_base_url=config.api_base,
-            anthropic_base_url=config.anthropic_base_url,
-            thinking_enabled=config.thinking,
-            thinking_level=initial_thinking_level,
-        ),
-        runtime=provider_runtime_port,
-        context=model_context_control,
-        recorder=configuration_recorder,
-        provider_factory=foundation.provider_factory,
-        schedule_background_operation=background_scheduler,
-    )
-    provider = foundation.bindings.provider.provider
-    if provider is None:
-        provider = provider_manager.build_provider()
-    return _ProviderGraph(
-        provider_runtime_port=provider_runtime_port,
-        model_context_control=model_context_control,
-        configuration_recorder=configuration_recorder,
-        background_scheduler=background_scheduler,
-        provider_manager=provider_manager,
-        provider=provider,
+    return ProviderState(
+        model=config.model,
+        provider_kind=initial_provider_kind,
+        api_key=initial_api_key,
+        openai_base_url=config.api_base,
+        anthropic_base_url=config.anthropic_base_url,
+        thinking_enabled=config.thinking,
+        thinking_level=initial_thinking_level,
     )
 
 
 def _build_identity_port(
-    config: AgentConfig,
     foundation: _FoundationGraph,
-    provider_manager: ProviderManager,
+    *,
+    api_configured: Callable[[], bool],
 ) -> RuntimeIdentityPort:
     return RuntimeIdentityPort(
-        is_sub_agent=config.is_sub_agent,
-        terminal_output=config.terminal_output,
-        effective_window=effective_window_tokens(fallback_model_limits(config.model)),
-        api_configured=lambda: (
-            foundation.bindings.provider.provider is not None
-            or provider_manager.api_configured
-        ),
-        is_aborted=lambda: foundation.execution.cancelled,
+        terminal_output=foundation.confirmation.terminal_output,
+        api_configured=api_configured,
         terminal_renderer_factory=foundation.renderer_factory,
         notices=foundation.notices,
     )
@@ -511,14 +571,12 @@ def _build_identity_port(
 
 def _build_capability_graph(
     foundation: _FoundationGraph,
-    provider_manager: ProviderManager,
     identity_port: RuntimeIdentityPort,
     selection: _ProfileSelection,
+    *,
+    child_config: Callable[[], ChildAgentConfig],
 ) -> _CapabilityGraph:
     capabilities = selection.capabilities
-
-    def child_config() -> ChildAgentConfig:
-        return _child_config(provider_manager, identity_port)
 
     capability_registry = CapabilityRegistry()
     subagent_factory: SubagentFactory | None = None
@@ -629,11 +687,6 @@ def _build_tooling_graph(
             foundation.tool_registry, name
         )
     )
-    session_port = SessionStatePort(
-        session_state=foundation.session_state,
-        session_repository=foundation.session_repository,
-        tool_context=tool_context,
-    )
     return _ToolingGraph(
         prompt_composer=prompt_composer,
         tool_context=tool_context,
@@ -641,53 +694,14 @@ def _build_tooling_graph(
         result_store=result_store,
         tool_runtime=tool_runtime,
         context_manager=context_manager,
-        session_port=session_port,
     )
-
-
-def _build_runtime_coordinator(
-    foundation: _FoundationGraph,
-    provider_graph: _ProviderGraph,
-    capability_runtime: CapabilityRuntime,
-    prompt_composer: PromptComposer,
-    identity_port: RuntimeIdentityPort,
-    session_port: SessionStatePort,
-    tool_runtime: ToolRuntime,
-    context_manager: ContextManager,
-) -> AgentRuntimeCoordinator:
-    runtime_coordinator = AgentRuntimeCoordinator(
-        usage=foundation.usage,
-        budget=foundation.budget,
-        identity=identity_port,
-        session=session_port,
-        execution=foundation.execution,
-        capabilities=capability_runtime,
-        get_system=prompt_composer.get_system,
-        provider=provider_graph.provider,
-        model=provider_graph.provider_manager.model,
-        tool_runtime=tool_runtime,
-        context_manager=context_manager,
-        context_compactor=foundation.bindings.session.context_compactor,
-        model_limits_resolver=(
-            foundation.bindings.provider.model_limits_resolver or ModelLimitsResolver()
-        ),
-        provider_manager=provider_graph.provider_manager,
-    )
-    provider_graph.provider_runtime_port.bind(runtime_coordinator)
-    provider_graph.model_context_control.bind(runtime_coordinator)
-    provider_graph.configuration_recorder.bind(
-        lambda: runtime_coordinator.session_recorder,
-        runtime_coordinator.schedule_background_operation,
-    )
-    provider_graph.background_scheduler.bind(runtime_coordinator)
-    return runtime_coordinator
 
 
 def _child_config(
-    provider_manager: ProviderManager,
+    provider_controller: ProviderController,
     identity_port: RuntimeIdentityPort,
 ) -> ChildAgentConfig:
-    kwargs = provider_manager.child_api_kwargs()
+    kwargs = provider_controller.child_api_kwargs()
     return ChildAgentConfig(
         model=str(kwargs["model"]),
         api_key=str(kwargs["api_key"]),

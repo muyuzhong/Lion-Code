@@ -1,14 +1,13 @@
-"""ProviderManager 的状态、事务与窄端口测试。"""
+"""ProviderController 的状态、事务与窄端口测试。"""
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import FrozenInstanceError
 from typing import Any
 
 import pytest
 
-from lion_code.runtime.provider import ProviderManager, ProviderState
+from lion_code.runtime.provider import ProviderController, ProviderState
 
 
 class _Provider:
@@ -20,12 +19,13 @@ class _Provider:
         self.closed = True
 
 
-class _Runtime:
+class _Conversation:
     def __init__(self, provider: _Provider) -> None:
         self.provider = provider
         self.model = "model-a"
         self.running = False
         self.events: list[str] = []
+        self.retired: list[_Provider] = []
 
     @property
     def is_running(self) -> bool:
@@ -40,6 +40,10 @@ class _Runtime:
     def set_model(self, model: str) -> None:
         self.events.append("set_model")
         self.model = model
+
+    def retire_provider(self, provider: _Provider) -> None:
+        self.events.append("retire_provider")
+        self.retired.append(provider)
 
 
 class _Context:
@@ -65,19 +69,17 @@ class _Recorder:
         self.changes.append((previous, current))
 
 
-def _manager(
+def _controller(
     *,
     factory,
-    runtime: _Runtime | None = None,
+    conversation: _Conversation | None = None,
     context: _Context | None = None,
     recorder: _Recorder | None = None,
-    scheduled: list[Any] | None = None,
-) -> tuple[ProviderManager, _Runtime, _Context, _Recorder, list[Any]]:
-    runtime = runtime or _Runtime(_Provider("old"))
+) -> tuple[ProviderController, _Conversation, _Context, _Recorder]:
+    conversation = conversation or _Conversation(_Provider("old"))
     context = context or _Context()
     recorder = recorder or _Recorder()
-    scheduled = [] if scheduled is None else scheduled
-    manager = ProviderManager(
+    controller = ProviderController(
         state=ProviderState(
             model="model-a",
             provider_kind="openai-compatible",
@@ -87,38 +89,38 @@ def _manager(
             thinking_enabled=False,
             thinking_level="off",
         ),
-        runtime=runtime,
+        conversation=conversation,
         context=context,
         recorder=recorder,
         provider_factory=factory,
-        schedule_background_operation=scheduled.append,
+        get_live_model=lambda: conversation.model,
     )
-    return manager, runtime, context, recorder, scheduled
+    return controller, conversation, context, recorder
 
 
 def test_view_is_read_only_and_state_has_no_derived_fields() -> None:
     providers = [_Provider("initial")]
-    manager, *_ = _manager(
+    controller, *_ = _controller(
         factory=lambda **_: providers.append(_Provider("new")) or providers[-1]
     )
 
-    assert manager.view.model == "model-a"
-    assert manager.view.provider_kind == "openai-compatible"
-    assert manager.view.thinking_level == "off"
+    assert controller.view.model == "model-a"
+    assert controller.view.provider_kind == "openai-compatible"
+    assert controller.view.thinking_level == "off"
     with pytest.raises(FrozenInstanceError):
-        manager.view.model = "other"
+        controller.view.model = "other"
 
 
-def test_replacement_transaction_refreshes_derived_services_before_old_close() -> None:
+def test_replacement_transaction_refreshes_derived_services_and_retires_old() -> None:
     factory_calls: list[dict] = []
 
     def factory(**kwargs):
         factory_calls.append(kwargs)
         return _Provider("new")
 
-    manager, runtime, context, recorder, scheduled = _manager(factory=factory)
-    old_provider = runtime.provider
-    manager.configure(
+    controller, conversation, context, recorder = _controller(factory=factory)
+    old_provider = conversation.provider
+    controller.configure(
         model="model-b",
         api_key="key-b",
         api_base="https://new.test/v1",
@@ -131,71 +133,74 @@ def test_replacement_transaction_refreshes_derived_services_before_old_close() -
             "thinking_level": "off",
         }
     ]
-    assert runtime.events == ["replace_provider", "set_model"]
+    assert conversation.events == [
+        "replace_provider",
+        "set_model",
+        "retire_provider",
+    ]
     assert context.events == [
         "replace_context_compactor",
         "invalidate_model_limit_cache",
     ]
     assert recorder.changes[0][1].model == "model-b"
-    assert runtime.provider.closed is False
+    assert conversation.provider.closed is False
     assert old_provider.closed is False
+    # 旧 Provider 经 ConversationRuntime 退役命令排程关闭，而不是同步关闭。
+    assert conversation.retired == [old_provider]
+    assert controller.view.model == "model-b"
+    assert controller.view.provider_kind == "openai-compatible"
 
-    asyncio.run(scheduled[0]())
-    assert old_provider.closed is True
-    assert manager.view.model == "model-b"
-    assert manager.view.provider_kind == "openai-compatible"
 
-
-def test_factory_failure_keeps_runtime_and_view_unchanged() -> None:
+def test_factory_failure_keeps_conversation_and_view_unchanged() -> None:
     old_provider = _Provider("old")
 
     def factory(**_kwargs):
         raise RuntimeError("bad provider")
 
-    runtime = _Runtime(old_provider)
-    manager, _, context, recorder, scheduled = _manager(
+    conversation = _Conversation(old_provider)
+    controller, conversation, context, recorder = _controller(
         factory=factory,
-        runtime=runtime,
+        conversation=conversation,
     )
-    before = manager.view
+    before = controller.view
 
     with pytest.raises(RuntimeError, match="bad provider"):
-        manager.configure(api_key="key-b")
+        controller.configure(api_key="key-b")
 
-    assert manager.view == before
-    assert runtime.provider is old_provider
-    assert runtime.events == []
+    assert controller.view == before
+    assert conversation.provider is old_provider
+    assert conversation.events == []
     assert context.events == []
     assert recorder.changes == []
-    assert scheduled == []
+    assert conversation.retired == []
     assert old_provider.closed is False
 
 
-def test_model_only_change_uses_runtime_command_without_provider_rebuild() -> None:
+def test_model_only_change_uses_conversation_command_without_provider_rebuild() -> None:
     factory_calls: list[dict] = []
-    manager, runtime, context, recorder, _ = _manager(
+    controller, conversation, context, recorder = _controller(
         factory=lambda **kwargs: factory_calls.append(kwargs) or _Provider("unused")
     )
 
-    manager.configure(model="model-b")
+    controller.configure(model="model-b")
 
     assert factory_calls == []
-    assert runtime.events == ["set_model"]
+    assert conversation.events == ["set_model"]
     assert context.events == ["invalidate_model_limit_cache"]
     assert recorder.changes[0][1].model == "model-b"
 
 
-def test_thinking_and_restore_are_manager_commands() -> None:
+def test_thinking_and_restore_are_controller_commands() -> None:
     factory_calls: list[dict] = []
-    manager, runtime, _context, recorder, scheduled = _manager(
+    controller, conversation, _context, recorder = _controller(
         factory=lambda **kwargs: (
             factory_calls.append(kwargs) or _Provider("replacement")
         )
     )
 
-    assert manager.set_thinking_level("high") == "high"
-    assert manager.view.thinking_level == "high"
-    manager.restore_configuration(model="model-restored", thinking_level="adaptive")
+    assert controller.set_thinking_level("high") == "high"
+    assert controller.view.thinking_level == "high"
+    controller.restore_configuration(model="model-restored", thinking_level="adaptive")
 
     assert factory_calls == [
         {
@@ -209,8 +214,38 @@ def test_thinking_and_restore_are_manager_commands() -> None:
             "thinking_level": "medium",
         },
     ]
-    assert manager.view.model == "model-restored"
-    assert manager.view.thinking_level == "medium"
-    assert runtime.model == "model-restored"
+    assert controller.view.model == "model-restored"
+    assert controller.view.thinking_level == "medium"
+    assert conversation.model == "model-restored"
     assert len(recorder.changes) == 1
-    assert len(scheduled) == 2
+    # 两次 Provider 重建各退役一个旧 Provider。
+    assert len(conversation.retired) == 2
+
+
+def test_build_provider_for_state_reuses_factory_rules() -> None:
+    from lion_code.runtime.provider import build_provider_for_state
+
+    calls: list[dict[str, Any]] = []
+
+    def factory(**kwargs):
+        calls.append(kwargs)
+        return _Provider("built")
+
+    state = ProviderState(
+        model="m",
+        provider_kind="anthropic",
+        api_key="k",
+        openai_base_url=None,
+        anthropic_base_url="https://anthropic.test",
+        thinking_enabled=True,
+        thinking_level="medium",
+    )
+    provider = build_provider_for_state(factory, state, "high")
+    assert isinstance(provider, _Provider)
+    assert calls == [
+        {
+            "api_key": "k",
+            "anthropic_base_url": "https://anthropic.test",
+            "thinking_level": "high",
+        }
+    ]

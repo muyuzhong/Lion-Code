@@ -28,7 +28,7 @@ TUI 允许在没有凭证时启动，并自动打开 `/model` 配置表单。one
 ```text
 Textual TUI
   → LionCodingSession
-  → Agent + LionAgentRuntime
+  → Agent + ConversationRuntime
   → OpenAICompatibleProvider / AnthropicProvider
   → canonical Core messages/events
      ├→ TuiEventAdapter / TranscriptView

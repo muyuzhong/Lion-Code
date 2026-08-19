@@ -26,7 +26,7 @@ LEGACY_MESSAGE_SYMBOLS = frozenset({"_anthropic_messages", "_openai_messages"})
 HARNESS_MUTATION_METHODS = frozenset({"clear_queues", "follow_up", "replace_messages"})
 SESSION_RECORDER_SITES = {
     "agent.py": frozenset({"Agent._migrate_legacy_core_session"}),
-    "runtime/agent.py": frozenset({"AgentRuntimeCoordinator.reset_core_observers"}),
+    "runtime/session.py": frozenset({"SessionRuntime._reset_recorder"}),
 }
 JSONL_WRITER_SYMBOLS = frozenset({"JsonlSessionStorage", "entry_to_json_line"})
 REMOVED_SKILL_COMMAND_SYMBOLS = frozenset(
@@ -1169,7 +1169,7 @@ def test_session_and_cancellation_state_have_single_owners() -> None:
         for path in _source_files()
         if _session_identity_reset_count(_tree(path))
     }
-    assert identity_resets == {"runtime/session_lifecycle.py": 2}
+    assert identity_resets == {"runtime/session.py": 2}
 
     identity_constructors = {
         _source_key(path): _named_constructor_count(_tree(path), "SessionIdentityState")
@@ -1275,15 +1275,11 @@ def test_usage_state_has_one_owner_and_command_only_writes() -> None:
         "subagent_runtime.py": ["SubagentExecutor._run_child"],
     }
     assert record_turn_sites == {
-        "runtime/agent.py": ["AgentRuntimeCoordinator.before_core_tool_calls"]
+        "runtime/agent.py": ["AgentRuntime.before_core_tool_calls"]
     }
-    assert reset_sites == {
-        "runtime/agent.py": ["AgentRuntimeCoordinator.reset_session_usage"]
-    }
+    assert reset_sites == {"runtime/agent.py": ["AgentRuntime.reset_session_usage"]}
     assert context_reset_sites == {
-        "runtime/agent.py": [
-            "AgentRuntimeCoordinator.compact_core_context_if_needed",
-        ]
+        "runtime/agent.py": ["AgentRuntime.compact_if_needed"]
     }
 
 
@@ -1399,12 +1395,7 @@ def test_plan_state_has_one_owner_and_live_read_port() -> None:
         f"ToolContext Plan path mirrors must not return: {path_mirrors}"
     )
 
-    host_tree = _tree(SOURCE_ROOT / "runtime" / "agent.py")
-    host_fields = _class_annotated_fields(host_tree, "SessionStateHost")
-    assert "plan" not in host_fields
-    assert not _REMOVED_AGENT_PLAN_SYMBOLS & host_fields
-
-    lifecycle_tree = _tree(SOURCE_ROOT / "runtime" / "session_lifecycle.py")
+    lifecycle_tree = _tree(SOURCE_ROOT / "runtime" / "session.py")
     lifecycle_prompt_symbols = frozenset(
         {
             "_base_system_prompt",
@@ -1461,7 +1452,7 @@ def test_prompt_and_capability_lifecycle_boundaries() -> None:
     ):
         assert symbol not in plan_runtime_source
 
-    lifecycle_source = (SOURCE_ROOT / "runtime" / "session_lifecycle.py").read_text(
+    lifecycle_source = (SOURCE_ROOT / "runtime" / "session.py").read_text(
         encoding="utf-8"
     )
     assert "PlanRuntime" not in lifecycle_source

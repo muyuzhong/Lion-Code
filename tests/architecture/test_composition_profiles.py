@@ -131,17 +131,17 @@ def test_minimal_graph_only_contains_caller_tools(tmp_path, monkeypatch) -> None
         tools=(_tool("caller_a"), _tool("caller_b")),
     )
 
-    assert {tool.name for tool in composition.tool_registry.all_tools()} == {
+    assert {tool.name for tool in composition.tooling.registry.all_tools()} == {
         "caller_a",
         "caller_b",
     }
-    assert composition.capability_registry.tool_sources == ()
-    assert composition.plan is None
-    assert composition.subagent_factory is None
-    assert composition.subagent_executor is None
-    assert composition.skill_runtime is None
-    assert composition.status_sink is None
-    assert NEUTRAL_SYSTEM_PROMPT in composition.prompt_composer.get_system()
+    assert composition.capabilities.registry.tool_sources == ()
+    assert composition.capabilities.plan is None
+    assert composition.capabilities.subagent_factory is None
+    assert composition.capabilities.subagent_executor is None
+    assert composition.capabilities.skill_runtime is None
+    assert composition.interaction.status_sink is None
+    assert NEUTRAL_SYSTEM_PROMPT in composition.tooling.prompt_composer.get_system()
 
 
 def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypatch):
@@ -160,16 +160,16 @@ def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypat
     ):
         composition = build_agent_composition(profile, config=config, bindings=bindings)
 
-    names = {tool.name for tool in composition.tool_registry.all_tools()}
+    names = {tool.name for tool in composition.tooling.registry.all_tools()}
     assert BUILTIN_TOOL_NAMES <= names
     assert {"tool_search", "extra_tool"} <= names
-    assert composition.capability_registry.tool_sources == ()
-    assert composition.skill_runtime is None
-    assert composition.plan is None
-    assert isinstance(composition.permission_policy, PermissionPolicy)
+    assert composition.capabilities.registry.tool_sources == ()
+    assert composition.capabilities.skill_runtime is None
+    assert composition.capabilities.plan is None
+    assert isinstance(composition.tooling.permission_policy, PermissionPolicy)
 
     result = asyncio.run(
-        composition.tool_runtime.execute(
+        composition.tooling.runtime.execute(
             tool_call_id="call-1",
             name="run_shell",
             arguments={"command": "echo hi", "timeout": 1200},
@@ -177,7 +177,9 @@ def test_coding_graph_binds_backend_and_default_capabilities(tmp_path, monkeypat
     )
     assert backend.calls == [("echo hi", 1200.0)]
     assert result.content == "backend-ran: echo hi"
-    assert build_static_system_prompt() in composition.prompt_composer.get_system()
+    assert (
+        build_static_system_prompt() in composition.tooling.prompt_composer.get_system()
+    )
 
 
 def test_coding_graph_never_composes_full_capabilities(tmp_path, monkeypatch):
@@ -192,11 +194,11 @@ def test_coding_graph_never_composes_full_capabilities(tmp_path, monkeypatch):
             profile, config=config, bindings=RuntimeBindings()
         )
 
-    assert composition.capability_registry.tool_sources == ()
-    assert composition.skill_runtime is None
-    assert composition.subagent_executor is None
-    assert composition.subagent_factory is None
-    assert composition.plan is None
+    assert composition.capabilities.registry.tool_sources == ()
+    assert composition.capabilities.skill_runtime is None
+    assert composition.capabilities.subagent_executor is None
+    assert composition.capabilities.subagent_factory is None
+    assert composition.capabilities.plan is None
 
 
 def test_minimal_and_coding_profiles_compose_extension_specs(tmp_path, monkeypatch):
@@ -228,16 +230,16 @@ def test_minimal_and_coding_profiles_compose_extension_specs(tmp_path, monkeypat
                 profile, config=profile_config, bindings=RuntimeBindings()
             )
 
-        assert len(composition.capability_registry.prompt_layers) == 1
+        assert len(composition.capabilities.registry.prompt_layers) == 1
         # 扩展不带内置 Capability：不产出 Full 专属 runtime
-        assert composition.plan is None
-        assert composition.subagent_factory is None
-        assert composition.skill_runtime is None
+        assert composition.capabilities.plan is None
+        assert composition.capabilities.subagent_factory is None
+        assert composition.capabilities.skill_runtime is None
         assert "example extension prompt layer" in (
-            composition.prompt_composer.get_system()
+            composition.tooling.prompt_composer.get_system()
         )
         if isinstance(profile, MinimalProfile):
-            assert {t.name for t in composition.tool_registry.all_tools()} == {
+            assert {t.name for t in composition.tooling.registry.all_tools()} == {
                 "caller_tool"
             }
 
@@ -273,14 +275,14 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
             bindings=bindings,
         )
 
-    assert len(composition.capability_registry.tool_sources) == 3
-    assert len(composition.capability_registry.prompt_layers) == 2
-    assert composition.plan is not None
-    assert composition.subagent_factory is not None
-    assert composition.skill_runtime is not None
-    assert composition.status_sink is not None
-    assert isinstance(composition.permission_policy, PermissionPolicy)
-    system = composition.prompt_composer.get_system()
+    assert len(composition.capabilities.registry.tool_sources) == 3
+    assert len(composition.capabilities.registry.prompt_layers) == 2
+    assert composition.capabilities.plan is not None
+    assert composition.capabilities.subagent_factory is not None
+    assert composition.capabilities.skill_runtime is not None
+    assert composition.interaction.status_sink is not None
+    assert isinstance(composition.tooling.permission_policy, PermissionPolicy)
+    system = composition.tooling.prompt_composer.get_system()
     assert build_static_system_prompt() in system
     assert "example extension prompt layer" in system
     assert "# Environment" in system
@@ -597,7 +599,9 @@ def test_default_bindings_fall_back_to_local_command_backend(
             bindings=RuntimeBindings(),
         )
 
-    assert "run_shell" in {tool.name for tool in composition.tool_registry.all_tools()}
+    assert "run_shell" in {
+        tool.name for tool in composition.tooling.registry.all_tools()
+    }
     assert isinstance(LocalCommandExecutionBackend(), LocalCommandExecutionBackend)
 
 

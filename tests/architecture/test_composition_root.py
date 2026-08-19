@@ -140,11 +140,13 @@ async def test_example_capability_needs_only_spec_registration_and_tests(
             bindings=bindings,
         )
 
-    assert len(composition.capability_registry.prompt_layers) == 2
-    assert "example capability prompt" in composition.prompt_composer.get_system()
-    await composition.capability_runtime.on_new_session()
+    assert len(composition.capabilities.registry.prompt_layers) == 2
+    assert (
+        "example capability prompt" in composition.tooling.prompt_composer.get_system()
+    )
+    await composition.capabilities.runtime.on_new_session()
     assert participant.new_sessions == 1
-    await composition.capability_runtime.close()
+    await composition.capabilities.runtime.close()
 
 
 def test_agent_constructor_delegates_to_the_composition_root():
@@ -161,8 +163,11 @@ def test_agent_constructor_delegates_to_the_composition_root():
             "UsageLedger",
             "BudgetPolicy",
             "PlanRuntime",
-            "ProviderManager",
-            "AgentRuntimeCoordinator",
+            "ProviderController",
+            "AgentRuntime",
+            "ConversationRuntime",
+            "SessionRuntime",
+            "ContextRuntime",
             "SubagentFactory",
             "CapabilityRegistry",
             "ToolRuntime",

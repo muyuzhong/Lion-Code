@@ -8,7 +8,7 @@ Agent session. It is executable architecture, not a migration plan.
 Apply this guide whenever a change reads, records, resets, displays, or limits
 model, child-agent, Skill, response, turn, prompt-window, or cost usage.
 It covers `usage.py`, Core event adapters, the Composition Root,
-`AgentRuntimeCoordinator`, session lifecycle, Application, TUI, and all child
+`AgentRuntime`, session lifecycle, Application, TUI, and all child
 execution paths. `Supervisor` is deliberately outside this ownership graph and
 must not create, mirror, read or persist usage/budget state.
 

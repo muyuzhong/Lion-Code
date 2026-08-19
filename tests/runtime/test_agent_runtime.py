@@ -1,7 +1,7 @@
-"""``LionAgentRuntime`` 组装闭环测试。
+"""``ConversationRuntime`` 组装闭环测试。
 
 用脚本化、信号感知的 ``FakeProvider``（记录每轮收到的 system/tools）
-驱动 LionAgentRuntime -> AgentHarness -> ToolRuntime -> LionTool 的完整
+驱动 ConversationRuntime -> AgentHarness -> ToolRuntime -> LionTool 的完整
 闭环，覆盖：基础闭环、每轮重新读取 system、每轮重新读取工具、取消传播。
 """
 
@@ -20,7 +20,8 @@ from lion_code.core.cancellation import CancellationToken
 from lion_code.core.provider_events import AssistantDoneEvent
 from lion_code.observers import TerminalRenderer, UsageObserver
 from lion_code.permission_state import PermissionController, PermissionState
-from lion_code.runtime.agent import AgentRuntimeCoordinator, LionAgentRuntime
+from lion_code.runtime.agent import AgentRuntime
+from lion_code.runtime.conversation import ConversationRuntime
 from lion_code.runtime.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
@@ -107,7 +108,7 @@ def _runtime_with_echo() -> tuple[ToolRegistry, ToolRuntime]:
     return registry, ToolRuntime(registry, _context(registry))
 
 
-class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
+class TestConversationRuntimeLoop(unittest.IsolatedAsyncioTestCase):
     def test_runtime_coordinator_module_does_not_import_agent(self) -> None:
         subprocess.run(
             [
@@ -119,7 +120,7 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
             check=True,
         )
 
-    async def test_agent_composes_one_runtime_coordinator(self) -> None:
+    async def test_agent_composes_one_agent_runtime(self) -> None:
         from lion_code.agent import Agent
 
         provider = FakeProvider([])
@@ -130,12 +131,12 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
                 custom_system_prompt="test",
                 terminal_output=False,
             )
-        self.assertIsInstance(agent._runtime_coordinator, AgentRuntimeCoordinator)
-        self.assertIs(agent.core_runtime, agent._runtime_coordinator.core_runtime)
+        self.assertIsInstance(agent._agent_runtime, AgentRuntime)
+        self.assertIs(agent.core_runtime, agent._conversation)
         self.assertIs(agent.tool_context.session, agent.session_state)
         self.assertIs(
             agent.tool_context.cancellation,
-            agent._runtime_coordinator.execution.cancellation,
+            agent._agent_runtime.execution.cancellation,
         )
         self.assertIs(
             agent.core_runtime.harness._cancellation,
@@ -146,7 +147,7 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
     async def test_closed_loop_through_tool_runtime(self) -> None:
         provider = FakeProvider([_tooluse_event(), _stop_event()])
         _registry, tool_runtime = _runtime_with_echo()
-        runtime = LionAgentRuntime(
+        runtime = ConversationRuntime(
             provider=provider,
             model="fake",
             get_system=lambda: "s",
@@ -170,7 +171,7 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
         holder = {"s": "initial"}
         provider = FakeProvider([_tooluse_event(), _stop_event()])
         _registry, tool_runtime = _runtime_with_echo()
-        runtime = LionAgentRuntime(
+        runtime = ConversationRuntime(
             provider=provider,
             model="fake",
             get_system=lambda: holder["s"],
@@ -193,7 +194,7 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
         # 工具激活后，第二次 provider 请求必须看到新工具。
         provider = FakeProvider([_tooluse_event(), _stop_event()])
         registry, tool_runtime = _runtime_with_echo()
-        runtime = LionAgentRuntime(
+        runtime = ConversationRuntime(
             provider=provider,
             model="fake",
             get_system=lambda: "s",
@@ -217,7 +218,7 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
         # runtime.cancel() 经 harness 信号传播到 provider，最终产生 aborted 消息。
         provider = FakeProvider([_tooluse_event(), _stop_event()])
         _registry, tool_runtime = _runtime_with_echo()
-        runtime = LionAgentRuntime(
+        runtime = ConversationRuntime(
             provider=provider,
             model="fake",
             get_system=lambda: "s",
@@ -247,7 +248,7 @@ class TestLionAgentRuntimeLoop(unittest.IsolatedAsyncioTestCase):
             ]
         )
         _registry, tool_runtime = _runtime_with_echo()
-        runtime = LionAgentRuntime(
+        runtime = ConversationRuntime(
             provider=provider,
             model="fake",
             get_system=lambda: "s",

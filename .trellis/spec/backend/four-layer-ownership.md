@@ -8,7 +8,7 @@ boundaries, not historical implementation or future Memory design.
 | Boundary | Current owners | Must not own |
 | --- | --- | --- |
 | Kernel | `core/`, `context/`, `tooling/`, `providers/`, `session_runtime/`, `permission_state.py`, `usage.py` | Product capabilities, Agent Runtime state, frontend state, project feature stores |
-| Agent Runtime | `runtime/` (`agent.py`, `execution.py`, `session_lifecycle.py`, `session_identity.py`, `provider.py`) | Profile selection, a second history, service locator, deleted legacy graph, Composition/Application deps |
+| Agent Runtime | `runtime/` (`agent.py`, `conversation.py`, `session.py`, `context.py`, `execution.py`, `session_identity.py`, `provider.py`) | Profile selection, a second history, service locator, deleted legacy graph, Composition/Application deps |
 | Capability | `capabilities/`, `plan_runtime.py`, `skill_runtime.py`, `subagent_factory.py`, `subagent_runtime.py` | Provider/session ownership, Agent host, Application/TUI, Memory/Dream/Learning replacements |
 | Composition | `composition/`, `meta_agent.py` | Frontend behavior, Supervisor policy, retained runtime container, feature API leakage |
 | Interfaces | `__init__.py`, `__main__.py`, `application/`, `tui/`, internal `agent.py` host | Direct Kernel/Agent Runtime ownership, duplicate persistence, public legacy feature facade |
@@ -19,10 +19,15 @@ it is not a service locator. `ContextManager` and `ContextCompactor` remain
 Kernel context policy and are the only generic provider-context preparation path.
 
 `AgentHarness` at `core/harness.py` is a Kernel stateful-loop wrapper, distinct
-from the Agent Runtime coordinator. The `runtime/` package is the physical home
-of the Agent Runtime layer: `AgentRuntimeCoordinator`, `LionAgentRuntime`,
-`ExecutionControl`, `SessionLifecycle`, `SessionIdentityState`, and
-`ProviderManager`/`ProviderState`.
+from the Agent Runtime. The `runtime/` package is the physical home of the Agent
+Runtime layer: `AgentRuntime` (orchestration only), `ConversationRuntime`
+(AgentHarness, canonical active messages, live provider/model, run capture,
+retired provider close), `SessionRuntime` (session identity, repository,
+recorder lifecycle, configuration-entry port), `ContextRuntime` (context
+manager/compactor/limits cache, compaction state), `ExecutionControl`,
+`SessionIdentityState`, and `ProviderController`/`ProviderState`. AgentRuntime
+and ProviderController never reference each other in either direction; the
+object graph is constructed in one topological pass with no deferred binding.
 
 ## Current composition
 
@@ -43,10 +48,15 @@ or fallback object.
 
 ## Canonical session ownership
 
-`SessionRepository` replays JSONL, `SessionRecorder` appends Core events, and
-`SessionLifecycle` coordinates clear/restore/compact transitions. The canonical
-compaction entry model at `core/session/memory.py` is retained. It must not be
-confused with the removed project-level Memory files or repositories.
+`SessionRepository` replays JSONL and `SessionRecorder` appends Core events;
+`SessionRuntime` is their single owner and coordinates
+new/load/restore/compact/close transitions. Session restore is explicit
+cross-owner orchestration: `SessionRuntime.load` returns an immutable
+`SessionRestoreState`, the facade commands
+`ProviderController.restore_configuration`, then `AgentRuntime.restore(state)`
+replays the messages. The canonical compaction entry model at
+`core/session/memory.py` is retained. It must not be confused with the removed
+project-level Memory files or repositories.
 
 Application code consumes semantic ports from `application/ports.py`. It owns
 frontend event bridging and overflow retry policy; it does not inspect Runtime

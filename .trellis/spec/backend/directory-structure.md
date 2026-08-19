@@ -16,11 +16,13 @@ lion_code/
 ├── composition/         # Profiles and the one-shot object graph root
 ├── core/                # Canonical messages, events, loop and generic Harness
 ├── runtime/             # Agent Runtime: single-session lifecycle coordination
-│   ├── agent.py         # AgentRuntimeCoordinator / LionAgentRuntime
+│   ├── agent.py         # AgentRuntime (operation orchestration only)
+│   ├── conversation.py  # ConversationRuntime (Harness/active messages/live provider)
+│   ├── session.py       # SessionRuntime (identity/repository/recorder)
+│   ├── context.py       # ContextRuntime (context/compaction state)
 │   ├── execution.py     # ExecutionControl (cancellation commands)
-│   ├── session_lifecycle.py  # SessionLifecycle (clear/restore/compact/close)
 │   ├── session_identity.py   # SessionIdentityState / SessionView
-│   └── provider.py      # ProviderManager / ProviderState
+│   └── provider.py      # ProviderController / ProviderState
 ├── capabilities/        # CapabilitySpec, registry, runtime and built-in adapters
 ├── tooling/             # Tool definitions, registry, permissions and middleware
 ├── context/             # Provider-context preparation and compaction policy
