@@ -16,10 +16,12 @@ from unittest.mock import Mock, patch
 from lion_code.capabilities import (
     CapabilityRegistry,
     CapabilitySpec,
-    create_skill_capability,
-    create_subagent_capability,
 )
-from lion_code.capabilities.skill import _SkillToolSource
+from lion_code.capabilities.skill.capability import (
+    _SkillToolSource,
+    create_skill_capability,
+)
+from lion_code.capabilities.subagent.capability import create_subagent_capability
 
 
 class _RecordingSessionParticipant:

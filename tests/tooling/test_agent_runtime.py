@@ -108,7 +108,7 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
             root = Path(directory)
             session_repository = SessionRepository(root / "sessions")
             with patch(
-                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                "lion_code.capabilities.plan.runtime.PlanRuntime._generate_file_path",
                 return_value=root / "plan.md",
             ) as generate_path:
                 agent = self._agent(
@@ -135,7 +135,7 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
             session_repository = SessionRepository(root / "sessions")
             plan_path = root / "plan.md"
             with patch(
-                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                "lion_code.capabilities.plan.runtime.PlanRuntime._generate_file_path",
                 return_value=plan_path,
             ) as generate_path:
                 agent = self._agent(

@@ -775,7 +775,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         with (
             patch("lion_code.agent.create_provider", return_value=fake),
             patch(
-                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                "lion_code.capabilities.plan.runtime.PlanRuntime._generate_file_path",
                 return_value=plan_path,
             ),
         ):
@@ -852,7 +852,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         with (
             patch("lion_code.agent.create_provider", return_value=fake),
             patch(
-                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                "lion_code.capabilities.plan.runtime.PlanRuntime._generate_file_path",
                 return_value=plan_path,
             ),
         ):
@@ -894,7 +894,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         with (
             patch("lion_code.agent.create_provider", return_value=fake),
             patch(
-                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                "lion_code.capabilities.plan.runtime.PlanRuntime._generate_file_path",
                 return_value=plan_path,
             ),
         ):

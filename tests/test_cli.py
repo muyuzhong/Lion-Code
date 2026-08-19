@@ -198,7 +198,7 @@ async def test_repl_dispatch_compact_error_is_printed(capsys) -> None:
 async def test_repl_dispatch_skills_lists_discovered_skills(
     monkeypatch, capsys
 ) -> None:
-    from lion_code.skills import SkillDefinition
+    from lion_code.capabilities.skill.discovery import SkillDefinition
 
     monkeypatch.setattr(
         "lion_code.__main__.discover_skills",

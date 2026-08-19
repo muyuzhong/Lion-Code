@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from lion_code.skill_runtime import SkillRuntime
-from lion_code.subagent_runtime import SubagentExecutor
+from lion_code.capabilities.skill.runtime import SkillRuntime
+from lion_code.capabilities.subagent.runtime import SubagentExecutor
 from lion_code.tooling.types import ToolResult
 from lion_code.usage import UsageLedger
 
@@ -57,7 +57,7 @@ async def test_skill_runtime_handles_inline_and_unknown_skills() -> None:
     runtime = SkillRuntime(executor)  # type: ignore[arg-type]
 
     with patch(
-        "lion_code.skills.execute_skill",
+        "lion_code.capabilities.skill.discovery.execute_skill",
         side_effect=[
             {"context": "inline", "prompt": "Use the inline instructions."},
             None,
@@ -85,7 +85,7 @@ async def test_skill_runtime_delegates_fork_to_subagent_executor() -> None:
         "allowed_tools": ["read_file"],
     }
 
-    with patch("lion_code.skills.execute_skill", return_value=skill):
+    with patch("lion_code.capabilities.skill.discovery.execute_skill", return_value=skill):
         result = await runtime({"skill_name": "research", "args": "find the docs"})
 
     assert result.content == "fork result"

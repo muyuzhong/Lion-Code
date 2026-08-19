@@ -50,7 +50,9 @@ from lion_code.tooling.types import LionTool, ToolResult
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
 PROFILES_PATH = SOURCE_ROOT / "composition" / "profiles.py"
-SUBAGENT_FACTORY_PATH = SOURCE_ROOT / "subagent_factory.py"
+SUBAGENT_FACTORY_PATH = (
+    SOURCE_ROOT / "capabilities" / "subagent" / "factory.py"
+)
 
 _PROFILE_CLASSES = ("MinimalProfile", "CodingProfile", "FullProfile")
 

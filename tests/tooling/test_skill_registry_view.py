@@ -52,7 +52,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             [
                 sys.executable,
                 "-c",
-                "import sys; import lion_code.subagent_factory; "
+                "import sys; import lion_code.capabilities.subagent.factory; "
                 "assert 'lion_code.agent' not in sys.modules",
             ],
             cwd=Path(__file__).resolve().parents[2],
@@ -148,7 +148,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
 
         with (
             _patched_child(),
-            patch("lion_code.skills.execute_skill", return_value=skill_result),
+            patch("lion_code.capabilities.skill.discovery.execute_skill", return_value=skill_result),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),
         ):
@@ -243,7 +243,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         }
 
         with (
-            patch("lion_code.skills.execute_skill", return_value=skill_result),
+            patch("lion_code.capabilities.skill.discovery.execute_skill", return_value=skill_result),
             _patched_child(),
             patch("lion_code.agent.print_sub_agent_start"),
             patch("lion_code.agent.print_sub_agent_end"),

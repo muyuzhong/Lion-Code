@@ -8,8 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .frontmatter import parse_frontmatter
-from .tooling.selection import ToolSelectionPolicy
+from ...frontmatter import parse_frontmatter
+from ...tooling.selection import ToolSelectionPolicy
 
 EXPLORE_PROMPT = """You are a file search specialist for Lion Code. You excel at thoroughly navigating and exploring codebases.
 

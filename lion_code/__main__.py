@@ -13,7 +13,7 @@ from .application.commands import CommandResult
 from .application.session import LionCodingSession
 from .config import load_api_config
 from .permission_state import PermissionMode
-from .skills import discover_skills
+from .capabilities.skill.discovery import discover_skills
 from .ui import (
     print_error,
     print_info,

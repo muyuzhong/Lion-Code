@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from lion_code.capabilities.plan import PlanPromptLayer, PlanSessionParticipant
-from lion_code.plan_runtime import PlanRuntime, PlanState
+from lion_code.capabilities.plan.runtime import PlanRuntime, PlanState
 
 
 class _Host:

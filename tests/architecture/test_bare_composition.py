@@ -60,10 +60,10 @@ _FEATURE_MODULE_PREFIXES = (
     "lion_code.capabilities.plan",
     "lion_code.capabilities.skill",
     "lion_code.capabilities.subagent",
-    "lion_code.plan_runtime",
-    "lion_code.skill_runtime",
-    "lion_code.subagent_factory",
-    "lion_code.subagent_runtime",
+    "lion_code.capabilities.plan.runtime",
+    "lion_code.capabilities.skill.runtime",
+    "lion_code.capabilities.subagent.factory",
+    "lion_code.capabilities.subagent.runtime",
 )
 _FEATURE_SYMBOLS = {
     "CheckpointStore",
