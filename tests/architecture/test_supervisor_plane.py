@@ -14,6 +14,7 @@ SUPERVISOR_PATH = SOURCE_ROOT / "supervisor.py"
 
 _FORBIDDEN_IMPORTS = {
     "lion_code.agent",
+    "lion_code.adapters",
     "lion_code.runtime",
     "lion_code.application",
     "lion_code.capabilities",
@@ -90,7 +91,6 @@ def test_checkpoint_state_is_only_execution_control() -> None:
 
 def test_profiles_agent_and_composition_do_not_know_supervisor() -> None:
     paths = (
-        SOURCE_ROOT / "agent.py",
         SOURCE_ROOT / "meta_agent.py",
         SOURCE_ROOT / "composition" / "profiles.py",
         SOURCE_ROOT / "composition" / "agent_builder.py",

@@ -422,7 +422,7 @@ def test_session_runtime_owns_session_lifecycle_exclusively() -> None:
             identity_resets[key] = resets
 
     assert recorder_constructors == {
-        "agent.py": 1,  # 旧 JSON 迁移的只读站点
+        "adapters/coding_session_backend.py": 1,  # 旧 JSON 迁移的只读站点
         "runtime/session.py": 1,
     }
     assert identity_resets == {"runtime/session.py": 2}

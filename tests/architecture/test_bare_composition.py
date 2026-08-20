@@ -134,7 +134,9 @@ def test_full_product_has_all_features(tmp_path, monkeypatch) -> None:
     bindings = RuntimeBindings(tool=ToolBindings(tool_registry=ToolRegistry()))
     provider = Mock()
     provider.aclose = AsyncMock()
-    with patch("lion_code.agent.create_provider", return_value=provider):
+    with patch(
+        "lion_code.composition.agent_builder.create_provider", return_value=provider
+    ):
         composition = build_agent_composition(
             FullProfile(), config=config, bindings=bindings
         )

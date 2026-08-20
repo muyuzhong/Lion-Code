@@ -98,10 +98,7 @@ def test_application_does_not_reference_harness_storage_or_queue_types() -> None
 
 
 def test_runtime_implementation_does_not_import_application() -> None:
-    runtime_files = (
-        *_source_files("runtime"),
-        SOURCE_ROOT / "agent.py",
-    )
+    runtime_files = _source_files("runtime")
     violations = _forbidden_root_imports(runtime_files, {"application"})
     assert not violations, violations
 
@@ -121,7 +118,7 @@ def test_fake_backend_is_a_real_application_injection() -> None:
         if isinstance(node, ast.ImportFrom) and node.module is not None
     }
     assert not any(
-        module == "lion_code.agent" or module.startswith("lion_code.agent.")
+        module == "lion_code.adapters" or module.startswith("lion_code.adapters.")
         for module in imported_modules
     )
     assert "LionCodingSession" not in fake_source

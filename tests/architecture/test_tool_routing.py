@@ -73,11 +73,7 @@ def test_removed_agent_tool_route_names_have_no_production_residue() -> None:
 
 
 def test_capability_and_executor_modules_do_not_import_agent() -> None:
-    checked = (
-        SOURCE_ROOT / "capabilities",
-        SOURCE_ROOT / "skill_runtime.py",
-        SOURCE_ROOT / "subagent_runtime.py",
-    )
+    checked = (SOURCE_ROOT / "capabilities",)
     violations: dict[str, list[str]] = {}
     paths = [
         path
@@ -99,8 +95,10 @@ def test_capability_and_executor_modules_do_not_import_agent() -> None:
 
 
 def test_capability_factories_require_bound_dependencies() -> None:
-    skill_source = _source(SOURCE_ROOT / "capabilities" / "skill.py")
-    subagent_source = _source(SOURCE_ROOT / "capabilities" / "subagent.py")
+    skill_source = _source(SOURCE_ROOT / "capabilities" / "skill" / "capability.py")
+    subagent_source = _source(
+        SOURCE_ROOT / "capabilities" / "subagent" / "capability.py"
+    )
     assert "def create_skill_capability(runtime: SkillRuntime)" in skill_source
     assert "def create_subagent_capability(executor: SubagentExecutor)" in (
         subagent_source

@@ -16,8 +16,9 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
+from full_agent import build_full_agent_harness
+
 import lion_code
-from lion_code.agent import Agent
 from lion_code.composition import (
     NEUTRAL_SYSTEM_PROMPT,
     AgentConfig,
@@ -50,9 +51,7 @@ from lion_code.tooling.types import LionTool, ToolResult
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
 PROFILES_PATH = SOURCE_ROOT / "composition" / "profiles.py"
-SUBAGENT_FACTORY_PATH = (
-    SOURCE_ROOT / "capabilities" / "subagent" / "factory.py"
-)
+SUBAGENT_FACTORY_PATH = SOURCE_ROOT / "capabilities" / "subagent" / "factory.py"
 
 _PROFILE_CLASSES = ("MinimalProfile", "CodingProfile", "FullProfile")
 
@@ -310,29 +309,23 @@ def test_full_agent_facade_uses_full_profile_and_child_uses_coding_profile(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    with (
-        patch("lion_code.agent.create_provider", return_value=_fake_provider()),
-        patch(
-            "lion_code.composition.agent_builder.create_provider",
-            return_value=_fake_provider(),
-        ),
-    ):
-        agent = Agent(
+    with patch("full_agent.create_provider", return_value=_fake_provider()):
+        harness = build_full_agent_harness(
             api_key="test-key",
             session_repository=_repo(tmp_path),
             terminal_output=False,
         )
-        child = agent._subagent_factory.create_for_agent_type("general")  # noqa: SLF001
+        child = harness.composition.capabilities.subagent_factory.create_for_agent_type(
+            "general"
+        )
 
     try:
-        assert isinstance(agent, Agent)
-        assert isinstance(agent, MetaAgent)
+        assert isinstance(harness.agent, MetaAgent)
         assert isinstance(child, MetaAgent)
-        assert not isinstance(child, Agent)
         assert child.permission_mode == "bypassPermissions"
     finally:
         asyncio.run(child.close())
-        asyncio.run(agent.close())
+        asyncio.run(harness.agent.close())
 
 
 def test_all_profiles_return_meta_facade(tmp_path, monkeypatch):
@@ -454,7 +447,10 @@ def test_subagent_factory_reuses_coding_composition_entrypoint() -> None:
         if isinstance(node, ast.ImportFrom) and node.module is not None
         for alias in node.names
     }
-    assert (1, "meta_agent", "build_coding_agent") in imports
+    assert any(
+        level in {1, 3} and module == "meta_agent" and name == "build_coding_agent"
+        for level, module, name in imports
+    )
     assert not {
         (level, module)
         for level, module, _name in imports
@@ -522,7 +518,6 @@ def test_kernel_and_harness_do_not_import_profiles() -> None:
         *sorted((SOURCE_ROOT / "providers").rglob("*.py")),
         *sorted((SOURCE_ROOT / "session_runtime").rglob("*.py")),
         *sorted((SOURCE_ROOT / "observers").rglob("*.py")),
-        *sorted((SOURCE_ROOT / "adapters").rglob("*.py")),
         *sorted((SOURCE_ROOT / "runtime").rglob("*.py")),
     ]
     for path in scanned:

@@ -145,10 +145,7 @@ def test_provider_controller_has_no_agent_dependency_or_constructor_argument() -
 
 def test_provider_state_field_writes_are_confined_to_provider_controller() -> None:
     violations: list[str] = []
-    for path in (
-        SOURCE_ROOT / "agent.py",
-        SOURCE_ROOT / "runtime" / "session.py",
-    ):
+    for path in (SOURCE_ROOT / "runtime" / "session.py",):
         if _attribute_assignments(
             _tree(path),
             PROVIDER_FIELDS,
@@ -158,9 +155,9 @@ def test_provider_state_field_writes_are_confined_to_provider_controller() -> No
     assert violations == []
 
 
-def test_agent_has_no_provider_mutable_mirrors() -> None:
-    agent_class = _class(_tree(SOURCE_ROOT / "agent.py"), "Agent")
-    assert not REMOVED_AGENT_MIRRORS & _self_assignments(agent_class)
+def test_meta_agent_has_no_provider_mutable_mirrors() -> None:
+    meta_agent = _class(_tree(SOURCE_ROOT / "meta_agent.py"), "MetaAgent")
+    assert not REMOVED_AGENT_MIRRORS & _self_assignments(meta_agent)
 
 
 def test_session_restore_uses_provider_controller_command() -> None:

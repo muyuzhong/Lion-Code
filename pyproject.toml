@@ -116,7 +116,7 @@ name = "Core 不依赖上层运行时包"
 type = "forbidden"
 source_modules = ["lion_code.core"]
 forbidden_modules = [
-    "lion_code.agent",
+    "lion_code.adapters",
     "lion_code.application",
     "lion_code.capabilities",
     "lion_code.composition",
@@ -138,7 +138,7 @@ name = "Supervisor 只依赖公开 Core 事件契约"
 type = "forbidden"
 source_modules = ["lion_code.supervisor"]
 forbidden_modules = [
-    "lion_code.agent",
+    "lion_code.adapters",
     "lion_code.application",
     "lion_code.capabilities",
     "lion_code.composition",
@@ -159,7 +159,6 @@ name = "Composition 不依赖 Product Facade 与 Interfaces"
 type = "forbidden"
 source_modules = ["lion_code.composition"]
 forbidden_modules = [
-    "lion_code.agent",
     "lion_code.application",
     "lion_code.meta_agent",
     "lion_code.supervisor",
@@ -173,7 +172,6 @@ name = "MetaAgent 不依赖 Product Features 与 Interfaces"
 type = "forbidden"
 source_modules = ["lion_code.meta_agent"]
 forbidden_modules = [
-    "lion_code.agent",
     "lion_code.application",
     "lion_code.supervisor",
     "lion_code.tui",
@@ -187,7 +185,6 @@ type = "forbidden"
 source_modules = ["lion_code.providers"]
 forbidden_modules = [
     "lion_code.adapters",
-    "lion_code.agent",
     "lion_code.application",
     "lion_code.capabilities",
     "lion_code.composition",
@@ -229,7 +226,6 @@ type = "forbidden"
 source_modules = ["lion_code.tui"]
 forbidden_modules = [
     "lion_code.adapters",
-    "lion_code.agent",
     "lion_code.capabilities",
     "lion_code.composition",
     "lion_code.context",
@@ -257,7 +253,6 @@ name = "Capabilities 不依赖 Agent 宿主与 Application/TUI"
 type = "forbidden"
 source_modules = ["lion_code.capabilities"]
 forbidden_modules = [
-    "lion_code.agent",
     "lion_code.application",
     "lion_code.tui",
 ]

@@ -86,7 +86,7 @@ _AXIS_ALLOWED_FILES = {
     "composition/config.py",
     "composition/bindings.py",
     "meta_agent.py",
-    "agent.py",
+    "adapters/coding_session_backend.py",
     "__init__.py",
 }
 
