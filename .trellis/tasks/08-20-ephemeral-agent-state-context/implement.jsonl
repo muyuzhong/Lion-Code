@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/capability-spi.md", "reason": "ContextLayer SPI、CapabilitySpec 槽位与 Registry 聚合的可执行契约。"}
+{"file": ".trellis/spec/backend/four-layer-ownership.md", "reason": "保持 Kernel、Capability、Composition、Runtime 的依赖与状态所有权边界。"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "确保瞬态 prepared context 不进入 canonical history、Session 或 Runtime owner。"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "约束新增 capability 包位置与禁止 Runtime/Kernel 反向依赖。"}

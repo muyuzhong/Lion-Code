@@ -11,6 +11,7 @@ from .runtime import CapabilityLifecycle, CapabilityRuntime
 from .types import (
     AsyncCloseable,
     CapabilitySpec,
+    ContextLayer,
     PromptLayer,
     SessionParticipant,
     ToolSource,
@@ -22,6 +23,7 @@ __all__ = [
     "CapabilityRegistry",
     "CapabilityRuntime",
     "CapabilitySpec",
+    "ContextLayer",
     "DuplicateCapabilityError",
     "PromptLayer",
     "SessionParticipant",

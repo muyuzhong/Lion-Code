@@ -763,10 +763,12 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             list(self._session_repository.session_dir.glob("*.jsonl")),
             [jsonl_path],
         )
+        received = fake.received_messages[0]
         self.assertEqual(
-            [message.role for message in fake.received_messages[0]],
+            [message.role for message in received[:-1]],
             ["user", "assistant", "toolResult", "assistant", "user"],
         )
+        self.assertTrue(received[-1].text.startswith("<agent-state>"))
         state = await self._session_repository.load(session_id)
         self.assertEqual(
             [message.text for message in state.messages],
@@ -922,10 +924,12 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(fake.call_count, 2)
         # 未清空上下文：第二次调用仍是完整历史，而不是摘要单条。
+        received = fake.received_messages[1]
         self.assertEqual(
-            [message.role for message in fake.received_messages[1]],
+            [message.role for message in received[:-1]],
             ["user", "assistant", "toolResult"],
         )
+        self.assertTrue(received[-1].text.startswith("<agent-state>"))
         self.assertEqual(
             agent.composition.runtime.conversation.messages[-1].text, "implemented"
         )

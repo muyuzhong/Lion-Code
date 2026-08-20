@@ -22,9 +22,9 @@ The package is split into physical boundaries visible in the directory tree:
   (SessionIdentityState), and `provider.py` (ProviderController /
   ProviderState).  The Runtime may use Kernel, Context and Tooling, but never
   Composition, Application or TUI.
-- **Capability** — `capabilities/`, including the cohesive `plan/`, `skill/`,
-  and `subagent/` feature packages. Capabilities never import the Agent
-  engine, Application or TUI.
+- **Capability** — `capabilities/`, including the cohesive `agent_state/`,
+  `git_status/`, `plan/`, `skill/`, and `subagent/` feature packages.
+  Capabilities never import the Agent engine, Application or TUI.
 - **Composition** — `composition/` and `meta_agent.py`; the Composition Root
   knows the Agent Runtime and wires the graph.
 - **Supervisor** — `supervisor.py`, consuming only the public Agent event /
@@ -75,7 +75,8 @@ profile, config, or bindings, and never returns a flat bag of everything:
 AgentComposition
 ├── runtime         agent / conversation / session / context /
 │                   provider_controller / usage / budget
-├── capabilities    registry / runtime / plan / skill / subagent
+├── capabilities    registry / runtime / agent_state / git_status /
+│                   plan / skill / subagent
 ├── tooling         registry / runtime / context / permission_policy /
 │                   prompt_composer
 └── interaction     notices / confirmation / status_sink
@@ -91,11 +92,11 @@ delegate.
 Profiles select the graph:
 
 - `MinimalProfile`: MetaAgent, caller tools, neutral prompt, and an empty
-  CapabilityRegistry.
-- `CodingProfile`: MetaAgent plus Coding tools and Coding Harness policy, with
-  an empty CapabilityRegistry.
-- `FullProfile`: Coding tools plus Plan, SubAgent, default Skill, and supplied
-  extension specs, still behind MetaAgent.
+  CapabilityRegistry unless caller extension_specs are supplied.
+- `CodingProfile`: MetaAgent plus Coding tools and Coding Harness policy,
+  AgentState/GitStatus ContextLayers, and supplied extension specs.
+- `FullProfile`: Coding tools plus AgentState/GitStatus, Plan/SubAgent/default
+  Skill, and supplied extension specs, still behind MetaAgent.
 
 `command_backend` is a `ToolBindings` entry (defaulting to the local backend);
 confirm callbacks, renderer factories, and print callbacks are
@@ -131,6 +132,10 @@ commands through narrow ports:
 - `ContextRuntime` owns the context manager, the provider-derived compactor,
   the model-limits cache, `effective_window`, and all compaction decision
   state (compaction flag, in-flight compaction task).
+- `ContextManager` owns only the generic prepared-context projection. It
+  receives structural ContextLayer callbacks from Composition, builds a frozen
+  ContextView from canonical messages, and appends one prepared-only state
+  message after budget/snipping/clearing/protected-window projection.
 - `ConversationRuntime` owns the AgentHarness, the canonical active messages,
   the live provider/model, run output capture, and retired-provider close.
 - `AgentRuntime` owns run orchestration order and stop-reason projection only;
@@ -167,6 +172,30 @@ the ProviderController.
 Its name is historical session terminology, not a project Memory subsystem.
 Canonical history, restore, compaction, legacy JSON read-only migration, and
 Event Stream behavior remain in scope and must keep their tests.
+
+## Ephemeral prepared-context contract
+
+ContextManager.prepare() is the only generic path that renders
+CapabilitySpec.context_layer values. It passes each layer an immutable
+ContextView containing current time, last-provider token utilization and
+compaction status, tool-call summaries, and at most three one-line failures.
+Layers are sorted by layer_id; non-empty fragments are wrapped into one
+role=user message at the prepared-context tail.
+
+The state message is request-local:
+
+| Consumer | May receive the state message? |
+| --- | --- |
+| Provider request from prepare_context | Yes, exactly once at the tail |
+| Harness canonical messages | No |
+| SessionRecorder / JSONL | No |
+| CompactionEntry | No |
+| ContextCompactor.summarize input | No |
+
+The callback passed by Composition captures the completed immutable layer
+tuple, not CapabilityRegistry, so the ContextRuntime path does not create a
+reverse mutable-owner edge. Feature layers may read an existing owner (for
+example PlanRuntime) but must not create counters, failure stores, or history.
 
 ## Application and frontend ports
 
@@ -319,7 +348,8 @@ of the Agent Runtime (`runtime/`) and keep Runtime free of Composition/Applicati
 dependencies. `tests/architecture/test_runtime_ownership.py` additionally proves
 the PR3 object graph: AgentRuntime and ProviderController never reference each
 other, the Deferred wiring symbols stay deleted, each Runtime owner's mutable
-state stays single-owner, and the runtime package keeps no Application/TUI
-imports. Run focused composition, Capability, session, provider,
-application, and Runtime tests before the full suite, then run compile, import
-linting, residual scans, and the repository quality gates.
+state stays single-owner, a ContextLayer callback does not reverse-link
+ContextRuntime to CapabilityRegistry, and the runtime package keeps no
+Application/TUI imports. Run focused composition, Capability, context, session,
+provider, application, and Runtime tests before the full suite, then run
+compile, import linting, residual scans, and the repository quality gates.

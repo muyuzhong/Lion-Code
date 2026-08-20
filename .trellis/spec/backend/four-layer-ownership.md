@@ -17,6 +17,8 @@ boundaries, not historical implementation or future Memory design.
 `CapabilityRegistry` aggregates immutable contributions and closeable resources;
 it is not a service locator. `ContextManager` and `ContextCompactor` remain
 Kernel context policy and are the only generic provider-context preparation path.
+Composition supplies `ContextLayer` implementations through a structural
+callback; the Kernel never imports a concrete capability.
 
 `AgentHarness` at `core/harness.py` is a Kernel stateful-loop wrapper, distinct
 from the Agent Runtime. The `runtime/` package is the physical home of the Agent
@@ -43,11 +45,12 @@ product preset), `AgentConfig` (HOW IT RUNS — value-type runtime settings), an
 `ProviderBindings` / `SessionBindings` / `ToolBindings` / `InteractionBindings`).
 They meet only in `build_agent_composition`.
 
-`MinimalProfile` constructs an empty CapabilityRegistry. `CodingProfile` adds
-Coding tools and Coding Harness policy, but no built-in Capability. `FullProfile`
-adds Plan, SubAgent, and Skill built-in Capabilities. Caller `extension_specs`
-are orthogonal to the Product preset: every Profile forwards them into the
-CapabilityRegistry. Every Profile produces a
+`MinimalProfile` constructs an empty CapabilityRegistry unless caller
+`extension_specs` are supplied. `CodingProfile` adds Coding tools and Coding
+Harness policy plus AgentState/GitStatus ContextLayers. `FullProfile` adds
+those layers together with Plan, SubAgent, and Skill built-in Capabilities.
+Caller `extension_specs` are orthogonal to the Product preset: every Profile
+forwards them into the CapabilityRegistry. Every Profile produces a
 feature-neutral `MetaAgent`; capability services remain private to the graph.
 No Profile creates or names a Memory, Dream, Learning, Null, Deprecated, Legacy,
 or fallback object.
@@ -74,7 +77,9 @@ application session.
 PR9 removed the old project Memory package and coordinator, Dream modules and
 adapter, Learning runtime, Memory-only provider text query, Memory file-write
 hook, project Memory facade/application ports, and the Memory-only per-request
-capability projection slot. No compatibility alias or placeholder remains.
+capability projection slot. The generic ContextLayer slot is intentionally
+retained for ephemeral prepared-context projections; no compatibility alias or
+placeholder remains.
 
 The Supervisor consumes only the public Agent event/result/session contracts.
 Goal lifecycle, scheduler, retry/recovery and execution-control checkpoints are
@@ -91,4 +96,7 @@ future Capability-owned Memory shape and the canonical `core/session/memory.py`.
 Other architecture tests cover import direction
 (`_boundaries.py` + import-linter; Kernel keeps zero Agent Runtime imports),
 composition profiles, zero-extension, capability lifecycle, session persistence,
-provider ownership, application ports, and TUI/Runtime direction.
+provider ownership, application ports, ContextLayer transientness, and
+TUI/Runtime direction. The runtime ownership test also checks that Composition
+passes a completed ContextLayer snapshot without a reverse
+ContextManager-to-CapabilityRegistry edge.
