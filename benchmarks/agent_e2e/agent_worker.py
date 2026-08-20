@@ -10,10 +10,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from lion_code.adapters.coding_session_backend import (
-    CodingSessionBackendAdapter,
-    build_full_coding_backend,
-)
+from lion_code.adapters.coding_session_backend import CodingSessionBackendAdapter
+from lion_code.composition.full_product import build_full_coding_backend
 from lion_code.session_runtime import SessionRepository
 
 from .backend import AgentExecutionRequest
