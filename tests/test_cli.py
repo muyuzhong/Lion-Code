@@ -13,8 +13,8 @@ from lion_code.__main__ import (
     parse_args,
     run_repl,
 )
-from lion_code.adapters.coding_session_backend import build_full_coding_backend
 from lion_code.application.commands import CommandResult
+from lion_code.composition.full_product import build_full_coding_backend
 
 
 def test_legacy_tui_option_is_rejected(monkeypatch) -> None:
@@ -69,7 +69,7 @@ async def test_repl_routes_generic_command_through_application_session(
     from core.fakes import FakeProvider
 
     with patch(
-        "lion_code.adapters.coding_session_backend.create_provider",
+        "lion_code.composition.full_product.create_provider",
         return_value=FakeProvider([]),
     ):
         agent = build_full_coding_backend(
@@ -91,7 +91,7 @@ async def test_repl_unknown_command_prints_hint(monkeypatch, capsys) -> None:
     from core.fakes import FakeProvider
 
     with patch(
-        "lion_code.adapters.coding_session_backend.create_provider",
+        "lion_code.composition.full_product.create_provider",
         return_value=FakeProvider([]),
     ):
         agent = build_full_coding_backend(

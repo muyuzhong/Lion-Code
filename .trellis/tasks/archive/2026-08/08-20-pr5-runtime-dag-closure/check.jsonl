@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/four-layer-ownership.md", "reason": "检查 Runtime DAG、ProviderController owner、Composition root 与 Adapter 边界。"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "检查 reachable graph、Provider projection、Session/Capability 路径和 product bootstrap。"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "检查新 bootstrap 文件归属和旧 adapter factory 残留。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "执行最终质量门禁、测试矩阵、diff-check 与基线噪声区分。"}
+{"file": ".trellis/tasks/08-20-pr5-runtime-dag-closure/research/runtime-dag-exploration.md", "reason": "复核实现是否真正消除 closure cycle，并验证探索阶段边界事实。"}

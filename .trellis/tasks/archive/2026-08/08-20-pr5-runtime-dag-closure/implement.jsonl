@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/four-layer-ownership.md", "reason": "保持 Runtime/Capability/Composition ownership 与 ProviderController 单 owner 契约。"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "遵循 Runtime 构造顺序、Provider read/write boundary 与 Product Adapter 契约。"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "确定 full_product bootstrap 与 adapters 的物理归属。"}
+{"file": ".trellis/spec/backend/capability-spi.md", "reason": "确保 SubAgent/Skill 仍通过 generic Capability SPI 接入，不把 Provider owner 倒灌进 Capability。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "实施时遵循 focused/full tests、compile、diff-check 与中文提交约定。"}
+{"file": ".trellis/tasks/08-20-pr5-runtime-dag-closure/research/runtime-dag-exploration.md", "reason": "提供 hidden cycle、测试缺口、factory 归属和本地基线证据。"}

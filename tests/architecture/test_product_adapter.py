@@ -8,10 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import lion_code
-from lion_code.adapters.coding_session_backend import (
-    CodingSessionBackendAdapter,
-    build_full_coding_backend,
-)
+from lion_code.adapters.coding_session_backend import CodingSessionBackendAdapter
 from lion_code.application.ports import CodingSessionBackend
 from lion_code.composition import (
     AgentConfig,
@@ -22,11 +19,14 @@ from lion_code.composition import (
     RuntimeBindings,
     SessionBindings,
 )
+from lion_code.composition.full_product import build_full_coding_backend
 from lion_code.meta_agent import MetaAgent, build_profile_agent
 from lion_code.session_runtime import SessionRepository
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = REPOSITORY_ROOT / "lion_code"
+ADAPTER_PATH = SOURCE_ROOT / "adapters" / "coding_session_backend.py"
+PRODUCT_BOOTSTRAP_PATH = SOURCE_ROOT / "composition" / "full_product.py"
 
 _FEATURE_NAMES = frozenset({"plan", "skill", "subagent"})
 _META_PRODUCT_METHODS = frozenset(
@@ -102,7 +102,7 @@ def test_public_package_has_no_agent_facade() -> None:
 def test_product_adapter_satisfies_application_port(tmp_path) -> None:
     repository = SessionRepository(tmp_path / "sessions")
     with patch(
-        "lion_code.adapters.coding_session_backend.create_provider",
+        "lion_code.composition.full_product.create_provider",
         return_value=_FakeProvider(),
     ):
         backend = build_full_coding_backend(
@@ -119,6 +119,46 @@ def test_product_adapter_satisfies_application_port(tmp_path) -> None:
 def test_product_adapter_does_not_inherit_meta_agent() -> None:
     assert not issubclass(CodingSessionBackendAdapter, MetaAgent)
     assert MetaAgent not in CodingSessionBackendAdapter.__mro__
+
+
+def test_product_factory_lives_in_composition_bootstrap() -> None:
+    adapter_tree = _tree(ADAPTER_PATH)
+    adapter_functions = {
+        node.name
+        for node in ast.walk(adapter_tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert "build_full_coding_backend" not in adapter_functions
+    assert not {
+        alias.name
+        for node in ast.walk(adapter_tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.name
+        in {
+            "AgentConfig",
+            "FullProfile",
+            "RuntimeBindings",
+            "ProviderBindings",
+            "SessionBindings",
+            "ToolBindings",
+            "build_agent_composition",
+        }
+    }
+
+    bootstrap_tree = _tree(PRODUCT_BOOTSTRAP_PATH)
+    bootstrap_functions = {
+        node.name
+        for node in ast.walk(bootstrap_tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert "build_full_coding_backend" in bootstrap_functions
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "build_agent_composition"
+        for node in ast.walk(bootstrap_tree)
+    )
 
 
 def test_meta_agent_has_no_product_session_or_ui_methods() -> None:

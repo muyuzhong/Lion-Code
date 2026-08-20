@@ -7,7 +7,11 @@ from typing import Any
 
 import pytest
 
-from lion_code.runtime.provider import ProviderController, ProviderState
+from lion_code.runtime.provider import (
+    ProviderConfigurationProjection,
+    ProviderController,
+    ProviderState,
+)
 
 
 class _Provider:
@@ -79,21 +83,26 @@ def _controller(
     conversation = conversation or _Conversation(_Provider("old"))
     context = context or _Context()
     recorder = recorder or _Recorder()
+    state = ProviderState(
+        model="model-a",
+        provider_kind="openai-compatible",
+        api_key="key-a",
+        openai_base_url="https://old.test/v1",
+        anthropic_base_url=None,
+        thinking_enabled=False,
+        thinking_level="off",
+    )
     controller = ProviderController(
-        state=ProviderState(
-            model="model-a",
-            provider_kind="openai-compatible",
-            api_key="key-a",
-            openai_base_url="https://old.test/v1",
-            anthropic_base_url=None,
-            thinking_enabled=False,
-            thinking_level="off",
-        ),
+        state=state,
         conversation=conversation,
         context=context,
         recorder=recorder,
         provider_factory=factory,
         get_live_model=lambda: conversation.model,
+        configuration_projection=ProviderConfigurationProjection(
+            _state=state,
+            _provider_ready=False,
+        ),
     )
     return controller, conversation, context, recorder
 
@@ -149,6 +158,13 @@ def test_replacement_transaction_refreshes_derived_services_and_retires_old() ->
     assert conversation.retired == [old_provider]
     assert controller.view.model == "model-b"
     assert controller.view.provider_kind == "openai-compatible"
+    projection = controller._configuration_projection
+    assert projection.is_api_configured() is True
+    assert projection.child_api_kwargs() == {
+        "model": "model-b",
+        "api_base": "https://new.test/v1",
+        "api_key": "key-b",
+    }
 
 
 def test_factory_failure_keeps_conversation_and_view_unchanged() -> None:

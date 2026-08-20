@@ -37,6 +37,51 @@ class ProviderState:
     thinking_level: ThinkingLevel
 
 
+@dataclass(slots=True)
+class ProviderConfigurationProjection:
+    """供 Runtime/Capability 读取当前 Provider 配置的稳定只读投影。
+
+    Composition Root 在 ``ProviderController`` 之前创建此对象；投影只保存
+    当前权威 ``ProviderState`` 的引用，不持有 Controller，也不复制可写状态。
+    Controller 仅在成功提交新的 state 后同步引用，避免读取面反向捕获未来
+    Controller。
+    """
+
+    _state: ProviderState
+    _provider_ready: bool
+
+    def is_api_configured(self) -> bool:
+        state = self._state
+        return self._provider_ready or bool(
+            state.api_key
+            and (
+                state.provider_kind == "anthropic" or state.openai_base_url is not None
+            )
+        )
+
+    def child_api_kwargs(self) -> dict[str, str | None]:
+        """返回子 Agent 继承当前 Provider 所需的凭证与 base projection。"""
+
+        state = self._state
+        if state.provider_kind == "openai-compatible":
+            return {
+                "model": state.model,
+                "api_base": state.openai_base_url,
+                "api_key": state.api_key,
+            }
+        return {
+            "model": state.model,
+            "api_base": None,
+            "anthropic_base_url": state.anthropic_base_url,
+            "api_key": state.api_key,
+        }
+
+    def _sync(self, state: ProviderState) -> None:
+        """由 ProviderController 在 state 提交后刷新共享引用。"""
+
+        self._state = state
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderView:
     """供应用和 Session 消费的 Provider 只读投影。"""
@@ -151,6 +196,7 @@ class ProviderController:
         recorder: ConfigurationRecorder,
         provider_factory: ProviderFactory,
         get_live_model: Callable[[], str],
+        configuration_projection: ProviderConfigurationProjection,
     ) -> None:
         self._state = state
         self._conversation = conversation
@@ -158,6 +204,7 @@ class ProviderController:
         self._recorder = recorder
         self._provider_factory = provider_factory
         self._get_live_model = get_live_model
+        self._configuration_projection = configuration_projection
 
     @property
     def view(self) -> ProviderView:
@@ -218,23 +265,6 @@ class ProviderController:
             "model": state.model,
             "api_key": state.api_key,
             "base_url": self._active_base_url() or "",
-        }
-
-    def child_api_kwargs(self) -> dict[str, str | None]:
-        """返回子 Agent 继承当前 Provider 所需的凭证与 base projection。"""
-
-        state = self._state
-        if state.provider_kind == "openai-compatible":
-            return {
-                "model": state.model,
-                "api_base": state.openai_base_url,
-                "api_key": state.api_key,
-            }
-        return {
-            "model": state.model,
-            "api_base": None,
-            "anthropic_base_url": state.anthropic_base_url,
-            "api_key": state.api_key,
         }
 
     def configure(
@@ -436,6 +466,7 @@ class ProviderController:
             self._conversation.set_model(target.model)
 
         self._state = target
+        self._configuration_projection._sync(target)
         if provider_changed:
             assert compactor is not None
             self._context.replace_context_compactor(compactor)
@@ -488,6 +519,7 @@ class ProviderController:
 __all__ = [
     "ConfigurationRecorder",
     "ModelContextControl",
+    "ProviderConfigurationProjection",
     "ProviderController",
     "ProviderFactory",
     "ProviderKind",

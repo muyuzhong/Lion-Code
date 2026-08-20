@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, patch
 from core.fakes import FakeProvider
 from full_agent import FullAgentHarness, build_full_agent_harness
 
-from lion_code.adapters.coding_session_backend import build_full_coding_backend
+from lion_code.composition.full_product import build_full_coding_backend
 from lion_code.context import SUMMARY_SYSTEM_PROMPT
 from lion_code.core import (
     AssistantMessage,
@@ -716,7 +716,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         registry.register(_echo_lion_tool())
         fake = FakeProvider([_stop_event("new answer")])
         with patch(
-            "lion_code.adapters.coding_session_backend.create_provider",
+            "lion_code.composition.full_product.create_provider",
             return_value=fake,
         ):
             backend = build_full_coding_backend(
