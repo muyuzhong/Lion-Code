@@ -18,7 +18,7 @@
    - 覆盖 full-fit、oversized history、零 history budget、fixed-prompt-too-large、canonical
      immutability，以及 overflow Provider 输入小于预算/原 context。
    - 更新 compactor prompt、ContextRuntime/AgentRuntime 调用、fakes、unit/integration tests。
-   - 增加 FullProfile reachable graph + exact removed coupling 架构门禁。
+   - 增加 FullProfile direct ownership graph + exact removed coupling 架构门禁。
    - 聚焦验证后提交：`fix: 移除压缩链路的 Plan 依赖并限制近期提示`。
 
 2. **增加九段摘要结构校验**
