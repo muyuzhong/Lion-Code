@@ -60,10 +60,10 @@ _FEATURE_MODULE_PREFIXES = (
     "lion_code.capabilities.plan",
     "lion_code.capabilities.skill",
     "lion_code.capabilities.subagent",
-    "lion_code.plan_runtime",
-    "lion_code.skill_runtime",
-    "lion_code.subagent_factory",
-    "lion_code.subagent_runtime",
+    "lion_code.capabilities.plan.runtime",
+    "lion_code.capabilities.skill.runtime",
+    "lion_code.capabilities.subagent.factory",
+    "lion_code.capabilities.subagent.runtime",
 )
 _FEATURE_SYMBOLS = {
     "CheckpointStore",
@@ -134,7 +134,9 @@ def test_full_product_has_all_features(tmp_path, monkeypatch) -> None:
     bindings = RuntimeBindings(tool=ToolBindings(tool_registry=ToolRegistry()))
     provider = Mock()
     provider.aclose = AsyncMock()
-    with patch("lion_code.agent.create_provider", return_value=provider):
+    with patch(
+        "lion_code.composition.agent_builder.create_provider", return_value=provider
+    ):
         composition = build_agent_composition(
             FullProfile(), config=config, bindings=bindings
         )

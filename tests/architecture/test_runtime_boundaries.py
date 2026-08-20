@@ -25,7 +25,9 @@ _PRODUCTION = BOUNDARIES[8]
 LEGACY_MESSAGE_SYMBOLS = frozenset({"_anthropic_messages", "_openai_messages"})
 HARNESS_MUTATION_METHODS = frozenset({"clear_queues", "follow_up", "replace_messages"})
 SESSION_RECORDER_SITES = {
-    "agent.py": frozenset({"Agent._migrate_legacy_core_session"}),
+    "adapters/coding_session_backend.py": frozenset(
+        {"CodingSessionBackendAdapter._migrate_legacy_core_session"}
+    ),
     "runtime/session.py": frozenset({"SessionRuntime._reset_recorder"}),
 }
 JSONL_WRITER_SYMBOLS = frozenset({"JsonlSessionStorage", "entry_to_json_line"})
@@ -1161,8 +1163,8 @@ def test_session_and_cancellation_state_have_single_owners() -> None:
     assert {"session", "cancellation"} <= context_fields
     assert not {"session_id", "cancellation_fn"} & context_fields
 
-    agent_fields = _self_fields(_tree(SOURCE_ROOT / "agent.py"))
-    assert not {"session_id", "session_start_time", "_aborted"} & agent_fields
+    meta_agent_fields = _self_fields(_tree(SOURCE_ROOT / "meta_agent.py"))
+    assert not {"session_id", "session_start_time", "_aborted"} & meta_agent_fields
 
     identity_resets = {
         _source_key(path): _session_identity_reset_count(_tree(path))
@@ -1206,9 +1208,9 @@ def test_usage_state_has_one_owner_and_command_only_writes() -> None:
     }
     assert not removed, f"Removed Usage mirrors must not return: {removed}"
 
-    agent_fields = _self_fields(_tree(SOURCE_ROOT / "agent.py"))
-    assert not REMOVED_USAGE_SYMBOLS & agent_fields
-    assert "_usage_observer" not in agent_fields
+    meta_agent_fields = _self_fields(_tree(SOURCE_ROOT / "meta_agent.py"))
+    assert not REMOVED_USAGE_SYMBOLS & meta_agent_fields
+    assert "_usage_observer" not in meta_agent_fields
 
     ledger_constructors = {
         _source_key(path): _named_constructor_count(_tree(path), "UsageLedger")
@@ -1272,7 +1274,7 @@ def test_usage_state_has_one_owner_and_command_only_writes() -> None:
     }
     assert record_model_sites == {"observers/usage.py": ["UsageObserver.handle"]}
     assert record_child_sites == {
-        "subagent_runtime.py": ["SubagentExecutor._run_child"],
+        "capabilities/subagent/runtime.py": ["SubagentExecutor._run_child"],
     }
     assert record_turn_sites == {
         "runtime/agent.py": ["AgentRuntime.before_core_tool_calls"]
@@ -1290,8 +1292,8 @@ def test_permission_state_has_one_owner_and_live_read_ports() -> None:
     assert not {"permission_mode", "confirmed_paths"} & context_fields
     assert _type_annotation_mentions(context_tree, "PermissionView")
 
-    agent_fields = _self_fields(_tree(SOURCE_ROOT / "agent.py"))
-    assert not {"permission_mode", "_confirmed_paths"} & agent_fields
+    meta_agent_fields = _self_fields(_tree(SOURCE_ROOT / "meta_agent.py"))
+    assert not {"permission_mode", "_confirmed_paths"} & meta_agent_fields
 
     state_constructors = {
         _source_key(path): _named_constructor_count(_tree(path), "PermissionState")
@@ -1353,7 +1355,7 @@ def test_tooling_does_not_import_product_runtimes() -> None:
     violations: dict[str, tuple[str, ...]] = {}
     for path in _source_files("tooling"):
         imported = _product_import_roots(path, _tree(path))
-        bad = sorted(imported & {"plan_runtime", "supervisor"})
+        bad = sorted(imported & {"capabilities", "supervisor"})
         if bad:
             violations[_source_key(path)] = tuple(bad)
     assert not violations, f"tooling 包反向绑定产品运行时: {violations}"
@@ -1370,11 +1372,13 @@ def test_plan_state_has_one_owner_and_live_read_port() -> None:
     assert "plan" not in context_fields
     assert "plan_file_path" not in context_fields
 
-    plan_tree = _tree(SOURCE_ROOT / "plan_runtime.py")
+    plan_tree = _tree(SOURCE_ROOT / "capabilities" / "plan" / "runtime.py")
     assert _class_annotated_fields(plan_tree, "PlanState") == _PLAN_STATE_FIELDS
 
-    agent_fields = _self_fields(_tree(SOURCE_ROOT / "agent.py"))
-    assert not _REMOVED_AGENT_PLAN_SYMBOLS & agent_fields
+    adapter_fields = _self_fields(
+        _tree(SOURCE_ROOT / "adapters" / "coding_session_backend.py")
+    )
+    assert not _REMOVED_AGENT_PLAN_SYMBOLS & adapter_fields
     removed_symbols = {
         _source_key(path): sorted(
             _referenced_symbols(_tree(path), _REMOVED_AGENT_PLAN_SYMBOLS)
@@ -1423,7 +1427,8 @@ def test_plan_state_has_one_owner_and_live_read_port() -> None:
     mutations = {
         _source_key(path): sorted(_plan_state_mutations(_tree(path)))
         for path in _source_files()
-        if _source_key(path) != "plan_runtime.py" and _plan_state_mutations(_tree(path))
+        if _source_key(path) != "capabilities/plan/runtime.py"
+        and _plan_state_mutations(_tree(path))
     }
     assert not mutations, f"PlanState writes must stay in PlanRuntime: {mutations}"
 
@@ -1437,13 +1442,17 @@ def test_plan_state_has_one_owner_and_live_read_port() -> None:
     assert 'mode != "auto"' not in middleware_source
 
     # PlanRuntime 不再依赖 PermissionController（PR4）。
-    plan_runtime_source = (SOURCE_ROOT / "plan_runtime.py").read_text(encoding="utf-8")
+    plan_runtime_source = (
+        SOURCE_ROOT / "capabilities" / "plan" / "runtime.py"
+    ).read_text(encoding="utf-8")
     assert "PermissionController" not in plan_runtime_source
     assert "permission_state" not in plan_runtime_source
 
 
 def test_prompt_and_capability_lifecycle_boundaries() -> None:
-    plan_runtime_source = (SOURCE_ROOT / "plan_runtime.py").read_text(encoding="utf-8")
+    plan_runtime_source = (
+        SOURCE_ROOT / "capabilities" / "plan" / "runtime.py"
+    ).read_text(encoding="utf-8")
     for symbol in (
         "self._base_system_prompt",
         "self._system_prompt",
@@ -1458,7 +1467,9 @@ def test_prompt_and_capability_lifecycle_boundaries() -> None:
     assert "PlanRuntime" not in lifecycle_source
     assert ".plan" not in lifecycle_source
 
-    agent_source = (SOURCE_ROOT / "agent.py").read_text(encoding="utf-8")
+    adapter_source = (SOURCE_ROOT / "adapters" / "coding_session_backend.py").read_text(
+        encoding="utf-8"
+    )
     for symbol in (
         "_before_turn_capabilities",
         "_after_turn_capabilities",
@@ -1466,7 +1477,7 @@ def test_prompt_and_capability_lifecycle_boundaries() -> None:
         "self._base_system_prompt",
         "self._system_prompt",
     ):
-        assert symbol not in agent_source
+        assert symbol not in adapter_source
 
     prompt_tree = _tree(SOURCE_ROOT / "prompt.py")
     capability_imports = {
@@ -1479,7 +1490,9 @@ def test_prompt_and_capability_lifecycle_boundaries() -> None:
     }
     assert capability_imports <= {"PromptLayer"}
 
-    plan_capability_tree = _tree(SOURCE_ROOT / "capabilities" / "plan.py")
+    plan_capability_tree = _tree(
+        SOURCE_ROOT / "capabilities" / "plan" / "capability.py"
+    )
     render_method = next(
         node
         for node in ast.walk(plan_capability_tree)
@@ -1854,7 +1867,7 @@ def test_domain_runtimes_use_only_narrow_dependencies() -> None:
 
     scoped = {
         "supervisor.py": ("Supervisor",),
-        "subagent_factory.py": ("SubagentFactory",),
+        "capabilities/subagent/factory.py": ("SubagentFactory",),
     }
     removed_hosts = {
         "AutonomyHost",

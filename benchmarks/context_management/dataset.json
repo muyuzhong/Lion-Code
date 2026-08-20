@@ -19,13 +19,13 @@
       "tool_payload_bytes": 120000,
       "user_payload_bytes": 0,
       "source_files": [
-        "lion_code/agent.py",
+        "lion_code/adapters/coding_session_backend.py",
         "lion_code/tools.py"
       ],
       "idle_before_turns": [],
       "facts": [
         {"turn": 1, "key": "项目代号", "value": "LION-PERSIST-7319"},
-        {"turn": 2, "key": "关键文件", "value": "lion_code/agent.py"},
+        {"turn": 2, "key": "关键文件", "value": "lion_code/adapters/coding_session_backend.py"},
         {"turn": 3, "key": "验证命令", "value": "python -m pytest -q"}
       ]
     },
@@ -38,7 +38,7 @@
       "tool_payload_bytes": 25000,
       "user_payload_bytes": 30000,
       "source_files": [
-        "lion_code/agent.py",
+        "lion_code/adapters/coding_session_backend.py",
         "lion_code/prompt.py",
         "lion_code/context/manager.py"
       ],
@@ -58,7 +58,7 @@
       "tool_payload_bytes": 90000,
       "user_payload_bytes": 0,
       "source_files": [
-        "lion_code/agent.py",
+        "lion_code/adapters/coding_session_backend.py",
         "lion_code/autonomy.py",
         "lion_code/tools.py"
       ],
@@ -79,7 +79,7 @@
       "user_payload_bytes": 80000,
       "source_files": [
         "README.md",
-        "lion_code/agent.py",
+        "lion_code/adapters/coding_session_backend.py",
         "lion_code/prompt.py"
       ],
       "idle_before_turns": [],

@@ -12,7 +12,7 @@ lion_code/
 ├── __init__.py          # Profile/MetaAgent/Capability/Supervisor public API
 ├── __main__.py          # CLI / REPL process boundary
 ├── meta_agent.py        # Feature-neutral public Agent facade
-├── agent.py             # Internal Full product host used by Application/CLI
+├── adapters/             # Product adapters over feature-neutral facades
 ├── composition/         # Profiles and the one-shot object graph root
 ├── core/                # Canonical messages, events, loop and generic Harness
 ├── runtime/             # Agent Runtime: single-session lifecycle coordination
@@ -23,7 +23,10 @@ lion_code/
 │   ├── execution.py     # ExecutionControl (cancellation commands)
 │   ├── session_identity.py   # SessionIdentityState / SessionView
 │   └── provider.py      # ProviderController / ProviderState
-├── capabilities/        # CapabilitySpec, registry, runtime and built-in adapters
+├── capabilities/        # Generic SPI plus cohesive built-in feature packages
+│   ├── plan/             # Plan capability and runtime
+│   ├── skill/            # Skill capability, runtime, and discovery
+│   └── subagent/         # SubAgent capability, factory, runtime, and types
 ├── tooling/             # Tool definitions, registry, permissions and middleware
 ├── context/             # Provider-context preparation and compaction policy
 ├── session_runtime/     # Canonical JSONL repository and recorder
@@ -33,10 +36,10 @@ lion_code/
 └── tui/                 # Textual interface
 ```
 
-Other root modules such as `hooks.py`, `skills.py`, `plan_runtime.py`,
-`skill_runtime.py`, and `subagent_runtime.py` are existing feature owners. Keep
-a change close to its current owner instead of moving it merely to make a
-generic layered diagram look cleaner.
+Other root modules such as `hooks.py` remain standalone process/runtime
+boundaries. Feature-specific implementation belongs in its corresponding
+`capabilities/<feature>/` package; do not recreate a root feature module merely
+to provide a shorter import path.
 
 ## Placement rules
 
@@ -49,10 +52,13 @@ generic layered diagram look cleaner.
   command parsing and dispatch.
 - Put Agent object-graph construction in `lion_code/composition/`. The builder
   owns concrete runtime wiring and Profile-selected capability registration;
-  `meta_agent.py` is the only feature-neutral public facade, while `agent.py`
-  is the internal Full product host for existing Application delegates. The
-  composition result is explicit and one-shot: no builder, container, or
-  service locator is retained by runtime or domain modules.
+  `meta_agent.py` is the feature-neutral public facade. Product-specific
+  frontend delegation belongs in `adapters/`. The composition result is
+  explicit and one-shot: no builder, container, or service locator is retained
+  by runtime or domain modules.
+- Put built-in feature implementations in their cohesive package under
+  `lion_code/capabilities/`; generic SPI files (`types.py`, `registry.py`, and
+  `runtime.py`) must not import a concrete feature.
 - Put provider-specific HTTP/request/stream handling in `lion_code/providers/`.
   `providers/factory.py`, `providers/anthropic.py`, and
   `providers/openai_compatible.py` are the current protocol boundary.

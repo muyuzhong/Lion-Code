@@ -13,8 +13,9 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from full_agent import build_full_agent_harness, execute_tool
+
 from lion_code import hooks as hook_module
-from lion_code.agent import Agent
 from lion_code.hooks import (
     HookChainResult,
     HookErrorKind,
@@ -682,8 +683,8 @@ time.sleep(10)
 
 class TestAgentHookIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_hook_denial_stops_tool_router_and_passes_trust_callback(self):
-        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
-            agent = Agent(api_key="test-key")
+        with patch("full_agent.load_pre_tool_use_hooks", return_value=[]):
+            agent = build_full_agent_harness(api_key="test-key")
 
         terminal = HookResult(
             hook_id="protect-shell",
@@ -698,18 +699,18 @@ class TestAgentHookIntegration(unittest.IsolatedAsyncioTestCase):
             )
         )
         tool_runner = AsyncMock(return_value=ToolResult(content="executed"))
-        run_shell = agent.tool_registry.resolve("run_shell")
-        agent.tool_registry.register(
+        run_shell = agent.composition.tooling.registry.resolve("run_shell")
+        agent.composition.tooling.registry.register(
             replace(run_shell, execute_fn=tool_runner),
             replace=True,
             activate=True,
         )
-        agent.tool_context.hooks.append(object())
+        agent.composition.tooling.context.hooks.append(object())
         with patch(
             "lion_code.tooling.middleware.run_pre_tool_use_hooks",
             hook_runner,
         ):
-            result = await agent._execute_tool_call("run_shell", {"command": "echo hi"})
+            result = await execute_tool(agent, "run_shell", {"command": "echo hi"})
 
         self.assertEqual(
             result,
@@ -718,12 +719,15 @@ class TestAgentHookIntegration(unittest.IsolatedAsyncioTestCase):
             "A configured policy rejected this action. Adjust the action.",
         )
         hook_runner.assert_awaited_once()
-        self.assertIs(hook_runner.await_args.kwargs["confirm_trust"].__self__, agent)
+        self.assertIs(
+            hook_runner.await_args.kwargs["confirm_trust"].__self__,
+            agent.composition.interaction.confirmation,
+        )
         tool_runner.assert_not_awaited()
 
     async def test_hook_error_is_not_presented_as_user_policy(self):
-        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
-            agent = Agent(api_key="test-key")
+        with patch("full_agent.load_pre_tool_use_hooks", return_value=[]):
+            agent = build_full_agent_harness(api_key="test-key")
 
         terminal = HookResult(
             hook_id="protect-shell",
@@ -739,18 +743,18 @@ class TestAgentHookIntegration(unittest.IsolatedAsyncioTestCase):
             )
         )
         tool_runner = AsyncMock(return_value=ToolResult(content="executed"))
-        run_shell = agent.tool_registry.resolve("run_shell")
-        agent.tool_registry.register(
+        run_shell = agent.composition.tooling.registry.resolve("run_shell")
+        agent.composition.tooling.registry.register(
             replace(run_shell, execute_fn=tool_runner),
             replace=True,
             activate=True,
         )
-        agent.tool_context.hooks.append(object())
+        agent.composition.tooling.context.hooks.append(object())
         with patch(
             "lion_code.tooling.middleware.run_pre_tool_use_hooks",
             hook_runner,
         ):
-            result = await agent._execute_tool_call("run_shell", {"command": "echo hi"})
+            result = await execute_tool(agent, "run_shell", {"command": "echo hi"})
 
         self.assertEqual(
             result,
@@ -761,12 +765,13 @@ class TestAgentHookIntegration(unittest.IsolatedAsyncioTestCase):
         tool_runner.assert_not_awaited()
 
     async def test_dont_ask_mode_rejects_hook_trust_without_prompt(self):
-        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
-            agent = Agent(api_key="test-key", permission_mode="dontAsk")
+        with patch("full_agent.load_pre_tool_use_hooks", return_value=[]):
+            agent = build_full_agent_harness(api_key="test-key", permission_mode="dontAsk")
         dangerous_prompt = AsyncMock(return_value=True)
 
-        with patch.object(agent, "_confirm_dangerous", dangerous_prompt):
-            approved = await agent._confirm_hook_trust("trust this Hook")
+        confirmation = agent.composition.interaction.confirmation
+        with patch.object(confirmation, "confirm", dangerous_prompt):
+            approved = await confirmation.confirm_hook_trust("trust this Hook")
 
         self.assertFalse(approved)
         dangerous_prompt.assert_not_awaited()

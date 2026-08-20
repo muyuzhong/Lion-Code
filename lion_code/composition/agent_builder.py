@@ -29,10 +29,14 @@ from ..capabilities import (
     CapabilityRegistry,
     CapabilityRuntime,
     CapabilitySpec,
-    create_plan_capability,
-    create_skill_capability,
-    create_subagent_capability,
 )
+from ..capabilities.plan.capability import create_plan_capability
+from ..capabilities.plan.runtime import PlanRuntime, PlanState
+from ..capabilities.skill.capability import create_skill_capability
+from ..capabilities.skill.runtime import SkillRuntime
+from ..capabilities.subagent.capability import create_subagent_capability
+from ..capabilities.subagent.factory import ChildAgentConfig, SubagentFactory
+from ..capabilities.subagent.runtime import SubagentExecutor
 from ..context import (
     ContextManager,
     ModelLimitsResolver,
@@ -43,7 +47,6 @@ from ..context import (
 from ..hooks import load_pre_tool_use_hooks
 from ..observers import TerminalRenderer
 from ..permission_state import PermissionController, PermissionState
-from ..plan_runtime import PlanRuntime, PlanState
 from ..prompt import (
     PromptComposer,
     build_dynamic_system_context,
@@ -65,9 +68,6 @@ from ..runtime.provider import (
 from ..runtime.session import SessionRuntime
 from ..runtime.session_identity import SessionIdentityState
 from ..session_runtime import SessionRepository
-from ..skill_runtime import SkillRuntime
-from ..subagent_factory import ChildAgentConfig, SubagentFactory
-from ..subagent_runtime import SubagentExecutor
 from ..tooling import (
     LocalCommandExecutionBackend,
     ToolPermissionStrategy,

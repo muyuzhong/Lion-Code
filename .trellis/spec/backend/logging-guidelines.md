@@ -9,9 +9,10 @@
 
 - `lion_code/observers/terminal.py::TerminalRenderer` consumes Core events and
   calls `ui.print_*` for text, tool calls/results, errors and lifecycle dividers.
-- `lion_code/agent.py` emits instance-scoped notices for configuration/runtime
-  situations; structured frontends receive them through `LionCodingSession`
-  callbacks instead of a process-global output sink.
+- `lion_code/adapters/coding_session_backend.py::CodingSessionBackendAdapter`
+  emits instance-scoped notices for product configuration/runtime situations;
+  structured frontends receive them through `LionCodingSession` callbacks
+  instead of a process-global output sink.
 - `lion_code/session_runtime/recorder.py::SessionRecorder` records completed
   canonical session entries in JSONL.  It deliberately skips incremental
   rendering events.

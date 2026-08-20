@@ -120,29 +120,33 @@ class TestConversationRuntimeLoop(unittest.IsolatedAsyncioTestCase):
             check=True,
         )
 
-    async def test_agent_composes_one_agent_runtime(self) -> None:
-        from lion_code.agent import Agent
+    async def test_full_composition_wires_one_agent_runtime(self) -> None:
+        from full_agent import build_full_agent_harness
 
         provider = FakeProvider([])
-        with patch("lion_code.agent.create_provider", return_value=provider):
-            agent = Agent(
+        with patch("full_agent.create_provider", return_value=provider):
+            harness = build_full_agent_harness(
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 custom_system_prompt="test",
                 terminal_output=False,
             )
-        self.assertIsInstance(agent._agent_runtime, AgentRuntime)
-        self.assertIs(agent.core_runtime, agent._conversation)
-        self.assertIs(agent.tool_context.session, agent.session_state)
+        composition = harness.composition
+        self.assertIsInstance(composition.runtime.agent, AgentRuntime)
+        self.assertIs(harness.agent._conversation, composition.runtime.conversation)
         self.assertIs(
-            agent.tool_context.cancellation,
-            agent._agent_runtime.execution.cancellation,
+            composition.tooling.context.session,
+            composition.runtime.session.state,
         )
         self.assertIs(
-            agent.core_runtime.harness._cancellation,
-            agent.tool_context.cancellation,
+            composition.tooling.context.cancellation,
+            composition.runtime.agent.execution.cancellation,
         )
-        await agent.close()
+        self.assertIs(
+            composition.runtime.conversation.harness._cancellation,
+            composition.tooling.context.cancellation,
+        )
+        await harness.agent.close()
 
     async def test_closed_loop_through_tool_runtime(self) -> None:
         provider = FakeProvider([_tooluse_event(), _stop_event()])

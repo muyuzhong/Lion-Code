@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from ..subagent_runtime import SubagentExecutor
-from ..tooling.internal import create_agent_tool
-from ..tooling.types import LionTool
-from .types import CapabilitySpec
+from ...tooling.internal import create_agent_tool
+from ...tooling.types import LionTool
+from ..types import CapabilitySpec
+from .runtime import SubagentExecutor
 
 
 class _SubagentToolSource:

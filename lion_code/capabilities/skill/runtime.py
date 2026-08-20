@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from . import skills
-from .subagent_runtime import SubagentExecutor
-from .tooling.types import JSONValue, ToolResult
+from ...tooling.types import JSONValue, ToolResult
+from ..subagent.runtime import SubagentExecutor
+from . import discovery
 
 
 class SkillRuntime:
@@ -23,7 +23,7 @@ class SkillRuntime:
 
         skill_name = _string_argument(arguments, "skill_name", "")
         args = _string_argument(arguments, "args", "")
-        result = skills.execute_skill(skill_name, args)
+        result = discovery.execute_skill(skill_name, args)
         if not result:
             return ToolResult(content=f"Unknown skill: {skill_name}")
 

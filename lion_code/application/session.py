@@ -264,7 +264,7 @@ class LionCodingSession:
     def skills(self) -> tuple[Skill, ...]:
         """用户可调用 Skill 的只读视图;首次访问后缓存(发现要扫盘)。"""
         if self._skills_cache is None:
-            from lion_code.skills import discover_skills
+            from lion_code.capabilities.skill.discovery import discover_skills
 
             self._skills_cache = tuple(
                 Skill(

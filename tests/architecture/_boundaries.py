@@ -102,14 +102,11 @@ BOUNDARIES: tuple[Boundary, ...] = (
                 "observers",
                 "tui",
                 "permission_state",
-                "plan_runtime",
-                "skill_runtime",
-                "subagent_runtime",
                 "usage",
                 "session_runtime",
                 "capabilities",
                 "supervisor",
-                "agent",
+                "adapters",
                 "runtime",
                 "composition",
             }
@@ -120,17 +117,15 @@ BOUNDARIES: tuple[Boundary, ...] = (
         source_package="lion_code.supervisor",
         forbidden=frozenset(
             {
-                "agent",
                 "runtime",
                 "application",
                 "capabilities",
                 "composition",
+                "adapters",
                 "context",
                 "permission_state",
                 "providers",
                 "session_runtime",
-                "skill_runtime",
-                "subagent_runtime",
                 "tooling",
                 "tui",
                 "usage",
@@ -142,7 +137,6 @@ BOUNDARIES: tuple[Boundary, ...] = (
         source_package="lion_code.composition",
         forbidden=frozenset(
             {
-                "agent",
                 "application",
                 "meta_agent",
                 "supervisor",
@@ -156,7 +150,6 @@ BOUNDARIES: tuple[Boundary, ...] = (
         source_package="lion_code.meta_agent",
         forbidden=frozenset(
             {
-                "agent",
                 "application",
                 "supervisor",
                 "tui",
@@ -193,7 +186,6 @@ BOUNDARIES: tuple[Boundary, ...] = (
         source_package="lion_code.capabilities",
         forbidden=frozenset(
             {
-                "agent",
                 "application",
                 "tui",
             }

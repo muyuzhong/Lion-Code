@@ -13,13 +13,17 @@ import asyncio
 from collections.abc import Callable
 from unittest.mock import Mock, patch
 
+from full_agent import build_full_agent_harness
+
 from lion_code.capabilities import (
     CapabilityRegistry,
     CapabilitySpec,
-    create_skill_capability,
-    create_subagent_capability,
 )
-from lion_code.capabilities.skill import _SkillToolSource
+from lion_code.capabilities.skill.capability import (
+    _SkillToolSource,
+    create_skill_capability,
+)
+from lion_code.capabilities.subagent.capability import create_subagent_capability
 
 
 class _RecordingSessionParticipant:
@@ -139,14 +143,13 @@ class TestAgentCompositionWithCapabilities:
     def test_root_agent_has_skill_and_agent_tools(self) -> None:
         """A root agent should have the 'skill' and 'agent' tools in its registry
         after construction, contributed by capabilities."""
-        from lion_code.agent import Agent
 
-        agent = Agent(
+        agent = build_full_agent_harness(
             api_key="test-key",
             terminal_output=False,
         )
 
-        tool_names = {t.name for t in agent.tool_registry.all_tools()}
+        tool_names = {t.name for t in agent.composition.tooling.registry.all_tools()}
         assert "skill" in tool_names
         assert "agent" in tool_names
         assert "enter_plan_mode" in tool_names
@@ -154,27 +157,25 @@ class TestAgentCompositionWithCapabilities:
 
     def test_agent_has_capability_registry_with_builtin_capabilities(self) -> None:
         """Agent should register skill, subagent and plan capabilities."""
-        from lion_code.agent import Agent
 
-        agent = Agent(
+        agent = build_full_agent_harness(
             api_key="test-key",
             terminal_output=False,
         )
 
-        sources = agent._capability_registry.tool_sources  # noqa: SLF001
+        sources = agent.composition.capabilities.registry.tool_sources  # noqa: SLF001
         assert len(sources) == 3
 
     def test_session_participant_runs_after_new_identity_transition(self) -> None:
         """Session callbacks observe the new identity before Core is reset."""
-        from lion_code.agent import Agent
 
-        agent = Agent(
+        agent = build_full_agent_harness(
             api_key="test-key",
             terminal_output=False,
         )
-        original_id = agent.session_id
-        participant = _RecordingSessionParticipant(lambda: agent.session_id)
-        agent._capability_registry.register(  # noqa: SLF001
+        original_id = agent.agent.session_id
+        participant = _RecordingSessionParticipant(lambda: agent.agent.session_id)
+        agent.composition.capabilities.registry.register(  # noqa: SLF001
             CapabilitySpec(
                 name="test-session-lifecycle",
                 session_participants=(participant,),
@@ -182,30 +183,29 @@ class TestAgentCompositionWithCapabilities:
         )
 
         try:
-            asyncio.run(agent.clear_history())
+            asyncio.run(agent.agent.new_session())
         finally:
-            asyncio.run(agent.close())
+            asyncio.run(agent.agent.close())
 
-        assert participant.calls == [("new", agent.session_id)]
+        assert participant.calls == [("new", agent.agent.session_id)]
         assert participant.calls[0][1] != original_id
 
     def test_agent_close_closes_capability_resources(self) -> None:
-        """Agent.close 应通过 SessionLifecycle 回收 Capability 资源。"""
-        from lion_code.agent import Agent
+        """Agent.close 应通过 CapabilityRuntime 回收 Capability 资源。"""
 
-        agent = Agent(
+        agent = build_full_agent_harness(
             api_key="test-key",
             terminal_output=False,
         )
         resource = _FakeCapabilityResource()
-        agent._capability_registry.register(  # noqa: SLF001
+        agent.composition.capabilities.registry.register(  # noqa: SLF001
             CapabilitySpec(
                 name="test-resource-lifecycle",
                 resources=(resource,),
             )
         )
 
-        asyncio.run(agent.close())
+        asyncio.run(agent.agent.close())
 
         assert resource.close_calls == 1
 
@@ -218,9 +218,8 @@ class TestAgentCompositionWithCapabilities:
 class TestSubAgentPermissionInheritance:
     def test_subagent_uses_bypass_permission_mode(self) -> None:
         """子 Agent 始终以 bypassPermissions 构造（无父模式继承）。"""
-        from lion_code.agent import Agent
 
-        agent = Agent(
+        agent = build_full_agent_harness(
             api_key="test-key",
             terminal_output=False,
             permission_mode="default",
@@ -229,7 +228,11 @@ class TestSubAgentPermissionInheritance:
         with patch(
             "lion_code.meta_agent.build_coding_agent",
         ) as build_child:
-            child = agent._subagent_factory.create_for_agent_type("general")  # noqa: SLF001
+            child = (
+                agent.composition.capabilities.subagent_factory.create_for_agent_type(
+                    "general"
+                )
+            )  # noqa: SLF001
 
         assert build_child.call_args.kwargs["permission_mode"] == "bypassPermissions"
         assert build_child.call_args.kwargs["is_sub_agent"] is True
@@ -238,9 +241,8 @@ class TestSubAgentPermissionInheritance:
     def test_subagent_inherits_parent_tool_registry_filtered(self) -> None:
         """SubAgent should receive a filtered view of the parent's registry,
         including capability-contributed tools like 'agent' and 'skill'."""
-        from lion_code.agent import Agent
 
-        agent = Agent(
+        agent = build_full_agent_harness(
             api_key="test-key",
             terminal_output=False,
         )
@@ -249,7 +251,9 @@ class TestSubAgentPermissionInheritance:
             "lion_code.meta_agent.build_coding_agent",
             return_value=Mock(),
         ) as build_child:
-            agent._subagent_factory.create_for_agent_type("general")  # noqa: SLF001
+            agent.composition.capabilities.subagent_factory.create_for_agent_type(
+                "general"
+            )  # noqa: SLF001
 
         child_registry = build_child.call_args.kwargs["tool_registry"]
         sub_tools = {t.name for t in child_registry.all_tools()}

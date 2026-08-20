@@ -179,7 +179,11 @@ def _try_skill_fallback(name: str, args: str) -> CommandResult:
     - ``fork`` Skill 改用 skill 工具调用入口。
     """
 
-    from lion_code.skills import execute_skill, get_skill_by_name, resolve_skill_prompt
+    from lion_code.capabilities.skill.discovery import (
+    execute_skill,
+    get_skill_by_name,
+    resolve_skill_prompt,
+)
 
     skill = get_skill_by_name(name)
     if skill is None or not skill.user_invocable:

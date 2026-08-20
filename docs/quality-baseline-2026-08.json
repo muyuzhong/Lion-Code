@@ -223,7 +223,7 @@
       ],
       "fingerprints": [
         "lion_code/__main__.py:118:run_repl:D:27",
-        "lion_code/__main__.py:212:main:E:31",
+        "lion_code/__main__.py:217:main:E:31",
         "lion_code/application/session.py:321:LionCodingSession._drive:D:28",
         "lion_code/core/loop.py:68:run_agent_loop:F:44",
         "lion_code/core/session/jsonl.py:59:_migrate_message:D:24",
@@ -239,11 +239,11 @@
       "version": "vulture==2.16",
       "max_count": 5,
       "fingerprints": [
-        "lion_code/__main__.py:158:unused variable 'sig':100",
+        "lion_code/__main__.py:163:unused variable 'sig':100",
         "lion_code/providers/thinking.py:104:unused variable 'provider_kind':100",
         "lion_code/providers/thinking.py:113:unused variable 'provider_kind':100",
         "tests/benchmarks/test_external_anchor.py:65:unused variable 'output_dir':100",
-        "tests/test_agent_run.py:67:unsatisfiable 'if' condition:100"
+        "tests/test_agent_run.py:68:unsatisfiable 'if' condition:100"
       ]
     }
   },

@@ -6,12 +6,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .subagent import get_sub_agent_config
-from .tooling import ToolRegistry
-from .tooling.selection import ToolSelectionPolicy, select_tools
+from ...tooling import ToolRegistry
+from ...tooling.selection import ToolSelectionPolicy, select_tools
+from .types import get_sub_agent_config
 
 if TYPE_CHECKING:
-    from .meta_agent import MetaAgent
+    from ...meta_agent import MetaAgent
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +76,7 @@ class SubagentFactory:
     ) -> MetaAgent:
         """在真正构造时才导入 Coding 构造入口，避免模块级循环依赖。"""
 
-        from .meta_agent import build_coding_agent
+        from ...meta_agent import build_coding_agent
 
         config = self._child_config()
         return build_coding_agent(

@@ -13,7 +13,7 @@ from lion_code.__main__ import (
     parse_args,
     run_repl,
 )
-from lion_code.agent import Agent
+from lion_code.adapters.coding_session_backend import build_full_coding_backend
 from lion_code.application.commands import CommandResult
 
 
@@ -68,8 +68,11 @@ async def test_repl_routes_generic_command_through_application_session(
 ) -> None:
     from core.fakes import FakeProvider
 
-    with patch("lion_code.agent.create_provider", return_value=FakeProvider([])):
-        agent = Agent(
+    with patch(
+        "lion_code.adapters.coding_session_backend.create_provider",
+        return_value=FakeProvider([]),
+    ):
+        agent = build_full_coding_backend(
             api_base="https://example.test/v1",
             api_key="test-key",
             custom_system_prompt="test",
@@ -87,8 +90,11 @@ async def test_repl_routes_generic_command_through_application_session(
 async def test_repl_unknown_command_prints_hint(monkeypatch, capsys) -> None:
     from core.fakes import FakeProvider
 
-    with patch("lion_code.agent.create_provider", return_value=FakeProvider([])):
-        agent = Agent(
+    with patch(
+        "lion_code.adapters.coding_session_backend.create_provider",
+        return_value=FakeProvider([]),
+    ):
+        agent = build_full_coding_backend(
             api_base="https://example.test/v1",
             api_key="test-key",
             custom_system_prompt="test",
@@ -198,7 +204,7 @@ async def test_repl_dispatch_compact_error_is_printed(capsys) -> None:
 async def test_repl_dispatch_skills_lists_discovered_skills(
     monkeypatch, capsys
 ) -> None:
-    from lion_code.skills import SkillDefinition
+    from lion_code.capabilities.skill.discovery import SkillDefinition
 
     monkeypatch.setattr(
         "lion_code.__main__.discover_skills",

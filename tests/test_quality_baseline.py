@@ -18,7 +18,7 @@ SPEC.loader.exec_module(quality)
 def test_ruff_format_fingerprints_parse_windows_paths() -> None:
     output = """
 unformatted: File would be reformatted
-   --> lion_code\\agent.py:1:1
+   --> lion_code\\meta_agent.py:1:1
 
 103 files would be reformatted, 99 files already formatted
 """
@@ -26,7 +26,7 @@ unformatted: File would be reformatted
     count, fingerprints = quality.ruff_format_fingerprints(output)
 
     assert count == 103
-    assert fingerprints == ["lion_code/agent.py"]
+    assert fingerprints == ["lion_code/meta_agent.py"]
 
 
 def test_read_json_accepts_powershell_utf16_redirect(tmp_path: Path) -> None:

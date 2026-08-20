@@ -1,0 +1,412 @@
+"""FullProfile 产品的 CodingSessionBackend 组合适配器。
+
+目标依赖链::
+
+    LionCodingSession → CodingSessionBackend protocol
+        ↑ 结构化实现
+    CodingSessionBackendAdapter → 委托 MetaAgent + product controllers
+
+通用 Agent 能力全部来自 MetaAgent；产品职责（session 枚举/legacy 迁移、
+Plan 审批、terminal 回调、confirmation、notices、cost 投影）在本适配器
+通过组合实现，禁止继承 MetaAgent。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+from typing import Any, Literal
+
+from ..capabilities.plan.runtime import PlanRuntime
+from ..composition import (
+    AgentConfig,
+    FullProfile,
+    InteractionBindings,
+    ProviderBindings,
+    RuntimeBindings,
+    SessionBindings,
+    ToolBindings,
+    build_agent_composition,
+)
+from ..composition.ports import (
+    ConfirmationController,
+    NoticeController,
+    SubagentStatusSink,
+)
+from ..hooks import load_pre_tool_use_hooks
+from ..meta_agent import MetaAgent
+from ..observers import TerminalRenderer
+from ..permission_state import PermissionMode
+from ..prompt import build_dynamic_system_context
+from ..providers.factory import create_provider
+from ..runtime.agent import AgentRunResult
+from ..session_runtime import (
+    SessionRecorder,
+    SessionRepository,
+    legacy_session_messages,
+    list_legacy_sessions,
+    load_legacy_session,
+)
+from ..tooling import ToolRegistry
+from ..ui import (
+    print_confirmation,
+    print_error,
+    print_info,
+    print_sub_agent_end,
+    print_sub_agent_start,
+)
+from ..usage import UsageSnapshot
+
+
+class CodingSessionBackendAdapter:
+    """通过组合 MetaAgent 与 product controllers 实现 CodingSessionBackend。"""
+
+    def __init__(
+        self,
+        *,
+        agent: MetaAgent,
+        plan: PlanRuntime,
+        confirmation: ConfirmationController,
+        notices: NoticeController,
+        status_sink: SubagentStatusSink,
+        terminal_output_sink: Callable[[bool], None],
+        session_repository: SessionRepository,
+        cwd: Path,
+    ) -> None:
+        self._agent = agent
+        self._plan = plan
+        self._confirmation = confirmation
+        self._notices = notices
+        self._status_sink = status_sink
+        self._terminal_output_sink = terminal_output_sink
+        self._session_repository = session_repository
+        self._cwd = cwd
+
+    # ─── ConversationPort ────────────────────────────────────
+
+    @property
+    def messages(self) -> tuple:
+        return self._agent.messages
+
+    def subscribe(self, listener: Callable) -> Callable[[], None]:
+        return self._agent.subscribe(listener)
+
+    async def prompt(self, content: str) -> None:
+        await self._agent.prompt(content)
+
+    async def continue_(self) -> None:
+        await self._agent.continue_()
+
+    def steer(self, content: str) -> Any:
+        return self._agent.steer(content)
+
+    def follow_up(self, content: str) -> Any:
+        return self._agent.follow_up(content)
+
+    def queue_snapshot(self) -> Any:
+        return self._agent.queue_snapshot()
+
+    def cancel(self) -> None:
+        self._agent.cancel()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._agent.cancelled
+
+    async def compact_for_overflow(self) -> bool:
+        return await self._agent.compact_for_overflow()
+
+    # ─── SessionPort ─────────────────────────────────────────
+
+    @property
+    def session_id(self) -> str:
+        return self._agent.session_id
+
+    async def list_sessions(self) -> list[dict[str, Any]]:
+        """统一枚举新 JSONL 与尚未迁移的旧 JSON Session。"""
+        current = await self._session_repository.list_sessions()
+        current_ids = {str(item.get("id")) for item in current}
+        legacy = [
+            item
+            for item in list_legacy_sessions(self._session_repository.session_dir)
+            if str(item.get("id")) not in current_ids
+        ]
+        sessions = [*current, *legacy]
+        sessions.sort(key=lambda item: str(item.get("startTime", "")), reverse=True)
+        return sessions
+
+    async def resume(self, session_id: str) -> bool:
+        """优先恢复 JSONL；遇到旧 JSON 时原地迁移且保留源文件。"""
+        if self._session_repository.exists(session_id):
+            if await self._agent.restore(session_id):
+                return True
+        legacy = load_legacy_session(
+            self._session_repository.session_dir,
+            session_id,
+        )
+        if legacy is None:
+            return False
+        await self._migrate_legacy_core_session(session_id, legacy)
+        return await self._agent.restore(session_id)
+
+    async def restore_latest(self) -> bool:
+        sessions = await self.list_sessions()
+        if not sessions:
+            self._notices.emit("No previous sessions found.")
+            return False
+        session_id = str(sessions[0]["id"])
+        restored = await self.resume(session_id)
+        if not restored:
+            self._notices.emit(
+                f"Session {session_id} could not be restored in this runtime."
+            )
+        return restored
+
+    async def new_session(self) -> None:
+        await self._agent.new_session()
+
+    async def compact(self) -> None:
+        await self._agent.compact()
+
+    async def aclose(self) -> None:
+        await self._agent.close()
+
+    async def _migrate_legacy_core_session(
+        self,
+        session_id: str,
+        legacy: dict[str, Any],
+    ) -> None:
+        metadata = legacy.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        recorder = SessionRecorder(
+            session_id=session_id,
+            model=str(metadata.get("model") or self._agent.model),
+            thinking_level=self._agent.thinking_level,
+            cwd=Path(str(metadata.get("cwd") or self._cwd)),
+            storage=self._session_repository.storage_for(session_id),
+        )
+        await recorder.initialize()
+        for message in legacy_session_messages(legacy):
+            await recorder.record_message(message)
+
+    # ─── SettingsPort ────────────────────────────────────────
+
+    @property
+    def cwd(self) -> Path:
+        return self._cwd
+
+    @property
+    def model(self) -> str:
+        return self._agent.model
+
+    @property
+    def provider_name(self) -> str:
+        return self._agent.provider_name
+
+    @property
+    def permission_mode(self) -> PermissionMode:
+        return self._agent.permission_mode
+
+    @property
+    def api_configured(self) -> bool:
+        return self._agent.api_configured
+
+    def provider_config(self) -> dict[str, Any]:
+        return self._agent.provider_config()
+
+    def configure_provider(self, **kwargs: Any) -> None:
+        self._agent.configure_provider(**kwargs)
+
+    @property
+    def thinking_level(self) -> str:
+        return str(self._agent.thinking_level)
+
+    @property
+    def available_thinking_levels(self) -> tuple[str, ...]:
+        return tuple(str(level) for level in self._agent.available_thinking_levels)
+
+    def set_thinking_level(self, level: str) -> str:
+        return str(self._agent.set_thinking_level(level))
+
+    def cycle_thinking_level(self) -> str:
+        return str(self._agent.cycle_thinking_level())
+
+    def set_terminal_output(self, enabled: bool) -> None:
+        self._terminal_output_sink(enabled)
+        self._confirmation.terminal_output = enabled
+        self._status_sink.terminal_output = enabled
+
+    # ─── UsagePort ───────────────────────────────────────────
+
+    def token_usage(self) -> UsageSnapshot:
+        return self._agent.usage
+
+    # ─── ControlPort ─────────────────────────────────────────
+
+    def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]] | None) -> None:
+        self._confirmation.confirm_fn = fn
+
+    def set_plan_approval_fn(
+        self, fn: Callable[[str], Awaitable[dict[str, Any]]] | None
+    ) -> None:
+        self._plan.set_approval_fn(fn)
+
+    def set_notice_fn(
+        self,
+        fn: Callable[[str, Literal["info", "error"]], None] | None,
+    ) -> None:
+        self._notices.set_notice_fn(fn)
+
+    def toggle_plan_mode(self) -> str:
+        return self._plan.toggle()
+
+    # ─── REPL / one-shot 产品便利 API ────────────────────────
+
+    async def chat(self, prompt: str) -> None:
+        await self._agent.chat(prompt)
+
+    async def run(self, prompt: str, *, timeout: float | None = None) -> AgentRunResult:
+        return await self._agent.run(prompt, timeout=timeout)
+
+    def abort(self) -> None:
+        self._agent.cancel()
+
+    @property
+    def is_aborted(self) -> bool:
+        return self._agent.cancelled
+
+    @property
+    def is_processing(self) -> bool:
+        return self._agent.is_running
+
+    async def clear_history(self) -> None:
+        await self.new_session()
+
+    async def close(self) -> None:
+        await self.aclose()
+
+    def show_cost(self) -> None:
+        """cost/usage 产品投影：格式化用量并经 notice 通道输出。"""
+        usage = self._agent.usage
+        budget = self._agent.budget
+        max_cost = budget.max_cost_usd
+        max_turns = budget.max_turns
+        budget_info = f" / ${max_cost} budget" if max_cost else ""
+        turn_info = f" | Turns: {usage.turns}/{max_turns}" if max_turns else ""
+        cached = usage.cache_read_tokens
+        billed_input = usage.input_tokens + usage.cache_write_tokens + cached
+        hit_rate = round((cached / billed_input) * 100) if billed_input > 0 else 0
+        cache_info = (
+            f"\n  Cache: {cached} read / {usage.cache_write_tokens} write ({hit_rate}% of input from cache)"
+            if (cached or usage.cache_write_tokens)
+            else ""
+        )
+        self._notices.emit(
+            f"Tokens: {usage.input_tokens} in / {usage.output_tokens} out{cache_info}\n  Estimated cost: ${usage.cost_usd:.4f}{budget_info}{turn_info}"
+        )
+
+
+# ─── Full 产品构造入口（Composition Root 语义）────────────────
+
+
+def _full_provider_factory(**kwargs: Any):
+    return create_provider(**kwargs)
+
+
+def _full_dynamic_context_builder(names) -> str:
+    return build_dynamic_system_context(list(names))
+
+
+def _full_terminal_renderer_factory() -> TerminalRenderer:
+    return TerminalRenderer()
+
+
+def build_full_coding_backend(
+    *,
+    permission_mode: PermissionMode = "default",
+    model: str = "claude-opus-4-6",
+    api_base: str | None = None,
+    anthropic_base_url: str | None = None,
+    api_key: str | None = None,
+    thinking: bool = False,
+    max_cost_usd: float | None = None,
+    max_turns: int | None = None,
+    terminal_output: bool = True,
+    custom_system_prompt: str | None = None,
+    session_repository: SessionRepository | None = None,
+    confirm_fn: Callable[[str], Awaitable[bool]] | None = None,
+    tool_registry: ToolRegistry | None = None,
+) -> CodingSessionBackendAdapter:
+    """装配 FullProfile 产品：Composition → MetaAgent → Product Adapter。"""
+
+    config = AgentConfig(
+        permission_mode=permission_mode,
+        model=model,
+        api_base=api_base,
+        anthropic_base_url=anthropic_base_url,
+        api_key=api_key,
+        thinking=thinking,
+        max_cost_usd=max_cost_usd,
+        max_turns=max_turns,
+        terminal_output=terminal_output,
+    )
+    bindings = RuntimeBindings(
+        provider=ProviderBindings(
+            provider_factory=_full_provider_factory,
+        ),
+        session=SessionBindings(
+            session_repository=session_repository,
+        ),
+        tool=ToolBindings(
+            tool_registry=tool_registry,
+            pre_tool_use_hooks_loader=load_pre_tool_use_hooks,
+        ),
+        interaction=InteractionBindings(
+            confirm_fn=confirm_fn,
+            dynamic_system_context_builder=_full_dynamic_context_builder,
+            terminal_renderer_factory=_full_terminal_renderer_factory,
+            print_info=print_info,
+            print_error=print_error,
+            print_confirmation=print_confirmation,
+            print_sub_agent_start=print_sub_agent_start,
+            print_sub_agent_end=print_sub_agent_end,
+        ),
+    )
+    composition = build_agent_composition(
+        FullProfile(system_prompt=custom_system_prompt),
+        config=config,
+        bindings=bindings,
+    )
+    # Full Profile 固定组合全部内置能力，Feature 字段必然存在。
+    assert composition.capabilities.plan is not None
+    assert composition.capabilities.subagent_factory is not None
+    assert composition.capabilities.subagent_executor is not None
+    assert composition.capabilities.skill_runtime is not None
+    assert composition.interaction.status_sink is not None
+
+    runtime = composition.runtime
+    agent = MetaAgent(
+        agent_runtime=runtime.agent,
+        provider_controller=runtime.provider_controller,
+        conversation=runtime.conversation,
+        session=runtime.session,
+        usage=runtime.usage,
+        budget=runtime.budget,
+        permission_mode=config.permission_mode,
+    )
+    return CodingSessionBackendAdapter(
+        agent=agent,
+        plan=composition.capabilities.plan,
+        confirmation=composition.interaction.confirmation,
+        notices=composition.interaction.notices,
+        status_sink=composition.interaction.status_sink,
+        terminal_output_sink=runtime.agent.set_terminal_output,
+        session_repository=runtime.session.repository,
+        cwd=Path(composition.tooling.context.cwd),
+    )
+
+
+__all__ = [
+    "CodingSessionBackendAdapter",
+    "build_full_coding_backend",
+]

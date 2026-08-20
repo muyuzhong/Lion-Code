@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from lion_code.subagent import get_sub_agent_config
+from lion_code.capabilities.subagent.types import get_sub_agent_config
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.selection import ToolSelectionPolicy, select_tools
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
@@ -96,7 +96,10 @@ class TestToolSelection(unittest.TestCase):
             }
         }
 
-        with patch("lion_code.subagent._discover_custom_agents", return_value=custom):
+        with patch(
+            "lion_code.capabilities.subagent.types._discover_custom_agents",
+            return_value=custom,
+        ):
             config = get_sub_agent_config("custom")
         child = select_tools(self.registry, config.tool_policy)
 

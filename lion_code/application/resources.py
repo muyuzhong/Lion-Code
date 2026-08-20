@@ -1,6 +1,6 @@
 """资源诊断轻类型(vendored 自 tau_coding/resources.py 的子集)。
 
-Lion 的资源发现逻辑在 lion_code.skills / lion_code.prompt;本模块只提供
+Lion 的资源发现逻辑在 lion_code.capabilities.skill.discovery / lion_code.prompt;本模块只提供
 TUI 与命令层需要的诊断数据类型,不引入 Tau 的资源目录体系。
 """
 

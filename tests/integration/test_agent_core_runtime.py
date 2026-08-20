@@ -1,6 +1,6 @@
 """Agent Core Runtime 单路径集成测试。
 
-通过 patch ``lion_code.agent.create_provider`` 注入脚本化 ``FakeProvider``，
+通过 patch ``full_agent.create_provider`` 注入脚本化 ``FakeProvider``，
 验证 ``chat`` 始终走 LionAgentRuntime，并覆盖工具闭环、动态 system、
 动态工具、取消后继续会话和 Provider 热切换。
 """
@@ -15,8 +15,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from core.fakes import FakeProvider
+from full_agent import FullAgentHarness, build_full_agent_harness
 
-from lion_code.agent import Agent
+from lion_code.adapters.coding_session_backend import build_full_coding_backend
 from lion_code.context import SUMMARY_SYSTEM_PROMPT
 from lion_code.core import (
     AssistantMessage,
@@ -28,6 +29,7 @@ from lion_code.core import (
     Usage,
 )
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
+from lion_code.meta_agent import MetaAgent
 from lion_code.providers import RuntimeModelLimits
 from lion_code.runtime.provider import ProviderController
 from lion_code.session_runtime import SessionRepository
@@ -179,10 +181,10 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         events: list,
         registry: ToolRegistry,
         **agent_kwargs,
-    ) -> tuple[Agent, FakeProvider]:
+    ) -> tuple[FullAgentHarness, FakeProvider]:
         fake = FakeProvider(events)
-        with patch("lion_code.agent.create_provider", return_value=fake):
-            agent = Agent(
+        with patch("full_agent.create_provider", return_value=fake):
+            agent = build_full_agent_harness(
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 tool_registry=registry,
@@ -197,8 +199,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
         fake = FakeProvider([_stop_event("done")])
-        with patch("lion_code.agent.create_provider", return_value=fake):
-            agent = Agent(
+        with patch("full_agent.create_provider", return_value=fake):
+            agent = build_full_agent_harness(
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 tool_registry=registry,
@@ -207,32 +209,36 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 terminal_output=False,
             )
 
-        await agent.chat("hello")
+        await agent.agent.chat("hello")
 
-        self.assertFalse(hasattr(Agent, "_chat_openai"))
+        self.assertFalse(hasattr(MetaAgent, "_chat_openai"))
         self.assertEqual(fake.call_count, 1)
-        self.assertEqual(agent.core_runtime.messages[-1].text, "done")
+        self.assertEqual(
+            agent.composition.runtime.conversation.messages[-1].text, "done"
+        )
 
     async def test_core_runtime_updates_completed_outcome(self) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
         agent, fake = self._make_agent([_stop_event("done")], registry)
 
-        self.assertIsNotNone(agent._core_runtime)
+        self.assertIsNotNone(agent.composition.runtime.conversation)
 
-        await agent.chat("hello")
+        await agent.agent.chat("hello")
 
-        self.assertEqual(agent._core_runtime.messages[-1].text, "done")
+        self.assertEqual(
+            agent.composition.runtime.conversation.messages[-1].text, "done"
+        )
         self.assertEqual(fake.call_count, 1)
-        self.assertEqual(agent._last_stop_reason, "completed")
+        self.assertEqual(agent.composition.runtime.agent.last_stop_reason, "completed")
 
     async def test_core_runtime_applies_provider_discovered_model_limits(self) -> None:
         fake = _LimitsFakeProvider(
             [_stop_event("done")],
             RuntimeModelLimits(context_window=128_000, max_output_tokens=8_000),
         )
-        with patch("lion_code.agent.create_provider", return_value=fake):
-            agent = Agent(
+        with patch("full_agent.create_provider", return_value=fake):
+            agent = build_full_agent_harness(
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 custom_system_prompt="test",
@@ -240,14 +246,14 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 terminal_output=False,
             )
 
-        await agent.chat("hello")
+        await agent.agent.chat("hello")
 
-        self.assertEqual(agent.effective_window, 120_000)
-        agent.effective_window = 111_000
-        self.assertEqual(agent.effective_window, 111_000)
-        agent._last_stop_reason = "max_turns"
-        self.assertEqual(agent._last_stop_reason, "max_turns")
-        self.assertEqual(fake.discovered_models, [agent.model])
+        self.assertEqual(agent.composition.runtime.context.effective_window, 120_000)
+        agent.composition.runtime.context.effective_window = 111_000
+        self.assertEqual(agent.composition.runtime.context.effective_window, 111_000)
+        agent.composition.runtime.agent.last_stop_reason = "max_turns"
+        self.assertEqual(agent.composition.runtime.agent.last_stop_reason, "max_turns")
+        self.assertEqual(fake.discovered_models, [agent.agent.model])
 
     async def test_abort_during_core_setup_stops_before_provider(self) -> None:
         setup_started = asyncio.Event()
@@ -269,28 +275,30 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             model_limits_resolver=resolver,
         )
 
-        chat_task = asyncio.create_task(agent.chat("hello"))
+        chat_task = asyncio.create_task(agent.agent.chat("hello"))
         await setup_started.wait()
-        agent.abort()
+        agent.agent.cancel()
         release_setup.set()
         await chat_task
 
         self.assertEqual(fake.call_count, 0)
-        self.assertEqual(agent._last_stop_reason, "aborted")
-        self.assertTrue(agent.is_aborted)
-        self.assertEqual(agent._core_runtime.messages, ())
+        self.assertEqual(agent.composition.runtime.agent.last_stop_reason, "aborted")
+        self.assertTrue(agent.agent.cancelled)
+        self.assertEqual(agent.composition.runtime.conversation.messages, ())
 
     async def test_core_run_reports_provider_error(self) -> None:
         agent, _fake = self._make_agent(
             [_error_event("upstream failed")], ToolRegistry()
         )
 
-        result = await agent.run("hello")
+        result = await agent.agent.run("hello")
 
         self.assertEqual(result.stop_reason, "model_error")
         self.assertEqual(result.error, "upstream failed")
         self.assertEqual(result.turns, 0)
-        self.assertEqual(agent._last_stop_reason, "model_error")
+        self.assertEqual(
+            agent.composition.runtime.agent.last_stop_reason, "model_error"
+        )
 
     async def test_tool_loop_through_runtime(self) -> None:
         registry = ToolRegistry()
@@ -299,9 +307,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             [_tooluse_event(), _stop_event("done")], registry
         )
 
-        await agent.chat("hello")
+        await agent.agent.chat("hello")
 
-        messages = agent._core_runtime.messages
+        messages = agent.composition.runtime.conversation.messages
         self.assertEqual(
             [m.role for m in messages],
             ["user", "assistant", "toolResult", "assistant"],
@@ -310,7 +318,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(messages[2].is_error)
         self.assertEqual(messages[-1].text, "done")
         self.assertEqual(fake.call_count, 2)
-        state = await self._session_repository.load(agent.session_id)
+        state = await self._session_repository.load(agent.agent.session_id)
         self.assertEqual(
             [message.role for message in state.messages],
             ["user", "assistant", "toolResult", "assistant"],
@@ -329,14 +337,17 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             max_turns=2,
         )
 
-        await agent.chat("first")
-        await agent.chat("second")
+        await agent.agent.chat("first")
+        await agent.agent.chat("second")
 
         self.assertEqual(fake.call_count, 3)
-        self.assertEqual(agent.token_usage().turns, 2)
-        self.assertEqual(agent._last_stop_reason, "max_turns")
-        self.assertTrue(agent._core_runtime.messages[-1].is_error)
-        self.assertIn("Turn limit reached", agent._core_runtime.messages[-1].text)
+        self.assertEqual(agent.agent.usage.turns, 2)
+        self.assertEqual(agent.composition.runtime.agent.last_stop_reason, "max_turns")
+        self.assertTrue(agent.composition.runtime.conversation.messages[-1].is_error)
+        self.assertIn(
+            "Turn limit reached",
+            agent.composition.runtime.conversation.messages[-1].text,
+        )
 
     async def test_core_budget_stops_before_tool_when_cost_limit_reached(self) -> None:
         registry = ToolRegistry()
@@ -347,12 +358,15 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             max_cost_usd=0.000_001,
         )
 
-        await agent.chat("expensive")
+        await agent.agent.chat("expensive")
 
         self.assertEqual(fake.call_count, 1)
-        self.assertEqual(agent._last_stop_reason, "max_cost")
-        self.assertTrue(agent._core_runtime.messages[-1].is_error)
-        self.assertIn("Cost limit reached", agent._core_runtime.messages[-1].text)
+        self.assertEqual(agent.composition.runtime.agent.last_stop_reason, "max_cost")
+        self.assertTrue(agent.composition.runtime.conversation.messages[-1].is_error)
+        self.assertIn(
+            "Cost limit reached",
+            agent.composition.runtime.conversation.messages[-1].text,
+        )
 
     async def test_provider_gets_projection_while_harness_and_session_stay_full(
         self,
@@ -367,7 +381,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             registry,
         )
 
-        await agent.chat("hello")
+        await agent.agent.chat("hello")
 
         projected_results = [
             message
@@ -376,11 +390,12 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(
             [message.text for message in projected_results[:2]],
-            [agent._context_manager.policy.snip_placeholder] * 2,
+            [agent.composition.runtime.context.context_manager.policy.snip_placeholder]
+            * 2,
         )
         durable_results = [
             message
-            for message in agent._core_runtime.messages
+            for message in agent.composition.runtime.conversation.messages
             if message.role == "toolResult"
         ]
         self.assertTrue(
@@ -390,7 +405,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        state = await self._session_repository.load(agent.session_id)
+        state = await self._session_repository.load(agent.agent.session_id)
         session_results = [
             message for message in state.messages if message.role == "toolResult"
         ]
@@ -415,11 +430,11 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             registry,
         )
         events = []
-        agent.subscribe(events.append)
+        agent.agent.subscribe(events.append)
 
-        await agent.chat("first question")
-        await agent.chat("second question")
-        await agent.chat("third question")
+        await agent.agent.chat("first question")
+        await agent.agent.chat("second question")
+        await agent.agent.chat("third question")
 
         self.assertEqual(fake.received_systems[2], SUMMARY_SYSTEM_PROMPT)
         self.assertEqual(fake.received_tools[2], [])
@@ -438,7 +453,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(projected[3], "third question")
 
-        state = await self._session_repository.load(agent.session_id)
+        state = await self._session_repository.load(agent.agent.session_id)
         self.assertEqual(len(state.compaction_entries), 1)
         self.assertEqual(len(state.compaction_entries[0].replaces_entry_ids), 2)
         self.assertEqual(
@@ -456,12 +471,14 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertIn("first question", raw_message_texts)
         self.assertIn("first answer", raw_message_texts)
-        self.assertEqual(agent._core_runtime.messages, state.messages)
-        usage = agent.token_usage()
+        self.assertEqual(
+            agent.composition.runtime.conversation.messages, state.messages
+        )
+        usage = agent.agent.usage
         self.assertEqual(usage.last_prompt_tokens, 0)
         self.assertEqual(usage.input_tokens, 160_000)
         self.assertEqual(usage.responses, 3)
-        self.assertFalse(agent._core_compaction_required)
+        self.assertFalse(agent.composition.runtime.context.compaction_required)
         self.assertEqual(
             [
                 event.reason
@@ -480,9 +497,12 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         )
 
         restored, _ = self._make_agent([], registry)
-        self.assertTrue(await restored.restore_core_session(agent.session_id))
+        self.assertTrue(await restored.agent.restore(agent.agent.session_id))
         self.assertEqual(
-            [message.text for message in restored._core_runtime.messages],
+            [
+                message.text
+                for message in restored.composition.runtime.conversation.messages
+            ],
             [message.text for message in state.messages],
         )
 
@@ -493,18 +513,20 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         agent, fake = self._make_agent(
             [_tooluse_event(), _stop_event("done")], registry
         )
-        agent._prompt_composer.set_dynamic_context("initial")
-        stable_base = agent._prompt_composer.stable_base_prompt
+        agent.composition.tooling.prompt_composer.set_dynamic_context("initial")
+        stable_base = agent.composition.tooling.prompt_composer.stable_base_prompt
 
         mutated = {"done": False}
 
         async def mutate_after_first_turn(event) -> None:
             if not mutated["done"] and isinstance(event, TurnEndEvent):
-                agent._prompt_composer.set_dynamic_context("plan-prompt")
+                agent.composition.tooling.prompt_composer.set_dynamic_context(
+                    "plan-prompt"
+                )
                 mutated["done"] = True
 
-        agent._core_runtime.subscribe(mutate_after_first_turn)
-        await agent.chat("hello")
+        agent.composition.runtime.conversation.subscribe(mutate_after_first_turn)
+        await agent.agent.chat("hello")
 
         self.assertEqual(
             fake.received_systems,
@@ -525,8 +547,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 registry.register(_named_lion_tool("late"))
                 added["done"] = True
 
-        agent._core_runtime.subscribe(activate_after_first_turn)
-        await agent.chat("hello")
+        agent.composition.runtime.conversation.subscribe(activate_after_first_turn)
+        await agent.agent.chat("hello")
 
         self.assertNotIn("late", fake.received_tools[0])
         self.assertIn("late", fake.received_tools[1])
@@ -542,40 +564,44 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         async def cancel_after_first_turn(event) -> None:
             if not cancelled["done"] and isinstance(event, TurnEndEvent):
-                agent.core_runtime.cancel()
+                agent.composition.runtime.conversation.cancel()
                 cancelled["done"] = True
 
-        agent._core_runtime.subscribe(cancel_after_first_turn)
-        await agent.chat("hello")
+        agent.composition.runtime.conversation.subscribe(cancel_after_first_turn)
+        await agent.agent.chat("hello")
 
         # 第一轮工具已执行，第二轮被取消，最终消息为 aborted。
-        self.assertEqual(agent._core_runtime.messages[-1].stop_reason, "aborted")
-        self.assertTrue(agent.is_aborted)
-        self.assertEqual(agent._last_stop_reason, "aborted")
+        self.assertEqual(
+            agent.composition.runtime.conversation.messages[-1].stop_reason, "aborted"
+        )
+        self.assertTrue(agent.agent.cancelled)
+        self.assertEqual(agent.composition.runtime.agent.last_stop_reason, "aborted")
 
         # 再次 chat：不遗留不完整工具调用，能正常收敛到最终文本。
-        await agent.chat("again")
-        self.assertEqual(agent._core_runtime.messages[-1].text, "done")
+        await agent.agent.chat("again")
+        self.assertEqual(
+            agent.composition.runtime.conversation.messages[-1].text, "done"
+        )
         # 第一轮 + 被取消的第二轮 + 续聊一轮，共 3 次 provider 调用。
         self.assertEqual(fake.call_count, 3)
 
     async def test_restore_continues_with_persisted_harness_messages(self) -> None:
         registry = ToolRegistry()
         first, _ = self._make_agent([_stop_event("first answer")], registry)
-        await first.chat("first question")
-        session_id = first.session_id
+        await first.agent.chat("first question")
+        session_id = first.agent.session_id
         session_path = self._session_repository.storage_for(session_id).path
 
         second, fake = self._make_agent([_stop_event("second answer")], registry)
-        session_view = second.tool_context.session
-        second._usage.record_child_usage(9, 8)
-        second._usage.record_turn()
-        self.assertTrue(await second.restore_core_session(session_id))
-        self.assertEqual(second.token_usage(), UsageSnapshot())
-        await second.chat("second question")
+        session_view = second.composition.tooling.context.session
+        second.composition.runtime.usage.record_child_usage(9, 8)
+        second.composition.runtime.usage.record_turn()
+        self.assertTrue(await second.agent.restore(session_id))
+        self.assertEqual(second.agent.usage, UsageSnapshot())
+        await second.agent.chat("second question")
 
-        self.assertEqual(second.session_id, session_id)
-        self.assertIs(session_view, second.session_state)
+        self.assertEqual(second.agent.session_id, session_id)
+        self.assertIs(session_view, second.composition.runtime.session.state)
         self.assertEqual(session_view.id, session_id)
         self.assertEqual(
             list(self._session_repository.session_dir.glob("*.jsonl")),
@@ -594,49 +620,53 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_clear_creates_new_session_and_preserves_old_jsonl(self) -> None:
         registry = ToolRegistry()
         agent, _ = self._make_agent([_stop_event()], registry)
-        await agent.chat("hello")
-        previous_session_id = agent.session_id
-        session_view = agent.tool_context.session
-        usage = agent._usage
-        usage_observer = agent._agent_runtime._usage_observer
+        await agent.agent.chat("hello")
+        previous_session_id = agent.agent.session_id
+        session_view = agent.composition.tooling.context.session
+        usage = agent.composition.runtime.usage
+        usage_observer = agent.composition.runtime.agent._usage_observer
         previous_path = self._session_repository.storage_for(previous_session_id).path
-        agent._core_runtime.harness.follow_up("queued")
+        agent.composition.runtime.conversation.harness.follow_up("queued")
         for _ in range(3):
-            agent._usage.record_turn()
+            agent.composition.runtime.usage.record_turn()
 
-        await agent.clear_history()
+        await agent.agent.new_session()
 
-        self.assertNotEqual(agent.session_id, previous_session_id)
-        self.assertIs(session_view, agent.session_state)
-        self.assertEqual(session_view.id, agent.session_id)
+        self.assertNotEqual(agent.agent.session_id, previous_session_id)
+        self.assertIs(session_view, agent.composition.runtime.session.state)
+        self.assertEqual(session_view.id, agent.agent.session_id)
         self.assertTrue(previous_path.exists())
         self.assertTrue(
-            self._session_repository.storage_for(agent.session_id).path.exists()
+            self._session_repository.storage_for(agent.agent.session_id).path.exists()
         )
-        self.assertEqual(agent._core_runtime.messages, ())
-        self.assertEqual(agent.token_usage(), UsageSnapshot())
-        self.assertIs(agent._usage, usage)
-        self.assertIsNot(agent._agent_runtime._usage_observer, usage_observer)
-        self.assertIs(agent._agent_runtime._usage_observer._ledger, usage)
+        self.assertEqual(agent.composition.runtime.conversation.messages, ())
+        self.assertEqual(agent.agent.usage, UsageSnapshot())
+        self.assertIs(agent.composition.runtime.usage, usage)
+        self.assertIsNot(
+            agent.composition.runtime.agent._usage_observer, usage_observer
+        )
+        self.assertIs(agent.composition.runtime.agent._usage_observer._ledger, usage)
 
     async def test_model_and_thinking_changes_are_restored(self) -> None:
         registry = ToolRegistry()
         agent, _ = self._make_agent([_stop_event()], registry)
-        await agent.chat("hello")
-        previous_provider = agent.core_runtime.provider
-        agent.configure_provider(model="claude-sonnet-4-6")
-        self.assertIs(agent.core_runtime.provider, previous_provider)
-        agent.set_thinking_level("high")
-        await agent.close()
+        await agent.agent.chat("hello")
+        previous_provider = agent.composition.runtime.conversation.provider
+        agent.agent.configure_provider(model="claude-sonnet-4-6")
+        self.assertIs(
+            agent.composition.runtime.conversation.provider, previous_provider
+        )
+        agent.agent.set_thinking_level("high")
+        await agent.agent.close()
 
-        state = await self._session_repository.load(agent.session_id)
+        state = await self._session_repository.load(agent.agent.session_id)
         self.assertEqual(state.model, "claude-sonnet-4-6")
         self.assertEqual(state.thinking_level, "high")
 
         restored, _ = self._make_agent([], registry)
-        self.assertTrue(await restored.restore_core_session(agent.session_id))
-        self.assertEqual(restored.model, "claude-sonnet-4-6")
-        self.assertEqual(restored.thinking_level, "high")
+        self.assertTrue(await restored.agent.restore(agent.agent.session_id))
+        self.assertEqual(restored.agent.model, "claude-sonnet-4-6")
+        self.assertEqual(restored.agent.thinking_level, "high")
 
     async def test_legacy_json_is_migrated_without_deleting_source(self) -> None:
         session_id = "legacy01"
@@ -684,15 +714,27 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         )
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
-        agent, fake = self._make_agent([_stop_event("new answer")], registry)
+        fake = FakeProvider([_stop_event("new answer")])
+        with patch(
+            "lion_code.adapters.coding_session_backend.create_provider",
+            return_value=fake,
+        ):
+            backend = build_full_coding_backend(
+                api_base="https://example.test/v1",
+                api_key="test-key",
+                tool_registry=registry,
+                custom_system_prompt="test",
+                session_repository=self._session_repository,
+                terminal_output=False,
+            )
 
-        discovered = await agent.list_sessions()
+        discovered = await backend.list_sessions()
         self.assertEqual(
             [(item["id"], item["format"]) for item in discovered],
             [(session_id, "json")],
         )
-        self.assertEqual(await agent.latest_session_id(), session_id)
-        self.assertTrue(await agent.restore_latest_session())
+        self.assertEqual(discovered[0]["id"], session_id)
+        self.assertTrue(await backend.restore_latest())
         jsonl_path = self._session_repository.storage_for(session_id).path
         self.assertEqual(
             (
@@ -703,7 +745,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             legacy_file_state,
         )
         self.assertTrue(jsonl_path.exists())
-        await agent.chat("continue")
+        await backend.chat("continue")
 
         self.assertEqual(
             (
@@ -738,7 +780,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             ],
         )
         sessions = [
-            item for item in await agent.list_sessions() if item["id"] == session_id
+            item for item in await backend.list_sessions() if item["id"] == session_id
         ]
         self.assertEqual(len(sessions), 1)
         self.assertEqual(sessions[0]["format"], "jsonl")
@@ -773,46 +815,51 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         plan_path = Path(self._temp_dir.name) / "approved-plan.md"
         plan_path.write_text("1. change code\n2. run tests", encoding="utf-8")
         with (
-            patch("lion_code.agent.create_provider", return_value=fake),
+            patch("full_agent.create_provider", return_value=fake),
             patch(
-                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                "lion_code.capabilities.plan.runtime.PlanRuntime._generate_file_path",
                 return_value=plan_path,
             ),
         ):
-            agent = Agent(
+            agent = build_full_agent_harness(
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
                 terminal_output=False,
             )
-        agent.toggle_plan_mode()
-        permission = agent.tool_context.permission
-        agent.tool_registry.activate("exit_plan_mode")
+        agent.composition.capabilities.plan.toggle()
+        permission = agent.composition.tooling.context.permission
+        agent.composition.tooling.registry.activate("exit_plan_mode")
 
         async def approve(_plan: str) -> dict:
             return {"choice": "clear-and-execute"}
 
-        agent.set_plan_approval_fn(approve)
-        await agent.chat("prepare the change")
+        agent.composition.capabilities.plan.set_approval_fn(approve)
+        await agent.agent.chat("prepare the change")
 
         self.assertEqual(fake.call_count, 2)
         self.assertEqual(len(fake.received_messages[1]), 1)
         self.assertIn("Approved plan", fake.received_messages[1][0].text)
         self.assertEqual(
-            [message.role for message in agent._core_runtime.messages],
+            [
+                message.role
+                for message in agent.composition.runtime.conversation.messages
+            ],
             ["user", "assistant"],
         )
-        self.assertEqual(agent._core_runtime.messages[-1].text, "implemented")
-        self.assertIs(agent.tool_context.permission, permission)
+        self.assertEqual(
+            agent.composition.runtime.conversation.messages[-1].text, "implemented"
+        )
+        self.assertIs(agent.composition.tooling.context.permission, permission)
         self.assertEqual(permission.mode, "default")
-        self.assertEqual(agent.permission_mode, "default")
-        usage = agent.token_usage()
+        self.assertEqual(agent.agent.permission_mode, "default")
+        usage = agent.agent.usage
         self.assertEqual((usage.input_tokens, usage.output_tokens), (18, 5))
         self.assertEqual(usage.responses, 2)
         self.assertEqual(usage.last_prompt_tokens, 10)
 
-        state = await self._session_repository.load(agent.session_id)
+        state = await self._session_repository.load(agent.agent.session_id)
         self.assertEqual(
             [message.role for message in state.messages],
             ["user", "assistant"],
@@ -850,28 +897,28 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         plan_path = Path(self._temp_dir.name) / "approved-plan.md"
         plan_path.write_text("1. change code\n2. run tests", encoding="utf-8")
         with (
-            patch("lion_code.agent.create_provider", return_value=fake),
+            patch("full_agent.create_provider", return_value=fake),
             patch(
-                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                "lion_code.capabilities.plan.runtime.PlanRuntime._generate_file_path",
                 return_value=plan_path,
             ),
         ):
-            agent = Agent(
+            agent = build_full_agent_harness(
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
                 terminal_output=False,
             )
-        agent.toggle_plan_mode()
-        permission = agent.tool_context.permission
-        agent.tool_registry.activate("exit_plan_mode")
+        agent.composition.capabilities.plan.toggle()
+        permission = agent.composition.tooling.context.permission
+        agent.composition.tooling.registry.activate("exit_plan_mode")
 
         async def approve(_plan: str) -> dict:
             return {"choice": "clear-and-execute"}
 
-        agent.set_plan_approval_fn(approve)
-        await agent.chat("prepare the change")
+        agent.composition.capabilities.plan.set_approval_fn(approve)
+        await agent.agent.chat("prepare the change")
 
         self.assertEqual(fake.call_count, 2)
         # 未清空上下文：第二次调用仍是完整历史，而不是摘要单条。
@@ -879,11 +926,13 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             [message.role for message in fake.received_messages[1]],
             ["user", "assistant", "toolResult"],
         )
-        self.assertEqual(agent._core_runtime.messages[-1].text, "implemented")
-        self.assertIs(agent.tool_context.permission, permission)
+        self.assertEqual(
+            agent.composition.runtime.conversation.messages[-1].text, "implemented"
+        )
+        self.assertIs(agent.composition.tooling.context.permission, permission)
         # PR4：审批通过不再把权限切换到 acceptEdits。
         self.assertEqual(permission.mode, "default")
-        state = await self._session_repository.load(agent.session_id)
+        state = await self._session_repository.load(agent.agent.session_id)
         self.assertEqual(len(state.compaction_entries), 0)
 
     @unittest.skip(_PLAN_REHOME)
@@ -892,13 +941,13 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         plan_path = Path(self._temp_dir.name) / "failing-reset-plan.md"
         plan_path.write_text("keep this plan", encoding="utf-8")
         with (
-            patch("lion_code.agent.create_provider", return_value=fake),
+            patch("full_agent.create_provider", return_value=fake),
             patch(
-                "lion_code.plan_runtime.PlanRuntime._generate_file_path",
+                "lion_code.capabilities.plan.runtime.PlanRuntime._generate_file_path",
                 return_value=plan_path,
             ),
         ):
-            agent = Agent(
+            agent = build_full_agent_harness(
                 permission_mode="plan",
                 api_base="https://example.test/v1",
                 api_key="test-key",
@@ -910,103 +959,114 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         async def approve(_plan: str) -> dict:
             return {"choice": "clear-and-execute"}
 
-        agent.set_plan_approval_fn(approve)
-        outcome = await agent.tool_runtime.execute(
+        agent.composition.capabilities.plan.set_approval_fn(approve)
+        outcome = await agent.composition.tooling.runtime.execute(
             tool_call_id="exit-plan",
             name="exit_plan_mode",
             arguments={},
         )
         self.assertTrue(outcome.terminate)
-        pending = agent.plan.pending_context_reset
+        pending = agent.composition.capabilities.plan.pending_context_reset
         self.assertIsNotNone(pending)
-        await agent._ensure_core_session_ready()
+        await agent.composition.runtime.agent.ensure_ready()
 
         with patch.object(
-            agent._core_runtime,
+            agent.composition.runtime.conversation,
             "reset_active_context",
             AsyncMock(side_effect=RuntimeError("reset failed")),
         ):
             with self.assertRaisesRegex(RuntimeError, "reset failed"):
-                await agent._agent_runtime.apply_plan_context_reset()
+                await agent.composition.runtime.agent.apply_plan_context_reset()
 
-        self.assertEqual(agent.plan.pending_context_reset, pending)
-        await agent.close()
+        self.assertEqual(
+            agent.composition.capabilities.plan.pending_context_reset, pending
+        )
+        await agent.agent.close()
 
     async def test_configure_api_replaces_provider_in_existing_runtime(self) -> None:
         """换 key/base 原位替换 Provider，并保留 Harness 与 canonical history。"""
         agent, old_fake = self._make_agent([_stop_event("done")], ToolRegistry())
-        self.assertIsInstance(agent._provider_controller, ProviderController)
-        await agent.chat("hello")
-        old_runtime = agent._core_runtime
-        old_compactor = agent._context_compactor
+        self.assertIsInstance(
+            agent.composition.runtime.provider_controller, ProviderController
+        )
+        await agent.agent.chat("hello")
+        old_runtime = agent.composition.runtime.conversation
+        old_compactor = agent.composition.runtime.context.context_compactor
 
         new_fake = FakeProvider([_stop_event("again")])
-        with patch(
-            "lion_code.agent.create_provider", return_value=new_fake
-        ) as mock_create:
-            agent.configure_provider(api_key="new-key", api_base="https://new.test/v1")
+        with patch("full_agent.create_provider", return_value=new_fake) as mock_create:
+            agent.agent.configure_provider(
+                api_key="new-key", api_base="https://new.test/v1"
+            )
 
         mock_create.assert_called_once_with(
             api_key="new-key", api_base="https://new.test/v1", thinking_level="off"
         )
-        self.assertIs(agent._core_runtime, old_runtime)
+        self.assertIs(agent.composition.runtime.conversation, old_runtime)
         self.assertEqual(
-            [m.role for m in agent._core_runtime.messages], ["user", "assistant"]
+            [m.role for m in agent.composition.runtime.conversation.messages],
+            ["user", "assistant"],
         )
-        self.assertIsNot(agent._context_compactor, old_compactor)
-        self.assertIs(agent._context_compactor._provider, new_fake)
-        self.assertIsNone(agent._resolved_model_limits_for)
+        self.assertIsNot(
+            agent.composition.runtime.context.context_compactor, old_compactor
+        )
+        self.assertIs(
+            agent.composition.runtime.context.context_compactor._provider, new_fake
+        )
+        self.assertIsNone(agent.composition.runtime.context.resolved_model_limits_for)
 
         # 新 Provider 接管后续请求。
-        await agent.chat("second")
+        await agent.agent.chat("second")
         self.assertTrue(old_fake.closed)
         self.assertFalse(new_fake.closed)
         self.assertEqual(new_fake.call_count, 1)
-        self.assertEqual(agent._core_runtime.messages[-1].text, "again")
-        await agent.close()
+        self.assertEqual(
+            agent.composition.runtime.conversation.messages[-1].text, "again"
+        )
+        await agent.agent.close()
         self.assertTrue(new_fake.closed)
 
     async def test_configure_api_failure_keeps_complete_state(self) -> None:
         agent, provider = self._make_agent([], ToolRegistry())
-        runtime = agent.core_runtime
-        compactor = agent._context_compactor
-        config = agent.provider_config()
+        runtime = agent.composition.runtime.conversation
+        compactor = agent.composition.runtime.context.context_compactor
+        config = agent.agent.provider_config()
 
         with (
             patch(
-                "lion_code.agent.create_provider",
+                "full_agent.create_provider",
                 side_effect=RuntimeError("bad provider config"),
             ),
             self.assertRaisesRegex(RuntimeError, "bad provider config"),
         ):
-            agent.configure_provider(
+            agent.agent.configure_provider(
                 model="new-model",
                 api_key="new-key",
                 api_base="https://new.test/v1",
             )
 
-        self.assertIs(agent.core_runtime, runtime)
-        self.assertIs(agent.core_runtime.provider, provider)
-        self.assertIs(agent._context_compactor, compactor)
-        self.assertEqual(agent.provider_config(), config)
+        self.assertIs(agent.composition.runtime.conversation, runtime)
+        self.assertIs(agent.composition.runtime.conversation.provider, provider)
+        self.assertIs(agent.composition.runtime.context.context_compactor, compactor)
+        self.assertEqual(agent.agent.provider_config(), config)
         self.assertFalse(provider.closed)
 
     async def test_configure_api_rejects_busy_runtime_without_changes(self) -> None:
         agent, provider = self._make_agent([], ToolRegistry())
-        config = agent.provider_config()
-        agent.core_runtime.harness._running = True
+        config = agent.agent.provider_config()
+        agent.composition.runtime.conversation.harness._running = True
         try:
             with (
-                patch("lion_code.agent.create_provider") as create,
+                patch("full_agent.create_provider") as create,
                 self.assertRaisesRegex(RuntimeError, "运行中"),
             ):
-                agent.configure_provider(api_key="new-key")
+                agent.agent.configure_provider(api_key="new-key")
         finally:
-            agent.core_runtime.harness._running = False
+            agent.composition.runtime.conversation.harness._running = False
 
         create.assert_not_called()
-        self.assertIs(agent.core_runtime.provider, provider)
-        self.assertEqual(agent.provider_config(), config)
+        self.assertIs(agent.composition.runtime.conversation.provider, provider)
+        self.assertEqual(agent.agent.provider_config(), config)
 
     async def test_configure_api_keeps_usage_for_cost_budget(self) -> None:
         registry = ToolRegistry()
@@ -1019,25 +1079,28 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             registry,
             max_cost_usd=0.0045,
         )
-        await agent.chat("first")
+        await agent.agent.chat("first")
 
         new_fake = FakeProvider([_tooluse_event("c2", usage=Usage(input=1_000))])
-        with patch("lion_code.agent.create_provider", return_value=new_fake):
-            agent.configure_provider(api_key="new-key")
+        with patch("full_agent.create_provider", return_value=new_fake):
+            agent.agent.configure_provider(api_key="new-key")
 
-        await agent.chat("second")
+        await agent.agent.chat("second")
 
-        self.assertEqual(agent.token_usage().input_tokens, 2_000)
-        self.assertEqual(agent._last_stop_reason, "max_cost")
+        self.assertEqual(agent.agent.usage.input_tokens, 2_000)
+        self.assertEqual(agent.composition.runtime.agent.last_stop_reason, "max_cost")
         self.assertEqual(new_fake.call_count, 1)
-        self.assertTrue(agent._core_runtime.messages[-1].is_error)
-        self.assertIn("Cost limit reached", agent._core_runtime.messages[-1].text)
+        self.assertTrue(agent.composition.runtime.conversation.messages[-1].is_error)
+        self.assertIn(
+            "Cost limit reached",
+            agent.composition.runtime.conversation.messages[-1].text,
+        )
 
     async def test_anthropic_backend_routes_to_core_runtime(self) -> None:
         """Anthropic 后端(无 api_base)同样走 Core Runtime,不再落 legacy。"""
         fake = FakeProvider([_stop_event("done")])
-        with patch("lion_code.agent.create_provider", return_value=fake):
-            agent = Agent(
+        with patch("full_agent.create_provider", return_value=fake):
+            agent = build_full_agent_harness(
                 api_key="ak",
                 tool_registry=ToolRegistry(),
                 custom_system_prompt="test",
@@ -1045,33 +1108,36 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
                 terminal_output=False,
             )
 
-        self.assertIsNotNone(agent.core_runtime)
+        self.assertIsNotNone(agent.composition.runtime.conversation)
 
-        await agent.chat("hello")
+        await agent.agent.chat("hello")
 
-        self.assertFalse(hasattr(Agent, "_chat_anthropic"))
-        self.assertEqual(agent._core_runtime.messages[-1].text, "done")
+        self.assertFalse(hasattr(MetaAgent, "_chat_anthropic"))
+        self.assertEqual(
+            agent.composition.runtime.conversation.messages[-1].text, "done"
+        )
         self.assertEqual(fake.call_count, 1)
 
     async def test_cross_protocol_switch_keeps_messages(self) -> None:
         """OpenAI→Anthropic 切换重建 Provider,canonical 历史保留。"""
         agent, _fake = self._make_agent([_stop_event("done")], ToolRegistry())
-        await agent.chat("hello")
+        await agent.agent.chat("hello")
 
         new_fake = FakeProvider([_stop_event("再见")])
-        with patch(
-            "lion_code.agent.create_provider", return_value=new_fake
-        ) as mock_create:
-            agent.configure_provider(use_openai=False, api_key="ak")
+        with patch("full_agent.create_provider", return_value=new_fake) as mock_create:
+            agent.agent.configure_provider(use_openai=False, api_key="ak")
 
         self.assertIn("anthropic_base_url", mock_create.call_args.kwargs)
         self.assertEqual(
-            [m.role for m in agent._core_runtime.messages], ["user", "assistant"]
+            [m.role for m in agent.composition.runtime.conversation.messages],
+            ["user", "assistant"],
         )
 
-        await agent.chat("second")
+        await agent.agent.chat("second")
         self.assertEqual(new_fake.call_count, 1)
-        self.assertEqual(agent._core_runtime.messages[-1].text, "再见")
+        self.assertEqual(
+            agent.composition.runtime.conversation.messages[-1].text, "再见"
+        )
 
     async def test_sub_agent_runs_on_core_runtime(self) -> None:
         """子 Agent 也走 Core:凭证随 fork 传递,文本经 canonical 兜底捕获。"""
@@ -1100,21 +1166,21 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         )
         sub_fake = FakeProvider([_stop_event("sub says hi")])
         with (
-            patch("lion_code.agent.create_provider", return_value=parent_fake),
+            patch("full_agent.create_provider", return_value=parent_fake),
             patch(
                 "lion_code.composition.agent_builder.create_provider",
                 return_value=sub_fake,
             ) as create,
-            patch("lion_code.agent.TerminalRenderer") as terminal_renderer,
+            patch("full_agent.TerminalRenderer") as terminal_renderer,
         ):
-            agent = Agent(
+            agent = build_full_agent_harness(
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
                 terminal_output=False,
             )
-            await agent.chat("hello")
+            await agent.agent.chat("hello")
 
         self.assertEqual(sub_fake.call_count, 1)
         terminal_renderer.assert_not_called()
@@ -1127,10 +1193,12 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(
-            [m.role for m in agent._core_runtime.messages],
+            [m.role for m in agent.composition.runtime.conversation.messages],
             ["user", "assistant", "toolResult", "assistant"],
         )
-        self.assertIn("sub says hi", agent._core_runtime.messages[2].text)
+        self.assertIn(
+            "sub says hi", agent.composition.runtime.conversation.messages[2].text
+        )
         # 子 Agent 不落盘会话:仓库里只有父会话。
         sessions = await self._session_repository.list_sessions()
         self.assertEqual(len(sessions), 1)
@@ -1138,13 +1206,15 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_configure_api_model_only_keeps_core_provider(self) -> None:
         """只改模型不重建 Provider,经 set_model 直接生效。"""
         agent, fake = self._make_agent([_stop_event("done")], ToolRegistry())
-        old_runtime = agent._core_runtime
+        old_runtime = agent.composition.runtime.conversation
 
-        agent.configure_provider(model="new-model")
+        agent.agent.configure_provider(model="new-model")
 
-        self.assertIs(agent._core_runtime, old_runtime)
-        self.assertEqual(agent._core_runtime.harness.config.model, "new-model")
-        await agent.chat("hello")
+        self.assertIs(agent.composition.runtime.conversation, old_runtime)
+        self.assertEqual(
+            agent.composition.runtime.conversation.harness.config.model, "new-model"
+        )
+        await agent.agent.chat("hello")
         self.assertEqual(fake.call_count, 1)
 
 

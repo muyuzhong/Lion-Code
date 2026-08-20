@@ -9,9 +9,9 @@ boundaries, not historical implementation or future Memory design.
 | --- | --- | --- |
 | Kernel | `core/`, `context/`, `tooling/`, `providers/`, `session_runtime/`, `permission_state.py`, `usage.py` | Product capabilities, Agent Runtime state, frontend state, project feature stores |
 | Agent Runtime | `runtime/` (`agent.py`, `conversation.py`, `session.py`, `context.py`, `execution.py`, `session_identity.py`, `provider.py`) | Profile selection, a second history, service locator, deleted legacy graph, Composition/Application deps |
-| Capability | `capabilities/`, `plan_runtime.py`, `skill_runtime.py`, `subagent_factory.py`, `subagent_runtime.py` | Provider/session ownership, Agent host, Application/TUI, Memory/Dream/Learning replacements |
+| Capability | `capabilities/` and its cohesive feature packages | Provider/session ownership, Product Adapter, Application/TUI, Memory/Dream/Learning replacements |
 | Composition | `composition/`, `meta_agent.py` | Frontend behavior, Supervisor policy, retained runtime container, feature API leakage |
-| Interfaces | `__init__.py`, `__main__.py`, `application/`, `tui/`, internal `agent.py` host | Direct Kernel/Agent Runtime ownership, duplicate persistence, public legacy feature facade |
+| Interfaces | `__init__.py`, `__main__.py`, `adapters/`, `application/`, `tui/` | Direct Kernel/Agent Runtime ownership, duplicate persistence, public legacy feature facade |
 | Supervisor | `supervisor.py` | Agent content, usage, permissions, tools, Profile internals, canonical session writes |
 
 `CapabilityRegistry` aggregates immutable contributions and closeable resources;

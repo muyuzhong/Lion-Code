@@ -116,18 +116,15 @@ name = "Core 不依赖上层运行时包"
 type = "forbidden"
 source_modules = ["lion_code.core"]
 forbidden_modules = [
-    "lion_code.agent",
+    "lion_code.adapters",
     "lion_code.application",
     "lion_code.capabilities",
     "lion_code.composition",
     "lion_code.observers",
     "lion_code.permission_state",
-    "lion_code.plan_runtime",
     "lion_code.providers",
     "lion_code.runtime",
     "lion_code.session_runtime",
-    "lion_code.skill_runtime",
-    "lion_code.subagent_runtime",
     "lion_code.supervisor",
     "lion_code.tooling",
     "lion_code.tui",
@@ -141,7 +138,7 @@ name = "Supervisor 只依赖公开 Core 事件契约"
 type = "forbidden"
 source_modules = ["lion_code.supervisor"]
 forbidden_modules = [
-    "lion_code.agent",
+    "lion_code.adapters",
     "lion_code.application",
     "lion_code.capabilities",
     "lion_code.composition",
@@ -150,8 +147,6 @@ forbidden_modules = [
     "lion_code.providers",
     "lion_code.runtime",
     "lion_code.session_runtime",
-    "lion_code.skill_runtime",
-    "lion_code.subagent_runtime",
     "lion_code.tooling",
     "lion_code.tui",
     "lion_code.usage",
@@ -164,7 +159,6 @@ name = "Composition 不依赖 Product Facade 与 Interfaces"
 type = "forbidden"
 source_modules = ["lion_code.composition"]
 forbidden_modules = [
-    "lion_code.agent",
     "lion_code.application",
     "lion_code.meta_agent",
     "lion_code.supervisor",
@@ -178,7 +172,6 @@ name = "MetaAgent 不依赖 Product Features 与 Interfaces"
 type = "forbidden"
 source_modules = ["lion_code.meta_agent"]
 forbidden_modules = [
-    "lion_code.agent",
     "lion_code.application",
     "lion_code.supervisor",
     "lion_code.tui",
@@ -192,7 +185,6 @@ type = "forbidden"
 source_modules = ["lion_code.providers"]
 forbidden_modules = [
     "lion_code.adapters",
-    "lion_code.agent",
     "lion_code.application",
     "lion_code.capabilities",
     "lion_code.composition",
@@ -203,16 +195,10 @@ forbidden_modules = [
     "lion_code.meta_agent",
     "lion_code.observers",
     "lion_code.permission_state",
-    "lion_code.plan_runtime",
     "lion_code.project_identity",
     "lion_code.prompt",
     "lion_code.runtime",
     "lion_code.session_runtime",
-    "lion_code.skill_runtime",
-    "lion_code.skills",
-    "lion_code.subagent",
-    "lion_code.subagent_factory",
-    "lion_code.subagent_runtime",
     "lion_code.supervisor",
     "lion_code.tooling",
     "lion_code.tools",
@@ -240,7 +226,6 @@ type = "forbidden"
 source_modules = ["lion_code.tui"]
 forbidden_modules = [
     "lion_code.adapters",
-    "lion_code.agent",
     "lion_code.capabilities",
     "lion_code.composition",
     "lion_code.context",
@@ -249,16 +234,10 @@ forbidden_modules = [
     "lion_code.meta_agent",
     "lion_code.observers",
     "lion_code.permission_state",
-    "lion_code.plan_runtime",
     "lion_code.project_identity",
     "lion_code.providers",
     "lion_code.runtime",
     "lion_code.session_runtime",
-    "lion_code.skill_runtime",
-    "lion_code.skills",
-    "lion_code.subagent",
-    "lion_code.subagent_factory",
-    "lion_code.subagent_runtime",
     "lion_code.supervisor",
     "lion_code.tooling",
     "lion_code.tools",
@@ -274,7 +253,6 @@ name = "Capabilities 不依赖 Agent 宿主与 Application/TUI"
 type = "forbidden"
 source_modules = ["lion_code.capabilities"]
 forbidden_modules = [
-    "lion_code.agent",
     "lion_code.application",
     "lion_code.tui",
 ]

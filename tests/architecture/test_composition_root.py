@@ -71,18 +71,6 @@ def _method(
     raise AssertionError(f"missing {class_name}.{method_name}")
 
 
-def _called_names(node: ast.AST) -> set[str]:
-    names: set[str] = set()
-    for call in ast.walk(node):
-        if not isinstance(call, ast.Call):
-            continue
-        if isinstance(call.func, ast.Name):
-            names.add(call.func.id)
-        elif isinstance(call.func, ast.Attribute):
-            names.add(call.func.attr)
-    return names
-
-
 def test_config_bindings_and_profiles_are_separate_frozen_values() -> None:
     config = AgentConfig()
     bindings = RuntimeBindings()
@@ -133,7 +121,9 @@ async def test_example_capability_needs_only_spec_registration_and_tests(
     bindings = RuntimeBindings(tool=ToolBindings(tool_registry=ToolRegistry()))
     provider = Mock()
     provider.aclose = AsyncMock()
-    with patch("lion_code.agent.create_provider", return_value=provider):
+    with patch(
+        "lion_code.composition.agent_builder.create_provider", return_value=provider
+    ):
         composition = build_agent_composition(
             FullProfile(extension_specs=(spec,)),
             config=config,
@@ -149,31 +139,25 @@ async def test_example_capability_needs_only_spec_registration_and_tests(
     await composition.capabilities.runtime.close()
 
 
-def test_agent_constructor_delegates_to_the_composition_root():
-    tree = _tree(SOURCE_ROOT / "agent.py")
-    constructor = _method(tree, "Agent", "__init__")
-    called = _called_names(constructor)
-    assert "build_agent_composition" in called
-    assert (
-        not {
-            "PermissionController",
-            "PermissionState",
-            "SessionIdentityState",
-            "ExecutionControl",
-            "UsageLedger",
-            "BudgetPolicy",
-            "PlanRuntime",
-            "ProviderController",
-            "AgentRuntime",
-            "ConversationRuntime",
-            "SessionRuntime",
-            "ContextRuntime",
-            "SubagentFactory",
-            "CapabilityRegistry",
-            "ToolRuntime",
-        }
-        & called
+def test_meta_agent_is_a_feature_neutral_facade():
+    tree = _tree(SOURCE_ROOT / "meta_agent.py")
+    meta_agent = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef) and node.name == "MetaAgent"
     )
+    methods = {
+        node.name
+        for node in meta_agent.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert not methods & {
+        "list_sessions",
+        "restore_latest",
+        "show_cost",
+        "toggle_plan_mode",
+        "set_plan_approval_fn",
+    }
 
 
 def test_builder_is_a_construction_function_not_a_service_locator():
@@ -195,7 +179,7 @@ def test_builder_is_a_construction_function_not_a_service_locator():
         and isinstance(node.value, ast.Name)
         and node.value.id == "self"
         and "builder" in node.attr.casefold()
-        for node in ast.walk(_tree(SOURCE_ROOT / "agent.py"))
+        for node in ast.walk(_tree(SOURCE_ROOT / "meta_agent.py"))
     )
 
 
@@ -240,8 +224,8 @@ def test_composition_root_has_no_supervisor_surface() -> None:
 @pytest.mark.parametrize(
     "path,class_name",
     [
-        ("plan_runtime.py", "PlanRuntime"),
-        ("subagent_factory.py", "SubagentFactory"),
+        ("capabilities/plan/runtime.py", "PlanRuntime"),
+        ("capabilities/subagent/factory.py", "SubagentFactory"),
     ],
 )
 def test_domain_runtime_constructors_do_not_receive_whole_agent(path, class_name):

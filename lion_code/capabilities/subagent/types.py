@@ -8,8 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .frontmatter import parse_frontmatter
-from .tooling.selection import ToolSelectionPolicy
+from ...frontmatter import parse_frontmatter
+from ...tooling.selection import ToolSelectionPolicy
 
 EXPLORE_PROMPT = """You are a file search specialist for Lion Code. You excel at thoroughly navigating and exploring codebases.
 
@@ -145,11 +145,13 @@ def get_sub_agent_config(agent_type: str) -> SubAgentConfig:
             EXPLORE_PROMPT,
             ToolSelectionPolicy(
                 require_read_only=True,
-                exclude_names=frozenset({
-                    "agent",
-                    "enter_plan_mode",
-                    "exit_plan_mode",
-                }),
+                exclude_names=frozenset(
+                    {
+                        "agent",
+                        "enter_plan_mode",
+                        "exit_plan_mode",
+                    }
+                ),
             ),
         )
     elif agent_type == "plan":

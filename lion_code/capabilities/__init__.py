@@ -1,12 +1,13 @@
-"""Capability SPI and the concrete Agent capability contributions."""
+"""Generic Capability SPI：extension slot protocols 与 Registry/Runtime。
+
+本模块不知道任何具体 feature（plan/skill/subagent）；feature-specific
+实现位于各自的 feature package，构造分支只存在于 Composition Root。
+"""
 
 from __future__ import annotations
 
-from .plan import PlanPromptLayer, PlanSessionParticipant, create_plan_capability
 from .registry import CapabilityRegistry, DuplicateCapabilityError
 from .runtime import CapabilityLifecycle, CapabilityRuntime
-from .skill import create_skill_capability
-from .subagent import create_subagent_capability
 from .types import (
     AsyncCloseable,
     CapabilitySpec,
@@ -22,12 +23,7 @@ __all__ = [
     "CapabilityRuntime",
     "CapabilitySpec",
     "DuplicateCapabilityError",
-    "PlanPromptLayer",
-    "PlanSessionParticipant",
     "PromptLayer",
     "SessionParticipant",
     "ToolSource",
-    "create_plan_capability",
-    "create_skill_capability",
-    "create_subagent_capability",
 ]
