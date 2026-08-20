@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .runtime import PlanRuntime, PlanToolOutcome, PlanView
 from ...tooling.internal import (
     create_enter_plan_tool,
     create_exit_plan_tool,
 )
 from ...tooling.types import JSONValue, LionTool, ToolResult
 from ..types import CapabilitySpec
+from .runtime import PlanRuntime, PlanToolOutcome, PlanView
 
 
 class _PlanToolSource:

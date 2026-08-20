@@ -96,7 +96,10 @@ class TestToolSelection(unittest.TestCase):
             }
         }
 
-        with patch("lion_code.capabilities.subagent.types._discover_custom_agents", return_value=custom):
+        with patch(
+            "lion_code.capabilities.subagent.types._discover_custom_agents",
+            return_value=custom,
+        ):
             config = get_sub_agent_config("custom")
         child = select_tools(self.registry, config.tool_policy)
 

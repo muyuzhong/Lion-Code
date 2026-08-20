@@ -85,7 +85,9 @@ async def test_skill_runtime_delegates_fork_to_subagent_executor() -> None:
         "allowed_tools": ["read_file"],
     }
 
-    with patch("lion_code.capabilities.skill.discovery.execute_skill", return_value=skill):
+    with patch(
+        "lion_code.capabilities.skill.discovery.execute_skill", return_value=skill
+    ):
         result = await runtime({"skill_name": "research", "args": "find the docs"})
 
     assert result.content == "fork result"

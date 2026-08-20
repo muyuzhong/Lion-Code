@@ -145,11 +145,13 @@ def get_sub_agent_config(agent_type: str) -> SubAgentConfig:
             EXPLORE_PROMPT,
             ToolSelectionPolicy(
                 require_read_only=True,
-                exclude_names=frozenset({
-                    "agent",
-                    "enter_plan_mode",
-                    "exit_plan_mode",
-                }),
+                exclude_names=frozenset(
+                    {
+                        "agent",
+                        "enter_plan_mode",
+                        "exit_plan_mode",
+                    }
+                ),
             ),
         )
     elif agent_type == "plan":

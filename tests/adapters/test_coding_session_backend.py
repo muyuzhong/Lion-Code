@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import unittest
 from pathlib import Path
@@ -18,9 +17,7 @@ from lion_code.session_runtime import SessionRepository
 
 
 def _backend(tmp_path: Path, **kwargs) -> CodingSessionBackendAdapter:
-    with patch(
-        "lion_code.composition.agent_builder.create_provider"
-    ) as create:
+    with patch("lion_code.composition.agent_builder.create_provider") as create:
         create.return_value = _FakeProvider()
         backend = build_full_coding_backend(
             api_key="test-key",
@@ -38,7 +35,8 @@ class _FakeProvider:
 class TestComposition(unittest.TestCase):
     def test_adapter_implements_protocol_structurally(self):
         with patch(
-            "lion_code.composition.agent_builder.create_provider", return_value=_FakeProvider()
+            "lion_code.composition.agent_builder.create_provider",
+            return_value=_FakeProvider(),
         ):
             backend = build_full_coding_backend(
                 api_key="test-key", terminal_output=False

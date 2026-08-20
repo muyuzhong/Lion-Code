@@ -58,7 +58,7 @@ def _task(task_id: str, *, split: TaskSplit = TaskSplit.REGRESSION) -> TaskSpec:
         verifier_identity="hidden-v1",
         gold_evidence_hash="a" * 64,
         difficulty=2,
-        involved_files=("lion_code/agent.py",),
+        involved_files=("lion_code/meta_agent.py",),
     )
 
 

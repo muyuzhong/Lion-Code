@@ -82,7 +82,7 @@ class TraceRecorder:
         return tuple(self._loop_candidates)
 
     def record(self, event: object) -> None:
-        """记录一个 Core event；该签名可直接传给 ``core_runtime.subscribe``。"""
+        """记录一个 Core event；该签名可直接传给 Agent 的 ``subscribe``。"""
 
         raw_payload = _event_payload(event)
         event_type = (

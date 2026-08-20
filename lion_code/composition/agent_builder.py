@@ -68,7 +68,6 @@ from ..runtime.provider import (
 from ..runtime.session import SessionRuntime
 from ..runtime.session_identity import SessionIdentityState
 from ..session_runtime import SessionRepository
-
 from ..tooling import (
     LocalCommandExecutionBackend,
     ToolPermissionStrategy,

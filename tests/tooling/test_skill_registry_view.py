@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from lion_code.agent import Agent
+from full_agent import build_full_agent_harness, execute_tool
+
 from lion_code.tooling.types import LionTool, ToolResult
 
 
@@ -64,17 +65,18 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     async def test_subagent_uses_parent_registry_view(self):
-        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
-            parent = Agent(api_key="test-key")
+        with patch("full_agent.load_pre_tool_use_hooks", return_value=[]):
+            parent = build_full_agent_harness(api_key="test-key")
         custom_name = "custom__docs__search"
-        parent.tool_registry.register(_tool(custom_name))
+        parent.composition.tooling.registry.register(_tool(custom_name))
 
         with (
             _patched_child(),
-            patch("lion_code.agent.print_sub_agent_start"),
-            patch("lion_code.agent.print_sub_agent_end"),
+            patch("full_agent.print_sub_agent_start"),
+            patch("full_agent.print_sub_agent_end"),
         ):
-            result = await parent._execute_tool_call(
+            result = await execute_tool(
+                parent,
                 "agent",
                 {
                     "type": "general",
@@ -86,19 +88,19 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         kwargs = _ChildAgent.created_with
         child_registry = kwargs["tool_registry"]
         self.assertEqual(result, "skill result")
-        usage = parent.token_usage()
+        usage = parent.agent.usage
         self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
         self.assertEqual((usage.responses, usage.turns), (0, 0))
         self.assertIs(
-            child_registry.resolve(custom_name), parent.tool_registry.resolve(custom_name)
+            child_registry.resolve(custom_name), parent.composition.tooling.registry.resolve(custom_name)
         )
         with self.assertRaises(LookupError):
             child_registry.resolve("agent")
         _ChildAgent.last_instance.close.assert_awaited_once_with()
 
     async def test_subagent_uses_current_api_configuration_and_bypass_permission(self):
-        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
-            parent = Agent(
+        with patch("full_agent.load_pre_tool_use_hooks", return_value=[]):
+            parent = build_full_agent_harness(
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 permission_mode="default",
@@ -106,10 +108,11 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
 
         with (
             _patched_child(),
-            patch("lion_code.agent.print_sub_agent_start"),
-            patch("lion_code.agent.print_sub_agent_end"),
+            patch("full_agent.print_sub_agent_start"),
+            patch("full_agent.print_sub_agent_end"),
         ):
-            await parent._execute_tool_call(
+            await execute_tool(
+                parent,
                 "agent",
                 {
                     "type": "general",
@@ -130,12 +133,12 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(_ChildAgent.created_with["is_sub_agent"])
 
     async def test_fork_paths_read_api_at_construction_time(self):
-        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
-            parent = Agent(
+        with patch("full_agent.load_pre_tool_use_hooks", return_value=[]):
+            parent = build_full_agent_harness(
                 api_base="https://old.example.test/v1",
                 api_key="old-key",
             )
-        parent.configure_provider(
+        parent.agent.configure_provider(
             model="current-model",
             api_base="https://new.example.test/v1",
             api_key="new-key",
@@ -149,10 +152,11 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         with (
             _patched_child(),
             patch("lion_code.capabilities.skill.discovery.execute_skill", return_value=skill_result),
-            patch("lion_code.agent.print_sub_agent_start"),
-            patch("lion_code.agent.print_sub_agent_end"),
+            patch("full_agent.print_sub_agent_start"),
+            patch("full_agent.print_sub_agent_end"),
         ):
-            await parent._execute_tool_call(
+            await execute_tool(
+                parent,
                 "agent",
                 {
                     "type": "general",
@@ -162,7 +166,8 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             )
             agent_kwargs = dict(_ChildAgent.created_with)
 
-            await parent._execute_tool_call(
+            await execute_tool(
+                parent,
                 "skill", {"skill_name": "research", "args": "find docs"}
             )
             skill_kwargs = dict(_ChildAgent.created_with)
@@ -175,19 +180,19 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(skill_kwargs["permission_mode"], "bypassPermissions")
 
     async def test_permission_mode_is_a_read_only_facade(self):
-        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
-            parent = Agent(api_key="test-key", permission_mode="dontAsk")
+        with patch("full_agent.load_pre_tool_use_hooks", return_value=[]):
+            parent = build_full_agent_harness(api_key="test-key", permission_mode="dontAsk")
 
         with self.assertRaises(AttributeError):
             setattr(parent, "permission_mode", "bypassPermissions")
 
-        self.assertEqual(parent.permission_mode, "dontAsk")
+        self.assertEqual(parent.agent.permission_mode, "dontAsk")
 
     async def test_agent_tool_error_emits_end_before_closing_without_charging_usage(
         self,
     ):
-        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
-            parent = Agent(api_key="test-key")
+        with patch("full_agent.load_pre_tool_use_hooks", return_value=[]):
+            parent = build_full_agent_harness(api_key="test-key")
         events: list[object] = []
         child = _ChildAgent()
         child.run_once.side_effect = RuntimeError("boom")
@@ -202,17 +207,18 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(
-                parent._subagent_factory,
+                parent.composition.capabilities.subagent_factory,
                 "create_for_agent_type",
                 return_value=child,
             ),
             patch.object(
-                parent._subagent_executor,
+                parent.composition.capabilities.subagent_executor,
                 "_status_callback",
                 side_effect=record_status,
             ),
         ):
-            result = await parent._execute_tool_call(
+            result = await execute_tool(
+                parent,
                 "agent",
                 {
                     "type": "general",
@@ -222,7 +228,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result, "Sub-agent error: boom")
-        usage = parent.token_usage()
+        usage = parent.agent.usage
         self.assertEqual((usage.input_tokens, usage.output_tokens), (0, 0))
         self.assertEqual(
             events,
@@ -231,11 +237,11 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         child.close.assert_awaited_once_with()
 
     async def test_fork_skill_selects_parent_registry_including_custom_tools(self):
-        with patch("lion_code.agent.load_pre_tool_use_hooks", return_value=[]):
-            parent = Agent(api_key="test-key")
+        with patch("full_agent.load_pre_tool_use_hooks", return_value=[]):
+            parent = build_full_agent_harness(api_key="test-key")
         custom_name = "custom__docs__search"
         custom_tool = _tool(custom_name)
-        parent.tool_registry.register(custom_tool)
+        parent.composition.tooling.registry.register(custom_tool)
         skill_result = {
             "context": "fork",
             "allowed_tools": [custom_name],
@@ -245,10 +251,11 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         with (
             patch("lion_code.capabilities.skill.discovery.execute_skill", return_value=skill_result),
             _patched_child(),
-            patch("lion_code.agent.print_sub_agent_start"),
-            patch("lion_code.agent.print_sub_agent_end"),
+            patch("full_agent.print_sub_agent_start"),
+            patch("full_agent.print_sub_agent_end"),
         ):
-            result = await parent._execute_tool_call(
+            result = await execute_tool(
+                parent,
                 "skill", {"skill_name": "research", "args": "find docs"}
             )
 
@@ -261,7 +268,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(child_registry.resolve(custom_name), custom_tool)
         self.assertEqual(kwargs["system_prompt"], skill_result["prompt"])
-        usage = parent.token_usage()
+        usage = parent.agent.usage
         self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
         self.assertEqual((usage.responses, usage.turns), (0, 0))
         _ChildAgent.last_instance.close.assert_awaited_once_with()

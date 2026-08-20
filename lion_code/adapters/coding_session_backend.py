@@ -39,6 +39,7 @@ from ..observers import TerminalRenderer
 from ..permission_state import PermissionMode
 from ..prompt import build_dynamic_system_context
 from ..providers.factory import create_provider
+from ..runtime.agent import AgentRunResult
 from ..session_runtime import (
     SessionRecorder,
     SessionRepository,
@@ -46,6 +47,7 @@ from ..session_runtime import (
     list_legacy_sessions,
     load_legacy_session,
 )
+from ..tooling import ToolRegistry
 from ..ui import (
     print_confirmation,
     print_error,
@@ -241,9 +243,7 @@ class CodingSessionBackendAdapter:
 
     # ─── ControlPort ─────────────────────────────────────────
 
-    def set_confirm_fn(
-        self, fn: Callable[[str], Awaitable[bool]] | None
-    ) -> None:
+    def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]] | None) -> None:
         self._confirmation.confirm_fn = fn
 
     def set_plan_approval_fn(
@@ -264,6 +264,9 @@ class CodingSessionBackendAdapter:
 
     async def chat(self, prompt: str) -> None:
         await self._agent.chat(prompt)
+
+    async def run(self, prompt: str, *, timeout: float | None = None) -> AgentRunResult:
+        return await self._agent.run(prompt, timeout=timeout)
 
     def abort(self) -> None:
         self._agent.cancel()
@@ -332,6 +335,7 @@ def build_full_coding_backend(
     custom_system_prompt: str | None = None,
     session_repository: SessionRepository | None = None,
     confirm_fn: Callable[[str], Awaitable[bool]] | None = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> CodingSessionBackendAdapter:
     """装配 FullProfile 产品：Composition → MetaAgent → Product Adapter。"""
 
@@ -354,6 +358,7 @@ def build_full_coding_backend(
             session_repository=session_repository,
         ),
         tool=ToolBindings(
+            tool_registry=tool_registry,
             pre_tool_use_hooks_loader=load_pre_tool_use_hooks,
         ),
         interaction=InteractionBindings(

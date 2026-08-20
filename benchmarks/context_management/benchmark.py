@@ -834,7 +834,7 @@ def populate_probe_tools(
 
 def offline_probes(dataset: dict[str, Any]) -> list[dict[str, Any]]:
     effective = int(dataset["effective_window_tokens"])
-    seed, _ = source_snapshot(["lion_code/agent.py", "lion_code/tools.py"])
+    seed, _ = source_snapshot(["lion_code/adapters/coding_session_backend.py", "lion_code/tools.py"])
     probes: list[dict[str, Any]] = []
 
     with tempfile.TemporaryDirectory(prefix="lion-context-probe-") as temp_home:

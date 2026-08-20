@@ -87,7 +87,9 @@ def _parse_skill_file(
                 try:
                     allowed_tools = json.loads(raw_tools)
                 except Exception:
-                    allowed_tools = [s.strip() for s in raw_tools.strip("[]").split(",")]
+                    allowed_tools = [
+                        s.strip() for s in raw_tools.strip("[]").split(",")
+                    ]
             else:
                 allowed_tools = [s.strip() for s in raw_tools.split(",")]
 
@@ -118,15 +120,14 @@ def get_skill_by_name(name: str) -> SkillDefinition | None:
 
 def resolve_skill_prompt(skill: SkillDefinition, args: str) -> str:
     import re
+
     prompt = skill.prompt_template
     prompt = re.sub(r"\$ARGUMENTS|\$\{ARGUMENTS\}", args, prompt)
     prompt = prompt.replace("${CLAUDE_SKILL_DIR}", skill.skill_dir)
     return prompt
 
 
-def execute_skill(
-    skill_name: str, args: str
-) -> dict | None:
+def execute_skill(skill_name: str, args: str) -> dict | None:
     skill = get_skill_by_name(skill_name)
     if not skill:
         return None

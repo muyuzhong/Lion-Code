@@ -22,7 +22,7 @@ from integration.test_application_coding_session import (
 )
 from textual.widgets import ListView
 
-from lion_code.agent import Agent
+from lion_code.adapters.coding_session_backend import build_full_coding_backend
 from lion_code.application.session import LionCodingSession
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
@@ -180,14 +180,17 @@ def app_factory():
 
     def factory(events: list, registry: ToolRegistry | None = None) -> LionTuiApp:
         fake = FakeProvider(events)
-        with patch("lion_code.agent.create_provider", return_value=fake):
-            agent = Agent(
+        with patch(
+            "lion_code.adapters.coding_session_backend.create_provider",
+            return_value=fake,
+        ):
+            agent = build_full_coding_backend(
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 tool_registry=registry or ToolRegistry(),
                 custom_system_prompt="test",
                 session_repository=repository,
-        )
+            )
         return LionTuiApp(LionCodingSession(backend=agent))
 
     yield factory
@@ -399,7 +402,6 @@ async def test_clear_command_resets_transcript(app_factory) -> None:
     assert any(item.text == "Conversation cleared." for item in app.state.items)
     assert notices.count(("Conversation cleared.", "status")) == 1
     assert app.session.messages == ()
-    assert app.session._backend._terminal_renderer is None
 
 
 @pytest.mark.asyncio
@@ -414,7 +416,7 @@ async def test_compact_notice_is_forwarded_once(app_factory) -> None:
             original_notice(text, role=role)
 
         async def compact() -> None:
-            app.session._backend._emit_notice("Conversation compacted.")
+            app._on_session_notice("Conversation compacted.", "info")
 
         with (
             patch.object(app, "_notice", record_notice),

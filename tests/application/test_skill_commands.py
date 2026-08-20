@@ -58,7 +58,10 @@ class _FakeSession:
 class TestSkillFallback(unittest.TestCase):
     def test_unknown_command_without_matching_skill_returns_unhandled(self) -> None:
         registry = create_default_command_registry()
-        with patch("lion_code.capabilities.skill.discovery.get_skill_by_name", return_value=None):
+        with patch(
+            "lion_code.capabilities.skill.discovery.get_skill_by_name",
+            return_value=None,
+        ):
             result = registry.execute(_FakeSession(), "/nonexistent")
         self.assertFalse(result.handled)
 
@@ -66,14 +69,20 @@ class TestSkillFallback(unittest.TestCase):
         """未命中 Skill 的命令保留通用 unknown-command 结果。"""
         registry = create_default_command_registry()
         self.assertIsNone(registry.get("removed-command"))
-        with patch("lion_code.capabilities.skill.discovery.get_skill_by_name", return_value=None):
+        with patch(
+            "lion_code.capabilities.skill.discovery.get_skill_by_name",
+            return_value=None,
+        ):
             result = registry.execute(_FakeSession(), "/removed-command")
         self.assertFalse(result.handled)
 
     def test_inline_skill_fallback_returns_resolved_prompt(self) -> None:
         registry = create_default_command_registry()
         skill = _fake_skill()
-        with patch("lion_code.capabilities.skill.discovery.get_skill_by_name", return_value=skill):
+        with patch(
+            "lion_code.capabilities.skill.discovery.get_skill_by_name",
+            return_value=skill,
+        ):
             result = registry.execute(_FakeSession(), "/test-skill hello world")
         self.assertTrue(result.handled)
         self.assertIsNotNone(result.skill_prompt)
@@ -82,7 +91,10 @@ class TestSkillFallback(unittest.TestCase):
     def test_non_user_invocable_skill_returns_unhandled(self) -> None:
         registry = create_default_command_registry()
         skill = _fake_skill(user_invocable=False)
-        with patch("lion_code.capabilities.skill.discovery.get_skill_by_name", return_value=skill):
+        with patch(
+            "lion_code.capabilities.skill.discovery.get_skill_by_name",
+            return_value=skill,
+        ):
             result = registry.execute(_FakeSession(), "/test-skill")
         self.assertFalse(result.handled)
 
@@ -90,7 +102,10 @@ class TestSkillFallback(unittest.TestCase):
         registry = create_default_command_registry()
         skill = _fake_skill(context="fork")
         with (
-            patch("lion_code.capabilities.skill.discovery.get_skill_by_name", return_value=skill),
+            patch(
+                "lion_code.capabilities.skill.discovery.get_skill_by_name",
+                return_value=skill,
+            ),
             patch("lion_code.capabilities.skill.discovery.execute_skill") as mock_exec,
         ):
             mock_exec.return_value = {

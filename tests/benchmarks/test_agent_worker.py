@@ -19,7 +19,10 @@ from benchmarks.agent_e2e.models import (
     TaskSplit,
     WorkerStatus,
 )
-from lion_code.agent import Agent
+from lion_code.adapters.coding_session_backend import (
+    CodingSessionBackendAdapter,
+    build_full_coding_backend,
+)
 from lion_code.core import AssistantMessage, TextContent, Usage
 from lion_code.core.provider_events import AssistantDoneEvent
 
@@ -101,10 +104,10 @@ class TestAgentWorker(unittest.IsolatedAsyncioTestCase):
     async def test_worker_keeps_session_outside_workspace(self) -> None:
         task = _task()
         manifest = _manifest(task)
-        created_agents: list[Agent] = []
+        created_agents: list[CodingSessionBackendAdapter] = []
 
-        def factory(**kwargs) -> Agent:
-            agent = Agent(api_key="test-key", **kwargs)
+        def factory(**kwargs) -> CodingSessionBackendAdapter:
+            agent = build_full_coding_backend(api_key="test-key", **kwargs)
             created_agents.append(agent)
             return agent
 
@@ -121,7 +124,7 @@ class TestAgentWorker(unittest.IsolatedAsyncioTestCase):
                 session_root=session_root,
             )
             with patch(
-                "lion_code.agent.create_provider",
+                "lion_code.adapters.coding_session_backend.create_provider",
                 return_value=_SingleEventProvider(_completed_event()),
             ):
                 result = await run_agent_worker(request, agent_factory=factory)
@@ -130,7 +133,7 @@ class TestAgentWorker(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(result.agent_run)
             self.assertEqual(
                 result.agent_run.final_text_digest,
-                hashlib.sha256("完成".encode("utf-8")).hexdigest(),
+                hashlib.sha256("完成".encode()).hexdigest(),
             )
             self.assertEqual(len(created_agents), 1)
             self.assertTrue(any(session_root.rglob("*.jsonl")))

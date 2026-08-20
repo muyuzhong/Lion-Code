@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from . import discovery
-from ..subagent.runtime import SubagentExecutor
 from ...tooling.types import JSONValue, ToolResult
+from ..subagent.runtime import SubagentExecutor
+from . import discovery
 
 
 class SkillRuntime:

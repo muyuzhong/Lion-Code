@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from .runtime import SkillRuntime
 from ...tooling.internal import create_skill_tool
 from ...tooling.types import LionTool
 from ..types import CapabilitySpec
+from .runtime import SkillRuntime
 
 
 class _SkillToolSource:

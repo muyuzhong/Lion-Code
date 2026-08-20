@@ -13,7 +13,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from lion_code.agent import Agent
+from full_agent import build_full_agent_harness
+
+from lion_code.adapters.coding_session_backend import CodingSessionBackendAdapter
 from lion_code.application import (
     AgentSettledEvent,
     AutoRetryEndEvent,
@@ -108,64 +110,76 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self._temp_dir.cleanup()
 
-    def _make_session(self, events: list, registry: ToolRegistry | None = None):
+    def _make_session(
+        self,
+        events: list,
+        registry: ToolRegistry | None = None,
+        *,
+        terminal_output: bool = False,
+    ):
+        from pathlib import Path as _Path
+
         from core.fakes import FakeProvider
 
         fake = FakeProvider(events)
-        with patch("lion_code.agent.create_provider", return_value=fake):
-            agent = Agent(
+        with patch("full_agent.create_provider", return_value=fake):
+            harness = build_full_agent_harness(
                 api_base="https://example.test/v1",
                 api_key="test-key",
                 tool_registry=registry or ToolRegistry(),
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+                terminal_output=terminal_output,
             )
-        return LionCodingSession(agent), agent, fake
+        composition = harness.composition
+        agent = CodingSessionBackendAdapter(
+            agent=harness.agent,
+            plan=composition.capabilities.plan,
+            confirmation=composition.interaction.confirmation,
+            notices=composition.interaction.notices,
+            status_sink=composition.interaction.status_sink,
+            terminal_output_sink=composition.runtime.agent.set_terminal_output,
+            session_repository=composition.runtime.session.repository,
+            cwd=_Path(composition.tooling.context.cwd),
+        )
+        return LionCodingSession(agent), agent, harness, fake
 
     # ─── 构造约束 ────────────────────────────────────────────
 
     async def test_uses_injected_backend(self) -> None:
-        session, agent, _fake = self._make_session([])
+        session, agent, _harness, _fake = self._make_session([])
         self.assertIs(session._backend, agent)
-        self.assertIsNone(agent._terminal_renderer)
+        self.assertIsNone(_harness.composition.runtime.agent._terminal_renderer)
 
     async def test_structured_session_only_unsubscribes_terminal_renderer(self) -> None:
-        from core.fakes import FakeProvider
-
-        fake = FakeProvider([_stop_event("before"), _stop_event("after")])
-        with (
-            patch("lion_code.agent.create_provider", return_value=fake),
-            patch("lion_code.agent.TerminalRenderer") as renderer_factory,
-        ):
-            agent = Agent(
-                api_base="https://example.test/v1",
-                api_key="test-key",
-                custom_system_prompt="test",
-                session_repository=self._session_repository,
+        with patch("full_agent.TerminalRenderer") as renderer_factory:
+            session, agent, harness, _fake = self._make_session(
+                [_stop_event("before"), _stop_event("after")],
+                terminal_output=True,
             )
             await agent.chat("first")
 
-            recorder = agent._session_recorder
-            usage = agent._usage
-            usage_observer = agent._agent_runtime._usage_observer
+            recorder = harness.composition.runtime.agent.session.recorder
+            usage = harness.composition.runtime.usage
+            usage_observer = harness.composition.runtime.agent._usage_observer
             self.assertIsNotNone(recorder)
             self.assertTrue(recorder.initialized)
             self.assertEqual(usage.snapshot().responses, 1)
 
             session = LionCodingSession(agent)
-            self.assertIs(agent._session_recorder, recorder)
-            self.assertIs(agent._usage, usage)
+            self.assertIs(harness.composition.runtime.agent.session.recorder, recorder)
+            self.assertIs(harness.composition.runtime.usage, usage)
             self.assertIs(
-                agent._agent_runtime._usage_observer,
+                harness.composition.runtime.agent._usage_observer,
                 usage_observer,
             )
-            self.assertIsNone(agent._terminal_renderer)
+            self.assertIsNone(harness.composition.runtime.agent._terminal_renderer)
             renderer_factory.assert_called_once_with()
 
             [event async for event in session.prompt("second")]
 
         entries = await self._session_repository.storage_for(
-            agent.session_id
+            harness.agent.session_id
         ).read_all()
         self.assertEqual(sum(entry.type == "session_info" for entry in entries), 1)
         self.assertEqual(sum(entry.type == "message" for entry in entries), 4)
@@ -183,12 +197,23 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 "os.environ",
                 {"ANTHROPIC_API_KEY": "", "OPENAI_API_KEY": ""},
             ),
-            patch("lion_code.agent.create_provider", return_value=fake),
+            patch("full_agent.create_provider", return_value=fake),
         ):
-            agent = Agent(
+            harness = build_full_agent_harness(
                 api_key=None,
                 custom_system_prompt="test",
                 session_repository=self._session_repository,
+            )
+            composition = harness.composition
+            agent = CodingSessionBackendAdapter(
+                agent=harness.agent,
+                plan=composition.capabilities.plan,
+                confirmation=composition.interaction.confirmation,
+                notices=composition.interaction.notices,
+                status_sink=composition.interaction.status_sink,
+                terminal_output_sink=composition.runtime.agent.set_terminal_output,
+                session_repository=composition.runtime.session.repository,
+                cwd=Path(composition.tooling.context.cwd),
             )
         session = LionCodingSession(agent)
         notices: list[tuple[str, str]] = []
@@ -206,7 +231,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
     # ─── 文本闭环与事件次序 ──────────────────────────────────
 
     async def test_text_round_trip_event_order(self) -> None:
-        session, _agent, fake = self._make_session([_stop_event("你好")])
+        session, _agent, _harness, fake = self._make_session([_stop_event("你好")])
 
         events = [event async for event in session.prompt("hi")]
 
@@ -224,7 +249,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
     async def test_tool_loop_round_trip(self) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
-        session, _agent, _fake = self._make_session(
+        session, _agent, _harness, _fake = self._make_session(
             [_tooluse_event(), _stop_event()], registry
         )
 
@@ -245,7 +270,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         gate = asyncio.Event()
         registry = ToolRegistry()
         registry.register(_echo_lion_tool(gate))
-        session, _agent, _fake = self._make_session(
+        session, _agent, _harness, _fake = self._make_session(
             [_tooluse_event(), _stop_event()], registry
         )
 
@@ -267,7 +292,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         registry = ToolRegistry()
         registry.register(_echo_lion_tool(gate))
         # 第一轮 toolUse 挂起;steer 入队后放行,steered 消息进入下一轮。
-        session, _agent, _fake = self._make_session(
+        session, _agent, _harness, _fake = self._make_session(
             [_tooluse_event(), _stop_event("after-steer")], registry
         )
 
@@ -296,7 +321,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         registry = ToolRegistry()
         registry.register(_echo_lion_tool(gate))
         # 只脚本一轮 toolUse:工具挂起时取消,第二次模型调用发 aborted。
-        session, _agent, _fake = self._make_session([_tooluse_event()], registry)
+        session, _agent, _harness, _fake = self._make_session(
+            [_tooluse_event()], registry
+        )
 
         events = []
         async for event in session.prompt("hi"):
@@ -320,7 +347,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             pass
 
     async def test_context_overflow_compacts_and_retries_once(self) -> None:
-        session, agent, fake = self._make_session(
+        session, _agent, harness, fake = self._make_session(
             [
                 _stop_event("old answer"),
                 _stop_event("recent answer"),
@@ -331,7 +358,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         )
         await self._prime_overflow_history(session)
         kernel_events = []
-        agent.subscribe(kernel_events.append)
+        harness.agent.subscribe(kernel_events.append)
 
         events = [event async for event in session.prompt("trigger overflow")]
 
@@ -379,7 +406,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(projected[3], "trigger overflow")
 
         entries = await self._session_repository.storage_for(
-            agent.session_id
+            harness.agent.session_id
         ).read_all()
         compactions = [entry for entry in entries if entry.type == "compaction"]
         self.assertEqual(len(compactions), 1)
@@ -411,7 +438,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_context_overflow_compaction_failure_settles(self) -> None:
-        session, _agent, fake = self._make_session(
+        session, _agent, _harness, fake = self._make_session(
             [
                 _stop_event("old answer"),
                 _stop_event("recent answer"),
@@ -436,7 +463,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.call_count, 4)
 
     async def test_context_overflow_without_old_context_does_not_compact(self) -> None:
-        session, agent, fake = self._make_session(
+        session, _agent, harness, fake = self._make_session(
             [
                 _stop_event("only prior answer"),
                 _error_event("context window exceeded"),
@@ -457,12 +484,12 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsInstance(events[-1], AgentSettledEvent)
         self.assertEqual(fake.call_count, 2)
-        state = await self._session_repository.load(agent.session_id)
+        state = await self._session_repository.load(harness.agent.session_id)
         self.assertIsNotNone(state)
         self.assertEqual(len(state.compaction_entries), 0)
 
     async def test_cancel_during_overflow_compaction_does_not_retry(self) -> None:
-        session, agent, fake = self._make_session(
+        session, _agent, harness, fake = self._make_session(
             [
                 _stop_event("old answer"),
                 _stop_event("recent answer"),
@@ -479,7 +506,9 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 await asyncio.Event().wait()
                 raise AssertionError("取消后不应继续摘要")
 
-        agent._context_compactor = BlockingCompactor()
+        harness.composition.runtime.context.replace_context_compactor(
+            BlockingCompactor()
+        )
 
         async def collect_events():
             return [event async for event in session.prompt("trigger overflow")]
@@ -499,12 +528,12 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsInstance(events[-1], AgentSettledEvent)
         self.assertEqual(fake.call_count, 3)
-        state = await self._session_repository.load(agent.session_id)
+        state = await self._session_repository.load(harness.agent.session_id)
         self.assertIsNotNone(state)
         self.assertEqual(len(state.compaction_entries), 0)
 
     async def test_context_overflow_retry_failure_is_terminal(self) -> None:
-        session, _agent, fake = self._make_session(
+        session, _agent, _harness, fake = self._make_session(
             [
                 _stop_event("old answer"),
                 _stop_event("recent answer"),
@@ -534,7 +563,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.call_count, 5)
 
     async def test_non_overflow_provider_error_does_not_retry(self) -> None:
-        session, _agent, fake = self._make_session(
+        session, _agent, _harness, fake = self._make_session(
             [
                 _error_event("service unavailable"),
             ]
@@ -556,7 +585,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.call_count, 1)
 
     async def test_generic_limit_error_does_not_trigger_overflow_recovery(self) -> None:
-        session, _agent, fake = self._make_session(
+        session, _agent, _harness, fake = self._make_session(
             [
                 _error_event("Requests per minute exceeded the limit"),
             ]
@@ -582,7 +611,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
     async def test_messages_match_jsonl_session(self) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
-        session, agent, _fake = self._make_session(
+        session, _agent, harness, _fake = self._make_session(
             [_tooluse_event(), _stop_event()], registry
         )
 
@@ -591,7 +620,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         transcript = session.messages
         await session.aclose()
 
-        state = await self._session_repository.load(agent.session_id)
+        state = await self._session_repository.load(harness.agent.session_id)
         self.assertIsNotNone(state)
         self.assertEqual([m.role for m in state.messages], [m.role for m in transcript])
         self.assertEqual(state.messages[-1].text, transcript[-1].text)
@@ -599,16 +628,16 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
     async def test_configure_provider_keeps_backend_binding(self) -> None:
         from core.fakes import FakeProvider
 
-        session, agent, original_provider = self._make_session([_stop_event("old")])
-        original_runtime = agent.core_runtime
+        session, agent, harness, original_provider = self._make_session(
+            [_stop_event("old")]
+        )
+        original_runtime = harness.composition.runtime.conversation
         replacement_provider = FakeProvider([_stop_event("new")])
 
-        with patch(
-            "lion_code.agent.create_provider", return_value=replacement_provider
-        ):
+        with patch("full_agent.create_provider", return_value=replacement_provider):
             session.configure_provider(api_key="new-key")
 
-        self.assertIs(agent.core_runtime, original_runtime)
+        self.assertIs(harness.composition.runtime.conversation, original_runtime)
         self.assertIs(session._backend, agent)
         async for _ in session.prompt("hello"):
             pass
@@ -617,12 +646,12 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.messages[-1].text, "new")
 
     async def test_configure_provider_rejects_unsettled_session(self) -> None:
-        session, agent, provider = self._make_session([])
-        config = agent.provider_config()
+        session, _agent, harness, provider = self._make_session([])
+        config = harness.agent.provider_config()
         session._running = True
         try:
             with (
-                patch("lion_code.agent.create_provider") as create,
+                patch("full_agent.create_provider") as create,
                 self.assertRaisesRegex(RuntimeError, "会话运行中"),
             ):
                 session.configure_provider(api_key="new-key")
@@ -630,13 +659,13 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             session._running = False
 
         create.assert_not_called()
-        self.assertIs(agent.core_runtime.provider, provider)
-        self.assertEqual(agent.provider_config(), config)
+        self.assertIs(harness.composition.runtime.conversation.provider, provider)
+        self.assertEqual(harness.agent.provider_config(), config)
 
     # ─── Thinking 档位 ────────────────────────────────────────
 
     async def test_thinking_level_defaults_and_available(self) -> None:
-        session, _agent, _fake = self._make_session([_stop_event()])
+        session, _agent, _harness, _fake = self._make_session([_stop_event()])
         self.assertEqual(session.thinking_level, "off")
         self.assertEqual(
             tuple(session.available_thinking_levels),
@@ -646,21 +675,21 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
     async def test_set_thinking_level_rebuilds_provider_with_level(self) -> None:
         from core.fakes import FakeProvider
 
-        session, agent, _fake = self._make_session([_stop_event()])
+        session, _agent, harness, _fake = self._make_session([_stop_event()])
         replacement = FakeProvider([])
-        with patch("lion_code.agent.create_provider", return_value=replacement) as mock:
+        with patch("full_agent.create_provider", return_value=replacement) as mock:
             session.set_thinking_level("high")
 
         # Core 路径按档位热重建 Provider。
         self.assertEqual(mock.call_args.kwargs.get("thinking_level"), "high")
-        self.assertIs(agent.core_runtime.provider, replacement)
+        self.assertIs(harness.composition.runtime.conversation.provider, replacement)
         self.assertEqual(session.thinking_level, "high")
 
     async def test_cycle_thinking_level_advances_and_wraps(self) -> None:
         from core.fakes import FakeProvider
 
-        session, _agent, _fake = self._make_session([_stop_event()])
-        with patch("lion_code.agent.create_provider", return_value=FakeProvider([])):
+        session, _agent, _harness, _fake = self._make_session([_stop_event()])
+        with patch("full_agent.create_provider", return_value=FakeProvider([])):
             self.assertEqual(session.thinking_level, "off")
             self.assertEqual(session.cycle_thinking_level(), "minimal")
             self.assertEqual(session.cycle_thinking_level(), "low")
@@ -671,30 +700,30 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
     async def test_set_thinking_level_persists_entry(self) -> None:
         from core.fakes import FakeProvider
 
-        session, agent, _fake = self._make_session([_stop_event("ok")])
+        session, _agent, harness, _fake = self._make_session([_stop_event("ok")])
         async for _ in session.prompt("hi"):
             pass
-        with patch("lion_code.agent.create_provider", return_value=FakeProvider([])):
+        with patch("full_agent.create_provider", return_value=FakeProvider([])):
             session.set_thinking_level("high")
         self.assertEqual(session.thinking_level, "high")
 
         await session.aclose()
-        state = await self._session_repository.load(agent.session_id)
+        state = await self._session_repository.load(harness.agent.session_id)
         self.assertIsNotNone(state)
         self.assertEqual(state.thinking_level, "high")
 
     async def test_set_thinking_level_rejects_unknown(self) -> None:
-        session, _agent, _fake = self._make_session([_stop_event()])
+        session, _agent, _harness, _fake = self._make_session([_stop_event()])
         with self.assertRaises(ValueError):
             session.set_thinking_level("ultra")
         # 被拒后档位不变。
         self.assertEqual(session.thinking_level, "off")
 
     async def test_thinking_switch_rejects_unsettled_session(self) -> None:
-        session, agent, provider = self._make_session([])
+        session, _agent, harness, provider = self._make_session([])
         session._running = True
         try:
-            with patch("lion_code.agent.create_provider") as create:
+            with patch("full_agent.create_provider") as create:
                 with self.assertRaisesRegex(RuntimeError, "会话运行中"):
                     session.set_thinking_level("high")
                 with self.assertRaisesRegex(RuntimeError, "会话运行中"):
@@ -703,7 +732,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             session._running = False
 
         create.assert_not_called()
-        self.assertIs(agent.core_runtime.provider, provider)
+        self.assertIs(harness.composition.runtime.conversation.provider, provider)
         self.assertEqual(session.thinking_level, "off")
 
 

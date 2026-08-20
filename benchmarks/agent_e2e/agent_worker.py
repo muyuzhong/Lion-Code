@@ -10,7 +10,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from lion_code.agent import Agent
+from lion_code.adapters.coding_session_backend import (
+    CodingSessionBackendAdapter,
+    build_full_coding_backend,
+)
 from lion_code.session_runtime import SessionRepository
 
 from .backend import AgentExecutionRequest
@@ -18,13 +21,13 @@ from .models import AgentRunSummary, WorkerResult, WorkerStatus
 from .trace import TraceRecorder, redact_text
 
 
-AgentFactory = Callable[..., Agent]
+AgentFactory = Callable[..., CodingSessionBackendAdapter]
 
 
 async def run_agent_worker(
     request: AgentExecutionRequest,
     *,
-    agent_factory: AgentFactory = Agent,
+    agent_factory: AgentFactory = build_full_coding_backend,
     trace_recorder: TraceRecorder | None = None,
 ) -> WorkerResult:
     """在 Agent workspace 中运行一次根 Agent，并返回不含 session/凭证的结果。
@@ -58,7 +61,7 @@ async def run_agent_worker(
                 session_repository=session_repository,
                 terminal_output=False,
             )
-            unsubscribe = agent.core_runtime.subscribe(recorder.record)
+            unsubscribe = agent.subscribe(recorder.record)
             run_result = await agent.run(
                 request.task.public_prompt,
                 timeout=request.manifest.timeout_seconds,

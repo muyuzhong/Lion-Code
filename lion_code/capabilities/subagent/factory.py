@@ -6,9 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .types import get_sub_agent_config
 from ...tooling import ToolRegistry
 from ...tooling.selection import ToolSelectionPolicy, select_tools
+from .types import get_sub_agent_config
 
 if TYPE_CHECKING:
     from ...meta_agent import MetaAgent
