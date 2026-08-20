@@ -22,6 +22,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,7 @@ from ..runtime.context import ContextRuntime
 from ..runtime.conversation import ConversationRuntime
 from ..runtime.execution import ExecutionControl
 from ..runtime.provider import (
+    ProviderConfigurationProjection,
     ProviderController,
     ProviderFactory,
     ProviderKind,
@@ -256,23 +258,21 @@ def build_agent_composition(
             provider_state.thinking_level,
         )
 
-    # controller 最后创建；identity port 的 api_configured 在 chat 时才求值，
-    # 届时 controller 已完成构造（同一函数作用域内的晚绑定 cell）。
-    provider_controller: ProviderController
+    provider_projection = ProviderConfigurationProjection(
+        _state=provider_state,
+        _provider_ready=foundation.bindings.provider.provider is not None,
+    )
 
     identity_port = _build_identity_port(
         foundation,
-        api_configured=lambda: (
-            foundation.bindings.provider.provider is not None
-            or provider_controller.api_configured
-        ),
+        api_configured=provider_projection.is_api_configured,
     )
 
     capability_graph = _build_capability_graph(
         foundation,
         identity_port,
         selection,
-        child_config=lambda: _child_config(provider_controller, identity_port),
+        child_config=partial(_child_config, provider_projection, identity_port),
     )
 
     tooling_graph = _build_tooling_graph(
@@ -336,6 +336,7 @@ def build_agent_composition(
         recorder=session,
         provider_factory=foundation.provider_factory,
         get_live_model=lambda: conversation.model,
+        configuration_projection=provider_projection,
     )
 
     return AgentComposition(
@@ -698,10 +699,10 @@ def _build_tooling_graph(
 
 
 def _child_config(
-    provider_controller: ProviderController,
+    provider_projection: ProviderConfigurationProjection,
     identity_port: RuntimeIdentityPort,
 ) -> ChildAgentConfig:
-    kwargs = provider_controller.child_api_kwargs()
+    kwargs = provider_projection.child_api_kwargs()
     return ChildAgentConfig(
         model=str(kwargs["model"]),
         api_key=str(kwargs["api_key"]),
