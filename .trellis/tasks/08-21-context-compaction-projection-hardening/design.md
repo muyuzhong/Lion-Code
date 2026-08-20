@@ -18,41 +18,69 @@ After:  Composition -> ContextRuntime -> generic CompactionRequest
 和 ContextRuntime 构造时的 `foundation.plan` 接线。门禁只绑定这次删除的 coupling，不做
 “Plan”全文禁词。
 
-## 2. Bounded compaction request
+## 2. Bounded compaction Provider input
 
-请求契约收敛为：
+请求契约收敛为已预算的 provider-only 快照：
 
 ```python
 @dataclass(frozen=True, slots=True)
 class CompactionRequest:
-    history: tuple[AgentMessage, ...]
-    objective: str | None = None
-    recent_context_hint: str = ""
+    history_projection: str
+    objective: str | None
+    recent_context_hint: str
+    input_budget_tokens: int
 ```
 
-`AgentRuntime` 继续拥有 old prefix / retained suffix 的边界切分；`ContextRuntime.summarize()`
-临时接收 suffix，按 generic message 内容解析 objective 并构造 hint，然后丢弃 suffix。
-`ProviderContextCompactor` 只 deep-copy `request.history`，追加包含 objective、hint 和固定协议的
-一条 prompt message。Request、compactor 和 Session 均不保存 retained messages。
+`AgentRuntime` 继续拥有 old prefix / retained suffix 的 canonical 边界切分；
+`ContextRuntime.summarize()` 临时接收两段消息，解析 objective、构造 hint 和 history
+projection，然后丢弃 raw messages。Request、compactor 和 Session 均不保存 message tuples。
 
-Hint 使用一次反向线性扫描构造，在预算耗尽时立即停止，只收集：
+### 2.1 Total budget and allocation
 
-- 最后一个非空 assistant 文本结论；
-- 最近失败的 `ToolResultMessage.tool_name`；
-- 最近 ToolCall 中 `file_path` / `path` 的字符串值。
-
-整段 hint 最终截断到：
+复用 `ContextPolicy.auto_compact_ratio == 0.85`：
 
 ```text
-effective_window_tokens * 5% * 4 chars/token
+compaction_input_budget = floor(effective_window_tokens * 0.85)
+objective_budget        = floor(compaction_input_budget * 0.05)
+hint_budget             = floor(compaction_input_budget * 0.05)
+history_budget          = compaction_input_budget
+                          - estimated(system + fixed prompt)
+                          - estimated(objective)
+                          - estimated(hint)
 ```
 
-实现复用仓库当前 4 chars/token 估算常量，不引入 tokenizer、配置或 reason-specific 分支。
-objective 独立传递，不在 hint 中重复。空 hint 渲染 `(none)`。
+objective 与 hint 都用现有 head/tail 字符预算语义收紧；hint 通过一次反向扫描收集最后一个非空
+assistant 结论、最近失败工具名和最近 `file_path` / `path`。空值渲染 `(none)`。
 
-这使 Provider compaction 输入从 `history + full suffix + prompt` 变成
-`history + bounded hint + prompt`。overflow 仍保留最近两个 user boundaries 并只替换 old
-prefix；Application 的 compact-once/retry-once 流程不变。
+最终 invariant 直接绑定实际 Provider 输入，而不是分别信任各 reserve：
+
+```text
+estimate_text_tokens(summary_system_prompt)
++ estimate_messages_tokens(provider_messages)
+<= request.input_budget_tokens
+```
+
+`estimate_text_tokens()` 与现有 `estimate_messages_tokens()` 共用
+`APPROXIMATE_CHARS_PER_TOKEN = 4`，不引入 tokenizer 或配置层。
+
+### 2.2 Deterministic history projection
+
+1. 按 canonical 顺序把 old prefix 渲染为带 role delimiter 的普通文本；不修改输入对象。
+2. 若全文在 `history_budget` 内，完整保留。
+3. 若超限，复用现有 `_budget_text` 的对称 head/tail 规则：保留最早背景和最新 old-history
+   结尾，中段替换为包含 omitted char count 的 marker。
+4. 把 history projection、objective、hint 和固定协议渲染成最终 UserMessage 后重新估算；若
+   JSON/message overhead 仍使总量超限，以二分方式继续缩短 history projection，直至满足
+   invariant。若 history budget 为零，使用空 history + omitted marker。
+5. 如果 system + fixed prompt 单独已超过总预算，抛现有 `RuntimeError` 且不调用 Provider。
+
+Provider compactor 在 `stream_response()` 前执行最后一次 invariant assertion，禁止任何调用方
+绕过预算。overflow 仍保留最近两个 user boundaries、只替换 old prefix；Application 的
+compact-once/retry-once 流程不变。
+
+该最小投影会省略 old history 中段，但 canonical/append-only JSONL 不被投影改写。分段或
+hierarchical compaction 需要多次 Provider 调用、失败恢复和中间摘要契约，本任务不预建；只有
+评测证明 head/tail 丢失了继续任务所需信息时再单独设计。
 
 ## 3. Structured summary validation
 
@@ -94,8 +122,11 @@ renderer 只展示总数和前三个路径，超出时追加 `- ... N more`。�
 | Condition | Result |
 | --- | --- |
 | no explicit/recent/history objective | marker only; never read Plan |
-| empty hint | render `(none)` |
-| hint exceeds budget | deterministic truncation; no raw suffix fallback |
+| empty objective/hint | render marker / `(none)` |
+| objective/hint exceeds its 5% reserve | deterministic head/tail truncation |
+| history exceeds remaining total budget | deterministic head/tail projection + omitted marker |
+| fixed prompt exceeds total budget | fail before Provider; no CompactionEntry |
+| final serialized input exceeds budget | shrink history again; never send oversized input |
 | Provider error / empty summary | existing compaction RuntimeError |
 | missing/duplicate/out-of-order headings | `InvalidCompactionSummary` |
 | validation/cancellation failure | no CompactionEntry; canonical history unchanged |

@@ -11,8 +11,12 @@
 1. **移除 Plan compaction edge，并收敛 request 输入**
    - 删除 Plan protocol/read helper、Runtime 字段和 Composition 接线。
    - 保留 explicit → recent user → history user → unavailable objective 顺序。
-   - 把 `CompactionRequest.recent_context` 替换为 bounded string hint；加入 5%
-     effective-window 预算和最小 hint 投影。
+   - 把 raw history/recent tuples 替换为 `history_projection`、bounded objective/hint 和
+     `input_budget_tokens`；总预算复用 `effective_window * 0.85`，objective/hint 各最多 5%。
+   - 复用 4 chars/token estimator 与现有 head/tail budget 语义；history 超限时保留首尾并
+     标记 omitted，中段不发送，最终按 serialized Provider input 二次收紧并断言总 invariant。
+   - 覆盖 full-fit、oversized history、零 history budget、fixed-prompt-too-large、canonical
+     immutability，以及 overflow Provider 输入小于预算/原 context。
    - 更新 compactor prompt、ContextRuntime/AgentRuntime 调用、fakes、unit/integration tests。
    - 增加 FullProfile reachable graph + exact removed coupling 架构门禁。
    - 聚焦验证后提交：`fix: 移除压缩链路的 Plan 依赖并限制近期提示`。

@@ -40,18 +40,28 @@
 - 增加架构回归门禁，证明 FullProfile 的 `ContextRuntime` 不可达 `PlanRuntime`，并绑定本次
   删除的 Plan-compaction coupling symbols。
 
-### R2. Bound recent context for compaction
+### R2. Bound the complete compaction Provider input
 
-- `CompactionRequest` 不再携带 `tuple[AgentMessage, ...]` 的 `recent_context`，改为只读、
-  有硬上限的 `recent_context_hint: str`。
-- old prefix 仍是唯一待压缩的 `history`；retained suffix 只在 request 创建前用于解析目标和
-  构造 hint，既不完整进入 Provider 请求，也不写入 `CompactionEntry`。
-- hint 只保留继续当前局面需要的有限信息：最近 assistant 结论、最近失败工具名和最近文件路径；
-  不复制完整 ToolResult、traceback、任意工具参数或整个消息 JSON。
-- hint 上限为按现有 4 chars/token 估算的 effective window 5%。threshold/manual/overflow
-  共用这一条规则，不增加第二个固定阈值、reason-specific 策略或配置。
-- overflow 回归必须证明 compactor Provider 输入不含 retained suffix 的大块原文，并在大
-  suffix fixture 下显著小于触发 overflow 的原 context。
+- 总预算为 `effective_window_tokens * 0.85`，复用现有 auto-compaction 安全比例，不增加新
+  配置。最终 Provider 输入必须满足：
+
+  `estimated(system + fixed prompt + objective + hint + history projection)
+  <= compaction_input_budget`。
+- fixed/system prompt 按实际静态文本预留；objective 与 hint 各自最多占总预算 5%；old
+  history projection 只能使用剩余预算。预算计算继续复用现有 4 chars/token estimator。
+- `CompactionRequest` 不再携带 raw `history` 或 `recent_context` message tuples，只携带
+  `history_projection: str`、bounded objective、`recent_context_hint: str` 和
+  `input_budget_tokens`，因此 request 本身就是发往 compactor 的有界只读快照。
+- retained suffix 只在 request 创建前用于解析目标和构造 hint。hint 只保留最近 assistant
+  结论、最近失败工具名和最近文件路径，不复制完整 ToolResult、traceback、任意工具参数或
+  整个消息 JSON。
+- old prefix 先按 role/source order 渲染为 provider-only 文本；超过 history 剩余预算时，
+  使用现有 head/tail budget 语义保留开头和最近结尾，并插入明确的 omitted marker。最终按
+  序列化后的 Provider messages 重新估算并收紧，直到满足总预算；canonical history 不改写。
+- 如果 fixed prompt 本身已经超过总预算，压缩在调用 Provider 前以现有 `RuntimeError` 失败，
+  不发送已知超限请求，不写 `CompactionEntry`。threshold/manual/overflow 共用同一规则。
+- overflow 回归必须证明 compactor Provider 输入满足总预算、显著小于触发 overflow 的原
+  context，并且 oversized history 不会原样进入 Provider 请求。
 
 ### R3. Enforce the nine-section summary contract
 
@@ -85,10 +95,13 @@
 - [ ] `ContextRuntime`、Context Kernel 和 compaction request 不持有或读取 Plan；FullProfile
       reachable-object-graph 与精确 coupling gate 均通过。
 - [ ] explicit → recent user → history user → unavailable 的 objective 顺序有直接测试。
-- [ ] `CompactionRequest.recent_context_hint` 是字符串且满足 effective window 5% 的硬上限；
-      Provider 请求不包含 retained suffix 的完整消息或大块 ToolResult。
-- [ ] overflow 集成测试证明 compaction 输入显著小于构造的 overflowing context，成功后仍只
-      替换 old prefix 并保留最近两轮。
+- [ ] 每个 compaction Provider 调用均满足
+      `estimated(total input) <= effective_window_tokens * 0.85`；objective/hint 各不超过
+      总预算 5%，Provider 请求不包含 raw history/suffix message tuple 或大块 ToolResult。
+- [ ] oversized history 投影确定性保留 head/tail 与 omitted marker，final serialized input
+      仍在预算内，输入 canonical history 逐条不变。
+- [ ] overflow 集成测试证明 compaction 输入满足总预算并显著小于构造的 overflowing
+      context，成功后仍只替换 old prefix 并保留最近两轮。
 - [ ] 九个 heading 缺失、重复或乱序均抛 `InvalidCompactionSummary`；合法摘要仍可写入并
       replay；非法摘要不新增 `CompactionEntry` 且原 history 不变。
 - [ ] 长工具历史生成的 `ContextView` 与 AgentState 输出满足 3/3/3 上限，同时保留准确的
@@ -104,5 +117,6 @@
 - 现在不设计或注册 `CompactionContributor`；只有至少两个 Capability 出现真实、已批准的
   compaction contribution 需求时再规划该通用 SPI。
 - 不解析每个 summary section 的正文或 Coding Evidence，不增加 schema/JSON 输出。
-- 不新增可配置预算、Provider-specific tokenizer、第二套 overflow compactor 或多阶段摘要。
+- 不新增可配置预算、Provider-specific tokenizer、第二套 overflow compactor、分段调用或
+  多阶段摘要；只有评测证明 head/tail 投影丢失了必要信息时再单独规划 hierarchical compaction。
 - 不改变状态栏 UI 风格、Git 命令策略、ContextLayer SPI 或 CapabilityRegistry 所有权。
