@@ -22,16 +22,16 @@ The package is split into physical boundaries visible in the directory tree:
   (SessionIdentityState), and `provider.py` (ProviderController /
   ProviderState).  The Runtime may use Kernel, Context and Tooling, but never
   Composition, Application or TUI.
-- **Capability** — `capabilities/` plus the runtime-support owners
-  `plan_runtime.py`, `skill_runtime.py`, `subagent_factory.py`, and
-  `subagent_runtime.py`.  Capabilities never import the Agent engine,
-  Application or TUI.
+- **Capability** — `capabilities/`, including the cohesive `plan/`, `skill/`,
+  and `subagent/` feature packages. Capabilities never import the Agent
+  engine, Application or TUI.
 - **Composition** — `composition/` and `meta_agent.py`; the Composition Root
   knows the Agent Runtime and wires the graph.
 - **Supervisor** — `supervisor.py`, consuming only the public Agent event /
   result / session contracts.
-- **Interfaces** — package root public API, `__main__.py`, `application/`,
-  `tui/`, and the internal `agent.py` product host.
+- **Interfaces** — package root public API, `__main__.py`, `adapters/`,
+  `application/`, and `tui/`. Product-specific frontend delegation lives in
+  `CodingSessionBackendAdapter`; `MetaAgent` remains feature-neutral.
 
 `AgentHarness` at `core/harness.py` is a Kernel stateful-loop wrapper; it is not
 the Agent Runtime.
@@ -67,19 +67,18 @@ profile, config, or bindings, and never returns a flat bag of everything:
 AgentComposition
 ├── runtime         agent / conversation / session / context /
 │                   provider_controller / usage / budget
-├── capabilities    registry / runtime / plan / subagent_factory /
-│                   subagent_executor / skill_runtime
+├── capabilities    registry / runtime / plan / skill / subagent
 ├── tooling         registry / runtime / context / permission_policy /
 │                   prompt_composer
 └── interaction     notices / confirmation / status_sink
 ```
 
 `build_profile_agent(profile, config=config, bindings=bindings)`
-wraps every selected graph in the same feature-neutral `MetaAgent`. The
-internal `Agent` product host subclasses that facade only to retain
-Application/CLI-specific operations; it is not part of the package-root public
-API. No facade retains a builder, CapabilityRegistry, project-Memory
-repository, or legacy command delegate.
+wraps every selected graph in the same feature-neutral `MetaAgent`.
+`CodingSessionBackendAdapter` adds FullProfile product operations through
+composition and delegation; it is not a `MetaAgent` subtype. No facade retains
+a builder, CapabilityRegistry, project-Memory repository, or legacy command
+delegate.
 
 Profiles select the graph:
 
@@ -126,9 +125,9 @@ commands through narrow ports:
 
 Runtime must not query `ProviderController` for the current model, provider,
 or context limits: live model/provider come from ConversationRuntime and
-limits from ContextRuntime. `DeferredProviderRuntimePort`,
-`DeferredModelContextControl`, `DeferredBackgroundScheduler`, and
-`SessionRecorderConfigurationRecorder` are deleted and must not return.
+limits from ContextRuntime. Provider, context, scheduler, and configuration
+recording ownership is wired directly during composition; deferred binding
+ports are not part of the runtime graph.
 
 Observers and frontends must not cache writable mirrors or access Core/Harness
 containers directly.
@@ -171,6 +170,106 @@ unknown-command behavior.
 
 The TUI imports application contracts only. The REPL may render terminal output
 but must not own session persistence or a second command dispatcher.
+
+## Product adapter contract (PR4)
+
+### 1. Scope / Trigger
+
+This contract applies when a product frontend needs FullProfile operations that
+are not part of the generic Agent facade. The frontend boundary is
+`CodingSessionBackend`; product behavior stays in
+`CodingSessionBackendAdapter`, while generic conversation and runtime behavior
+stays in `MetaAgent`.
+
+### 2. Signatures
+
+The public construction seams are:
+
+```python
+build_profile_agent(
+    profile: Profile,
+    *,
+    config: AgentConfig,
+    bindings: RuntimeBindings,
+) -> MetaAgent
+
+build_full_coding_backend(
+    *,
+    permission_mode: PermissionMode = "default",
+    model: str = "claude-opus-4-6",
+    session_repository: SessionRepository | None = None,
+    tool_registry: ToolRegistry | None = None,
+    ...,
+) -> CodingSessionBackendAdapter
+```
+
+`CodingSessionBackendAdapter` structurally implements `CodingSessionBackend`
+and receives a `MetaAgent`, `PlanRuntime`, interaction controllers, and the
+session repository it delegates to.
+
+### 3. Contracts
+
+- `build_profile_agent` returns the same `MetaAgent` facade shape for Minimal,
+  Coding, and Full profiles.
+- `build_full_coding_backend` constructs `FullProfile → AgentComposition →
+  MetaAgent → CodingSessionBackendAdapter`.
+- Generic methods (`prompt`, `continue_`, `steer`, `follow_up`, cancellation,
+  compaction, provider views, and usage) delegate to `MetaAgent`.
+- Product methods (session enumeration/legacy migration, Plan approval,
+  terminal output, notices, confirmation, and cost presentation) are owned by
+  the adapter and its injected controllers.
+- `MetaAgent` must not expose product-specific methods or import adapters.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Minimal/Coding/Full profile construction | Exact `MetaAgent` result with the same Runtime owner tuple |
+| Full product construction | `CodingSessionBackendAdapter` satisfying `CodingSessionBackend` |
+| Adapter used as a `MetaAgent` subtype | Forbidden by MRO/architecture tests |
+| Product method added to `MetaAgent` | Forbidden by the MetaAgent surface guard |
+| Old `lion_code.agent` or root feature module imported | Forbidden by residual and architecture guards |
+
+### 5. Good / Base / Bad Cases
+
+- Good: use `build_profile_agent` for generic runtime consumers and
+  `build_full_coding_backend` for the application/TUI product path.
+- Base: pass injected repository, registry, and confirmation callbacks through
+  the factory so the adapter delegates to the same composition graph.
+- Bad: subclass `MetaAgent`, copy product methods into it, or add a compatibility
+  alias for a removed root module.
+
+### 6. Tests Required
+
+- `tests/architecture/test_product_adapter.py`: public `Agent` removal, adapter
+  protocol/MRO, generic SPI isolation, feature tree, and profile runtime shape.
+- `tests/adapters/test_coding_session_backend.py`: delegation, legacy session
+  migration, callbacks, terminal output, and cost projection.
+- `tests/integration/test_meta_agent.py`: exact feature-neutral MetaAgent
+  surface, including generic queue/compaction/provider projections.
+- `tests/architecture/_boundaries.py` and import-linter: adapter direction and
+  Supervisor isolation.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+class CodingSessionBackendAdapter(MetaAgent):
+    # Product methods become part of every generic Agent facade.
+    ...
+```
+
+Correct:
+
+```python
+class CodingSessionBackendAdapter:
+    def __init__(self, *, agent: MetaAgent, ...):
+        self._agent = agent
+```
+
+Composition is the extension seam: generic profiles remain interchangeable and
+the product adapter can be removed without changing Runtime ownership.
 
 ## Retained runtime seams
 

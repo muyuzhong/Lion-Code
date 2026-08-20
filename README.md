@@ -362,14 +362,16 @@ Lion-Code/
 │   ├── __init__.py             # 最终公共 API
 │   ├── __main__.py             # CLI、TUI 与 REPL 进程入口
 │   ├── meta_agent.py           # feature-neutral 公共 Agent facade
-│   ├── agent.py                # Application/CLI 使用的内部 Full 产品宿主
+│   ├── adapters/               # Product Adapter 与前端端口组合实现
 │   ├── composition/            # Profile 与一次性 Composition Root
 │   ├── runtime/                # Agent Runtime 物理边界（Agent 生命周期协调）
-│   │   ├── agent.py            # AgentRuntimeCoordinator / LionAgentRuntime
+│   │   ├── agent.py            # AgentRuntime
+│   │   ├── conversation.py     # ConversationRuntime / Harness 与活动消息
+│   │   ├── context.py          # ContextRuntime / compaction policy
 │   │   ├── execution.py        # ExecutionControl（取消命令）
-│   │   ├── session_lifecycle.py# SessionLifecycle（clear/restore/compact/close）
+│   │   ├── session.py          # SessionRuntime（会话与 JSONL recorder）
 │   │   ├── session_identity.py # SessionIdentityState / SessionView
-│   │   └── provider.py         # ProviderManager / ProviderState
+│   │   └── provider.py         # ProviderController / ProviderState
 │   ├── core/                   # Agent Kernel、Harness 与规范协议
 │   │   ├── loop.py             # 异步生成器：整个工具使用周期
 │   │   ├── harness.py          # 配置、事件总线、消息队列
@@ -377,7 +379,10 @@ Lion-Code/
 │   │   ├── tools.py            # 工具定义、执行协议、并行批处理
 │   │   ├── provider.py         # ModelProvider 抽象
 │   │   └── provider_events.py  # 流式事件（delta、done、error）
-│   ├── capabilities/           # CapabilitySpec/Registry/Runtime 与内置适配
+│   ├── capabilities/           # Generic SPI 与内聚的内置 Feature package
+│   │   ├── plan/               # Plan capability/runtime
+│   │   ├── skill/              # Skill capability/runtime/discovery
+│   │   └── subagent/           # SubAgent capability/factory/runtime/types
 │   ├── providers/              # 纯 httpx HTTP Provider（零 SDK 依赖）
 │   │   ├── http.py             # 共享 HTTP 客户端（重试/流式）
 │   │   ├── anthropic.py        # Anthropic Messages API 适配
@@ -410,12 +415,7 @@ Lion-Code/
 │   │   ├── themes.py           # 内置 + 自定义主题加载
 │   │   └── autocomplete.py     # 路径/命令/Skill 补全引擎
 │   ├── hooks.py                # PreToolUse 命令 Hook (~23 KB)
-│   ├── skills.py               # Skill 发现与解析
 │   ├── session_runtime/        # JSONL 记录、旧 JSON 迁移、Repository
-│   ├── plan_runtime.py         # Plan Capability 的状态所有者
-│   ├── skill_runtime.py        # Skill Capability 的运行时
-│   ├── subagent_factory.py     # Profile-backed child Agent 工厂
-│   ├── subagent_runtime.py     # SubAgent Capability 的执行器
 │   ├── supervisor.py           # Agent 外部 goal/retry/scheduler/checkpoint 平面
 │   ├── prompt.py               # System Prompt 拼装
 │   └── config.py               # API 配置
@@ -578,4 +578,3 @@ python benchmarks/context_management/formal_benchmark.py
 - [ ] **演示素材**——终端 GIF、代表性任务记录和结果截图
 - [ ] **CI 管线**——跨平台（Windows、Linux）、多 Python 版本 CI，展示测试状态徽章
 - [ ] **评测扩展**——更多任务多样性和对抗性测试用例
-
