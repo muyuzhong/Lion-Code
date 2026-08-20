@@ -135,7 +135,9 @@ class ProviderContextCompactor:
 
     async def summarize(self, request: CompactionRequest) -> str:
         bounded_request = _fit_history_to_budget(request, self._system_prompt)
-        projected = [UserMessage(content=_render_compaction_prompt(bounded_request))]
+        projected: list[AgentMessage] = [
+            UserMessage(content=_render_compaction_prompt(bounded_request))
+        ]
         if (
             estimate_compaction_input_tokens(
                 bounded_request,
