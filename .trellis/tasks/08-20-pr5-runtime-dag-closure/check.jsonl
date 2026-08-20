@@ -1,4 +1,3 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
 {"file": ".trellis/spec/backend/four-layer-ownership.md", "reason": "检查 Runtime DAG、ProviderController owner、Composition root 与 Adapter 边界。"}
 {"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "检查 reachable graph、Provider projection、Session/Capability 路径和 product bootstrap。"}
 {"file": ".trellis/spec/backend/directory-structure.md", "reason": "检查新 bootstrap 文件归属和旧 adapter factory 残留。"}

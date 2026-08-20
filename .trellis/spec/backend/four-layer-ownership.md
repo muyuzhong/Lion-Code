@@ -26,8 +26,14 @@ retired provider close), `SessionRuntime` (session identity, repository,
 recorder lifecycle, configuration-entry port), `ContextRuntime` (context
 manager/compactor/limits cache, compaction state), `ExecutionControl`,
 `SessionIdentityState`, and `ProviderController`/`ProviderState`. AgentRuntime
-and ProviderController never reference each other in either direction; the
-object graph is constructed in one topological pass with no deferred binding.
+and ProviderController never reference each other in either direction. The
+Composition Root creates `ProviderConfigurationProjection` before the Runtime
+graph so provider-read callbacks close over a controller-free projection;
+ProviderController synchronizes that projection after successful state
+transitions while retaining exclusive provider-configuration write ownership.
+The object graph is constructed in one topological pass with no deferred
+binding. Full product bootstrap also belongs to `composition/`; adapters only
+implement product-facing delegation.
 
 ## Current composition
 

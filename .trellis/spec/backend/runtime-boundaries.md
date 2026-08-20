@@ -53,12 +53,20 @@ The composition inputs are three orthogonal axes:
 one-shot Composition Root and the only place where the three axes meet. It
 creates state owners, Provider and permission ports, tools, ContextManager,
 selected capabilities, the four Runtime owners, and the ProviderController —
-in one topologically sorted pass with no deferred post-construction binding:
+in one topologically sorted pass with no deferred post-construction binding.
+Before Runtime construction it creates a `ProviderConfigurationProjection`,
+which exposes only provider-read data to Runtime and Capability closures:
 
 ```text
-foundation → ContextRuntime → ConversationRuntime → SessionRuntime
-          → AgentRuntime → ProviderController
+foundation → ProviderConfigurationProjection → ContextRuntime
+          → ConversationRuntime → SessionRuntime → AgentRuntime
+          → ProviderController
 ```
+
+`ProviderController` remains the sole provider-configuration write owner. After
+each successful state transition it synchronizes the projection's reference to
+the same authoritative `ProviderState`; the projection never stores a
+controller reference and Runtime never reaches back to the controller.
 
 `AgentComposition` is the one-shot layered graph; it does not retain the
 profile, config, or bindings, and never returns a flat bag of everything:
@@ -104,12 +112,17 @@ commands through narrow ports:
 - `SessionIdentityState` owns the session id and start time.
 - `ExecutionControl` owns cancellation transitions.
 - `PermissionController` owns permission mode and confirmations.
-- `ProviderController` owns provider configuration and thinking state; it
+- `ProviderController` owns provider configuration and thinking state; its
   commands ConversationRuntime (`replace_provider` / `set_model` /
   `retire_provider`), ContextRuntime (`replace_context_compactor` /
   `invalidate_model_limit_cache`), and SessionRuntime
   (`record_configuration_change`). It is never referenced by AgentRuntime in
   either direction.
+- `ProviderConfigurationProjection` is the read-only provider boundary for
+  Runtime and Capability callbacks. It exposes API readiness and child-agent
+  provider kwargs, points at the authoritative `ProviderState`, and is
+  synchronized only after a successful ProviderController transition. It owns
+  no provider mutation or persistence state.
 - `UsageLedger` and `BudgetPolicy` own usage and budget decisions.
 - `PlanRuntime` owns Plan state.
 - `SessionRuntime` owns session lifecycle and the recorder; `SessionRepository`
@@ -203,6 +216,13 @@ build_full_coding_backend(
 ) -> CodingSessionBackendAdapter
 ```
 
+The Full product bootstrap lives in
+`lion_code/composition/full_product.py`. This is the intentional product-facing
+Composition boundary that assembles `MetaAgent` and the Adapter; the core
+Composition modules remain independent of the facade. The Adapter module only
+defines `CodingSessionBackendAdapter` and does not become a second Composition
+Root.
+
 `CodingSessionBackendAdapter` structurally implements `CodingSessionBackend`
 and receives a `MetaAgent`, `PlanRuntime`, interaction controllers, and the
 session repository it delegates to.
@@ -211,8 +231,9 @@ session repository it delegates to.
 
 - `build_profile_agent` returns the same `MetaAgent` facade shape for Minimal,
   Coding, and Full profiles.
-- `build_full_coding_backend` constructs `FullProfile → AgentComposition →
-  MetaAgent → CodingSessionBackendAdapter`.
+- `build_full_coding_backend` in `composition/full_product.py` constructs
+  `FullProfile → AgentComposition → MetaAgent → CodingSessionBackendAdapter`
+  by reusing `build_agent_composition`.
 - Generic methods (`prompt`, `continue_`, `steer`, `follow_up`, cancellation,
   compaction, provider views, and usage) delegate to `MetaAgent`.
 - Product methods (session enumeration/legacy migration, Plan approval,
@@ -233,7 +254,8 @@ session repository it delegates to.
 ### 5. Good / Base / Bad Cases
 
 - Good: use `build_profile_agent` for generic runtime consumers and
-  `build_full_coding_backend` for the application/TUI product path.
+  `composition.full_product.build_full_coding_backend` for the application/TUI
+  product path.
 - Base: pass injected repository, registry, and confirmation callbacks through
   the factory so the adapter delegates to the same composition graph.
 - Bad: subclass `MetaAgent`, copy product methods into it, or add a compatibility

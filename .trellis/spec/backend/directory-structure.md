@@ -13,7 +13,8 @@ lion_code/
 ├── __main__.py          # CLI / REPL process boundary
 ├── meta_agent.py        # Feature-neutral public Agent facade
 ├── adapters/             # Product adapters over feature-neutral facades
-├── composition/         # Profiles and the one-shot object graph root
+├── composition/         # Profiles, object graph root, and Full product bootstrap
+│   └── full_product.py  # Full product bootstrap over build_agent_composition
 ├── core/                # Canonical messages, events, loop and generic Harness
 ├── runtime/             # Agent Runtime: single-session lifecycle coordination
 │   ├── agent.py         # AgentRuntime (operation orchestration only)
@@ -50,12 +51,14 @@ to provide a shorter import path.
   `lion_code/application/`.  `lion_code/application/session.py` turns Agent
   events into `LionSessionEvent` values; `application/commands.py` owns slash
   command parsing and dispatch.
-- Put Agent object-graph construction in `lion_code/composition/`. The builder
-  owns concrete runtime wiring and Profile-selected capability registration;
-  `meta_agent.py` is the feature-neutral public facade. Product-specific
-  frontend delegation belongs in `adapters/`. The composition result is
-  explicit and one-shot: no builder, container, or service locator is retained
-  by runtime or domain modules.
+- Put Agent object-graph construction and the Full product bootstrap in
+  `lion_code/composition/`. The builder owns concrete runtime wiring and
+  Profile-selected capability registration; `full_product.py` owns the
+  application/TUI product factory and reuses that builder. `meta_agent.py` is
+  the feature-neutral public facade. Product-specific frontend delegation
+  belongs in `adapters/`, whose modules implement adapters only. The composition
+  result is explicit and one-shot: no builder, container, or service locator is
+  retained by runtime or domain modules.
 - Put built-in feature implementations in their cohesive package under
   `lion_code/capabilities/`; generic SPI files (`types.py`, `registry.py`, and
   `runtime.py`) must not import a concrete feature.
