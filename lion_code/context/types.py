@@ -160,44 +160,9 @@ class ContextView:
         else:
             compaction_status = compaction or "not required"
 
-        tool_totals: dict[str, int] = {}
-        trace_totals: dict[str, tuple[ToolTrace, int]] = {}
-        recent_traces: list[ToolTrace] = []
-        for message in message_list:
-            if not isinstance(message, AssistantMessage):
-                continue
-            for call in message.tool_calls:
-                trace = ToolTrace(
-                    tool_name=call.name,
-                    argument_summary=_summarize_arguments(call.arguments),
-                )
-                tool_totals[call.name] = tool_totals.get(call.name, 0) + 1
-                previous = trace_totals.get(trace.summary)
-                trace_totals[trace.summary] = (
-                    trace,
-                    1 if previous is None else previous[1] + 1,
-                )
-                recent_traces.append(trace)
-                if len(recent_traces) > _TOOL_ACTIVITY_LIMIT:
-                    del recent_traces[0]
-
-        ranked_tools = sorted(tool_totals.items(), key=lambda item: -item[1])
-        bounded_tool_totals = tuple(
-            ToolTrace(tool_name=name, argument_summary="", count=count)
-            for name, count in ranked_tools[:_TOOL_ACTIVITY_LIMIT]
+        tool_totals, recent_traces, repeated_traces, other_tool_calls = (
+            _project_tool_activity(message_list)
         )
-        repeated_traces = tuple(
-            ToolTrace(
-                tool_name=trace.tool_name,
-                argument_summary=trace.argument_summary,
-                count=count,
-            )
-            for trace, count in sorted(
-                trace_totals.values(),
-                key=lambda item: -item[1],
-            )
-            if count > 1
-        )[:_TOOL_ACTIVITY_LIMIT]
         failures = tuple(
             _summarize_failure(message)
             for message in message_list
@@ -210,12 +175,10 @@ class ContextView:
                 limit,
                 compaction_status,
             ),
-            tool_totals=bounded_tool_totals,
-            recent_tool_calls=tuple(recent_traces),
+            tool_totals=tool_totals,
+            recent_tool_calls=recent_traces,
             repeated_tool_calls=repeated_traces,
-            other_tool_calls=sum(
-                count for _name, count in ranked_tools[_TOOL_ACTIVITY_LIMIT:]
-            ),
+            other_tool_calls=other_tool_calls,
             recent_failures=failures,
         )
 
@@ -228,6 +191,63 @@ class PreparedContext:
     actions: tuple[ContextAction, ...] = ()
     estimated_tokens: int = 0
     compaction_required: bool = False
+
+
+def _project_tool_activity(
+    messages: tuple[AgentMessage, ...],
+) -> tuple[
+    tuple[ToolTrace, ...],
+    tuple[ToolTrace, ...],
+    tuple[ToolTrace, ...],
+    int,
+]:
+    tool_totals: dict[str, int] = {}
+    trace_totals: dict[str, tuple[ToolTrace, int]] = {}
+    recent_traces: list[ToolTrace] = []
+    for message in messages:
+        if not isinstance(message, AssistantMessage):
+            continue
+        for call in message.tool_calls:
+            trace = ToolTrace(
+                tool_name=call.name,
+                argument_summary=_summarize_arguments(call.arguments),
+            )
+            tool_totals[call.name] = tool_totals.get(call.name, 0) + 1
+            previous = trace_totals.get(trace.summary)
+            trace_totals[trace.summary] = (
+                trace,
+                1 if previous is None else previous[1] + 1,
+            )
+            recent_traces.append(trace)
+            if len(recent_traces) > _TOOL_ACTIVITY_LIMIT:
+                del recent_traces[0]
+
+    ranked_tools = sorted(tool_totals.items(), key=lambda item: -item[1])
+    bounded_tool_totals = tuple(
+        ToolTrace(tool_name=name, argument_summary="", count=count)
+        for name, count in ranked_tools[:_TOOL_ACTIVITY_LIMIT]
+    )
+    repeated_traces = tuple(
+        ToolTrace(
+            tool_name=trace.tool_name,
+            argument_summary=trace.argument_summary,
+            count=count,
+        )
+        for trace, count in sorted(
+            trace_totals.values(),
+            key=lambda item: -item[1],
+        )
+        if count > 1
+    )[:_TOOL_ACTIVITY_LIMIT]
+    other_tool_calls = sum(
+        count for _name, count in ranked_tools[_TOOL_ACTIVITY_LIMIT:]
+    )
+    return (
+        bounded_tool_totals,
+        tuple(recent_traces),
+        repeated_traces,
+        other_tool_calls,
+    )
 
 
 def _context_utilization(
