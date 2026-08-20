@@ -8,14 +8,12 @@ import os
 import signal
 import sys
 
-from .adapters.coding_session_backend import (
-    CodingSessionBackendAdapter,
-    build_full_coding_backend,
-)
+from .adapters.coding_session_backend import CodingSessionBackendAdapter
 from .application.commands import CommandResult
 from .application.session import LionCodingSession
 from .capabilities.skill.discovery import discover_skills
 from .config import load_api_config
+from .composition.full_product import build_full_coding_backend
 from .permission_state import PermissionMode
 from .ui import (
     print_error,

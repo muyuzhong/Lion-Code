@@ -7,17 +7,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from lion_code.adapters.coding_session_backend import (
-    CodingSessionBackendAdapter,
-    build_full_coding_backend,
-)
+from lion_code.adapters.coding_session_backend import CodingSessionBackendAdapter
 from lion_code.application.ports import CodingSessionBackend
+from lion_code.composition.full_product import build_full_coding_backend
 from lion_code.meta_agent import MetaAgent
 from lion_code.session_runtime import SessionRepository
 
 
 def _backend(tmp_path: Path, **kwargs) -> CodingSessionBackendAdapter:
-    with patch("lion_code.composition.agent_builder.create_provider") as create:
+    with patch("lion_code.composition.full_product.create_provider") as create:
         create.return_value = _FakeProvider()
         backend = build_full_coding_backend(
             api_key="test-key",
@@ -35,7 +33,7 @@ class _FakeProvider:
 class TestComposition(unittest.TestCase):
     def test_adapter_implements_protocol_structurally(self):
         with patch(
-            "lion_code.composition.agent_builder.create_provider",
+            "lion_code.composition.full_product.create_provider",
             return_value=_FakeProvider(),
         ):
             backend = build_full_coding_backend(

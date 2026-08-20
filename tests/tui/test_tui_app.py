@@ -22,8 +22,8 @@ from integration.test_application_coding_session import (
 )
 from textual.widgets import ListView
 
-from lion_code.adapters.coding_session_backend import build_full_coding_backend
 from lion_code.application.session import LionCodingSession
+from lion_code.composition.full_product import build_full_coding_backend
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tui.app import (
@@ -181,7 +181,7 @@ def app_factory():
     def factory(events: list, registry: ToolRegistry | None = None) -> LionTuiApp:
         fake = FakeProvider(events)
         with patch(
-            "lion_code.adapters.coding_session_backend.create_provider",
+            "lion_code.composition.full_product.create_provider",
             return_value=fake,
         ):
             agent = build_full_coding_backend(
