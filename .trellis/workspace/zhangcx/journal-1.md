@@ -1473,3 +1473,31 @@ Updated the current logging spec to reference CodingSessionBackendAdapter. Resid
 ### Status
 
 [OK] **Completed**
+
+
+## Session 47: 上下文压缩与状态投影加固
+
+**Date**: 2026-08-21
+**Task**: 上下文压缩与状态投影加固
+**Branch**: `muyuzhong/context-compaction-hardening`
+
+### Summary
+
+移除 Context Runtime 的 Plan 压缩依赖，限制 compactor 总输入与动态字段，校验九段摘要，并将 Agent/Git 状态投影限制为常量规模。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0e47232` | (see git log) |
+| `6e74beb` | (see git log) |
+| `9e861cf` | (see git log) |
+| `023901e` | (see git log) |
+| `0ea421c` | (see git log) |
+| `103e7f7` | (see git log) |
+| `da9281d` | (see git log) |
+| `5642194` | (see git log) |
+
+### Status
+
+[OK] **Completed**

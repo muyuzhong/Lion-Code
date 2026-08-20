@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 46
-- **Last Active**: 2026-08-20
+- **Total Sessions**: 47
+- **Last Active**: 2026-08-21
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1475 | Active |
+| `journal-1.md` | ~1503 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 47 | 2026-08-21 | 上下文压缩与状态投影加固 | `0e47232`, `6e74beb`, `9e861cf`, `023901e`, `0ea421c`, `103e7f7`, `da9281d`, `5642194` | `muyuzhong/context-compaction-hardening` |
 | 46 | 2026-08-20 | 完成 PR5 Runtime DAG Closure | `b88d470`, `c62154f`, `a478fe8`, `ef22962`, `acda907`, `78a8b8c`, `6566803`, `3f44ef1`, `893b782` | `muyuzhong/pr4-product-adapter-feature-cohesion` |
 | 45 | 2026-08-20 | PR4 residual scan cleanup | `c190daf` | `master` |
 | 44 | 2026-08-20 | PR4 Product Adapter complete | `2bbf293`, `6904c3a`, `dfe8602` | `master` |
