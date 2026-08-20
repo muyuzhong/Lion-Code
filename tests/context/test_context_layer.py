@@ -30,12 +30,17 @@ from lion_code.core.session import JsonlSessionStorage
 from lion_code.session_runtime import SessionRecorder
 
 
-def _call(index: int, *, path: str = "a.py") -> AssistantMessage:
+def _call(
+    index: int,
+    *,
+    path: str = "a.py",
+    name: str = "read_file",
+) -> AssistantMessage:
     return AssistantMessage(
         content=[
             ToolCall(
                 id=f"call-{index}",
-                name="read_file",
+                name=name,
                 arguments={"file_path": path},
             )
         ],
@@ -43,7 +48,7 @@ def _call(index: int, *, path: str = "a.py") -> AssistantMessage:
     )
 
 
-def test_context_view_projects_tool_trace_and_recent_failures() -> None:
+def test_context_view_projects_bounded_activity_and_recent_failures() -> None:
     arguments = {"file_path": "a.py"}
     messages = [
         AssistantMessage(
@@ -96,14 +101,21 @@ def test_context_view_projects_tool_trace_and_recent_failures() -> None:
     assert view.context_utilization.limit_tokens == 1_000
     assert view.context_utilization.percentage == 25.0
     assert view.context_utilization.compaction == "required"
-    assert [trace.summary for trace in view.tool_trace] == [
+    assert [(trace.name, trace.count) for trace in view.tool_totals] == [
+        ("read_file", 1),
+        ("run_shell", 1),
+    ]
+    assert [trace.summary for trace in view.recent_tool_calls] == [
         "read_file(path=a.py)",
         "run_shell(command=pytest)",
     ]
+    assert view.repeated_tool_calls == ()
+    assert view.other_tool_calls == 0
+    assert not hasattr(view, "tool_trace")
     assert view.recent_failures == ("run_shell: pytest failed, exit=1",)
 
     arguments["file_path"] = "changed.py"
-    assert view.tool_trace[0].summary == "read_file(path=a.py)"
+    assert view.recent_tool_calls[0].summary == "read_file(path=a.py)"
     with pytest.raises(FrozenInstanceError):
         view.current_time = "changed"  # type: ignore[misc]
 
@@ -131,6 +143,35 @@ def test_context_view_keeps_only_last_three_failure_lines() -> None:
         "run_shell: failure-3",
     )
     assert all("Traceback" not in failure for failure in view.recent_failures)
+
+
+def test_context_view_bounds_tool_totals_recent_and_repeated_activity() -> None:
+    messages = [
+        *[_call(index, path="a.py") for index in range(4)],
+        *[_call(index + 4, path="b.py") for index in range(3)],
+        *[_call(index + 7, path="c.py", name="run_shell") for index in range(2)],
+        _call(9, path="d.py", name="grep_search"),
+        _call(10, path="e.py", name="write_file"),
+    ]
+
+    view = ContextView.from_messages(messages, current_time="now")
+
+    assert [(trace.name, trace.count) for trace in view.tool_totals] == [
+        ("read_file", 7),
+        ("run_shell", 2),
+        ("grep_search", 1),
+    ]
+    assert view.other_tool_calls == 1
+    assert [trace.summary for trace in view.recent_tool_calls] == [
+        "run_shell(path=c.py)",
+        "grep_search(path=d.py)",
+        "write_file(path=e.py)",
+    ]
+    assert [(trace.summary, trace.count) for trace in view.repeated_tool_calls] == [
+        ("read_file(path=a.py)", 4),
+        ("read_file(path=b.py)", 3),
+        ("run_shell(path=c.py)", 2),
+    ]
 
 
 class _Layer:
@@ -192,7 +233,9 @@ def test_agent_state_groups_repeated_tool_activity() -> None:
 
     assert "Time: now" in rendered
     assert "Context: 500 / 10k tokens (5.0%)" in rendered
+    assert "read_file: 4 calls" in rendered
     assert "read_file(path=a.py) ×4" in rendered
+    assert "Recent activity:" in rendered
     assert "Recent failures:" in rendered
 
 
@@ -206,9 +249,26 @@ def test_git_status_layer_reads_workspace_on_every_render() -> None:
         second = GitStatusLayer().render(view)
 
     assert "Branch: main" in first
+    assert "Dirty files: 1" in first
     assert "- a.py" in first
     assert "- b.py" in second
     assert git_output.call_count == 4
+
+
+def test_git_status_layer_bounds_dirty_file_list() -> None:
+    view = ContextView.from_messages([], current_time="now")
+    with patch(
+        "lion_code.capabilities.git_status.capability._git_output",
+        side_effect=["main", "\n".join(f" M {name}.py" for name in "abcde")],
+    ):
+        rendered = GitStatusLayer().render(view)
+
+    assert "Dirty files: 5" in rendered
+    assert "- a.py" in rendered
+    assert "- b.py" in rendered
+    assert "- c.py" in rendered
+    assert "- ... 2 more" in rendered
+    assert "- d.py" not in rendered
 
 
 class _RecordingProvider:

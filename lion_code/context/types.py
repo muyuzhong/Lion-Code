@@ -25,6 +25,7 @@ CompactionStatus = Literal["not required", "required"]
 
 MAX_TOOL_ARGUMENT_SUMMARY_CHARS = 240
 MAX_FAILURE_SUMMARY_CHARS = 240
+_TOOL_ACTIVITY_LIMIT = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,10 +71,11 @@ class ContextUtilization:
 
 @dataclass(frozen=True, slots=True)
 class ToolTrace:
-    """不可变的工具调用名称与有界参数投影。"""
+    """不可变的工具调用名称、参数投影与聚合次数。"""
 
     tool_name: str
     argument_summary: str
+    count: int = 1
 
     @property
     def name(self) -> str:
@@ -103,17 +105,21 @@ class ContextView:
 
     current_time: str
     context_utilization: ContextUtilization
-    tool_trace: tuple[ToolTrace, ...] = ()
+    tool_totals: tuple[ToolTrace, ...] = ()
+    recent_tool_calls: tuple[ToolTrace, ...] = ()
+    repeated_tool_calls: tuple[ToolTrace, ...] = ()
+    other_tool_calls: int = 0
     recent_failures: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "tool_trace", tuple(self.tool_trace))
+        object.__setattr__(self, "tool_totals", tuple(self.tool_totals))
+        object.__setattr__(self, "recent_tool_calls", tuple(self.recent_tool_calls))
+        object.__setattr__(
+            self,
+            "repeated_tool_calls",
+            tuple(self.repeated_tool_calls),
+        )
         object.__setattr__(self, "recent_failures", tuple(self.recent_failures))
-
-    @property
-    def tool_traces(self) -> tuple[ToolTrace, ...]:
-        """返回适合按序处理的工具轨迹复数形式。"""
-        return self.tool_trace
 
     @classmethod
     def from_messages(
@@ -154,15 +160,44 @@ class ContextView:
         else:
             compaction_status = compaction or "not required"
 
-        traces = tuple(
-            ToolTrace(
-                tool_name=call.name,
-                argument_summary=_summarize_arguments(call.arguments),
-            )
-            for message in message_list
-            if isinstance(message, AssistantMessage)
-            for call in message.tool_calls
+        tool_totals: dict[str, int] = {}
+        trace_totals: dict[str, tuple[ToolTrace, int]] = {}
+        recent_traces: list[ToolTrace] = []
+        for message in message_list:
+            if not isinstance(message, AssistantMessage):
+                continue
+            for call in message.tool_calls:
+                trace = ToolTrace(
+                    tool_name=call.name,
+                    argument_summary=_summarize_arguments(call.arguments),
+                )
+                tool_totals[call.name] = tool_totals.get(call.name, 0) + 1
+                previous = trace_totals.get(trace.summary)
+                trace_totals[trace.summary] = (
+                    trace,
+                    1 if previous is None else previous[1] + 1,
+                )
+                recent_traces.append(trace)
+                if len(recent_traces) > _TOOL_ACTIVITY_LIMIT:
+                    del recent_traces[0]
+
+        ranked_tools = sorted(tool_totals.items(), key=lambda item: -item[1])
+        bounded_tool_totals = tuple(
+            ToolTrace(tool_name=name, argument_summary="", count=count)
+            for name, count in ranked_tools[:_TOOL_ACTIVITY_LIMIT]
         )
+        repeated_traces = tuple(
+            ToolTrace(
+                tool_name=trace.tool_name,
+                argument_summary=trace.argument_summary,
+                count=count,
+            )
+            for trace, count in sorted(
+                trace_totals.values(),
+                key=lambda item: -item[1],
+            )
+            if count > 1
+        )[:_TOOL_ACTIVITY_LIMIT]
         failures = tuple(
             _summarize_failure(message)
             for message in message_list
@@ -175,7 +210,12 @@ class ContextView:
                 limit,
                 compaction_status,
             ),
-            tool_trace=traces,
+            tool_totals=bounded_tool_totals,
+            recent_tool_calls=tuple(recent_traces),
+            repeated_tool_calls=repeated_traces,
+            other_tool_calls=sum(
+                count for _name, count in ranked_tools[_TOOL_ACTIVITY_LIMIT:]
+            ),
             recent_failures=failures,
         )
 
