@@ -979,12 +979,26 @@ def test_core_does_not_import_upper_runtime_layers() -> None:
 
 
 def test_composition_does_not_import_product_facades_or_interfaces() -> None:
+    composition_core = tuple(
+        path
+        for path in _source_files("composition")
+        if _source_key(path) != "composition/full_product.py"
+    )
     violations = _forbidden_imports(
-        _source_files("composition"),
+        composition_core,
         forbidden=_COMPOSITION.forbidden_roots,
     )
 
     assert not violations, f"Composition imported an upper product layer: {violations}"
+
+    bootstrap_violations = _forbidden_imports(
+        [SOURCE_ROOT / "composition" / "full_product.py"],
+        forbidden=_COMPOSITION.forbidden_roots - {"meta_agent"},
+    )
+    assert not bootstrap_violations, (
+        "Full product bootstrap imported an unrelated upper layer: "
+        f"{bootstrap_violations}"
+    )
 
 
 def test_meta_agent_does_not_import_features_or_interfaces() -> None:
