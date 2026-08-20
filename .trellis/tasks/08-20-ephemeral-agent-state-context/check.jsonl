@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/capability-spi.md", "reason": "复核新 ContextLayer 槽位、聚合与零扩展行为。"}
+{"file": ".trellis/spec/backend/four-layer-ownership.md", "reason": "复核 reachable-object-graph、Feature cohesion 与 import direction。"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "复核持久化、compaction 与 prepared-only 瞬态性。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "执行现有测试、类型、格式与质量门禁约定。"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "复核新增 capability 包与测试文件布局。"}

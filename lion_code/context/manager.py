@@ -3,18 +3,41 @@
 from __future__ import annotations
 
 import posixpath
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from time import time
+from typing import Protocol
 
 from lion_code.context.estimator import estimate_messages_tokens
 from lion_code.context.policy import ContextPolicy
 from lion_code.context.projector import project_messages, replace_tool_result_text
-from lion_code.context.types import ContextAction, ContextRuntimeState, PreparedContext
-from lion_code.core.messages import AgentMessage, AssistantMessage, ToolCall, ToolResultMessage
-
+from lion_code.context.types import (
+    ContextAction,
+    ContextRuntimeState,
+    ContextView,
+    PreparedContext,
+)
+from lion_code.core.messages import (
+    AgentMessage,
+    AssistantMessage,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
 
 IsSnippableTool = Callable[[str], bool]
+
+
+class _ContextLayer(Protocol):
+    """Composition 注入 Kernel context 的结构化回调边界。"""
+
+    @property
+    def layer_id(self) -> str: ...
+
+    def render(self, view: ContextView) -> str: ...
+
+
+ContextLayerCallback = Callable[[], Sequence[_ContextLayer]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,9 +55,11 @@ class ContextManager:
         policy: ContextPolicy | None = None,
         *,
         is_snippable_tool: IsSnippableTool | None = None,
+        context_layers: ContextLayerCallback | None = None,
     ) -> None:
         self.policy = policy or ContextPolicy()
         self._is_snippable_tool = is_snippable_tool or (lambda _name: False)
+        self._context_layers = context_layers or (lambda: ())
 
     def prepare(
         self,
@@ -55,11 +80,50 @@ class ContextManager:
         if compaction_required:
             actions.append(ContextAction(type="request_compaction"))
 
-        return PreparedContext(
-            messages=tuple(projected),
-            actions=tuple(actions),
-            estimated_tokens=estimate_messages_tokens(projected),
+        self._append_context_layers(
+            projected,
+            source_messages=messages,
+            state=state,
             compaction_required=compaction_required,
+        )
+
+        prepared_messages = tuple(projected)
+
+        return PreparedContext(
+            messages=prepared_messages,
+            actions=tuple(actions),
+            estimated_tokens=estimate_messages_tokens(prepared_messages),
+            compaction_required=compaction_required,
+        )
+
+    def _append_context_layers(
+        self,
+        projected: list[AgentMessage],
+        *,
+        source_messages: list[AgentMessage],
+        state: ContextRuntimeState,
+        compaction_required: bool,
+    ) -> None:
+        layers = tuple(self._context_layers())
+        if not layers:
+            return
+
+        view = ContextView.from_messages(
+            source_messages,
+            state=state,
+            compaction_required=compaction_required,
+        )
+        fragments = [
+            fragment.strip()
+            for layer in sorted(layers, key=lambda item: item.layer_id)
+            if (fragment := layer.render(view)).strip()
+        ]
+        if not fragments:
+            return
+        projected.append(
+            UserMessage(
+                content="<agent-state>\n" + "\n\n".join(fragments) + "\n</agent-state>"
+            )
         )
 
     def should_compact(self, state: ContextRuntimeState) -> bool:

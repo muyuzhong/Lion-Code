@@ -338,6 +338,44 @@ def test_reachable_runtime_graph_has_no_provider_controller(tmp_path) -> None:
             )
 
 
+def test_context_layer_wiring_keeps_runtime_ownership_direction(tmp_path) -> None:
+    from lion_code.capabilities import CapabilitySpec
+
+    class _StatelessLayer:
+        layer_id = "test-state"
+
+        def render(self, _view) -> str:
+            return "test state"
+
+    composition = _profile_composition(
+        FullProfile(
+            extension_specs=(
+                CapabilitySpec(
+                    name="test-state",
+                    context_layer=_StatelessLayer(),
+                ),
+            )
+        ),
+        tmp_path,
+    )
+    registry = composition.capabilities.registry
+    context_manager = composition.runtime.context.context_manager
+
+    # Composition 给 ContextManager 的是构造完成后的层快照。prepared-context
+    # 路径不得新增 ContextManager -> Registry 反向边；AgentRuntime 已经会经由
+    # PromptComposer 到达 Registry，那是既有 Prompt 投影路径，不是本回调造成的。
+    assert id(registry) not in _reachable_paths(context_manager)
+
+    # Capability 根对象拥有 Registry/Feature；不得通过 ContextLayer 回调到达
+    # ContextRuntime 这个 mutable owner。
+    for root in (
+        composition.capabilities.runtime,
+        composition.capabilities.subagent_factory,
+    ):
+        if root is not None:
+            assert id(context_manager) not in _reachable_paths(root)
+
+
 # ---------------------------------------------------------------------------
 # 1/2. AgentRuntime 与 ProviderController 互不持有
 # ---------------------------------------------------------------------------

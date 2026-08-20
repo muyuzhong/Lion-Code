@@ -17,6 +17,7 @@ from __future__ import annotations
 from .types import (
     AsyncCloseable,
     CapabilitySpec,
+    ContextLayer,
     PromptLayer,
     SessionParticipant,
     ToolSource,
@@ -94,6 +95,15 @@ class CapabilityRegistry:
         """All closeable resources in registration order."""
         return tuple(
             resource for spec in self._specs.values() for resource in spec.resources
+        )
+
+    @property
+    def context_layers(self) -> tuple[ContextLayer, ...]:
+        """All non-empty context layers in registration order."""
+        return tuple(
+            spec.context_layer
+            for spec in self._specs.values()
+            if spec.context_layer is not None
         )
 
     # -- lifecycle -----------------------------------------------------

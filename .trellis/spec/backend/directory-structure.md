@@ -25,6 +25,8 @@ lion_code/
 │   ├── session_identity.py   # SessionIdentityState / SessionView
 │   └── provider.py      # ProviderController / ProviderState
 ├── capabilities/        # Generic SPI plus cohesive built-in feature packages
+│   ├── agent_state/      # Ephemeral Agent status ContextLayer
+│   ├── git_status/       # Live Git workspace ContextLayer
 │   ├── plan/             # Plan capability and runtime
 │   ├── skill/            # Skill capability, runtime, and discovery
 │   └── subagent/         # SubAgent capability, factory, runtime, and types
@@ -62,6 +64,10 @@ to provide a shorter import path.
 - Put built-in feature implementations in their cohesive package under
   `lion_code/capabilities/`; generic SPI files (`types.py`, `registry.py`, and
   `runtime.py`) must not import a concrete feature.
+- Put per-request status projections in cohesive capability packages such as
+  `capabilities/agent_state/` and `capabilities/git_status/`. They implement
+  `ContextLayer` and are wired by the Composition Root; `context/` only owns
+  generic projection and never hard-codes feature state.
 - Put provider-specific HTTP/request/stream handling in `lion_code/providers/`.
   `providers/factory.py`, `providers/anthropic.py`, and
   `providers/openai_compatible.py` are the current protocol boundary.

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from lion_code.context.types import ContextView
     from lion_code.tooling.types import LionTool
 
 
@@ -50,6 +51,20 @@ class PromptLayer(Protocol):
     def layer_id(self) -> str: ...
 
     def render(self) -> str: ...
+
+
+class ContextLayer(Protocol):
+    """向 prepared context 提供每次请求的临时状态。
+
+    ``PromptLayer`` 贡献相对稳定的 System Prompt 内容；``ContextLayer``
+    在每次 Provider 请求前渲染当前状态，结果只保留在本次 prepared
+    context 中，不得进入 canonical conversation history 或持久化 Session。
+    """
+
+    @property
+    def layer_id(self) -> str: ...
+
+    def render(self, view: ContextView) -> str: ...
 
 
 class SessionParticipant(Protocol):
@@ -91,6 +106,9 @@ class CapabilitySpec:
         ``SessionParticipant`` instances that need session lifecycle hooks.
     resources:
         ``AsyncCloseable`` instances that must be closed on shutdown.
+    context_layer:
+        An optional per-request context projection.  Its rendered output is
+        transient and never enters canonical history or session persistence.
     """
 
     name: str
@@ -98,6 +116,7 @@ class CapabilitySpec:
     prompt_layers: tuple[PromptLayer, ...] = ()
     session_participants: tuple[SessionParticipant, ...] = ()
     resources: tuple[AsyncCloseable, ...] = ()
+    context_layer: ContextLayer | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tool_sources", tuple(self.tool_sources))

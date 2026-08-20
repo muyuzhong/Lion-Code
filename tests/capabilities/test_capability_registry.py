@@ -11,6 +11,7 @@ from lion_code.capabilities import (
     CapabilitySpec,
     DuplicateCapabilityError,
 )
+from lion_code.context import ContextView
 from lion_code.tooling.types import LionTool, ToolResult
 
 # ---------------------------------------------------------------------------
@@ -61,6 +62,18 @@ class _FakePromptLayer:
         return self._text
 
 
+class _FakeContextLayer:
+    def __init__(self, layer_id: str) -> None:
+        self._id = layer_id
+
+    @property
+    def layer_id(self) -> str:
+        return self._id
+
+    def render(self, _view: ContextView) -> str:
+        return self._id
+
+
 class _FakeSessionParticipant:
     """Minimal SessionParticipant that records hook calls."""
 
@@ -103,6 +116,16 @@ class TestRegistration:
         registry.register(CapabilitySpec(name="browser", tool_sources=(ts,)))
 
         assert registry.tool_sources == (ts,)
+
+    def test_context_layer_slot_is_optional_and_aggregated(self) -> None:
+        layer = _FakeContextLayer("state")
+        registry = CapabilityRegistry()
+        registry.register(CapabilitySpec(name="plain"))
+        registry.register(
+            CapabilitySpec(name="stateful", context_layer=layer),
+        )
+
+        assert registry.context_layers == (layer,)
 
     def test_register_multiple_capabilities(self) -> None:
         registry = CapabilityRegistry()
@@ -224,6 +247,7 @@ class TestAggregation:
 
         assert registry.tool_sources == ()
         assert registry.prompt_layers == ()
+        assert registry.context_layers == ()
         assert registry.session_participants == ()
         assert registry.resources == ()
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from ...tooling.internal import (
     create_enter_plan_tool,
@@ -11,6 +12,9 @@ from ...tooling.internal import (
 from ...tooling.types import JSONValue, LionTool, ToolResult
 from ..types import CapabilitySpec
 from .runtime import PlanRuntime, PlanToolOutcome, PlanView
+
+if TYPE_CHECKING:
+    from ...context.types import ContextView
 
 
 class _PlanToolSource:
@@ -64,6 +68,21 @@ Write your plan incrementally to this file using write_file or edit_file. This i
 IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask the user to approve — exit_plan_mode handles that."""
 
 
+class PlanContextLayer:
+    """把 Plan 自己的实时状态投影为 transient Task 行。"""
+
+    layer_id = "plan"
+
+    def __init__(self, view: PlanView) -> None:
+        self._view = view
+
+    def render(self, view: ContextView) -> str:
+        del view
+        if not self._view.is_active:
+            return ""
+        return f"Task: Plan mode active; plan file: {self._view.file_path}"
+
+
 class PlanSessionParticipant:
     """把会话迁移适配到 Plan runtime Owner。"""
 
@@ -85,6 +104,7 @@ def create_plan_capability(runtime: PlanRuntime) -> CapabilitySpec:
         tool_sources=(_PlanToolSource(runtime),),
         prompt_layers=(PlanPromptLayer(runtime),),
         session_participants=(PlanSessionParticipant(runtime),),
+        context_layer=PlanContextLayer(runtime),
     )
 
 

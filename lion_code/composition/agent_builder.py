@@ -31,6 +31,8 @@ from ..capabilities import (
     CapabilityRuntime,
     CapabilitySpec,
 )
+from ..capabilities.agent_state import create_agent_state_capability
+from ..capabilities.git_status import create_git_status_capability
 from ..capabilities.plan.capability import create_plan_capability
 from ..capabilities.plan.runtime import PlanRuntime, PlanState
 from ..capabilities.skill.capability import create_skill_capability
@@ -580,6 +582,10 @@ def _build_capability_graph(
     capabilities = selection.capabilities
 
     capability_registry = CapabilityRegistry()
+    if selection.builtin_tools:
+        capability_registry.register(create_agent_state_capability())
+        capability_registry.register(create_git_status_capability())
+
     subagent_factory: SubagentFactory | None = None
     subagent_executor: SubagentExecutor | None = None
     if _CAP_SUBAGENT in capabilities or _CAP_SKILL in capabilities:
@@ -683,11 +689,17 @@ def _build_tooling_graph(
             AuditMiddleware(),
         ],
     )
-    context_manager = foundation.bindings.session.context_manager or ContextManager(
-        is_snippable_tool=lambda name: _is_snippable_tool(
-            foundation.tool_registry, name
+    context_layers = capability_registry.context_layers
+    context_manager = foundation.bindings.session.context_manager
+    if context_manager is None:
+        context_manager = ContextManager(
+            is_snippable_tool=lambda name: _is_snippable_tool(
+                foundation.tool_registry, name
+            ),
+            # 只捕获构造完成后的不可变层快照，避免 ContextRuntime 反向持有
+            # CapabilityRegistry；动态状态由各 Layer 在 render 时读取。
+            context_layers=lambda: context_layers,
         )
-    )
     return _ToolingGraph(
         prompt_composer=prompt_composer,
         tool_context=tool_context,
