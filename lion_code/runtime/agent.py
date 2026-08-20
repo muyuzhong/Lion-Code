@@ -253,6 +253,7 @@ class AgentRuntime:
         force: bool = False,
         keep_user_boundaries: int = 1,
         reason: Literal["threshold", "overflow", "manual"] = "threshold",
+        objective: str | None = None,
     ) -> bool:
         """在新用户轮次前写入 CompactionEntry 并回放唯一活跃上下文。"""
 
@@ -272,17 +273,23 @@ class AgentRuntime:
         )
         replaced_ids = list(entry_ids[:boundary])
         summary_messages = tuple(messages[:boundary])
+        recent_context = tuple(messages[boundary:])
         if not replaced_ids:
             if force:
                 return False
             replaced_ids = list(entry_ids)
             summary_messages = messages
+            recent_context = ()
         if not replaced_ids:
             return False
 
         await self._conversation.emit(CompactionStartedEvent(reason=reason))
         try:
-            summary = await self._context.summarize(summary_messages)
+            summary = await self._context.summarize(
+                summary_messages,
+                recent_context=recent_context,
+                objective=objective,
+            )
             await self._session.record_compaction(
                 summary=summary,
                 replaces_entry_ids=replaced_ids,
@@ -327,7 +334,7 @@ class AgentRuntime:
         await self.ensure_ready()
         if self._execution.cancelled:
             return
-        await self.compact_if_needed()
+        await self.compact_if_needed(objective=user_message)
         if self._execution.cancelled:
             return
         await self._conversation.prompt(user_message)

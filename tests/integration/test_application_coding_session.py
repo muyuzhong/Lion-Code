@@ -501,7 +501,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         compaction_started = asyncio.Event()
 
         class BlockingCompactor:
-            async def summarize(self, _messages) -> str:
+            async def summarize(self, _request) -> str:
                 compaction_started.set()
                 await asyncio.Event().wait()
                 raise AssertionError("取消后不应继续摘要")

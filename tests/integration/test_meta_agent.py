@@ -9,7 +9,7 @@ import pytest
 from core.fakes import FakeProvider
 
 from lion_code import MetaAgent, build_meta_agent
-from lion_code.context import ContextCompactor
+from lion_code.context import CompactionRequest, ContextCompactor
 from lion_code.core import (
     AssistantMessage,
     CancelledEvent,
@@ -57,7 +57,7 @@ def _tool_call(name: str, arguments: dict) -> AssistantDoneEvent:
 
 
 class _StaticCompactor(ContextCompactor):
-    async def summarize(self, _messages) -> str:
+    async def summarize(self, _request: CompactionRequest) -> str:
         return "summary"
 
 
@@ -65,7 +65,7 @@ class _BlockingCompactor(ContextCompactor):
     def __init__(self) -> None:
         self.started = asyncio.Event()
 
-    async def summarize(self, _messages) -> str:
+    async def summarize(self, _request: CompactionRequest) -> str:
         self.started.set()
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
