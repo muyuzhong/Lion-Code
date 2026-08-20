@@ -7,8 +7,10 @@ import pytest
 from lion_code.context import (
     COMPACTION_PROMPT_TEMPLATE,
     OBJECTIVE_UNAVAILABLE_MARKER,
+    SUMMARY_HEADINGS,
     SUMMARY_SYSTEM_PROMPT,
     CompactionRequest,
+    InvalidCompactionSummary,
     ProviderContextCompactor,
     build_compaction_request,
     estimate_compaction_input_tokens,
@@ -27,6 +29,8 @@ from lion_code.core.provider_events import (
     AssistantErrorEvent,
     AssistantMessageEvent,
 )
+
+VALID_SUMMARY = "\n\n".join(f"{heading}\ncontent" for heading in SUMMARY_HEADINGS)
 
 
 class _RecordingProvider:
@@ -52,7 +56,9 @@ async def test_provider_compactor_uses_canonical_stream_without_mutating_history
     provider = _RecordingProvider(
         AssistantDoneEvent(
             reason="stop",
-            message=AssistantMessage(content=[TextContent(text="  concise summary  ")]),
+            message=AssistantMessage(
+                content=[TextContent(text=f"  {VALID_SUMMARY}  ")]
+            ),
         )
     )
     messages = (UserMessage(content="original"),)
@@ -67,7 +73,7 @@ async def test_provider_compactor_uses_canonical_stream_without_mutating_history
 
     summary = await compactor.summarize(request)
 
-    assert summary == "concise summary"
+    assert summary == VALID_SUMMARY
     assert messages[0].text == "original"
     model, system, projected, tools, signal = provider.calls[0]
     assert model == "fake"
@@ -95,24 +101,44 @@ def test_compaction_request_rejects_non_positive_budget() -> None:
 
 
 def test_compaction_prompt_has_fixed_sections_and_evidence_rules() -> None:
-    sections = (
-        "# Objective",
-        "# Constraints",
-        "# Decisions",
-        "# Repository State",
-        "# Findings",
-        "# Failed Attempts",
-        "# Completed Work",
-        "# Remaining Work",
-        "# Verification",
-    )
-
-    positions = [COMPACTION_PROMPT_TEMPLATE.index(section) for section in sections]
+    positions = [
+        COMPACTION_PROMPT_TEMPLATE.index(section) for section in SUMMARY_HEADINGS
+    ]
 
     assert positions == sorted(positions)
     assert "Coding Evidence" in COMPACTION_PROMPT_TEMPLATE
     assert "Evidence:" in COMPACTION_PROMPT_TEMPLATE
     assert "objective-unavailable marker" in COMPACTION_PROMPT_TEMPLATE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "summary",
+    (
+        "unstructured summary",
+        VALID_SUMMARY + "\n\n# Objective\nduplicate",
+        "\n\n".join(f"{heading}\ncontent" for heading in reversed(SUMMARY_HEADINGS)),
+    ),
+)
+async def test_provider_compactor_rejects_invalid_summary_structure(summary) -> None:
+    provider = _RecordingProvider(
+        AssistantDoneEvent(
+            reason="stop",
+            message=AssistantMessage(content=[TextContent(text=summary)]),
+        )
+    )
+    compactor = ProviderContextCompactor(provider=provider, get_model=lambda: "fake")
+
+    with pytest.raises(InvalidCompactionSummary):
+        await compactor.summarize(
+            build_compaction_request(
+                history=(UserMessage(content="original"),),
+                recent_context=(),
+                requested_objective=None,
+                effective_window_tokens=2_000,
+                input_ratio=0.85,
+            )
+        )
 
 
 def test_objective_prefers_explicit_request_then_recent_and_history() -> None:

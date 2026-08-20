@@ -26,6 +26,7 @@ from lion_code.application import (
     QueueUpdateEvent,
     SessionAgentEndEvent,
 )
+from lion_code.context import SUMMARY_HEADINGS
 from lion_code.core import AssistantMessage, TextContent, ToolCall
 from lion_code.core.events import (
     AgentEndEvent,
@@ -43,6 +44,10 @@ from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEve
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
+
+
+def _structured_summary(content: str) -> str:
+    return "\n\n".join(f"{heading}\n{content}" for heading in SUMMARY_HEADINGS)
 
 
 def _echo_lion_tool(gate: asyncio.Event | None = None) -> LionTool:
@@ -347,12 +352,13 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             pass
 
     async def test_context_overflow_compacts_and_retries_once(self) -> None:
+        summary = _structured_summary("recovery summary")
         session, _agent, harness, fake = self._make_session(
             [
                 _stop_event("old answer"),
                 _stop_event("recent answer"),
                 _error_event("This model's maximum context length was exceeded."),
-                _stop_event("recovery summary"),
+                _stop_event(summary),
                 _stop_event("recovered answer"),
             ]
         )
@@ -398,7 +404,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             projected[:3],
             [
-                "Previous conversation summary:\nrecovery summary",
+                f"Previous conversation summary:\n{summary}",
                 "keep recent turn",
                 "recent answer",
             ],
@@ -410,7 +416,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         ).read_all()
         compactions = [entry for entry in entries if entry.type == "compaction"]
         self.assertEqual(len(compactions), 1)
-        self.assertEqual(compactions[0].summary, "recovery summary")
+        self.assertEqual(compactions[0].summary, summary)
         self.assertEqual(
             [
                 event.reason
@@ -460,6 +466,31 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             any(isinstance(event, AutoRetryStartEvent) for event in events)
         )
         self.assertIsInstance(events[-1], AgentSettledEvent)
+        self.assertEqual(fake.call_count, 4)
+
+    async def test_invalid_compaction_summary_preserves_canonical_history(self) -> None:
+        session, _agent, harness, fake = self._make_session(
+            [
+                _stop_event("old answer"),
+                _stop_event("recent answer"),
+                _error_event("context window exceeded"),
+                _stop_event("unstructured summary"),
+            ]
+        )
+        await self._prime_overflow_history(session)
+
+        events = [event async for event in session.prompt("trigger overflow")]
+
+        compaction_end = next(
+            event for event in events if isinstance(event, CompactionEndEvent)
+        )
+        self.assertTrue(compaction_end.aborted)
+        self.assertIn("must contain", compaction_end.error_message or "")
+        state = await self._session_repository.load(harness.agent.session_id)
+        self.assertIsNotNone(state)
+        self.assertEqual(len(state.compaction_entries), 0)
+        self.assertIn("old prompt", [message.text for message in state.messages])
+        self.assertIn("keep recent turn", [message.text for message in state.messages])
         self.assertEqual(fake.call_count, 4)
 
     async def test_context_overflow_without_old_context_does_not_compact(self) -> None:
@@ -533,12 +564,13 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(state.compaction_entries), 0)
 
     async def test_context_overflow_retry_failure_is_terminal(self) -> None:
+        summary = _structured_summary("recovery summary")
         session, _agent, _harness, fake = self._make_session(
             [
                 _stop_event("old answer"),
                 _stop_event("recent answer"),
                 _error_event("too many tokens"),
-                _stop_event("recovery summary"),
+                _stop_event(summary),
                 _error_event("context limit still exceeded"),
             ]
         )

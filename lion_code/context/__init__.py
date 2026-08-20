@@ -3,9 +3,11 @@
 from lion_code.context.compaction import (
     COMPACTION_PROMPT_TEMPLATE,
     OBJECTIVE_UNAVAILABLE_MARKER,
+    SUMMARY_HEADINGS,
     SUMMARY_SYSTEM_PROMPT,
     CompactionRequest,
     ContextCompactor,
+    InvalidCompactionSummary,
     ProviderContextCompactor,
     build_compaction_request,
     estimate_compaction_input_tokens,
@@ -35,6 +37,7 @@ from lion_code.context.types import (
 __all__ = [
     "COMPACTION_PROMPT_TEMPLATE",
     "OBJECTIVE_UNAVAILABLE_MARKER",
+    "SUMMARY_HEADINGS",
     "SUMMARY_SYSTEM_PROMPT",
     "CompactionRequest",
     "CompactionStatus",
@@ -46,6 +49,7 @@ __all__ = [
     "ContextRuntimeState",
     "ContextUtilization",
     "ContextView",
+    "InvalidCompactionSummary",
     "ModelLimitsResolver",
     "PreparedContext",
     "ProviderContextCompactor",

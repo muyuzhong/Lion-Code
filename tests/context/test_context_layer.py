@@ -9,6 +9,7 @@ import pytest
 from lion_code.capabilities.agent_state import AgentStateLayer
 from lion_code.capabilities.git_status import GitStatusLayer
 from lion_code.context import (
+    SUMMARY_HEADINGS,
     ContextManager,
     ContextRuntimeState,
     ContextView,
@@ -220,7 +221,15 @@ class _RecordingProvider:
         async def events():
             yield AssistantDoneEvent(
                 reason="stop",
-                message=AssistantMessage(content=[TextContent(text="summary")]),
+                message=AssistantMessage(
+                    content=[
+                        TextContent(
+                            text="\n\n".join(
+                                f"{heading}\ncontent" for heading in SUMMARY_HEADINGS
+                            )
+                        )
+                    ]
+                ),
             )
 
         return events()
@@ -263,16 +272,13 @@ async def test_prepared_state_is_not_canonical_jsonl_compaction_or_compactor_inp
         provider=provider,
         get_model=lambda: "model",
     )
-    assert (
-        await compactor.summarize(
-            build_compaction_request(
-                history=tuple(source),
-                recent_context=(),
-                requested_objective=None,
-                effective_window_tokens=2_000,
-                input_ratio=0.85,
-            )
+    assert await compactor.summarize(
+        build_compaction_request(
+            history=tuple(source),
+            recent_context=(),
+            requested_objective=None,
+            effective_window_tokens=2_000,
+            input_ratio=0.85,
         )
-        == "summary"
-    )
+    ) == "\n\n".join(f"{heading}\ncontent" for heading in SUMMARY_HEADINGS)
     assert all(message.text != state_text for message in provider.messages[0])

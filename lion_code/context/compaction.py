@@ -29,6 +29,17 @@ OBJECTIVE_UNAVAILABLE_MARKER = "[objective unavailable; do not invent a goal]"
 HISTORY_OMITTED_MARKER = "[old history omitted by compaction input budget]"
 _DYNAMIC_FIELD_BUDGET_RATIO = 0.05
 _HINT_ITEM_LIMIT = 3
+SUMMARY_HEADINGS = (
+    "# Objective",
+    "# Constraints",
+    "# Decisions",
+    "# Repository State",
+    "# Findings",
+    "# Failed Attempts",
+    "# Completed Work",
+    "# Remaining Work",
+    "# Verification",
+)
 COMPACTION_PROMPT_TEMPLATE = """Summarize the old history for the next coding-agent turn.
 
 Old history projection:
@@ -82,6 +93,10 @@ Evidence: <command/result, commit hash, or one-line error summary>
 Do not invent objectives, repository state, findings, or verification results. Use the explicit
 objective-unavailable marker when the objective is unknown.
 """
+
+
+class InvalidCompactionSummary(RuntimeError):
+    """模型摘要不满足固定章节契约。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +160,7 @@ class ProviderContextCompactor:
 
         if not summary:
             raise RuntimeError("Context compaction produced no summary")
+        _validate_summary(summary)
         return summary
 
 
@@ -321,6 +337,22 @@ def _fit_history_to_budget(
         else:
             high = budget - 1
     return best
+
+
+def _validate_summary(summary: str) -> None:
+    lines = [line.strip() for line in summary.splitlines()]
+    positions: list[int] = []
+    for heading in SUMMARY_HEADINGS:
+        matches = [index for index, line in enumerate(lines) if line == heading]
+        if len(matches) != 1:
+            raise InvalidCompactionSummary(
+                f"Compaction summary must contain {heading!r} exactly once"
+            )
+        positions.append(matches[0])
+    if positions != sorted(positions):
+        raise InvalidCompactionSummary(
+            "Compaction summary sections are not in the required order"
+        )
 
 
 def _latest_user_message(messages: tuple[AgentMessage, ...]) -> str | None:

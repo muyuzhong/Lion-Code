@@ -18,7 +18,7 @@ from core.fakes import FakeProvider
 from full_agent import FullAgentHarness, build_full_agent_harness
 
 from lion_code.composition.full_product import build_full_coding_backend
-from lion_code.context import SUMMARY_SYSTEM_PROMPT
+from lion_code.context import SUMMARY_HEADINGS, SUMMARY_SYSTEM_PROMPT
 from lion_code.core import (
     AssistantMessage,
     CompactionCompletedEvent,
@@ -41,6 +41,10 @@ _PLAN_REHOME = (
     "PR3 Kernel 不含 Plan：clear-and-execute 上下文清空 + 自动 continue 的增强"
     "依赖 Kernel 对 Plan 的特判，已随 Runtime 移除；待 Capability re-home PR 恢复"
 )
+
+
+def _structured_summary(content: str) -> str:
+    return "\n\n".join(f"{heading}\n{content}" for heading in SUMMARY_HEADINGS)
 
 
 class _LimitsFakeProvider(FakeProvider):
@@ -418,13 +422,14 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         registry = ToolRegistry()
+        summary = _structured_summary("condensed context")
         agent, fake = self._make_agent(
             [
                 _stop_event("first answer", Usage(total_tokens=100)),
                 _stop_event(
                     "second answer", Usage(input=160_000, total_tokens=160_000)
                 ),
-                _stop_event("condensed context"),
+                _stop_event(summary),
                 _stop_event("third answer"),
             ],
             registry,
@@ -438,20 +443,19 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(fake.received_systems[2], SUMMARY_SYSTEM_PROMPT)
         self.assertEqual(fake.received_tools[2], [])
-        self.assertEqual(
-            [message.text for message in fake.received_messages[2][:-1]],
-            ["first question", "first answer"],
-        )
-        compaction_prompt = fake.received_messages[2][-1].text
+        self.assertEqual(len(fake.received_messages[2]), 1)
+        compaction_prompt = fake.received_messages[2][0].text
+        assert "first question" in compaction_prompt
+        assert "first answer" in compaction_prompt
         assert "third question" in compaction_prompt
-        assert "second question" in compaction_prompt
+        assert "second answer" in compaction_prompt
         assert "# Objective" in compaction_prompt
         assert "# Verification" in compaction_prompt
         projected = [message.text for message in fake.received_messages[3]]
         self.assertEqual(
             projected[:3],
             [
-                "Previous conversation summary:\ncondensed context",
+                f"Previous conversation summary:\n{summary}",
                 "second question",
                 "second answer",
             ],
@@ -464,7 +468,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [message.text for message in state.messages],
             [
-                "Previous conversation summary:\ncondensed context",
+                f"Previous conversation summary:\n{summary}",
                 "second question",
                 "second answer",
                 "third question",
