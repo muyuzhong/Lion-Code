@@ -10,9 +10,18 @@ from lion_code.context import (
     SUMMARY_SYSTEM_PROMPT,
     CompactionRequest,
     ProviderContextCompactor,
+    build_compaction_request,
+    estimate_compaction_input_tokens,
+    estimate_text_tokens,
     resolve_compaction_objective,
 )
-from lion_code.core import AssistantMessage, TextContent, UserMessage
+from lion_code.core import (
+    AssistantMessage,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
 from lion_code.core.provider_events import (
     AssistantDoneEvent,
     AssistantErrorEvent,
@@ -48,47 +57,41 @@ async def test_provider_compactor_uses_canonical_stream_without_mutating_history
     )
     messages = (UserMessage(content="original"),)
     compactor = ProviderContextCompactor(provider=provider, get_model=lambda: "fake")
-
-    summary = await compactor.summarize(
-        CompactionRequest(
-            history=messages,
-            recent_context=(UserMessage(content="recent background"),),
-            objective="finish the compaction change",
-        )
+    request = build_compaction_request(
+        history=messages,
+        recent_context=(),
+        requested_objective="finish the compaction change",
+        effective_window_tokens=2_000,
+        input_ratio=0.85,
     )
+
+    summary = await compactor.summarize(request)
 
     assert summary == "concise summary"
     assert messages[0].text == "original"
     model, system, projected, tools, signal = provider.calls[0]
     assert model == "fake"
     assert system == SUMMARY_SYSTEM_PROMPT
-    assert projected[0] is not messages[0]
-    assert "finish the compaction change" in projected[-1].text
-    assert "recent background" in projected[-1].text
-    assert projected[-1].text == COMPACTION_PROMPT_TEMPLATE.format(
-        objective="finish the compaction change",
-        recent_context="[user]\nrecent background",
+    assert len(projected) == 1
+    assert "finish the compaction change" in projected[0].text
+    assert projected[0].text == COMPACTION_PROMPT_TEMPLATE.format(
+        history_projection="[user]\noriginal",
+        objective="Current task:\nfinish the compaction change",
+        recent_context_hint="(none)",
     )
+    assert estimate_compaction_input_tokens(request) <= request.input_budget_tokens
     assert tools == []
     assert signal is None
 
 
-def test_compaction_request_freezes_message_collections() -> None:
-    history = [UserMessage(content="history")]
-    recent = [UserMessage(content="recent")]
-
-    request = CompactionRequest(
-        history=history,
-        recent_context=recent,
-        objective=None,
-    )
-
-    history.append(UserMessage(content="later"))
-    recent.append(UserMessage(content="later"))
-
-    assert request.history == (history[0],)
-    assert request.recent_context == (recent[0],)
-    assert request.objective is None
+def test_compaction_request_rejects_non_positive_budget() -> None:
+    with pytest.raises(ValueError, match="input_budget_tokens"):
+        CompactionRequest(
+            history_projection="history",
+            objective=None,
+            recent_context_hint="",
+            input_budget_tokens=0,
+        )
 
 
 def test_compaction_prompt_has_fixed_sections_and_evidence_rules() -> None:
@@ -112,66 +115,100 @@ def test_compaction_prompt_has_fixed_sections_and_evidence_rules() -> None:
     assert "objective-unavailable marker" in COMPACTION_PROMPT_TEMPLATE
 
 
-class _PlanView:
-    def __init__(self, *, active: bool, file_path=None) -> None:
-        self.is_active = active
-        self.file_path = file_path
-
-
-def test_objective_prefers_explicit_request_and_merges_active_plan(tmp_path) -> None:
-    plan_path = tmp_path / "plan.md"
-    plan_path.write_text("Keep the summary append-only.", encoding="utf-8")
-
-    objective = resolve_compaction_objective(
-        requested_objective="Ship structured compaction",
-        history=(UserMessage(content="old goal"),),
-        recent_context=(UserMessage(content="recent goal"),),
-        plan_view=_PlanView(active=True, file_path=plan_path),
+def test_objective_prefers_explicit_request_then_recent_and_history() -> None:
+    assert (
+        resolve_compaction_objective(
+            requested_objective="Ship structured compaction",
+            history=(UserMessage(content="old goal"),),
+            recent_context=(UserMessage(content="recent goal"),),
+        )
+        == "Current task:\nShip structured compaction"
     )
-
-    assert objective == (
-        "Current task:\nShip structured compaction\n\n"
-        f"Active plan ({plan_path}):\nKeep the summary append-only."
-    )
-
-
-def test_objective_falls_back_to_recent_user_message_or_empty_marker(tmp_path) -> None:
-    recent = (UserMessage(content="recent goal"),)
-
     assert (
         resolve_compaction_objective(
             requested_objective=None,
             history=(UserMessage(content="old goal"),),
-            recent_context=recent,
-            plan_view=_PlanView(active=False),
+            recent_context=(UserMessage(content="recent goal"),),
         )
         == "Current task:\nrecent goal"
     )
-
     assert (
         resolve_compaction_objective(
             requested_objective=None,
-            history=(),
+            history=(UserMessage(content="old goal"),),
             recent_context=(),
-            plan_view=_PlanView(active=True, file_path=tmp_path / "missing.md"),
         )
-        is None
+        == "Current task:\nold goal"
     )
-    invalid_plan = tmp_path / "invalid-plan.md"
-    invalid_plan.write_bytes(b"\xff")
+
+
+def test_objective_uses_empty_marker_when_unknown() -> None:
     assert (
         resolve_compaction_objective(
             requested_objective=None,
             history=(),
             recent_context=(),
-            plan_view=_PlanView(active=True, file_path=invalid_plan),
         )
         is None
     )
     assert OBJECTIVE_UNAVAILABLE_MARKER in COMPACTION_PROMPT_TEMPLATE.format(
+        history_projection="(none)",
         objective=OBJECTIVE_UNAVAILABLE_MARKER,
-        recent_context="(none)",
+        recent_context_hint="(none)",
     )
+
+
+def test_compaction_request_bounds_the_complete_provider_input() -> None:
+    history = tuple(
+        UserMessage(content=f"old-{index}-" + "x" * 2_000) for index in range(12)
+    )
+    recent = (
+        AssistantMessage(
+            content=[
+                TextContent(text="last conclusion " + "y" * 1_000),
+                ToolCall(
+                    id="call-1",
+                    name="read_file",
+                    arguments={"path": "lion_code/context/compaction.py"},
+                ),
+            ]
+        ),
+        ToolResultMessage(
+            tool_call_id="call-1",
+            tool_name="read_file",
+            content="failed",
+            is_error=True,
+        ),
+    )
+    canonical = tuple(message.model_dump_json() for message in history + recent)
+
+    request = build_compaction_request(
+        history=history,
+        recent_context=recent,
+        requested_objective="finish " + "z" * 1_000,
+        effective_window_tokens=2_000,
+        input_ratio=0.85,
+    )
+
+    assert request.input_budget_tokens == 1_700
+    assert estimate_compaction_input_tokens(request) <= request.input_budget_tokens
+    assert estimate_text_tokens(request.objective or "") <= 85
+    assert estimate_text_tokens(request.recent_context_hint) <= 85
+    assert "budgeted" in request.history_projection
+    assert request.history_projection.startswith("[user]\nold-0-")
+    assert request.history_projection.endswith("x" * 10)
+    assert canonical == tuple(message.model_dump_json() for message in history + recent)
+
+
+def test_compaction_request_rejects_window_smaller_than_fixed_prompt() -> None:
+    with pytest.raises(RuntimeError, match="Fixed context compaction prompt"):
+        build_compaction_request(
+            history=(),
+            recent_context=(),
+            requested_objective=None,
+            effective_window_tokens=10,
+            input_ratio=0.85,
+        )
 
 
 @pytest.mark.asyncio
@@ -186,5 +223,11 @@ async def test_provider_compactor_surfaces_provider_failure() -> None:
 
     with pytest.raises(RuntimeError, match="failed"):
         await compactor.summarize(
-            CompactionRequest(history=(UserMessage(content="original"),))
+            build_compaction_request(
+                history=(UserMessage(content="original"),),
+                recent_context=(),
+                requested_objective=None,
+                effective_window_tokens=2_000,
+                input_ratio=0.85,
+            )
         )

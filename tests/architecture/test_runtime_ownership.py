@@ -376,6 +376,40 @@ def test_context_layer_wiring_keeps_runtime_ownership_direction(tmp_path) -> Non
             assert id(context_manager) not in _reachable_paths(root)
 
 
+def test_context_runtime_does_not_hold_plan_runtime(tmp_path) -> None:
+    composition = _profile_composition(FullProfile(), tmp_path)
+    plan = composition.capabilities.plan
+
+    assert plan is not None
+    assert all(
+        value is not plan for value in vars(composition.runtime.context).values()
+    ), "ContextRuntime 不得直接持有 PlanRuntime"
+
+
+def test_context_compaction_has_no_plan_specific_seam() -> None:
+    context_tree = _tree(RUNTIME_DIR / "context.py")
+    compaction_tree = _tree(SOURCE_ROOT / "context" / "compaction.py")
+    builder_tree = _tree(SOURCE_ROOT / "composition" / "agent_builder.py")
+
+    assert not _referenced_symbols(
+        context_tree,
+        frozenset({"CompactionPlanView", "_plan_view", "plan_view"}),
+    )
+    assert not _referenced_symbols(
+        compaction_tree,
+        frozenset({"CompactionPlanView", "_read_active_plan"}),
+    )
+    context_runtime_keywords = {
+        keyword.arg
+        for node in ast.walk(builder_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "ContextRuntime"
+        for keyword in node.keywords
+    }
+    assert "plan_view" not in context_runtime_keywords
+
+
 # ---------------------------------------------------------------------------
 # 1/2. AgentRuntime 与 ProviderController 互不持有
 # ---------------------------------------------------------------------------

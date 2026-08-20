@@ -10,7 +10,11 @@ from typing import Protocol
 
 from lion_code.context.estimator import estimate_messages_tokens
 from lion_code.context.policy import ContextPolicy
-from lion_code.context.projector import project_messages, replace_tool_result_text
+from lion_code.context.projector import (
+    budget_text,
+    project_messages,
+    replace_tool_result_text,
+)
 from lion_code.context.types import (
     ContextAction,
     ContextRuntimeState,
@@ -144,7 +148,7 @@ class ContextManager:
             original = ref.message.text
             if len(original) <= budget or self._is_placeholder(original):
                 continue
-            retained = _budget_text(original, budget)
+            retained = budget_text(original, budget)
             replace_tool_result_text(ref.message, retained)
             actions.append(
                 ContextAction(
@@ -268,25 +272,3 @@ def _read_file_key(message: ToolResultMessage, call: ToolCall | None) -> str | N
     if not isinstance(raw_path, str) or not raw_path:
         return None
     return posixpath.normpath(raw_path.replace("\\", "/")).casefold()
-
-
-def _budget_text(text: str, budget: int) -> str:
-    if budget <= 0:
-        return ""
-    if len(text) <= budget:
-        return text
-
-    low = 0
-    high = budget // 2
-    best = ""
-    while low <= high:
-        keep = (low + high) // 2
-        omitted = len(text) - keep * 2
-        marker = f"\n\n[... budgeted: {omitted} chars truncated ...]\n\n"
-        candidate = text[:keep] + marker + text[-keep:] if keep else marker
-        if len(candidate) <= budget:
-            best = candidate
-            low = keep + 1
-        else:
-            high = keep - 1
-    return best[:budget]
