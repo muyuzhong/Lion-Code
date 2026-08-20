@@ -173,6 +173,105 @@ Its name is historical session terminology, not a project Memory subsystem.
 Canonical history, restore, compaction, legacy JSON read-only migration, and
 Event Stream behavior remain in scope and must keep their tests.
 
+## Goal-aware structured compaction
+
+### 1. Scope / Trigger
+
+Automatic compaction at the 85% context threshold, manual compaction, and
+context-overflow recovery all use the same provider-neutral compaction contract.
+The change affects only the summary input and prompt; ContextPolicy thresholds,
+projection protection, canonical history, and append-only session recording stay
+unchanged.
+
+### 2. Signatures
+
+```python
+@dataclass(frozen=True, slots=True)
+class CompactionRequest:
+    history: tuple[AgentMessage, ...]
+    recent_context: tuple[AgentMessage, ...]
+    objective: str | None
+
+class ContextCompactor(Protocol):
+    async def summarize(self, request: CompactionRequest) -> str: ...
+```
+
+`ContextRuntime.summarize(history, *, recent_context=(), objective=None)` builds
+the request immediately before scheduling the existing compaction task. It does
+not persist the request or create a second history owner.
+
+### 3. Contracts
+
+- `history` is the old canonical prefix to summarize; the provider projection
+  deep-copies it before adding the prompt.
+- `recent_context` is the retained suffix supplied as background only. It is not
+  summarized into `history`, and it must not be written to `CompactionEntry`.
+- A non-empty current user objective has priority, followed by the latest user
+  message in recent/history. An active structural PlanView (`is_active`,
+  `file_path`) contributes readable plan content and its path.
+- When no objective can be established, `objective` remains `None` and the
+  prompt renders `[objective unavailable; do not invent a goal]`.
+- The single `COMPACTION_PROMPT_TEMPLATE` requires these headings in order:
+  `# Objective`, `# Constraints`, `# Decisions`, `# Repository State`,
+  `# Findings`, `# Failed Attempts`, `# Completed Work`, `# Remaining Work`,
+  `# Verification`. Every Findings and Verification item must include a
+  `Coding Evidence` line with a source, command/result, commit, or one-line
+  error reference.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Active Plan has a readable file | Merge its path/content into the objective for this request only |
+| Plan inactive, missing, or unreadable | Omit Plan content; never invent replacement state |
+| Objective and user fallback are unavailable | Keep request objective `None`; render the explicit unavailable marker |
+| Provider emits an error or empty summary | Preserve the existing compaction error; write no new entry |
+| Compaction is cancelled | Preserve the existing aborted event/cancellation path; write no new entry |
+| Projection budgets or snips tool results | Change only provider projection; canonical history and compaction input remain intact |
+
+### 5. Good / Base / Bad Cases
+
+- Good: Composition passes the existing PlanRuntime as a structural read-only
+  view; ContextRuntime assembles one immutable request; SessionRuntime records
+  only the returned text in the existing CompactionEntry.
+- Base: Manual or overflow compaction omits an explicit current objective and
+  resolves the latest user message from its existing canonical context.
+- Bad: Add a compatibility `summarize(messages)` overload, store a second
+  history/Memory object, or pass prepared/snipped messages as canonical summary
+  input.
+
+### 6. Tests Required
+
+- Unit tests assert request tuple normalization, objective/Plan precedence,
+  recent-user fallback, unavailable marker, fixed heading order, and evidence
+  instructions in the one template.
+- Runtime/integration tests assert retained context is prompt background,
+  85%-triggered compaction still appends CompactionEntry and replays the same
+  active messages, and canonical messages are unchanged.
+- Context projection tests assert the recent three eligible tool results and
+  each file's last `read_file` remain protected at the existing thresholds.
+- Provider error, empty-summary, and cancellation tests retain their existing
+  error/event behavior.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+await compactor.summarize(messages)
+```
+
+Correct:
+
+```python
+request = CompactionRequest(
+    history=old_history,
+    recent_context=retained_suffix,
+    objective=resolved_objective,
+)
+await compactor.summarize(request)
+```
+
 ## Ephemeral prepared-context contract
 
 ContextManager.prepare() is the only generic path that renders

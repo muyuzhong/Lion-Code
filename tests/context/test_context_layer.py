@@ -9,6 +9,7 @@ import pytest
 from lion_code.capabilities.agent_state import AgentStateLayer
 from lion_code.capabilities.git_status import GitStatusLayer
 from lion_code.context import (
+    CompactionRequest,
     ContextManager,
     ContextRuntimeState,
     ContextView,
@@ -262,5 +263,7 @@ async def test_prepared_state_is_not_canonical_jsonl_compaction_or_compactor_inp
         provider=provider,
         get_model=lambda: "model",
     )
-    assert await compactor.summarize(tuple(source)) == "summary"
+    assert (
+        await compactor.summarize(CompactionRequest(history=tuple(source))) == "summary"
+    )
     assert all(message.text != state_text for message in provider.messages[0])

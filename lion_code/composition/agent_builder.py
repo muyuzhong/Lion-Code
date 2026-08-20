@@ -292,6 +292,7 @@ def build_agent_composition(
         initial_effective_window=effective_window_tokens(
             fallback_model_limits(config.model)
         ),
+        plan_view=foundation.plan,
     )
 
     conversation = ConversationRuntime(

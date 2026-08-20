@@ -1,10 +1,14 @@
 """Lion Core 的供应商无关活跃上下文投影。"""
 
 from lion_code.context.compaction import (
+    COMPACTION_PROMPT_TEMPLATE,
+    OBJECTIVE_UNAVAILABLE_MARKER,
     SUMMARY_SYSTEM_PROMPT,
-    SUMMARY_USER_PROMPT,
+    CompactionPlanView,
+    CompactionRequest,
     ContextCompactor,
     ProviderContextCompactor,
+    resolve_compaction_objective,
 )
 from lion_code.context.estimator import estimate_messages_tokens
 from lion_code.context.limits import (
@@ -28,8 +32,11 @@ from lion_code.context.types import (
 )
 
 __all__ = [
+    "COMPACTION_PROMPT_TEMPLATE",
+    "OBJECTIVE_UNAVAILABLE_MARKER",
     "SUMMARY_SYSTEM_PROMPT",
-    "SUMMARY_USER_PROMPT",
+    "CompactionPlanView",
+    "CompactionRequest",
     "CompactionStatus",
     "ContextAction",
     "ContextActionType",
@@ -48,4 +55,5 @@ __all__ = [
     "fallback_context_window",
     "fallback_model_limits",
     "project_messages",
+    "resolve_compaction_objective",
 ]

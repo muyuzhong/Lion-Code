@@ -442,6 +442,11 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             [message.text for message in fake.received_messages[2][:-1]],
             ["first question", "first answer"],
         )
+        compaction_prompt = fake.received_messages[2][-1].text
+        assert "third question" in compaction_prompt
+        assert "second question" in compaction_prompt
+        assert "# Objective" in compaction_prompt
+        assert "# Verification" in compaction_prompt
         projected = [message.text for message in fake.received_messages[3]]
         self.assertEqual(
             projected[:3],
