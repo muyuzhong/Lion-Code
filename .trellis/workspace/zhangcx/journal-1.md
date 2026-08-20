@@ -1423,3 +1423,24 @@ Completed Agent removal, adapter boundary, architecture gates, docs, corpus, and
 ### Status
 
 [OK] **Completed**
+
+
+## Session 45: PR4 residual scan cleanup
+
+**Date**: 2026-08-20
+**Task**: PR4 residual scan cleanup
+**Branch**: `master`
+
+### Summary
+
+Updated the current logging spec to reference CodingSessionBackendAdapter. Residual scan now has no real legacy path; remaining hits are negative guards, historical v1/results, or quality baseline fingerprints.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c190daf` | (see git log) |
+
+### Status
+
+[OK] **Completed**
