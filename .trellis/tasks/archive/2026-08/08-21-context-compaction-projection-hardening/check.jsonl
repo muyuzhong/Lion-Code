@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "核对 Plan 不可达、compaction hint 和状态栏上界契约"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "执行测试、静态分析和质量基线门禁"}

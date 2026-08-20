@@ -8,6 +8,8 @@ from pathlib import Path
 from ...context.types import ContextView
 from ..types import CapabilitySpec
 
+_DIRTY_FILE_LIMIT = 3
+
 
 class GitStatusLayer:
     """每次渲染实时读取 cwd、分支和 dirty files。"""
@@ -24,9 +26,11 @@ class GitStatusLayer:
         lines = [
             f"Working directory: {cwd}",
             f"Branch: {branch}",
-            "Dirty files:",
+            f"Dirty files: {len(paths)}",
         ]
-        lines.extend(f"- {path}" for path in paths)
+        lines.extend(f"- {path}" for path in paths[:_DIRTY_FILE_LIMIT])
+        if len(paths) > _DIRTY_FILE_LIMIT:
+            lines.append(f"- ... {len(paths) - _DIRTY_FILE_LIMIT} more")
         if not paths:
             lines.append("- clean")
         return "\n".join(lines)

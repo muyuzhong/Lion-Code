@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...context.types import ContextView, ToolTrace
+from ...context.types import ContextView
 from ..types import CapabilitySpec
 
 
@@ -24,7 +24,24 @@ class AgentStateLayer:
             ),
             "Activity:",
         ]
-        lines.extend(_activity_lines(view.tool_trace))
+        if view.tool_totals:
+            lines.extend(
+                f"- {trace.name}: {trace.count} calls" for trace in view.tool_totals
+            )
+            if view.other_tool_calls:
+                lines.append(f"- other tools: {view.other_tool_calls} calls")
+        else:
+            lines.append("- none")
+        lines.append("Recent activity:")
+        lines.extend(f"- {trace.summary}" for trace in view.recent_tool_calls)
+        if not view.recent_tool_calls:
+            lines.append("- none")
+        lines.append("Repeated activity:")
+        lines.extend(
+            f"- {trace.summary} ×{trace.count}" for trace in view.repeated_tool_calls
+        )
+        if not view.repeated_tool_calls:
+            lines.append("- none")
         lines.append("Recent failures:")
         lines.extend(f"- {failure}" for failure in view.recent_failures)
         if not view.recent_failures:
@@ -38,27 +55,6 @@ def create_agent_state_capability() -> CapabilitySpec:
         name="agent-state",
         context_layer=AgentStateLayer(),
     )
-
-
-def _activity_lines(traces: tuple[ToolTrace, ...]) -> list[str]:
-    grouped: dict[str, int] = {}
-    order: list[str] = []
-    for trace in traces:
-        key = trace.summary
-        if key not in grouped:
-            order.append(key)
-            grouped[key] = 0
-        grouped[key] += 1
-
-    if not order:
-        return ["- none"]
-
-    lines: list[str] = []
-    for summary in order:
-        count = grouped[summary]
-        repeated = f" ×{count}" if count > 1 else ""
-        lines.append(f"- {summary}{repeated}")
-    return lines
 
 
 def _format_tokens(value: int) -> str:

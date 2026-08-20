@@ -188,9 +188,10 @@ unchanged.
 ```python
 @dataclass(frozen=True, slots=True)
 class CompactionRequest:
-    history: tuple[AgentMessage, ...]
-    recent_context: tuple[AgentMessage, ...]
+    history_projection: str
     objective: str | None
+    recent_context_hint: str
+    input_budget_tokens: int
 
 class ContextCompactor(Protocol):
     async def summarize(self, request: CompactionRequest) -> str: ...
@@ -202,13 +203,20 @@ not persist the request or create a second history owner.
 
 ### 3. Contracts
 
-- `history` is the old canonical prefix to summarize; the provider projection
-  deep-copies it before adding the prompt.
-- `recent_context` is the retained suffix supplied as background only. It is not
-  summarized into `history`, and it must not be written to `CompactionEntry`.
+- `history_projection` is a deterministic role-delimited projection of the old
+  canonical prefix. If it does not fit, only this projection is head/tail
+  cropped; canonical messages and JSONL entries are never modified.
+- The complete provider input is bounded by
+  `int(effective_window_tokens * ContextPolicy.auto_compact_ratio)`. The
+  estimator includes the system prompt and serialized compaction message, so
+  `estimated(system + message) <= input_budget_tokens` before provider dispatch.
+- `objective` and `recent_context_hint` each receive at most 5% of the total
+  compaction input budget. The hint contains only the latest assistant
+  conclusion, at most three unique failed tool names, and at most three recent
+  file paths; the retained message suffix is never serialized in full.
 - A non-empty current user objective has priority, followed by the latest user
-  message in recent/history. An active structural PlanView (`is_active`,
-  `file_path`) contributes readable plan content and its path.
+  message in recent/history. ContextRuntime and the compaction contract do not
+  know or hold PlanRuntime or any Plan-specific view.
 - When no objective can be established, `objective` remains `None` and the
   prompt renders `[objective unavailable; do not invent a goal]`.
 - The single `COMPACTION_PROMPT_TEMPLATE` requires these headings in order:
@@ -217,37 +225,41 @@ not persist the request or create a second history owner.
   `# Verification`. Every Findings and Verification item must include a
   `Coding Evidence` line with a source, command/result, commit, or one-line
   error reference.
+- A returned summary is valid only when all nine headings are present exactly
+  once and in the required order. Validation happens before SessionRuntime can
+  append a `CompactionEntry`.
 
 ### 4. Validation & Error Matrix
 
 | Condition | Required result |
 | --- | --- |
-| Active Plan has a readable file | Merge its path/content into the objective for this request only |
-| Plan inactive, missing, or unreadable | Omit Plan content; never invent replacement state |
 | Objective and user fallback are unavailable | Keep request objective `None`; render the explicit unavailable marker |
 | Provider emits an error or empty summary | Preserve the existing compaction error; write no new entry |
+| Summary misses, duplicates, or reorders a heading | Raise `InvalidCompactionSummary`; write no new entry |
+| Fixed prompt exceeds the total input budget | Fail before provider dispatch |
+| History exceeds its remaining budget | Crop only the provider history projection with a deterministic omission marker |
 | Compaction is cancelled | Preserve the existing aborted event/cancellation path; write no new entry |
-| Projection budgets or snips tool results | Change only provider projection; canonical history and compaction input remain intact |
+| Projection budgets or snips tool results | Change only provider projection; canonical history remains intact |
 
 ### 5. Good / Base / Bad Cases
 
-- Good: Composition passes the existing PlanRuntime as a structural read-only
-  view; ContextRuntime assembles one immutable request; SessionRuntime records
-  only the returned text in the existing CompactionEntry.
+- Good: ContextRuntime derives one bounded immutable request from canonical
+  messages; SessionRuntime records only a validated returned summary in the
+  existing CompactionEntry.
 - Base: Manual or overflow compaction omits an explicit current objective and
   resolves the latest user message from its existing canonical context.
 - Bad: Add a compatibility `summarize(messages)` overload, store a second
-  history/Memory object, or pass prepared/snipped messages as canonical summary
-  input.
+  history/Memory object, pass the full retained suffix into the compaction
+  prompt, or inject PlanRuntime through a structural Protocol.
 
 ### 6. Tests Required
 
-- Unit tests assert request tuple normalization, objective/Plan precedence,
-  recent-user fallback, unavailable marker, fixed heading order, and evidence
-  instructions in the one template.
-- Runtime/integration tests assert retained context is prompt background,
-  85%-triggered compaction still appends CompactionEntry and replays the same
-  active messages, and canonical messages are unchanged.
+- Unit tests assert the whole-request budget invariant, deterministic history
+  cropping, 5% objective/hint limits, objective precedence, unavailable marker,
+  and fixed summary headings.
+- Runtime/integration tests assert the retained suffix becomes only a bounded
+  hint, 85%-triggered compaction still appends a valid CompactionEntry, invalid
+  summaries append no entry, and canonical messages are unchanged.
 - Context projection tests assert the recent three eligible tool results and
   each file's last `read_file` remain protected at the existing thresholds.
 - Provider error, empty-summary, and cancellation tests retain their existing
@@ -265,9 +277,10 @@ Correct:
 
 ```python
 request = CompactionRequest(
-    history=old_history,
-    recent_context=retained_suffix,
+    history_projection=bounded_old_history,
     objective=resolved_objective,
+    recent_context_hint=bounded_hint,
+    input_budget_tokens=compaction_input_budget,
 )
 await compactor.summarize(request)
 ```
@@ -277,9 +290,12 @@ await compactor.summarize(request)
 ContextManager.prepare() is the only generic path that renders
 CapabilitySpec.context_layer values. It passes each layer an immutable
 ContextView containing current time, last-provider token utilization and
-compaction status, tool-call summaries, and at most three one-line failures.
-Layers are sorted by layer_id; non-empty fragments are wrapped into one
-role=user message at the prepared-context tail.
+compaction status, the top three tool totals plus an aggregate remainder, the
+latest three calls, the top three repeated calls, and at most three one-line
+failures. GitStatusLayer renders the dirty-file count, at most three paths, and
+an omitted count. Layer output size therefore stays constant as history and the
+dirty-file set grow. Layers are sorted by layer_id; non-empty fragments are
+wrapped into one role=user message at the prepared-context tail.
 
 The state message is request-local:
 

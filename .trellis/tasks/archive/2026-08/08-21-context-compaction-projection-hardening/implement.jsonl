@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "修复 ContextRuntime 所有权、compaction contract 与瞬态投影边界"}
+{"file": ".trellis/spec/backend/four-layer-ownership.md", "reason": "保持 Kernel Runtime Capability Composition 四层依赖方向"}

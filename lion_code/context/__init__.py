@@ -3,14 +3,17 @@
 from lion_code.context.compaction import (
     COMPACTION_PROMPT_TEMPLATE,
     OBJECTIVE_UNAVAILABLE_MARKER,
+    SUMMARY_HEADINGS,
     SUMMARY_SYSTEM_PROMPT,
-    CompactionPlanView,
     CompactionRequest,
     ContextCompactor,
+    InvalidCompactionSummary,
     ProviderContextCompactor,
+    build_compaction_request,
+    estimate_compaction_input_tokens,
     resolve_compaction_objective,
 )
-from lion_code.context.estimator import estimate_messages_tokens
+from lion_code.context.estimator import estimate_messages_tokens, estimate_text_tokens
 from lion_code.context.limits import (
     ModelLimitsResolver,
     effective_window_tokens,
@@ -34,8 +37,8 @@ from lion_code.context.types import (
 __all__ = [
     "COMPACTION_PROMPT_TEMPLATE",
     "OBJECTIVE_UNAVAILABLE_MARKER",
+    "SUMMARY_HEADINGS",
     "SUMMARY_SYSTEM_PROMPT",
-    "CompactionPlanView",
     "CompactionRequest",
     "CompactionStatus",
     "ContextAction",
@@ -46,12 +49,16 @@ __all__ = [
     "ContextRuntimeState",
     "ContextUtilization",
     "ContextView",
+    "InvalidCompactionSummary",
     "ModelLimitsResolver",
     "PreparedContext",
     "ProviderContextCompactor",
     "ToolTrace",
+    "build_compaction_request",
     "effective_window_tokens",
+    "estimate_compaction_input_tokens",
     "estimate_messages_tokens",
+    "estimate_text_tokens",
     "fallback_context_window",
     "fallback_model_limits",
     "project_messages",

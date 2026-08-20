@@ -12,15 +12,13 @@ import asyncio
 import time
 
 from ..context import (
-    CompactionPlanView,
-    CompactionRequest,
     ContextCompactor,
     ContextManager,
     ContextRuntimeState,
     ModelLimitsResolver,
+    build_compaction_request,
     effective_window_tokens,
     fallback_model_limits,
-    resolve_compaction_objective,
 )
 from ..core.messages import AgentMessage
 from ..core.provider import ModelProvider
@@ -40,14 +38,12 @@ class ContextRuntime:
         usage: UsageLedger,
         execution: ExecutionControl,
         initial_effective_window: int,
-        plan_view: CompactionPlanView | None = None,
     ) -> None:
         self._context_manager = context_manager
         self._context_compactor = context_compactor
         self._model_limits_resolver = model_limits_resolver
         self._usage = usage
         self._execution = execution
-        self._plan_view = plan_view
         self.effective_window = initial_effective_window
         self._resolved_model_limits_for: tuple[int, str] | None = None
         self._compaction_required = False
@@ -138,15 +134,12 @@ class ContextRuntime:
             raise RuntimeError("No context compactor installed")
         if self._execution.cancelled:
             raise asyncio.CancelledError
-        request = CompactionRequest(
+        request = build_compaction_request(
             history=messages,
             recent_context=recent_context,
-            objective=resolve_compaction_objective(
-                requested_objective=objective,
-                history=tuple(messages),
-                recent_context=tuple(recent_context),
-                plan_view=self._plan_view,
-            ),
+            requested_objective=objective,
+            effective_window_tokens=self.effective_window,
+            input_ratio=self._context_manager.policy.auto_compact_ratio,
         )
         task = asyncio.create_task(self._context_compactor.summarize(request))
         self._compaction_task = task

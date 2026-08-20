@@ -29,3 +29,27 @@ def replace_tool_result_text(message: ToolResultMessage, text: str) -> None:
     if not inserted:
         updated.insert(0, replacement)
     message.content = updated
+
+
+def budget_text(text: str, budget: int) -> str:
+    """在字符预算内对称保留文本首尾，并标记省略规模。"""
+
+    if budget <= 0:
+        return ""
+    if len(text) <= budget:
+        return text
+
+    low = 0
+    high = budget // 2
+    best = ""
+    while low <= high:
+        keep = (low + high) // 2
+        omitted = len(text) - keep * 2
+        marker = f"\n\n[... budgeted: {omitted} chars truncated ...]\n\n"
+        candidate = text[:keep] + marker + text[-keep:] if keep else marker
+        if len(candidate) <= budget:
+            best = candidate
+            low = keep + 1
+        else:
+            high = keep - 1
+    return best[:budget]
