@@ -48,8 +48,8 @@
   构造 hint，既不完整进入 Provider 请求，也不写入 `CompactionEntry`。
 - hint 只保留继续当前局面需要的有限信息：最近 assistant 结论、最近失败工具名和最近文件路径；
   不复制完整 ToolResult、traceback、任意工具参数或整个消息 JSON。
-- hint 上限同时满足固定 4,000 字符和按现有 4 chars/token 估算的 effective window 5%，取
-  两者较小值。threshold/manual/overflow 共用这一条规则，不增加 reason-specific 策略或配置。
+- hint 上限为按现有 4 chars/token 估算的 effective window 5%。threshold/manual/overflow
+  共用这一条规则，不增加第二个固定阈值、reason-specific 策略或配置。
 - overflow 回归必须证明 compactor Provider 输入不含 retained suffix 的大块原文，并在大
   suffix fixture 下显著小于触发 overflow 的原 context。
 
@@ -65,8 +65,8 @@
 
 - `ContextView` 不再保存全部 tool traces，只保留固定上限的 per-tool totals、重复调用摘要和
   最近调用摘要；`AgentStateLayer` 只渲染这些有界投影。
-- 固定上限为：最多 8 个 tool totals、3 个高频重复摘要、5 个最近摘要；超出 tool totals 的
-  调用合并为 `other`，不新增配置项或 mutable counter owner。
+- 复用一个固定 `N=3`：最多 3 个 tool totals、3 个高频重复摘要、3 个最近摘要；超出 tool
+  totals 的调用合并为 `other`，不新增配置项或 mutable counter owner。
 - Git 状态显示 dirty file 总数，只列前三个稳定排序路径，其余显示 `... N more`。
 - 保持每条 argument/failure 摘要的现有字符上限、最近三条 failure、prepared-only 语义和
   每次 render 实时读取 Git 的行为。
@@ -85,13 +85,13 @@
 - [ ] `ContextRuntime`、Context Kernel 和 compaction request 不持有或读取 Plan；FullProfile
       reachable-object-graph 与精确 coupling gate 均通过。
 - [ ] explicit → recent user → history user → unavailable 的 objective 顺序有直接测试。
-- [ ] `CompactionRequest.recent_context_hint` 是字符串且满足 4,000 chars / 5% window 中更小
-      的硬上限；Provider 请求不包含 retained suffix 的完整消息或大块 ToolResult。
+- [ ] `CompactionRequest.recent_context_hint` 是字符串且满足 effective window 5% 的硬上限；
+      Provider 请求不包含 retained suffix 的完整消息或大块 ToolResult。
 - [ ] overflow 集成测试证明 compaction 输入显著小于构造的 overflowing context，成功后仍只
       替换 old prefix 并保留最近两轮。
 - [ ] 九个 heading 缺失、重复或乱序均抛 `InvalidCompactionSummary`；合法摘要仍可写入并
       replay；非法摘要不新增 `CompactionEntry` 且原 history 不变。
-- [ ] 长工具历史生成的 `ContextView` 与 AgentState 输出满足 8/3/5 上限，同时保留准确的
+- [ ] 长工具历史生成的 `ContextView` 与 AgentState 输出满足 3/3/3 上限，同时保留准确的
       per-tool 总调用数、最近三条失败和确定性顺序。
 - [ ] Git dirty files 为 0、3、超过 3 三种情况均按总数 + 前三项 + `... N more` 渲染，
       每次 render 仍重新读取工作区。

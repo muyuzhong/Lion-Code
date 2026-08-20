@@ -35,16 +35,16 @@ class CompactionRequest:
 `ProviderContextCompactor` 只 deep-copy `request.history`，追加包含 objective、hint 和固定协议的
 一条 prompt message。Request、compactor 和 Session 均不保存 retained messages。
 
-Hint 使用一次线性扫描构造，只收集：
+Hint 使用一次反向线性扫描构造，在预算耗尽时立即停止，只收集：
 
 - 最后一个非空 assistant 文本结论；
-- 最近三个失败 `ToolResultMessage.tool_name`；
-- 最近五个 ToolCall 中 `file_path` / `path` 的字符串值。
+- 最近失败的 `ToolResultMessage.tool_name`；
+- 最近 ToolCall 中 `file_path` / `path` 的字符串值。
 
 整段 hint 最终截断到：
 
 ```text
-min(4_000 chars, effective_window_tokens * 5% * 4 chars/token)
+effective_window_tokens * 5% * 4 chars/token
 ```
 
 实现复用仓库当前 4 chars/token 估算常量，不引入 tokenizer、配置或 reason-specific 分支。
@@ -72,13 +72,14 @@ Provider 返回非空文本后，validator 按完整行匹配 heading，并检�
 `ContextView.from_messages()` 仍从 canonical messages 派生一次只读快照，但快照只保留：
 
 ```text
-tool totals       <= 8 rows (overflow merged into other)
+tool totals       <= 3 rows (overflow merged into other)
 repeated details  <= 3 rows
-recent details    <= 5 rows
+recent details    <= 3 rows
 recent failures   <= 3 rows (unchanged)
 ```
 
-内部可用一个最小 counted-activity value 表达 `label + count`；不保留兼容的全量
+四处列表共用一个 `N=3` 常量。内部可用一个最小 counted-activity value 表达
+`label + count`；不保留兼容的全量
 `tool_trace` alias。统计值随 view 创建，不存入 ContextManager/Capability/Session，不形成新的
 mutable owner。相同 count 时使用首次出现顺序，recent 使用消息顺序；渲染顺序确定。
 

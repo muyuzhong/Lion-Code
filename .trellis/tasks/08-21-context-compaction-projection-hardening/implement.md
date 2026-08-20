@@ -11,8 +11,8 @@
 1. **移除 Plan compaction edge，并收敛 request 输入**
    - 删除 Plan protocol/read helper、Runtime 字段和 Composition 接线。
    - 保留 explicit → recent user → history user → unavailable objective 顺序。
-   - 把 `CompactionRequest.recent_context` 替换为 bounded string hint；加入 4,000 chars / 5%
-     effective-window 中较小的预算和最小 hint 投影。
+   - 把 `CompactionRequest.recent_context` 替换为 bounded string hint；加入 5%
+     effective-window 预算和最小 hint 投影。
    - 更新 compactor prompt、ContextRuntime/AgentRuntime 调用、fakes、unit/integration tests。
    - 增加 FullProfile reachable graph + exact removed coupling 架构门禁。
    - 聚焦验证后提交：`fix: 移除压缩链路的 Plan 依赖并限制近期提示`。
@@ -24,7 +24,7 @@
    - 聚焦验证后提交：`fix: 校验上下文压缩摘要结构`。
 
 3. **限制瞬态状态投影**
-   - 把 ContextView activity 改为 8 个 tool totals、3 个 repeated、5 个 recent 的有界快照；
+   - 用单个 `N=3` 把 ContextView activity 改为 3 个 tool totals、3 个 repeated、3 个 recent；
      保持 failure=3 和单条摘要=240 chars。
    - 更新 AgentStateLayer 渲染和长历史测试。
    - GitStatusLayer 渲染 dirty total、前三项和 `... N more`；覆盖 clean/3/>3/rename/重复 render。
