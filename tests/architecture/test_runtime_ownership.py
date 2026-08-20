@@ -10,16 +10,23 @@
 from __future__ import annotations
 
 import ast
+import functools
+import types
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 from lion_code.composition import (
     AgentConfig,
+    CodingProfile,
+    FullProfile,
     MinimalProfile,
+    ProviderBindings,
     RuntimeBindings,
+    SessionBindings,
     ToolBindings,
     build_agent_composition,
 )
+from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.registry import ToolRegistry
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -151,6 +158,185 @@ def _bare_composition():
         return build_agent_composition(
             MinimalProfile(), config=config, bindings=bindings
         )
+
+
+def _profile_composition(profile, tmp_path: Path):
+    provider = Mock()
+    provider.aclose = AsyncMock()
+    bindings = RuntimeBindings(
+        provider=ProviderBindings(provider=provider),
+        session=SessionBindings(
+            session_repository=SessionRepository(
+                tmp_path / type(profile).__name__.casefold()
+            )
+        ),
+    )
+    return build_agent_composition(
+        profile,
+        config=AgentConfig(api_key="test-key", terminal_output=False),
+        bindings=bindings,
+    )
+
+
+def _slot_names(value: object) -> tuple[str, ...]:
+    names: list[str] = []
+    for cls in type(value).__mro__:
+        slots = cls.__dict__.get("__slots__", ())
+        if isinstance(slots, str):
+            slots = (slots,)
+        names.extend(
+            slot
+            for slot in slots
+            if slot not in {"__dict__", "__weakref__"}
+        )
+    return tuple(dict.fromkeys(names))
+
+
+def _reachable_paths(root: object) -> dict[int, str]:
+    """只沿 Lion composition 对象展开引用，不执行 callable 或读取 globals。"""
+
+    primitive_types = (str, bytes, bytearray, int, float, complex, bool)
+    visited: set[int] = set()
+    paths: dict[int, str] = {}
+
+    def visit(value: object, path: str) -> None:
+        if value is None or isinstance(value, primitive_types):
+            return
+        if isinstance(value, types.ModuleType | type):
+            return
+        if isinstance(value, dict):
+            identity = id(value)
+            if identity in visited:
+                return
+            visited.add(identity)
+            paths[identity] = path
+            for index, (key, child) in enumerate(value.items()):
+                visit(key, f"{path}.key[{index}]")
+                visit(child, f"{path}[{key!r}]")
+            return
+        if isinstance(value, (list, tuple, set, frozenset)):
+            identity = id(value)
+            if identity in visited:
+                return
+            visited.add(identity)
+            paths[identity] = path
+            for index, child in enumerate(value):
+                visit(child, f"{path}[{index}]")
+            return
+        if isinstance(value, functools.partial):
+            identity = id(value)
+            if identity in visited:
+                return
+            visited.add(identity)
+            paths[identity] = path
+            visit(value.func, f"{path}.func")
+            for index, child in enumerate(value.args):
+                visit(child, f"{path}.args[{index}]")
+            for key, child in (value.keywords or {}).items():
+                visit(child, f"{path}.keywords[{key!r}]")
+            return
+        if isinstance(value, types.MethodType):
+            identity = id(value)
+            if identity in visited:
+                return
+            visited.add(identity)
+            paths[identity] = path
+            visit(value.__self__, f"{path}.__self__")
+            visit(value.__func__, f"{path}.__func__")
+            return
+        if isinstance(value, types.FunctionType):
+            identity = id(value)
+            if identity in visited:
+                return
+            visited.add(identity)
+            paths[identity] = path
+            if value.__closure__ is not None:
+                for index, cell in enumerate(value.__closure__):
+                    try:
+                        contents = cell.cell_contents
+                    except ValueError:
+                        continue
+                    visit(contents, f"{path}.__closure__[{index}]")
+            return
+
+        module_name = getattr(type(value), "__module__", "")
+        if not module_name.startswith("lion_code"):
+            return
+        identity = id(value)
+        if identity in visited:
+            return
+        visited.add(identity)
+        paths[identity] = path
+        if hasattr(value, "__dict__"):
+            for name, child in vars(value).items():
+                visit(child, f"{path}.{name}")
+        for slot in _slot_names(value):
+            try:
+                child = getattr(value, slot)
+            except AttributeError:
+                continue
+            visit(child, f"{path}.{slot}")
+
+    visit(root, "$root")
+    return paths
+
+
+def _assert_not_reachable(root: object, target: object, *, label: str) -> None:
+    paths = _reachable_paths(root)
+    assert id(target) not in paths, f"{label} 仍可经 {paths.get(id(target))} 到达 ProviderController"
+
+
+def test_builder_has_no_provider_controller_closure() -> None:
+    tree = _tree(SOURCE_ROOT / "composition" / "agent_builder.py")
+    builder = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "build_agent_composition"
+    )
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        if node is builder:
+            continue
+        if any(
+            isinstance(name, ast.Name)
+            and isinstance(name.ctx, ast.Load)
+            and name.id == "provider_controller"
+            for name in ast.walk(node)
+        ):
+            violations.append(getattr(node, "name", "<lambda>"))
+    assert not violations, f"builder closure 不得捕获未来 provider_controller: {violations}"
+
+
+def test_reachable_runtime_graph_has_no_provider_controller(tmp_path) -> None:
+    profiles = (MinimalProfile(), CodingProfile(), FullProfile())
+    for profile in profiles:
+        composition = _profile_composition(profile, tmp_path)
+        controller = composition.runtime.provider_controller
+        profile_name = type(profile).__name__
+        _assert_not_reachable(
+            composition.runtime.agent,
+            controller,
+            label=f"{profile_name}.AgentRuntime",
+        )
+        _assert_not_reachable(
+            composition.runtime.session,
+            controller,
+            label=f"{profile_name}.SessionRuntime",
+        )
+        _assert_not_reachable(
+            composition.capabilities.runtime,
+            controller,
+            label=f"{profile_name}.CapabilityRuntime",
+        )
+        if composition.capabilities.subagent_factory is not None:
+            _assert_not_reachable(
+                composition.capabilities.subagent_factory,
+                controller,
+                label=f"{profile_name}.SubagentFactory",
+            )
 
 
 # ---------------------------------------------------------------------------
