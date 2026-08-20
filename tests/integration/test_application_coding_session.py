@@ -26,7 +26,11 @@ from lion_code.application import (
     QueueUpdateEvent,
     SessionAgentEndEvent,
 )
-from lion_code.context import SUMMARY_HEADINGS
+from lion_code.context import (
+    SUMMARY_HEADINGS,
+    estimate_messages_tokens,
+    estimate_text_tokens,
+)
 from lion_code.core import AssistantMessage, TextContent, ToolCall
 from lion_code.core.events import (
     AgentEndEvent,
@@ -442,6 +446,42 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             ),
             1,
         )
+
+    async def test_overflow_compactor_input_is_bounded_and_smaller(self) -> None:
+        summary = _structured_summary("recovery summary")
+        old_prompt = "old prompt " + "x" * 20_000
+        recent_answer = "recent answer " + "y" * 20_000
+        session, _agent, harness, fake = self._make_session(
+            [
+                _stop_event("old answer"),
+                _stop_event(recent_answer),
+                _error_event("context window exceeded"),
+                _stop_event(summary),
+                _stop_event("recovered answer"),
+            ]
+        )
+        async for _ in session.prompt(old_prompt):
+            pass
+        async for _ in session.prompt("keep recent turn"):
+            pass
+        harness.composition.runtime.context.effective_window = 2_000
+
+        events = [event async for event in session.prompt("trigger overflow")]
+
+        compaction_end = next(
+            event for event in events if isinstance(event, CompactionEndEvent)
+        )
+        self.assertFalse(compaction_end.aborted)
+        original_tokens = estimate_text_tokens(fake.received_systems[2]) + (
+            estimate_messages_tokens(fake.received_messages[2])
+        )
+        compaction_tokens = estimate_text_tokens(fake.received_systems[3]) + (
+            estimate_messages_tokens(fake.received_messages[3])
+        )
+        self.assertLessEqual(compaction_tokens, int(2_000 * 0.85))
+        self.assertLess(compaction_tokens, original_tokens // 2)
+        self.assertEqual(len(fake.received_messages[3]), 1)
+        self.assertNotIn("y" * 1_000, fake.received_messages[3][0].text)
 
     async def test_context_overflow_compaction_failure_settles(self) -> None:
         session, _agent, _harness, fake = self._make_session(

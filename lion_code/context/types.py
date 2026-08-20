@@ -167,7 +167,7 @@ class ContextView:
             _summarize_failure(message)
             for message in message_list
             if isinstance(message, ToolResultMessage) and message.is_error
-        )[-3:]
+        )[-_TOOL_ACTIVITY_LIMIT:]
         return cls(
             current_time=current_time,
             context_utilization=_context_utilization(

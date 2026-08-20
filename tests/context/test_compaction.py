@@ -17,6 +17,7 @@ from lion_code.context import (
     estimate_text_tokens,
     resolve_compaction_objective,
 )
+from lion_code.context.compaction import HISTORY_OMITTED_MARKER
 from lion_code.core import (
     AssistantMessage,
     TextContent,
@@ -237,6 +238,63 @@ def test_compaction_request_rejects_window_smaller_than_fixed_prompt() -> None:
         )
 
 
+def test_oversized_history_uses_marker_when_no_history_content_fits() -> None:
+    minimum_request = CompactionRequest(
+        history_projection=HISTORY_OMITTED_MARKER,
+        objective=None,
+        recent_context_hint="",
+        input_budget_tokens=1,
+    )
+    minimum_budget = estimate_compaction_input_tokens(minimum_request)
+    effective_window = next(
+        window
+        for window in range(minimum_budget, minimum_budget * 2)
+        if int(window * 0.85) == minimum_budget
+    )
+
+    request = build_compaction_request(
+        history=(
+            AssistantMessage(content=[TextContent(text="old history " + "x" * 10_000)]),
+        ),
+        recent_context=(),
+        requested_objective=None,
+        effective_window_tokens=effective_window,
+        input_ratio=0.85,
+    )
+
+    assert "budgeted" in request.history_projection
+    assert "old history" not in request.history_projection
+    assert estimate_compaction_input_tokens(request) == minimum_budget
+
+
+def test_oversized_history_fails_when_omission_marker_does_not_fit() -> None:
+    marker_request = CompactionRequest(
+        history_projection=HISTORY_OMITTED_MARKER,
+        objective=None,
+        recent_context_hint="",
+        input_budget_tokens=1,
+    )
+    insufficient_budget = estimate_compaction_input_tokens(marker_request) - 1
+    effective_window = next(
+        window
+        for window in range(insufficient_budget, insufficient_budget * 2)
+        if int(window * 0.85) == insufficient_budget
+    )
+
+    with pytest.raises(RuntimeError, match="omission marker"):
+        build_compaction_request(
+            history=(
+                AssistantMessage(
+                    content=[TextContent(text="old history " + "x" * 10_000)]
+                ),
+            ),
+            recent_context=(),
+            requested_objective=None,
+            effective_window_tokens=effective_window,
+            input_ratio=0.85,
+        )
+
+
 @pytest.mark.asyncio
 async def test_provider_compactor_surfaces_provider_failure() -> None:
     provider = _RecordingProvider(
@@ -248,6 +306,28 @@ async def test_provider_compactor_surfaces_provider_failure() -> None:
     compactor = ProviderContextCompactor(provider=provider, get_model=lambda: "fake")
 
     with pytest.raises(RuntimeError, match="failed"):
+        await compactor.summarize(
+            build_compaction_request(
+                history=(UserMessage(content="original"),),
+                recent_context=(),
+                requested_objective=None,
+                effective_window_tokens=2_000,
+                input_ratio=0.85,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_provider_compactor_rejects_empty_summary() -> None:
+    provider = _RecordingProvider(
+        AssistantDoneEvent(
+            reason="stop",
+            message=AssistantMessage(content=[]),
+        )
+    )
+    compactor = ProviderContextCompactor(provider=provider, get_model=lambda: "fake")
+
+    with pytest.raises(RuntimeError, match="produced no summary"):
         await compactor.summarize(
             build_compaction_request(
                 history=(UserMessage(content="original"),),

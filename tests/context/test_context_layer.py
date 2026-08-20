@@ -271,6 +271,33 @@ def test_git_status_layer_bounds_dirty_file_list() -> None:
     assert "- d.py" not in rendered
 
 
+@pytest.mark.parametrize(
+    ("status", "expected", "excluded"),
+    (
+        ("", ("Dirty files: 0", "- clean"), ("...",)),
+        (
+            "R  old.py -> z.py\n M a.py\n?? b.py",
+            ("Dirty files: 3", "- a.py", "- b.py", "- z.py"),
+            ("old.py", "more"),
+        ),
+    ),
+)
+def test_git_status_layer_handles_clean_exact_limit_and_rename(
+    status: str,
+    expected: tuple[str, ...],
+    excluded: tuple[str, ...],
+) -> None:
+    view = ContextView.from_messages([], current_time="now")
+    with patch(
+        "lion_code.capabilities.git_status.capability._git_output",
+        side_effect=["main", status],
+    ):
+        rendered = GitStatusLayer().render(view)
+
+    assert all(value in rendered for value in expected)
+    assert all(value not in rendered for value in excluded)
+
+
 class _RecordingProvider:
     def __init__(self) -> None:
         self.messages: list[list] = []

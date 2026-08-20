@@ -317,13 +317,22 @@ def _fit_history_to_budget(
 
     source = request.history_projection
     best = without_history
-    omitted = replace(without_history, history_projection=HISTORY_OMITTED_MARKER)
-    if estimate_compaction_input_tokens(omitted, system_prompt=system_prompt) <= (
-        request.input_budget_tokens
-    ):
+    if source:
+        omitted = replace(without_history, history_projection=HISTORY_OMITTED_MARKER)
+        if (
+            estimate_compaction_input_tokens(
+                omitted,
+                system_prompt=system_prompt,
+            )
+            > request.input_budget_tokens
+        ):
+            raise RuntimeError(
+                "Context compaction omission marker exceeds its input budget"
+            )
         best = omitted
 
-    low = 1
+    marker_chars = len(f"\n\n[... budgeted: {len(source)} chars truncated ...]\n\n")
+    low = marker_chars + 1
     high = len(source)
     while low <= high:
         budget = (low + high) // 2
