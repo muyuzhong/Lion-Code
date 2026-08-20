@@ -12,8 +12,8 @@ from .adapters.coding_session_backend import CodingSessionBackendAdapter
 from .application.commands import CommandResult
 from .application.session import LionCodingSession
 from .capabilities.skill.discovery import discover_skills
-from .config import load_api_config
 from .composition.full_product import build_full_coding_backend
+from .config import load_api_config
 from .permission_state import PermissionMode
 from .ui import (
     print_error,

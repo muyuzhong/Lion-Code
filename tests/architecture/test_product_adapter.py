@@ -19,8 +19,8 @@ from lion_code.composition import (
     RuntimeBindings,
     SessionBindings,
 )
-from lion_code.meta_agent import MetaAgent, build_profile_agent
 from lion_code.composition.full_product import build_full_coding_backend
+from lion_code.meta_agent import MetaAgent, build_profile_agent
 from lion_code.session_runtime import SessionRepository
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]

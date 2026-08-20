@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 from core.fakes import FakeProvider
 from full_agent import FullAgentHarness, build_full_agent_harness
 
+from lion_code.composition.full_product import build_full_coding_backend
 from lion_code.context import SUMMARY_SYSTEM_PROMPT
 from lion_code.core import (
     AssistantMessage,
@@ -29,7 +30,6 @@ from lion_code.core import (
 )
 from lion_code.core.provider_events import AssistantDoneEvent, AssistantErrorEvent
 from lion_code.meta_agent import MetaAgent
-from lion_code.composition.full_product import build_full_coding_backend
 from lion_code.providers import RuntimeModelLimits
 from lion_code.runtime.provider import ProviderController
 from lion_code.session_runtime import SessionRepository

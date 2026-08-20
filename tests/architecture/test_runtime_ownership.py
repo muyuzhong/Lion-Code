@@ -184,11 +184,7 @@ def _slot_names(value: object) -> tuple[str, ...]:
         slots = cls.__dict__.get("__slots__", ())
         if isinstance(slots, str):
             slots = (slots,)
-        names.extend(
-            slot
-            for slot in slots
-            if slot not in {"__dict__", "__weakref__"}
-        )
+        names.extend(slot for slot in slots if slot not in {"__dict__", "__weakref__"})
     return tuple(dict.fromkeys(names))
 
 
@@ -283,7 +279,9 @@ def _reachable_paths(root: object) -> dict[int, str]:
 
 def _assert_not_reachable(root: object, target: object, *, label: str) -> None:
     paths = _reachable_paths(root)
-    assert id(target) not in paths, f"{label} 仍可经 {paths.get(id(target))} 到达 ProviderController"
+    assert id(target) not in paths, (
+        f"{label} 仍可经 {paths.get(id(target))} 到达 ProviderController"
+    )
 
 
 def test_builder_has_no_provider_controller_closure() -> None:
@@ -291,8 +289,7 @@ def test_builder_has_no_provider_controller_closure() -> None:
     builder = next(
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "build_agent_composition"
+        if isinstance(node, ast.FunctionDef) and node.name == "build_agent_composition"
     )
     violations: list[str] = []
     for node in ast.walk(tree):
@@ -307,7 +304,9 @@ def test_builder_has_no_provider_controller_closure() -> None:
             for name in ast.walk(node)
         ):
             violations.append(getattr(node, "name", "<lambda>"))
-    assert not violations, f"builder closure 不得捕获未来 provider_controller: {violations}"
+    assert not violations, (
+        f"builder closure 不得捕获未来 provider_controller: {violations}"
+    )
 
 
 def test_reachable_runtime_graph_has_no_provider_controller(tmp_path) -> None:
