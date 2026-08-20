@@ -182,10 +182,7 @@ def build_compaction_request(
         raise ValueError("input_ratio must be between 0 and 1")
 
     input_budget_tokens = max(1, int(effective_window_tokens * input_ratio))
-    dynamic_budget_chars = (
-        int(input_budget_tokens * _DYNAMIC_FIELD_BUDGET_RATIO)
-        * APPROXIMATE_CHARS_PER_TOKEN
-    )
+    dynamic_budget_chars = _dynamic_field_budget_chars(input_budget_tokens)
     objective = resolve_compaction_objective(
         requested_objective=requested_objective,
         history=history,
@@ -297,6 +294,19 @@ def _fit_history_to_budget(
     request: CompactionRequest,
     system_prompt: str,
 ) -> CompactionRequest:
+    dynamic_budget_chars = _dynamic_field_budget_chars(request.input_budget_tokens)
+    request = replace(
+        request,
+        objective=(
+            budget_text(request.objective, dynamic_budget_chars)
+            if request.objective is not None
+            else None
+        ),
+        recent_context_hint=budget_text(
+            request.recent_context_hint,
+            dynamic_budget_chars,
+        ),
+    )
     if estimate_compaction_input_tokens(request, system_prompt=system_prompt) <= (
         request.input_budget_tokens
     ):
@@ -348,6 +358,13 @@ def _fit_history_to_budget(
         else:
             high = budget - 1
     return best
+
+
+def _dynamic_field_budget_chars(input_budget_tokens: int) -> int:
+    return (
+        int(input_budget_tokens * _DYNAMIC_FIELD_BUDGET_RATIO)
+        * APPROXIMATE_CHARS_PER_TOKEN
+    )
 
 
 def _validate_summary(summary: str) -> None:

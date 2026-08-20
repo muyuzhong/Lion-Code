@@ -337,3 +337,35 @@ async def test_provider_compactor_rejects_empty_summary() -> None:
                 input_ratio=0.85,
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_provider_compactor_enforces_dynamic_field_reserves() -> None:
+    provider = _RecordingProvider(
+        AssistantDoneEvent(
+            reason="stop",
+            message=AssistantMessage(content=[TextContent(text=VALID_SUMMARY)]),
+        )
+    )
+    compactor = ProviderContextCompactor(provider=provider, get_model=lambda: "fake")
+
+    await compactor.summarize(
+        CompactionRequest(
+            history_projection="",
+            objective="o" * 1_000,
+            recent_context_hint="h" * 1_000,
+            input_budget_tokens=1_700,
+        )
+    )
+
+    prompt = provider.calls[0][2][0].text
+    objective = prompt.split("Current objective:\n", 1)[1].split(
+        "\n\nRecent context hint",
+        1,
+    )[0]
+    hint = prompt.split("<recent_context_hint>\n", 1)[1].split(
+        "\n</recent_context_hint>",
+        1,
+    )[0]
+    assert estimate_text_tokens(objective) <= 85
+    assert estimate_text_tokens(hint) <= 85
