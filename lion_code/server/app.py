@@ -1,15 +1,16 @@
-"""FastAPI Web 服务端实现。"""
-
 from __future__ import annotations
 
 import json
 import threading
 import time
 import webbrowser
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import FileResponse
+from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
 from lion_code.application.session import LionCodingSession
@@ -177,6 +178,19 @@ def create_app(session: LionCodingSession) -> FastAPI:
             bridge.unbind_callbacks()
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.close()
+
+    # ─── 静态前端资源托管 (SPA 模式) ──────────────────────────────
+    dist_dir = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    assets_dir = dist_dir / "assets"
+    if dist_dir.exists() and dist_dir.is_dir() and assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+        @app.get("/{full_path:path}")
+        async def serve_spa(full_path: str) -> FileResponse:
+            file_path = dist_dir / full_path
+            if file_path.exists() and file_path.is_file():
+                return FileResponse(file_path)
+            return FileResponse(dist_dir / "index.html")
 
     return app
 
