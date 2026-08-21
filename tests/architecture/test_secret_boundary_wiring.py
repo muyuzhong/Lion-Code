@@ -1,4 +1,4 @@
-"""PR-S2 接线门禁：sanitizer 必须落在 post 链首位，且可整体关闭。"""
+"""PR-S2/S3 接线门禁：sanitizer 落 post 链首位、egress 落 Permission 之后，均可整体关闭。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from lion_code.composition import (
     ToolBindings,
     build_agent_composition,
 )
+from lion_code.tooling.egress_guard import EgressGuardMiddleware, EgressWhitelist
 from lion_code.tooling.output_sanitizer import OutputSanitizerMiddleware
 from lion_code.tooling.secret_provider import SecretStore
 
@@ -52,5 +53,35 @@ def test_secret_boundary_can_be_disabled(tmp_path, monkeypatch) -> None:
     )
     assert not any(
         isinstance(item, OutputSanitizerMiddleware)
+        for item in composition.tooling.runtime.middleware
+    )
+
+
+def test_egress_guard_enabled_sits_after_permission(tmp_path, monkeypatch) -> None:
+    composition = _composition(
+        tmp_path,
+        monkeypatch,
+        ToolBindings(
+            secret_store=SecretStore({"API_KEY": "value-long-enough"}, b"k"),
+            egress_whitelist=EgressWhitelist(frozenset({"api.anthropic.com"})),
+        ),
+    )
+    pre_names = [
+        type(item).__name__
+        for item in composition.tooling.runtime.middleware
+        if item.phase == "pre"
+    ]
+    assert "EgressGuardMiddleware" in pre_names
+    assert pre_names.index("EgressGuardMiddleware") > pre_names.index(
+        "PermissionMiddleware"
+    )
+
+
+def test_egress_guard_can_be_disabled(tmp_path, monkeypatch) -> None:
+    composition = _composition(
+        tmp_path, monkeypatch, ToolBindings(enable_egress_guard=False)
+    )
+    assert not any(
+        isinstance(item, EgressGuardMiddleware)
         for item in composition.tooling.runtime.middleware
     )

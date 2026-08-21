@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from ..session_runtime import SessionRepository
     from ..tooling import ToolRegistry
     from ..tooling.audit import ExecutionAuditLog
+    from ..tooling.egress_guard import EgressWhitelist
     from ..tooling.execution import CommandExecutionBackend
     from ..tooling.secret_provider import SecretStore
     from ..tooling.snapshot import WorkspaceSnapshot
@@ -55,9 +56,11 @@ class ToolBindings:
     workspace_snapshot: WorkspaceSnapshot | None = None
     audit_log: ExecutionAuditLog | None = None
     secret_store: SecretStore | None = None
+    egress_whitelist: EgressWhitelist | None = None
     enable_workspace_snapshot: bool = True
     enable_audit: bool = True
     enable_secret_boundary: bool = True
+    enable_egress_guard: bool = True
 
 
 @dataclass(frozen=True, slots=True)

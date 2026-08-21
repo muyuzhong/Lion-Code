@@ -30,6 +30,7 @@ class ExecutionEvent:
     fingerprint_hit: bool | None = None
     authorization_source: str | None = None
     sanitizer_hits: int = 0
+    best_effort: bool | None = None
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, JSONValue]:
@@ -44,6 +45,7 @@ class ExecutionEvent:
             "fingerprint_hit": self.fingerprint_hit,
             "authorization_source": self.authorization_source,
             "sanitizer_hits": self.sanitizer_hits,
+            "best_effort": self.best_effort,
             "notes": list(self.notes),
         }
 
@@ -89,6 +91,13 @@ class ExecutionAuditLog:
         """从统一工具结果构造审计事件。"""
         snapshot_id = result.details.get("snapshot_id")
         sanitizer_hits = result.details.get("sanitizer_hits")
+        destination = result.details.get("egress_destination")
+        best_effort = result.details.get("egress_best_effort")
+        fingerprint_hit = result.details.get("fingerprint_hit")
+        blocked = result.details.get("egress_blocked")
+        result_value: AuditResult = (
+            "blocked" if blocked else ("failed" if result.is_error else "success")
+        )
         self.append(
             ExecutionEvent(
                 tool=tool.name,
@@ -97,7 +106,12 @@ class ExecutionAuditLog:
                 sanitizer_hits=(
                     sanitizer_hits if isinstance(sanitizer_hits, int) else 0
                 ),
-                result="failed" if result.is_error else "success",
+                destination=destination if isinstance(destination, str) else None,
+                best_effort=best_effort if isinstance(best_effort, bool) else None,
+                fingerprint_hit=(
+                    fingerprint_hit if isinstance(fingerprint_hit, bool) else None
+                ),
+                result=result_value,
             )
         )
 

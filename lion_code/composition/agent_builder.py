@@ -55,6 +55,7 @@ from ..prompt import (
     build_dynamic_system_context,
     build_static_system_prompt,
 )
+from ..providers.config import DEFAULT_ANTHROPIC_BASE_URL
 from ..providers.factory import create_provider
 from ..providers.thinking import ThinkingLevel
 from ..runtime.agent import AgentRuntime
@@ -81,6 +82,7 @@ from ..tooling import (
 from ..tooling.audit import ExecutionAuditLog
 from ..tooling.builtin import create_builtin_tools
 from ..tooling.context import ToolContext
+from ..tooling.egress_guard import EgressGuardMiddleware, EgressWhitelist, host_of
 from ..tooling.internal import create_internal_tools
 from ..tooling.middleware import (
     AuditMiddleware,
@@ -284,7 +286,16 @@ def build_agent_composition(
     )
 
     tooling_graph = _build_tooling_graph(
-        selection, foundation, capability_graph.capability_registry
+        selection,
+        foundation,
+        capability_graph.capability_registry,
+        provider_hosts=frozenset(
+            host
+            for host in (
+                host_of(config.anthropic_base_url or DEFAULT_ANTHROPIC_BASE_URL),
+            )
+            if host
+        ),
     )
 
     context = ContextRuntime(
@@ -655,6 +666,8 @@ def _build_tooling_graph(
     selection: _ProfileSelection,
     foundation: _FoundationGraph,
     capability_registry: CapabilityRegistry,
+    *,
+    provider_hosts: frozenset[str] = frozenset(),
 ) -> _ToolingGraph:
     prompt_composer = PromptComposer(
         stable_base_prompt=selection.base_prompt,
@@ -683,6 +696,16 @@ def _build_tooling_graph(
         secret_store = tool_bindings.secret_store or load_secret_store(
             workspace=foundation.cwd,
             key_file=Path.home() / ".lion_code" / "sanitizer.key",
+        )
+    egress_whitelist = None
+    if tool_bindings.enable_egress_guard:
+        egress_whitelist = (
+            tool_bindings.egress_whitelist
+            or EgressWhitelist.from_sources(
+                home=Path.home(),
+                cwd=foundation.cwd,
+                provider_hosts=provider_hosts,
+            )
         )
 
     def record_audit(tool, arguments, result) -> None:
@@ -719,6 +742,12 @@ def _build_tooling_graph(
             PermissionMiddleware(
                 permission_policy,
                 foundation.permission_controller,
+            ),
+            # 出口判定在权限之后、执行之前
+            *(
+                [EgressGuardMiddleware(egress_whitelist, secret_store)]
+                if egress_whitelist is not None
+                else []
             ),
             ReadFreshnessMiddleware(),
             ResultPolicyMiddleware(result_store),

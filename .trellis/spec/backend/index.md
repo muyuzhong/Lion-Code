@@ -26,6 +26,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Logging Guidelines](./logging-guidelines.md) | Event-based observability and terminal presentation | Active |
 | [Tool Runtime Workspace Recovery](./tool-runtime-recovery.md) | Snapshot, rollback result, and execution audit contracts | Active |
 | [Secret Boundary](./secret-boundary.md) | Secret registration, fingerprint redaction, and sanitizer pipeline contracts | Active |
+| [Egress Guard](./egress-guard.md) | Trust domain, Level A/B egress promises, whitelist growth contracts | Active |
 | [Agent E2E Evaluation](./agent-e2e-evaluation.md) | Versioned evaluation contracts, isolation, and offline-only behavior | Active |
 
 ---
