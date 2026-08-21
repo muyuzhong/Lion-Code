@@ -25,6 +25,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, testing, and review checks | Active |
 | [Logging Guidelines](./logging-guidelines.md) | Event-based observability and terminal presentation | Active |
 | [Tool Runtime Workspace Recovery](./tool-runtime-recovery.md) | Snapshot, rollback result, and execution audit contracts | Active |
+| [Secret Boundary](./secret-boundary.md) | Secret registration, fingerprint redaction, and sanitizer pipeline contracts | Active |
 | [Agent E2E Evaluation](./agent-e2e-evaluation.md) | Versioned evaluation contracts, isolation, and offline-only behavior | Active |
 
 ---

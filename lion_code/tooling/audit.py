@@ -29,6 +29,7 @@ class ExecutionEvent:
     destination: str | None = None
     fingerprint_hit: bool | None = None
     authorization_source: str | None = None
+    sanitizer_hits: int = 0
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, JSONValue]:
@@ -42,6 +43,7 @@ class ExecutionEvent:
             "destination": self.destination,
             "fingerprint_hit": self.fingerprint_hit,
             "authorization_source": self.authorization_source,
+            "sanitizer_hits": self.sanitizer_hits,
             "notes": list(self.notes),
         }
 
@@ -86,11 +88,15 @@ class ExecutionAuditLog:
     ) -> None:
         """从统一工具结果构造审计事件。"""
         snapshot_id = result.details.get("snapshot_id")
+        sanitizer_hits = result.details.get("sanitizer_hits")
         self.append(
             ExecutionEvent(
                 tool=tool.name,
                 command_or_args=serialize_tool_arguments(tool, arguments),
                 snapshot_id=snapshot_id if isinstance(snapshot_id, str) else None,
+                sanitizer_hits=(
+                    sanitizer_hits if isinstance(sanitizer_hits, int) else 0
+                ),
                 result="failed" if result.is_error else "success",
             )
         )

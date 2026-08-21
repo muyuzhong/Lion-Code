@@ -51,6 +51,7 @@ class TestExecutionAudit(unittest.TestCase):
                     "destination",
                     "fingerprint_hit",
                     "authorization_source",
+                    "sanitizer_hits",
                     "notes",
                 },
             )

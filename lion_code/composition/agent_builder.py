@@ -92,8 +92,10 @@ from ..tooling.middleware import (
     ToolMiddleware,
     WorkspaceSnapshotMiddleware,
 )
+from ..tooling.output_sanitizer import OutputSanitizerMiddleware
 from ..tooling.permission import PermissionPolicy
 from ..tooling.result_store import ResultStore
+from ..tooling.secret_provider import load_secret_store
 from ..tooling.snapshot import WorkspaceSnapshot
 from ..tooling.types import LionTool
 from ..usage import BudgetPolicy, UsageLedger
@@ -676,6 +678,12 @@ def _build_tooling_graph(
         audit_log = tool_bindings.audit_log or ExecutionAuditLog(
             Path.home() / ".lion_code" / "execution.audit"
         )
+    secret_store = None
+    if tool_bindings.enable_secret_boundary:
+        secret_store = tool_bindings.secret_store or load_secret_store(
+            workspace=foundation.cwd,
+            key_file=Path.home() / ".lion_code" / "sanitizer.key",
+        )
 
     def record_audit(tool, arguments, result) -> None:
         if audit_log is not None:
@@ -702,6 +710,9 @@ def _build_tooling_graph(
     ]
     if workspace_snapshot is not None:
         middleware.append(WorkspaceSnapshotMiddleware(workspace_snapshot))
+    # post 链首位：redact 必须先于 ResultStore 落盘与审计记录
+    if secret_store is not None:
+        middleware.append(OutputSanitizerMiddleware(secret_store))
     middleware.extend(
         [
             PreToolHookMiddleware(),
