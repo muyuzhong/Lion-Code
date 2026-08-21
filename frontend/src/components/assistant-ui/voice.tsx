@@ -173,7 +173,7 @@ void main() {
   float dist = length(uv);
   float t = u_time * u_speed;
 
-  // Perfect circle â€” hard boundary, soft anti-aliased edge
+  // Perfect circle â€?hard boundary, soft anti-aliased edge
   float radius = 0.44;
   float circle = 1.0 - smoothstep(radius - 0.008, radius + 0.008, dist);
 

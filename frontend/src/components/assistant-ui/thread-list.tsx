@@ -219,7 +219,7 @@ export const ThreadListNew = forwardRef<
         variant="ghost"
         data-slot="aui_thread-list-new"
         className={cn(
-          "hover:bg-muted data-active:bg-muted h-8 justify-start gap-2 rounded-md px-2.5 text-sm font-normal",
+          "bg-muted/80 hover:bg-muted text-foreground h-9 justify-start gap-2 rounded-lg px-3 text-sm font-medium",
           className,
         )}
         {...props}
