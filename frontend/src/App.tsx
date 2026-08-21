@@ -6,14 +6,16 @@ import { ChatInput } from "@/components/chat/ChatInput";
 import { ConfirmBanner, PlanApprovalModal } from "@/components/chat/ApprovalModals";
 import { SettingsModal } from "@/components/chat/SettingsModal";
 import { useLionChat } from "@/hooks/useLionChat";
-import { fetchSessions, fetchStatus, resumeSession, createNewSession } from "@/lib/api";
-import { ServerStatus, SessionSummary } from "@/types/chat";
+import { fetchSessions, fetchStatus, resumeSession, createNewSession, fetchModels } from "@/lib/api";
+import { ModelChoice, ServerStatus, SessionSummary } from "@/types/chat";
+import { ThemeProvider } from "@/context/ThemeContext";
 import { Toaster, toast } from "sonner";
 
-export function App() {
+function ChatApp() {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [status, setStatus] = useState<ServerStatus | null>(null);
+  const [models, setModels] = useState<ModelChoice[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
 
@@ -29,11 +31,12 @@ export function App() {
     respondPlanApproval,
   } = useLionChat(currentSessionId);
 
-  const loadStatusAndSessions = useCallback(async () => {
+  const loadData = useCallback(async () => {
     try {
-      const [statusData, sessionsData] = await Promise.all([
+      const [statusData, sessionsData, modelsData] = await Promise.all([
         fetchStatus().catch(() => null),
         fetchSessions().catch(() => []),
+        fetchModels().catch(() => []),
       ]);
       if (statusData) {
         setStatus(statusData);
@@ -42,20 +45,21 @@ export function App() {
         }
       }
       setSessions(sessionsData);
+      setModels(modelsData);
     } catch (err) {
       console.error("Failed to load initial data:", err);
     }
   }, [currentSessionId]);
 
   useEffect(() => {
-    loadStatusAndSessions();
-  }, [loadStatusAndSessions]);
+    loadData();
+  }, [loadData]);
 
   const handleSelectSession = async (sessionId: string) => {
     try {
       await resumeSession(sessionId);
       setCurrentSessionId(sessionId);
-      await loadStatusAndSessions();
+      await loadData();
       toast.success("已切换到指定会话");
     } catch (err: any) {
       toast.error(err.message || "切换会话失败");
@@ -66,7 +70,7 @@ export function App() {
     try {
       const res = await createNewSession();
       setCurrentSessionId(res.session_id);
-      await loadStatusAndSessions();
+      await loadData();
       toast.success("已创建新会话");
     } catch (err: any) {
       toast.error(err.message || "创建新会话失败");
@@ -74,7 +78,7 @@ export function App() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+    <div className="flex h-screen w-screen overflow-hidden bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 transition-colors">
       <Toaster position="top-right" richColors />
 
       {/* Left Sidebar */}
@@ -85,7 +89,6 @@ export function App() {
         currentSessionId={currentSessionId}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
-        onOpenSettings={() => setSettingsOpen(true)}
         status={status}
       />
 
@@ -97,6 +100,8 @@ export function App() {
           onNewChat={handleNewSession}
           onOpenSettings={() => setSettingsOpen(true)}
           status={status}
+          models={models}
+          onModelChanged={loadData}
           isConnected={isConnected}
         />
 
@@ -126,15 +131,23 @@ export function App() {
           onRespond={respondPlanApproval}
         />
 
-        {/* Settings Modal */}
+        {/* Single Settings Modal */}
         <SettingsModal
           isOpen={settingsOpen}
           onClose={() => setSettingsOpen(false)}
           status={status}
-          onStatusUpdated={loadStatusAndSessions}
+          onStatusUpdated={loadData}
         />
       </main>
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <ThemeProvider>
+      <ChatApp />
+    </ThemeProvider>
   );
 }
 

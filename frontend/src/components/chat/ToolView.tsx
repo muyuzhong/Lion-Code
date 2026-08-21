@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Terminal, FileCode, Search, Wrench, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { ToolCallItem } from "@/types/chat";
-import { cn } from "@/lib/utils";
 
 interface ToolViewProps {
   tool: ToolCallItem;
@@ -26,23 +25,23 @@ export function ToolView({ tool }: ToolViewProps) {
   const Icon = getToolIcon(tool.toolName);
 
   return (
-    <div className="mb-2.5 overflow-hidden rounded-lg border border-border/70 bg-card/60 text-xs shadow-xs">
+    <div className="mb-2 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs shadow-2xs">
       <div
         onClick={() => setIsOpen(!isOpen)}
-        className="flex cursor-pointer items-center justify-between px-3 py-2 transition hover:bg-muted/40"
+        className="flex cursor-pointer items-center justify-between px-3.5 py-2 transition hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
       >
         <div className="flex items-center gap-2 font-mono">
-          <div className="flex size-5 items-center justify-center rounded bg-muted text-muted-foreground">
+          <div className="flex size-5 items-center justify-center rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
             <Icon className="size-3.5" />
           </div>
-          <span className="font-semibold text-foreground">{tool.toolName}</span>
+          <span className="font-semibold text-zinc-900 dark:text-zinc-100">{tool.toolName}</span>
           {tool.args?.CommandLine && (
-            <span className="max-w-[280px] truncate text-[11px] text-muted-foreground">
+            <span className="max-w-[240px] sm:max-w-[320px] truncate text-[11px] text-zinc-500 dark:text-zinc-400">
               {tool.args.CommandLine}
             </span>
           )}
           {tool.args?.TargetFile && (
-            <span className="max-w-[280px] truncate text-[11px] text-muted-foreground">
+            <span className="max-w-[240px] sm:max-w-[320px] truncate text-[11px] text-zinc-500 dark:text-zinc-400">
               {tool.args.TargetFile.split(/[/\\]/).pop()}
             </span>
           )}
@@ -50,32 +49,36 @@ export function ToolView({ tool }: ToolViewProps) {
 
         <div className="flex items-center gap-2">
           {tool.status === "running" && (
-            <span className="flex items-center gap-1 text-[11px] text-amber-500 font-medium">
+            <span className="flex items-center gap-1 text-[11px] text-amber-500 font-medium font-sans">
               <Loader2 className="size-3 animate-spin" /> 执行中
             </span>
           )}
           {tool.status === "completed" && (
-            <span className="flex items-center gap-1 text-[11px] text-emerald-500 font-medium">
+            <span className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium font-sans">
               <CheckCircle2 className="size-3" /> 完成
             </span>
           )}
           {tool.status === "error" && (
-            <span className="flex items-center gap-1 text-[11px] text-rose-500 font-medium">
+            <span className="flex items-center gap-1 text-[11px] text-rose-500 font-medium font-sans">
               <XCircle className="size-3" /> 失败
             </span>
           )}
-          {isOpen ? <ChevronDown className="size-3.5 text-muted-foreground" /> : <ChevronRight className="size-3.5 text-muted-foreground" />}
+          {isOpen ? (
+            <ChevronDown className="size-3.5 text-zinc-400" />
+          ) : (
+            <ChevronRight className="size-3.5 text-zinc-400" />
+          )}
         </div>
       </div>
 
       {isOpen && (
-        <div className="border-t border-border/50 bg-muted/20 p-3 font-mono text-[11px] space-y-2">
+        <div className="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/60 p-3 font-mono text-[11px] space-y-2.5">
           {tool.args && (
             <div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mb-1">
                 参数 (Parameters)
               </div>
-              <pre className="overflow-x-auto rounded bg-background/80 p-2 text-muted-foreground whitespace-pre-wrap">
+              <pre className="overflow-x-auto rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2.5 text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">
                 {typeof tool.args === "string" ? tool.args : JSON.stringify(tool.args, null, 2)}
               </pre>
             </div>
@@ -83,13 +86,14 @@ export function ToolView({ tool }: ToolViewProps) {
 
           {tool.result && (
             <div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mb-1">
                 输出结果 (Output)
               </div>
-              <pre className={cn(
-                "max-h-60 overflow-y-auto rounded bg-background/80 p-2 whitespace-pre-wrap",
-                tool.status === "error" ? "text-rose-400" : "text-foreground/90"
-              )}>
+              <pre
+                className={`max-h-60 overflow-y-auto rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2.5 whitespace-pre-wrap ${
+                  tool.status === "error" ? "text-rose-500" : "text-zinc-800 dark:text-zinc-200"
+                }`}
+              >
                 {tool.result}
               </pre>
             </div>

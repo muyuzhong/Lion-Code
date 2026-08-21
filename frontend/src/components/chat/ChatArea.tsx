@@ -47,13 +47,13 @@ export function ChatArea({ messages, onSelectPrompt }: ChatAreaProps) {
       <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
         <div className="max-w-xl space-y-6">
           <div className="space-y-2">
-            <div className="inline-flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-inner">
+            <div className="inline-flex size-12 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 shadow-inner">
               <span className="text-2xl">🦁</span>
             </div>
-            <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+            <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Hello! How can I help you today?
             </h2>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
               Lion Code 是你的轻量级智能编码 Agent，支持终端执行、代码重构与多轮对话。
             </p>
           </div>
@@ -66,13 +66,13 @@ export function ChatArea({ messages, onSelectPrompt }: ChatAreaProps) {
                   key={index}
                   type="button"
                   onClick={() => onSelectPrompt(item.prompt)}
-                  className="flex flex-col gap-1 rounded-xl border border-border/80 bg-card p-3.5 text-left transition hover:border-primary/50 hover:bg-muted/50 shadow-xs"
+                  className="flex flex-col gap-1 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3.5 text-left transition hover:border-blue-500/50 hover:bg-zinc-50 dark:hover:bg-zinc-800/80 shadow-xs"
                 >
-                  <div className="flex items-center gap-2 font-medium text-foreground text-xs">
-                    <Icon className="size-3.5 text-primary" />
+                  <div className="flex items-center gap-2 font-medium text-zinc-900 dark:text-zinc-100 text-xs">
+                    <Icon className="size-3.5 text-blue-600 dark:text-blue-400" />
                     <span>{item.title}</span>
                   </div>
-                  <p className="text-[11px] text-muted-foreground line-clamp-2">
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 line-clamp-2">
                     {item.label}
                   </p>
                 </button>
@@ -86,7 +86,7 @@ export function ChatArea({ messages, onSelectPrompt }: ChatAreaProps) {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-4xl divide-y divide-border/20 py-4">
+      <div className="mx-auto max-w-4xl divide-y divide-zinc-200/60 dark:divide-zinc-800/40 py-4">
         {messages.map((message) => (
           <MessageItem key={message.id} message={message} />
         ))}
