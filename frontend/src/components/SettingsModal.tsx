@@ -51,12 +51,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 select-none">
-      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-neutral-900/90 text-neutral-100 shadow-2xl overflow-hidden backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 select-none">
+      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#161e31]/95 text-slate-100 shadow-2xl overflow-hidden backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-200">
         {/* 头部 */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.02]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#101524]">
           <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-xl bg-purple-500/10 text-purple-400">
+            <div className="p-1.5 rounded-xl bg-[#4e75ff]/15 text-[#4e75ff]">
               <Sliders className="w-4 h-4" />
             </div>
             <h3 className="text-sm font-semibold text-white">
@@ -65,7 +65,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -75,7 +75,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <form onSubmit={handleSave} className="p-6 space-y-4 text-xs">
           {/* Provider 协议卡片 */}
           <div>
-            <label className="block font-medium text-neutral-300 mb-2">
+            <label className="block font-medium text-slate-300 mb-2">
               接口协议类型 (Protocol)
             </label>
             <div className="grid grid-cols-2 gap-2.5">
@@ -84,8 +84,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onClick={() => setProvider('openai')}
                 className={`py-2.5 px-3 rounded-2xl border text-center font-medium transition-all ${
                   provider === 'openai'
-                    ? 'border-purple-500/80 bg-purple-500/20 text-purple-300 shadow-sm'
-                    : 'border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.06]'
+                    ? 'border-[#4e75ff] bg-[#4e75ff]/20 text-[#4e75ff] shadow-sm'
+                    : 'border-white/10 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]'
                 }`}
               >
                 OpenAI Compatible
@@ -95,8 +95,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onClick={() => setProvider('anthropic')}
                 className={`py-2.5 px-3 rounded-2xl border text-center font-medium transition-all ${
                   provider === 'anthropic'
-                    ? 'border-purple-500/80 bg-purple-500/20 text-purple-300 shadow-sm'
-                    : 'border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.06]'
+                    ? 'border-[#4e75ff] bg-[#4e75ff]/20 text-[#4e75ff] shadow-sm'
+                    : 'border-white/10 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]'
                 }`}
               >
                 Anthropic
@@ -106,7 +106,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* 模型名 */}
           <div>
-            <label className="block font-medium text-neutral-300 mb-1.5">
+            <label className="block font-medium text-slate-300 mb-1.5">
               模型名称 (Model)
             </label>
             <div className="relative">
@@ -114,10 +114,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="text"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                placeholder="e.g. gpt-4o, deepseek-chat, claude-3-5-sonnet"
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-white/10 bg-black/40 text-white placeholder-neutral-500 focus:outline-none focus:border-purple-500"
+                placeholder="e.g. deepseek-chat, gpt-4o, claude-3-5-sonnet"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-white/10 bg-[#0b0f19] text-white placeholder-slate-500 focus:outline-none focus:border-[#4e75ff]"
               />
-              <Cpu className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
+              <Cpu className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             </div>
 
             {models.length > 0 && (
@@ -127,7 +127,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     key={m.model}
                     type="button"
                     onClick={() => setModel(m.model)}
-                    className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.06] hover:bg-purple-500/20 text-neutral-300 hover:text-purple-300 border border-white/5 transition-colors"
+                    className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.06] hover:bg-[#4e75ff]/20 text-slate-300 hover:text-[#4e75ff] border border-white/5 transition-colors"
                   >
                     {m.model}
                   </button>
@@ -138,7 +138,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* API Key */}
           <div>
-            <label className="block font-medium text-neutral-300 mb-1.5">
+            <label className="block font-medium text-slate-300 mb-1.5">
               API Key (选填，留空保持当前配置)
             </label>
             <div className="relative">
@@ -147,15 +147,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="sk-..."
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-white/10 bg-black/40 text-white placeholder-neutral-500 focus:outline-none focus:border-purple-500"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-white/10 bg-[#0b0f19] text-white placeholder-slate-500 focus:outline-none focus:border-[#4e75ff]"
               />
-              <Key className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
+              <Key className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             </div>
           </div>
 
           {/* Base URL */}
           <div>
-            <label className="block font-medium text-neutral-300 mb-1.5">
+            <label className="block font-medium text-slate-300 mb-1.5">
               API Base URL (选填)
             </label>
             <div className="relative">
@@ -163,10 +163,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="text"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://api.openai.com/v1"
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-white/10 bg-black/40 text-white placeholder-neutral-500 focus:outline-none focus:border-purple-500"
+                placeholder="https://api.deepseek.com/v1"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-white/10 bg-[#0b0f19] text-white placeholder-slate-500 focus:outline-none focus:border-[#4e75ff]"
               />
-              <Server className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
+              <Server className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             </div>
           </div>
 
@@ -175,14 +175,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 font-medium transition-colors"
+              className="px-4 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 font-medium transition-colors"
             >
               取消
             </button>
             <button
               type="submit"
               disabled={isSaving}
-              className="px-5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium shadow-lg shadow-purple-500/25 transition-all"
+              className="px-5 py-2 rounded-xl bg-gradient-to-r from-[#4e75ff] to-[#3b82f6] hover:from-[#3d61f5] hover:to-[#2563eb] text-white font-medium shadow-lg shadow-blue-500/25 transition-all"
             >
               {isSaving ? '保存中...' : '保存配置'}
             </button>

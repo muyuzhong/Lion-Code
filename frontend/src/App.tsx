@@ -133,8 +133,8 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-neutral-50 dark:bg-[#0c0c10] text-neutral-900 dark:text-neutral-100 font-sans">
-      {/* 最左侧 Lobe 图标 Dock */}
+    <div className="flex h-screen w-screen overflow-hidden bg-[#0b0f19] text-slate-100 font-sans">
+      {/* 最左侧 DeepSeek Harness 图标 Dock */}
       <Dock
         activeTab={activeTab}
         onTabChange={(tab) => {

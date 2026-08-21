@@ -4,74 +4,78 @@
 
 @layer base {
   :root {
-    --background: 240 10% 98%;
-    --foreground: 240 10% 10%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 10%;
-    --muted: 240 5% 92%;
-    --muted-foreground: 240 4% 45%;
-    --border: 240 6% 90%;
-    --input: 240 6% 90%;
-    --primary: 250 84% 54%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 5% 94%;
-    --secondary-foreground: 240 10% 10%;
-    --accent: 250 84% 60%;
-    --accent-foreground: 0 0% 98%;
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 13%;
+    --card-foreground: 210 40% 98%;
+    --muted: 217 33% 18%;
+    --muted-foreground: 215 20% 65%;
+    --border: 217 33% 20%;
+    --input: 217 33% 20%;
+    --primary: 226 100% 65%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 18%;
+    --secondary-foreground: 210 40% 98%;
+    --accent: 226 100% 65%;
+    --accent-foreground: 0 0% 100%;
     --radius: 0.75rem;
   }
 
   .dark {
-    --background: 240 12% 6%;
-    --foreground: 0 0% 98%;
-    --card: 240 11% 9%;
-    --card-foreground: 0 0% 98%;
-    --muted: 240 9% 14%;
-    --muted-foreground: 240 5% 65%;
-    --border: 240 8% 18%;
-    --input: 240 8% 18%;
-    --primary: 250 84% 60%;
+    --background: 224 71% 7%;      /* DSH Bluish-950 #0b0f19 */
+    --foreground: 210 40% 98%;
+    --card: 223 47% 11%;            /* DSH Bluish-875 #151c2c */
+    --card-foreground: 210 40% 98%;
+    --muted: 223 35% 16%;           /* DSH Bluish-850 #1a2336 */
+    --muted-foreground: 215 20% 65%;
+    --border: 220 30% 18%;
+    --input: 220 30% 18%;
+    --primary: 226 100% 65%;        /* DeepSeek Blue #4e75ff */
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 9% 13%;
-    --secondary-foreground: 0 0% 98%;
-    --accent: 250 84% 60%;
+    --secondary: 223 35% 16%;
+    --secondary-foreground: 210 40% 98%;
+    --accent: 226 100% 65%;
     --accent-foreground: 0 0% 100%;
   }
 }
 
-/* Lobe Glassmorphism & Glow Utilities */
-.lobe-glass {
-  background: rgba(22, 22, 29, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+/* DeepSeek Harness Signature Tokens & Effects */
+.dsh-surface-base {
+  background-color: #0b0f19;
 }
 
-.lobe-glass-light {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+.dsh-surface-layer1 {
+  background-color: #121826;
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
-.lobe-ambient-glow {
+.dsh-surface-layer2 {
+  background-color: #1a2338;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.dsh-ambient-glow {
   background: radial-gradient(
-    ellipse 80% 50% at 50% -20%,
-    rgba(124, 58, 237, 0.15),
-    rgba(99, 102, 241, 0.08) 50%,
+    ellipse 80% 50% at 50% -10%,
+    rgba(78, 117, 255, 0.12),
+    rgba(59, 130, 246, 0.05) 50%,
     transparent 100%
   );
 }
 
-.lobe-card-hover {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.lobe-card-hover:hover {
-  border-color: rgba(139, 92, 246, 0.35);
-  box-shadow: 0 0 20px -5px rgba(139, 92, 246, 0.15);
+.dsh-blue-gradient {
+  background: linear-gradient(135deg, #4e75ff 0%, #3b82f6 100%);
 }
 
-/* Custom Scrollbar */
+.dsh-card-hover {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.dsh-card-hover:hover {
+  border-color: rgba(78, 117, 255, 0.35);
+  box-shadow: 0 0 25px -5px rgba(78, 117, 255, 0.15);
+}
+
+/* Custom Scrollbar in DeepSeek Navy style */
 ::-webkit-scrollbar {
   width: 5px;
   height: 5px;
@@ -82,10 +86,10 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(140, 140, 160, 0.2);
+  background: rgba(140, 160, 200, 0.2);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(140, 140, 160, 0.4);
+  background: rgba(140, 160, 200, 0.4);
 }

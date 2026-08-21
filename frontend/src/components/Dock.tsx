@@ -30,13 +30,13 @@ export const Dock: React.FC<DockProps> = ({
   onToggleTheme,
 }) => {
   return (
-    <aside className="w-16 h-full flex flex-col items-center justify-between py-3.5 bg-neutral-100/80 dark:bg-neutral-950/90 border-r border-neutral-200/80 dark:border-neutral-800/80 z-30 flex-shrink-0 select-none">
-      {/* 顶部：Lion Logo */}
+    <aside className="w-16 h-full flex flex-col items-center justify-between py-3.5 bg-[#0f1422] border-r border-white/[0.08] z-30 flex-shrink-0 select-none">
+      {/* 顶部：DeepSeek Harness 标志 */}
       <div className="flex flex-col items-center gap-5">
         <div className="relative group cursor-pointer">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-purple-600 to-indigo-600 p-[1.5px] shadow-lg shadow-purple-500/20 transition-transform group-hover:scale-105">
-            <div className="w-full h-full rounded-[10px] bg-neutral-900 flex items-center justify-center text-lg">
-              🦁
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#4e75ff] to-[#3b82f6] p-[1.5px] shadow-lg shadow-blue-500/25 transition-transform group-hover:scale-105">
+            <div className="w-full h-full rounded-[10px] bg-[#121827] flex items-center justify-center text-lg">
+              🐋
             </div>
           </div>
         </div>
@@ -47,8 +47,8 @@ export const Dock: React.FC<DockProps> = ({
             onClick={() => onTabChange('chat')}
             className={`relative p-2.5 rounded-xl transition-all ${
               activeTab === 'chat'
-                ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 shadow-md shadow-neutral-900/10'
-                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60'
+                ? 'bg-[#4e75ff] text-white shadow-md shadow-blue-500/25'
+                : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
             }`}
             title="对话 (Chat)"
           >
@@ -59,8 +59,8 @@ export const Dock: React.FC<DockProps> = ({
             onClick={() => onTabChange('skills')}
             className={`relative p-2.5 rounded-xl transition-all ${
               activeTab === 'skills'
-                ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 shadow-md shadow-neutral-900/10'
-                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60'
+                ? 'bg-[#4e75ff] text-white shadow-md shadow-blue-500/25'
+                : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
             }`}
             title="技能中心 (Skills)"
           >
@@ -71,8 +71,8 @@ export const Dock: React.FC<DockProps> = ({
             onClick={() => onTabChange('workspace')}
             className={`relative p-2.5 rounded-xl transition-all ${
               activeTab === 'workspace'
-                ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 shadow-md shadow-neutral-900/10'
-                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60'
+                ? 'bg-[#4e75ff] text-white shadow-md shadow-blue-500/25'
+                : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
             }`}
             title="工作区信息 (Workspace)"
           >
@@ -85,7 +85,7 @@ export const Dock: React.FC<DockProps> = ({
       <div className="flex flex-col items-center gap-2">
         <button
           onClick={onToggleSidebar}
-          className="p-2.5 rounded-xl text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 transition-colors"
+          className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors"
           title={isSidebarOpen ? '收起侧边栏' : '展开侧边栏'}
         >
           {isSidebarOpen ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeftOpen className="w-5 h-5" />}
@@ -93,7 +93,7 @@ export const Dock: React.FC<DockProps> = ({
 
         <button
           onClick={onToggleTheme}
-          className="p-2.5 rounded-xl text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 transition-colors"
+          className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors"
           title={isDark ? '切换至浅色模式' : '切换至深色模式'}
         >
           {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
@@ -101,7 +101,7 @@ export const Dock: React.FC<DockProps> = ({
 
         <button
           onClick={onOpenSettings}
-          className="p-2.5 rounded-xl text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 transition-colors"
+          className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors"
           title="模型与系统设置"
         >
           <Settings className="w-5 h-5" />
