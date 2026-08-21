@@ -1501,3 +1501,24 @@ Updated the current logging spec to reference CodingSessionBackendAdapter. Resid
 ### Status
 
 [OK] **Completed**
+
+
+## Session 48: PR-S1 Workspace Snapshot 与 Rollback Event
+
+**Date**: 2026-08-21
+**Task**: PR-S1 Workspace Snapshot 与 Rollback Event
+**Branch**: `muyuzhong/contextview-bounded-tool-activity`
+
+### Summary
+
+完成 WorkspaceSnapshot、ToolRuntime rollback 通知、ExecutionAuditLog 与可下电配置；覆盖 tracked/untracked 恢复、敏感文件元数据、pre-restore、GC、shell 自动快照、Core 回流和完整质量门禁。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `968b6c9` | (see git log) |
+
+### Status
+
+[OK] **Completed**
