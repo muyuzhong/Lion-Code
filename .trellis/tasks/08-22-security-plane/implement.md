@@ -1,56 +1,54 @@
-# 实施计划
+# 实施计划（YAGNI 削减后：3 个 PR）
 
-按依赖顺序交付四个 PR（每个 PR 一个职责，独立可回滚）。
-S3 复用 S2 的指纹族，S5 复用 S3 的出口事实，docs 定稿在实现后如实落地。
+按依赖顺序交付。S3 复用 S2 的指纹族；S5-lite 足够小，与 docs 定稿合并为
+一个 PR。每个 PR 一个职责，独立可回滚。
 
-## PR-S2 Secret Boundary
+## PR-S2 Secret Boundary（redact-only）
 
-1. `secret_provider.py`：SecretStore（.env 解析 + 环境变量源；keychain defer）
-   + SecretRef 元数据 + 指纹族预计算 + `~/.lion/sanitizer.key` 密钥管理。
+1. `secret_provider.py`：SecretStore（.env 全量 + 进程 env 名字模式
+   `*_KEY/*_TOKEN/*_SECRET/*_PASSWORD`）+ HMAC 指纹族（原值 + base64 两变体）
+   + `~/.lion/sanitizer.key` 自动生成（0600）。
 2. `output_sanitizer.py`：OutputSanitizerMiddleware（分隔符切分 + 指纹比对
    + redact + hits 计数入 details）。
-3. `execution.py`：run_shell `secrets` 参数 → 子进程 env 注入；
-   `types.py` 同步工具 schema。
-4. `agent_builder.py`：post 链首位插入 sanitizer；ToolBindings 开关。
-5. `audit.py`：sanitizer_hits 字段。
-6. 测试：四条 redact 路径各一条（run_shell / read_file / grep_search /
-   web_fetch）；secret 明文不出现在 provider 请求负载（capture 断言）；
-   指纹族四种变换覆盖；密钥文件权限。
-7. spec：`.trellis/spec/backend/` 新增 secret-boundary 契约文档。
+3. `agent_builder.py`：post 链首位插入 sanitizer；ToolBindings 开关
+   enable_secret_boundary。
+4. `audit.py`：sanitizer_hits 字段。
+5. 测试：四条 redact 路径各一条（run_shell / read_file / grep_search /
+   web_fetch）；printenv 进程 env 凭据 redact；secret 明文不出现在
+   provider 请求负载（capture 断言）；指纹两变体覆盖；密钥文件权限；
+   token 切分边界（引号内含空格的 secret 值）。
+6. spec：`.trellis/spec/backend/` 新增 secret-boundary 契约文档。
 
 ## PR-S3 Egress Guard
 
-1. `egress_guard.py`：EgressWhitelist（(host, direction)）+ Level A pre 检查
-   + URL 全串指纹扫描 + Level B run_shell URL 提取。
-2. 白名单配置发现（home / cwd settings 模式）+ provider host 派生注入
-   （composition root）。
-3. `agent_builder.py`：pre 链 Permission 后插入；ToolBindings 开关。
-4. `audit.py`：direction / best_effort 字段。
+1. `egress_guard.py`：EgressWhitelist（host 集合）+ Level A pre 检查
+   （host 白名单 + URL 全串指纹扫描）+ Level B run_shell URL 提取。
+2. 白名单：provider host 派生注入（composition root）+ settings 加白条目
+   （沿用 load_permission_rules 的 home / cwd 发现模式）。
+3. `agent_builder.py`：pre 链 Permission 后插入；ToolBindings 开关
+   enable_egress_guard。
+4. `audit.py`：best_effort 字段。
 5. 测试：白名单外 block + 审计行；白名单内放行；provider 流量不受影响；
-   run_shell URL 提取审计行（best_effort=true）；GET query 带指纹命中即阻断
-   （deny(secret_hit and egress.outbound) 首次生效）。
+   URL query 指纹命中即阻断；run_shell URL 提取审计行（best_effort=true）。
 6. spec 同步。
 
-## PR-S5 Authorization Policy
+## PR-S5-lite + docs 定稿（合并一个 PR）
 
-1. `permission.py`：谓词表加载与机械判定 + 事实源分级标注 + 授权快照入审计。
-2. dontAsk 优雅停机：结构化 budget_exceeded ToolResult + handoff 报告，
-   替换 auto-deny 分支；模型可见通知走 ToolResult 回流。
-3. shadow 对照：旧 allow/deny 并行判定只记录（notes.shadow_old）。
-4. 测试：谓词判定矩阵（allow / require_confirmation / deny×组合谓词）；
-   dontAsk 停机产物（进度说明 + handoff + 审计行）；授权声明快照；
-   shadow 对照行。
-5. spec / `docs/tui.md` 更新（dontAsk 语义变更）。
-6. 观察期后删除旧规则判定路径（独立小 PR）。
-
-## PR-docs 设计定稿
-
-1. `docs/security-design.md` 按 G1-G7 修正定稿：信任域声明、快照机制对齐
-   已落地实现、目录/分层修正、谓词事实源分级、egress 方向维度、闭环措辞
-   弱化、prompt injection 对手模型 + 残余风险登记表（S4 立项依据）。
-2. `docs/advanced-capability-guide.md` 门禁段落：ToolRuntime 唯一路径，
-   新工具不得绕过 sanitizer / egress / authorization。
-3. `tests/architecture` 期望值同步（若新增模块需登记）。
+1. `permission.py`：dontAsk 分支改优雅停机（结构化 budget_exceeded
+   ToolResult + handoff 文本 + 审计行，不做 git commit）；
+   push 类语境（git push / npm publish 等机械匹配）接入现有 confirm 路径。
+2. 授权快照：会话启动时 mode + 规则摘要入审计。
+3. `docs/security-design.md` 定稿：信任域声明、快照机制对齐已落地实现、
+   目录/分层修正、egress A/B 承诺分层、闭环措辞弱化（"对已登记 secret
+   闭环，发现完整性是显式残余风险"）、prompt injection 对手模型 +
+   残余风险登记表（S4 立项依据）、D5-D8 削减决策记录。
+4. `docs/advanced-capability-guide.md` 门禁段落：ToolRuntime 唯一路径，
+   新工具不得绕过 sanitizer / egress / 权限判定。
+5. `docs/tui.md` 与 `.trellis/spec/backend/` 更新（dontAsk 语义变更）。
+6. `tests/architecture` 期望值同步（登记 secret_provider /
+   output_sanitizer / egress_guard 模块）。
+7. 测试：dontAsk 停机产物（结构化结果 + 审计行 + 无 commit）；
+   push 语境 confirm 触发与缓存命中；授权快照记录。
 
 ## 验证命令
 
@@ -68,8 +66,9 @@ S3 复用 S2 的指纹族，S5 复用 S3 的出口事实，docs 定稿在实现�
 
 - `middleware.py` / `agent_builder.py`：链顺序敏感——sanitizer 必须 post
   首位（redact 先于 ResultStore / 审计），egress 在 Permission 之后。
-- `permission.py`：dontAsk 语义变更；shadow 期间判定行为不变。
-- `tools.py` `_web_fetch` 不改本体（检查全部在 middleware 层）。
+- `permission.py`：dontAsk 语义变更。
+- `tools.py` `_web_fetch` 不改本体（检查全部在 middleware 层）；
+  `execution.py` 本任务不改（注入延后，D6）。
 - 回滚：ToolBindings 开关关闭即回现状；PR 级 revert（squash 单提交）。
 
 ## task.py start 前检查
