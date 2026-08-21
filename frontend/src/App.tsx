@@ -12,6 +12,7 @@ import {
 import { ChatContainer } from './components/ChatContainer';
 import { ChatInput } from './components/ChatInput';
 import { ConfirmBanner } from './components/ConfirmBanner';
+import { Dock } from './components/Dock';
 import { Header } from './components/Header';
 import { PlanApprovalDialog } from './components/PlanApprovalDialog';
 import { SettingsModal } from './components/SettingsModal';
@@ -24,6 +25,7 @@ export const App: React.FC = () => {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [models, setModels] = useState<ModelChoice[]>([]);
   const [skills, setSkills] = useState<SkillItem[]>([]);
+  const [activeTab, setActiveTab] = useState<'chat' | 'skills' | 'workspace'>('chat');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDark, setIsDark] = useState(true);
@@ -96,6 +98,15 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleModelSelect = async (newModel: string) => {
+    try {
+      await configureProvider({ model: newModel });
+      await loadInitialData();
+    } catch (err) {
+      console.error('Failed to switch model:', err);
+    }
+  };
+
   const handleThinkingChange = async (level: string) => {
     try {
       const res = await setThinkingLevel(level);
@@ -122,39 +133,53 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground font-sans">
-      {/* 侧边栏 */}
+    <div className="flex h-screen w-screen overflow-hidden bg-neutral-50 dark:bg-[#0c0c10] text-neutral-900 dark:text-neutral-100 font-sans">
+      {/* 最左侧 Lobe 图标 Dock */}
+      <Dock
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          if (!isSidebarOpen) setIsSidebarOpen(true);
+        }}
+        isSidebarOpen={isSidebarOpen}
+        onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        isDark={isDark}
+        onToggleTheme={() => setIsDark(!isDark)}
+      />
+
+      {/* 会话与功能侧边栏 Drawer */}
       <Sidebar
         isOpen={isSidebarOpen}
+        activeTab={activeTab}
         sessions={sessions}
         currentSessionId={status?.sessionId}
         cwd={status?.cwd}
         skills={skills}
         onNewSession={handleNewSession}
         onResumeSession={handleResumeSession}
-        onClose={() => setIsSidebarOpen(false)}
+        onSkillClick={(name) => sendPrompt(`/${name} `)}
       />
 
-      {/* 主工作区 */}
+      {/* 主对话区 */}
       <div className="flex-1 flex flex-col min-w-0 h-full relative">
         {/* 顶部 Header */}
         <Header
           status={status}
+          models={models}
           isConnected={isConnected}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+          onModelSelect={handleModelSelect}
           onThinkingChange={handleThinkingChange}
-          isDark={isDark}
-          onToggleTheme={() => setIsDark(!isDark)}
+          onClearChat={clearMessages}
         />
 
-        {/* 消息展示区域 */}
+        {/* 聊天消息流 */}
         <ChatContainer
           messages={messages}
           onPromptClick={(text) => sendPrompt(text)}
         />
 
-        {/* 底部输入框 */}
+        {/* 底部悬浮输入框 */}
         <ChatInput
           onSend={(text) => sendPrompt(text)}
           onCancel={cancelGeneration}
@@ -162,7 +187,7 @@ export const App: React.FC = () => {
           disabled={!isConnected}
         />
 
-        {/* 敏感操作确认条 */}
+        {/* 敏感操作确认浮窗 */}
         {pendingConfirm && (
           <ConfirmBanner
             request={pendingConfirm}
@@ -170,7 +195,7 @@ export const App: React.FC = () => {
           />
         )}
 
-        {/* Plan 审批弹窗 */}
+        {/* Plan 审批确认弹窗 */}
         {pendingPlanApproval && (
           <PlanApprovalDialog
             request={pendingPlanApproval}
@@ -194,10 +219,10 @@ export const App: React.FC = () => {
             {notices.map((n) => (
               <div
                 key={n.id}
-                className={`p-3 rounded-lg text-xs shadow-lg border backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-150 ${
+                className={`p-3 rounded-2xl text-xs shadow-2xl border backdrop-blur-xl animate-in fade-in slide-in-from-top-3 duration-200 ${
                   n.role === 'error'
-                    ? 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-300'
-                    : 'bg-neutral-900/90 border-neutral-800 text-white dark:bg-neutral-100/90 dark:text-neutral-900'
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                    : 'bg-neutral-900/90 border-white/10 text-white'
                 }`}
               >
                 {n.text}

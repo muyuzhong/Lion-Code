@@ -1,5 +1,5 @@
 import React, { KeyboardEvent, useEffect, useRef, useState } from 'react';
-import { ArrowUp, Square } from 'lucide-react';
+import { ArrowUp, Sparkles, Square, Zap } from 'lucide-react';
 
 interface ChatInputProps {
   onSend: (text: string) => void;
@@ -17,7 +17,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // 自动调整高度
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -43,53 +42,66 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   return (
-    <div className="relative max-w-3xl mx-auto w-full px-4 mb-4">
-      <div className="relative rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900/90 shadow-lg focus-within:ring-1 focus-within:ring-neutral-400 dark:focus-within:ring-neutral-600 transition-all">
+    <div className="relative max-w-3xl mx-auto w-full px-4 mb-4 select-none">
+      <div className="relative rounded-3xl border border-neutral-200/80 dark:border-white/10 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-2xl shadow-xl shadow-purple-500/[0.03] focus-within:border-purple-500/50 focus-within:ring-4 focus-within:ring-purple-500/10 transition-all">
+        {/* 输入文本框 */}
         <textarea
           ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="向 Lion 提问或派发任务，输入 / 查看可用命令..."
+          placeholder="向 Lion 派发任务或提问，输入 / 触发命令或技能..."
           rows={1}
           disabled={disabled}
-          className="w-full bg-transparent px-4 pt-3.5 pb-10 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 resize-none focus:outline-none min-h-[52px] max-h-[180px]"
+          className="w-full bg-transparent px-5 pt-4 pb-12 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 resize-none focus:outline-none min-h-[56px] max-h-[180px] leading-relaxed"
         />
 
-        {/* 底部按钮栏 */}
-        <div className="absolute bottom-2.5 right-3 flex items-center gap-2">
-          {isGenerating ? (
+        {/* 底部操作栏 */}
+        <div className="absolute bottom-2.5 left-4 right-3 flex items-center justify-between pointer-events-none">
+          {/* 快捷技能标签 */}
+          <div className="flex items-center gap-1.5 pointer-events-auto">
             <button
-              onClick={onCancel}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 text-xs font-medium transition-colors"
-              title="停止生成"
+              onClick={() => setInput('/plan ')}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-neutral-100 dark:bg-white/[0.05] hover:bg-neutral-200 dark:hover:bg-white/[0.1] text-neutral-500 dark:text-neutral-400 text-[11px] font-mono transition-colors"
             >
-              <Square className="w-3 h-3 fill-current" />
-              <span>停止</span>
+              <Sparkles className="w-3 h-3 text-purple-400" />
+              <span>/plan</span>
             </button>
-          ) : (
             <button
-              onClick={handleSend}
-              disabled={!input.trim() || disabled}
-              className={`p-1.5 rounded-full transition-all ${
-                input.trim() && !disabled
-                  ? 'bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 shadow hover:opacity-90'
-                  : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-400 cursor-not-allowed'
-              }`}
-              title="发送消息 (Enter)"
+              onClick={() => setInput('/cost')}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-neutral-100 dark:bg-white/[0.05] hover:bg-neutral-200 dark:hover:bg-white/[0.1] text-neutral-500 dark:text-neutral-400 text-[11px] font-mono transition-colors"
             >
-              <ArrowUp className="w-4 h-4" />
+              <Zap className="w-3 h-3 text-amber-400" />
+              <span>/cost</span>
             </button>
-          )}
-        </div>
+          </div>
 
-        {/* 快捷提示 */}
-        <div className="absolute bottom-2.5 left-3 text-[10px] text-neutral-400 flex items-center gap-1 select-none">
-          <span>按</span>
-          <span className="px-1 rounded bg-neutral-100 dark:bg-neutral-800 font-mono text-[9px]">Enter</span>
-          <span>发送，</span>
-          <span className="px-1 rounded bg-neutral-100 dark:bg-neutral-800 font-mono text-[9px]">Shift+Enter</span>
-          <span>换行</span>
+          {/* 发送 / 停止按钮 */}
+          <div className="flex items-center gap-2 pointer-events-auto">
+            {isGenerating ? (
+              <button
+                onClick={onCancel}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 text-xs font-semibold border border-rose-500/20 transition-all active:scale-95"
+                title="停止生成"
+              >
+                <Square className="w-3 h-3 fill-current" />
+                <span>停止</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!input.trim() || disabled}
+                className={`p-2 rounded-full transition-all active:scale-95 ${
+                  input.trim() && !disabled
+                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-md shadow-purple-500/25 cursor-pointer'
+                    : 'bg-neutral-100 dark:bg-white/[0.06] text-neutral-400 cursor-not-allowed'
+                }`}
+                title="发送消息 (Enter)"
+              >
+                <ArrowUp className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
