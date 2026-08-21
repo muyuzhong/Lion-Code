@@ -38,10 +38,12 @@ The Composition Root creates the default lazily from `foundation.cwd` plus
 
 ### Registration
 
-- Sources: the workspace `.env` file (full body) and process-environment
-  entries whose names end with `_KEY`, `_TOKEN`, `_SECRET`, or `_PASSWORD`
-  (case-insensitive). Registering process env is load-bearing: without it
-  `printenv` on the agent's own API key is a live T1 hole.
+- Sources: the workspace `.env` file (full body; unquoted values have
+  inline ` #` comments stripped, quoted values keep their `#`) and
+  process-environment entries whose names end with `_KEY`, `_TOKEN`,
+  `_SECRET`, or `_PASSWORD` (case-insensitive). Registering process env is
+  load-bearing: without it `printenv` on the agent's own API key is a live
+  T1 hole.
 - Only `.env` itself is parsed, never `.env.example`-style templates:
   placeholder values would cause mass false-positive redaction.
 - Values shorter than `MIN_SECRET_LENGTH` (8) are not registered; short
@@ -60,6 +62,8 @@ The Composition Root creates the default lazily from `foundation.cwd` plus
 
 - Position: first post-phase middleware, so redaction precedes
   `ResultPolicyMiddleware` persistence and `AuditMiddleware` recording.
+  Results synthesized from runtime exceptions (custom tools raising with a
+  secret in the message) flow through the same post chain.
 - Granularity: line-level candidates first (bare value on its own line,
   `KEY="value with spaces"`), then token-level candidates. Tokens split on
   whitespace, quotes, backticks, and angle brackets; delimiters `"/"` and

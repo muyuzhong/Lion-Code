@@ -48,7 +48,7 @@ middleware 层完成，不改 `tools.py:_web_fetch` 本体，避免出现第二�
   `printenv` 是 v1 的 T1 现成洞）。keychain 源 defer。
 - 指纹族：`HMAC(secret)` 与 `HMAC(base64(secret))` 两个变体；
   hex/urlencode 等审计出现漏网案例再加（常数行）。
-  密钥 `~/.lion/sanitizer.key` 自动生成（0600），无轮换无配置面；
+  密钥 `~/.lion_code/sanitizer.key` 自动生成（0600），无轮换无配置面；
   store 只输出指纹，明文不出 SecretStore。
 - Sanitizer：按分隔符切分（空白 / 行 / 引号界）后逐段与指纹族比对，
   命中原地替换 `***`，命中计数写入 `ToolResult.details.sanitizer_hits`；

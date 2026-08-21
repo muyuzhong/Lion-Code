@@ -7,7 +7,7 @@
 
 1. `secret_provider.py`：SecretStore（.env 全量 + 进程 env 名字模式
    `*_KEY/*_TOKEN/*_SECRET/*_PASSWORD`）+ HMAC 指纹族（原值 + base64 两变体）
-   + `~/.lion/sanitizer.key` 自动生成（0600）。
+   + `~/.lion_code/sanitizer.key` 自动生成（0600）。
 2. `output_sanitizer.py`：OutputSanitizerMiddleware（分隔符切分 + 指纹比对
    + redact + hits 计数入 details）。
 3. `agent_builder.py`：post 链首位插入 sanitizer；ToolBindings 开关

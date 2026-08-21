@@ -191,5 +191,67 @@ class TestSanitizedPathsByToolShape(unittest.TestCase):
         self.assertNotIn(SECRET, result.content)
 
 
+class TestEdgeCaseRedaction(unittest.TestCase):
+    def test_env_inline_comment_is_stripped_at_registration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            (workspace / ".env").write_text(
+                "API_KEY=value12345 # note\n", encoding="utf-8"
+            )
+            store = load_secret_store(
+                workspace=workspace,
+                key_file=workspace / "key",
+                environ={},
+            )
+        self.assertTrue(store.matches("value12345"))
+        self.assertFalse(store.matches("value12345 # note"))
+
+    def test_env_quoted_value_keeps_hash_inside(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            (workspace / ".env").write_text('API_KEY="value#12345"\n', encoding="utf-8")
+            store = load_secret_store(
+                workspace=workspace,
+                key_file=workspace / "key",
+                environ={},
+            )
+        self.assertTrue(store.matches("value#12345"))
+
+    def test_crlf_output_is_redacted(self) -> None:
+        store = _store({"API_KEY": SECRET})
+        result = _run(_tool("run_shell", f"line\r\n{SECRET}\r\n"), store)
+        self.assertNotIn(SECRET, result.content)
+        self.assertIn("***", result.content)
+
+    def test_base64_form_through_full_chain(self) -> None:
+        import base64
+
+        encoded = base64.b64encode(SECRET.encode()).decode()
+        store = _store({"API_KEY": SECRET})
+        result = _run(_tool("run_shell", f"bearer {encoded}\n"), store)
+        self.assertNotIn(encoded, result.content)
+
+    def test_tool_exception_message_is_sanitized(self) -> None:
+        store = _store({"API_KEY": SECRET})
+
+        def _raising() -> LionTool:
+            async def execute(_context, _tool_call_id, _arguments, _on_update):
+                raise ValueError(f"invalid config value: {SECRET}")
+
+            return LionTool(
+                name="custom",
+                label="custom",
+                description="custom",
+                parameters={"type": "object", "properties": {}},
+                execute_fn=execute,
+                capabilities=ToolCapabilities(),
+            )
+
+        result = _run(_raising(), store)
+        self.assertTrue(result.is_error)
+        self.assertIn("ValueError", result.content)
+        self.assertNotIn(SECRET, result.content)
+
+
 if __name__ == "__main__":
     unittest.main()

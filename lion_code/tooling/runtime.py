@@ -76,7 +76,17 @@ class ToolRuntime:
 
         try:
             result = await invoke(0)
+        except Exception as exc:
+            # 异常转结果后同样要过 post 链：自定义工具抛出的
+            # 异常消息可能携带 secret，绕过 sanitizer 即绕过窄腰
+            result = ToolResult(
+                content=f"{type(exc).__name__}: {exc}",
+                is_error=True,
+            )
+
+        try:
             for current in post:
+
                 async def current_result(value=result) -> ToolResult:
                     return value
 
@@ -87,12 +97,12 @@ class ToolRuntime:
                     arguments=arguments,
                     call_next=current_result,
                 )
-            return result
         except Exception as exc:
             return ToolResult(
                 content=f"{type(exc).__name__}: {exc}",
                 is_error=True,
             )
+        return result
 
     def rollback(self, snapshot_id: str, operation_summary: str) -> ToolResult:
         """恢复快照，并把恢复说明作为普通工具结果返回给模型。"""

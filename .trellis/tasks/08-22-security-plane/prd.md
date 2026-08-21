@@ -67,7 +67,7 @@ Secret Boundary redaction（PR-S2）、Egress Guard（PR-S3）、授权收尾三
   keychain 源 defer。
 - 指纹族：每 secret 预计算 HMAC 原值 + HMAC(base64) 两个变体；
   hex/urlencode 变体等审计出现漏网案例再加（常数行成本）。
-  HMAC 密钥文件 `~/.lion/sanitizer.key` 自动生成（0600），无轮换无配置面；
+  HMAC 密钥文件 `~/.lion_code/sanitizer.key` 自动生成（0600），无轮换无配置面；
   sanitizer 只持有指纹不持有明文。
 - OutputSanitizer 为 post-phase middleware（G1 落点）：覆盖全部 7 个工具输出；
   分隔符切分（空白 / 行 / 引号界）后与指纹族线性比对，命中原地替换 `***`；

@@ -23,10 +23,13 @@ def _hmac_hex(key: bytes, text: str) -> str:
 
 def load_or_create_key(key_file: Path) -> bytes:
     """读取或首次生成 HMAC 密钥；权限收紧尽力而为（Windows 无完整 POSIX 语义）。"""
-    if key_file.exists():
-        data = key_file.read_bytes().strip()
-        if data:
-            return data
+    try:
+        if key_file.exists():
+            data = key_file.read_bytes().strip()
+            if data:
+                return data
+    except OSError:
+        pass  # 存在但不可读：宁可重建密钥（指纹失效重算），不让 agent 启动崩溃
     key = secrets.token_hex(32).encode("ascii")
     key_file.parent.mkdir(parents=True, exist_ok=True)
     key_file.write_bytes(key)
@@ -48,7 +51,13 @@ def _parse_env_file(path: Path) -> dict[str, str]:
         if not entry or entry.startswith("#") or "=" not in entry:
             continue
         key, _, value = entry.partition("=")
-        value = value.strip().strip("'\"")
+        value = value.strip()
+        if len(value) > 1 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        else:
+            # 未加引号的值剥行内注释，否则登记的是 "value # comment"
+            # 而输出里出现的裸 value 反而不会被 redact
+            value = value.split(" #", 1)[0].rstrip()
         if value:
             values[key.strip()] = value
     return values
