@@ -13,6 +13,7 @@ from ..permission_state import PermissionConfirmationSink
 from .context import ToolContext
 from .permission import ToolPermissionStrategy
 from .result_store import ResultStore
+from .snapshot import WorkspaceSnapshot
 from .types import JSONValue, LionTool, ToolResult
 
 NextCall = Callable[[], Awaitable[ToolResult]]
@@ -50,6 +51,47 @@ class CancellationMiddleware:
         if context.cancellation.cancelled:
             return ToolResult(content="Tool call cancelled.", is_error=True)
         return await call_next()
+
+
+class WorkspaceSnapshotMiddleware:
+    """为声明工作区变更或进程执行能力的工具建立前置快照。"""
+
+    phase: Literal["pre"] = "pre"
+
+    def __init__(self, snapshot: WorkspaceSnapshot) -> None:
+        self.snapshot = snapshot
+
+    async def handle(
+        self,
+        *,
+        tool: LionTool,
+        context: ToolContext,
+        tool_call_id: str,
+        arguments: Mapping[str, JSONValue],
+        call_next: NextCall,
+    ) -> ToolResult:
+        del context, tool_call_id, arguments
+        if not (
+            tool.capabilities.mutates_workspace or tool.capabilities.executes_process
+        ):
+            return await call_next()
+        try:
+            snapshot_id = self.snapshot.create()
+        except Exception as exc:
+            return ToolResult(
+                content=f"Workspace snapshot failed: {type(exc).__name__}: {exc}",
+                is_error=True,
+            )
+        try:
+            result = await call_next()
+        except Exception as exc:
+            return ToolResult(
+                content=f"{type(exc).__name__}: {exc}",
+                is_error=True,
+                details={"snapshot_id": snapshot_id},
+            )
+        result.details = {**result.details, "snapshot_id": snapshot_id}
+        return result
 
 
 class PreToolHookMiddleware:
@@ -258,6 +300,8 @@ class AuditMiddleware:
             audit_result = context.audit_fn(tool, arguments, result)
             if inspect.isawaitable(audit_result):
                 await audit_result
+        elif context.audit_log is not None:
+            context.audit_log.record_tool(tool, arguments, result)
         return result
 
 

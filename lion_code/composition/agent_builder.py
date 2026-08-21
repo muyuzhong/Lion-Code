@@ -78,6 +78,7 @@ from ..tooling import (
     ToolRegistry,
     ToolRuntime,
 )
+from ..tooling.audit import ExecutionAuditLog
 from ..tooling.builtin import create_builtin_tools
 from ..tooling.context import ToolContext
 from ..tooling.internal import create_internal_tools
@@ -88,9 +89,12 @@ from ..tooling.middleware import (
     PreToolHookMiddleware,
     ReadFreshnessMiddleware,
     ResultPolicyMiddleware,
+    ToolMiddleware,
+    WorkspaceSnapshotMiddleware,
 )
 from ..tooling.permission import PermissionPolicy
 from ..tooling.result_store import ResultStore
+from ..tooling.snapshot import WorkspaceSnapshot
 from ..tooling.types import LionTool
 from ..usage import BudgetPolicy, UsageLedger
 from .bindings import RuntimeBindings
@@ -661,6 +665,22 @@ def _build_tooling_graph(
         ),
         layers=lambda: capability_registry.prompt_layers,
     )
+    tool_bindings = foundation.bindings.tool
+    workspace_snapshot = None
+    if tool_bindings.enable_workspace_snapshot:
+        workspace_snapshot = tool_bindings.workspace_snapshot or WorkspaceSnapshot(
+            foundation.cwd
+        )
+    audit_log = None
+    if tool_bindings.enable_audit:
+        audit_log = tool_bindings.audit_log or ExecutionAuditLog(
+            Path.home() / ".lion_code" / "execution.audit"
+        )
+
+    def record_audit(tool, arguments, result) -> None:
+        if audit_log is not None:
+            audit_log.record_tool(tool, arguments, result)
+
     tool_context = ToolContext(
         session=foundation.session_state,
         cancellation=foundation.execution.cancellation,
@@ -671,14 +691,19 @@ def _build_tooling_graph(
         confirm_fn=foundation.confirmation.confirm,
         hooks=foundation.hooks_loader(),
         confirm_hook_trust=foundation.confirmation.confirm_hook_trust,
+        audit_fn=record_audit if audit_log is not None else None,
+        workspace_snapshot=workspace_snapshot,
+        audit_log=audit_log,
     )
     permission_policy = PermissionPolicy(cwd=foundation.cwd)
     result_store = ResultStore()
-    tool_runtime = ToolRuntime(
-        foundation.tool_registry,
-        tool_context,
+    middleware: list[ToolMiddleware] = [
+        CancellationMiddleware(),
+    ]
+    if workspace_snapshot is not None:
+        middleware.append(WorkspaceSnapshotMiddleware(workspace_snapshot))
+    middleware.extend(
         [
-            CancellationMiddleware(),
             PreToolHookMiddleware(),
             PermissionMiddleware(
                 permission_policy,
@@ -687,7 +712,12 @@ def _build_tooling_graph(
             ReadFreshnessMiddleware(),
             ResultPolicyMiddleware(result_store),
             AuditMiddleware(),
-        ],
+        ]
+    )
+    tool_runtime = ToolRuntime(
+        foundation.tool_registry,
+        tool_context,
+        middleware,
     )
     context_layers = capability_registry.context_layers
     context_manager = foundation.bindings.session.context_manager

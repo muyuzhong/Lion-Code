@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from ..core.cancellation import CancellationView
+from .audit import AuditResult, ExecutionEvent
 from .context import ToolContext
 from .middleware import ToolMiddleware, can_run_parallel
 from .registry import ToolRegistry
@@ -92,6 +93,62 @@ class ToolRuntime:
                 content=f"{type(exc).__name__}: {exc}",
                 is_error=True,
             )
+
+    def rollback(self, snapshot_id: str, operation_summary: str) -> ToolResult:
+        """恢复快照，并把恢复说明作为普通工具结果返回给模型。"""
+        snapshot = self.context.workspace_snapshot
+        rollback_details: dict[str, JSONValue] = {
+            "snapshot_id": snapshot_id,
+            "pre_restore_snapshot_id": None,
+            "operation_summary": operation_summary,
+            "restored": False,
+        }
+        if snapshot is None:
+            return ToolResult(
+                content="Workspace rollback is disabled.",
+                is_error=True,
+                details={"rollback": rollback_details},
+            )
+
+        error: str | None = None
+        try:
+            restored = snapshot.restore(snapshot_id)
+        except Exception as exc:
+            restored = None
+            error = f"{type(exc).__name__}: {exc}"
+        else:
+            error = (
+                restored.error if restored is not None else "unknown restore failure"
+            )
+
+        if restored is not None:
+            rollback_details["pre_restore_snapshot_id"] = (
+                restored.pre_restore_snapshot_id
+            )
+            rollback_details["restored"] = restored.restored
+        if restored is not None and restored.restored:
+            content = "以下操作结果已被撤销，请基于当前 workspace 重新判断"
+            is_error = False
+            audit_result: AuditResult = "rolled_back"
+        else:
+            content = f"Rollback failed: {error or 'unknown restore failure'}"
+            is_error = True
+            audit_result = "failed"
+
+        if self.context.audit_log is not None:
+            self.context.audit_log.append(
+                ExecutionEvent(
+                    tool="rollback",
+                    command_or_args=operation_summary,
+                    snapshot_id=snapshot_id,
+                    result=audit_result,
+                )
+            )
+        return ToolResult(
+            content=content,
+            is_error=is_error,
+            details={"rollback": rollback_details},
+        )
 
     def _execution_context(
         self,

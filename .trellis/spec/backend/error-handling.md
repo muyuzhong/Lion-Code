@@ -10,6 +10,7 @@
 | Boundary | Expected failure representation | Current example |
 |---|---|---|
 | Tool execution | `ToolResult(content=..., is_error=True)` | `lion_code/tooling/runtime.py::ToolRuntime.execute` returns this for unknown tools and caught tool/middleware exceptions. |
+| Workspace snapshot / rollback | Snapshot creation blocks an unsnapshotted mutating/process call with a structured tool error; restore returns a pre-restore ID and rollback returns a structured result | `lion_code/tooling/middleware.py::WorkspaceSnapshotMiddleware` and `lion_code/tooling/runtime.py::ToolRuntime.rollback` keep recovery at the Tool Runtime boundary. |
 | Permission / hook / freshness policy | Structured error `ToolResult`, not an exception to the model loop | `lion_code/tooling/middleware.py` returns denial, confirmation, hook and read-freshness results with `is_error=True`. |
 | Provider/model run | Canonical `AssistantMessage(stop_reason="error", error_message=...)` and related Core events | `lion_code/core/messages.py` defines the canonical error fields; `TerminalRenderer` renders the resulting event. |
 | Application stream | Forward the mapped event; unstructured run exceptions propagate after queue cleanup | `lion_code/application/session.py::LionCodingSession._drive`. |

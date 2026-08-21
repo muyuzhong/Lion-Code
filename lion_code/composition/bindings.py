@@ -17,7 +17,9 @@ if TYPE_CHECKING:
     from ..core.provider import ModelProvider
     from ..session_runtime import SessionRepository
     from ..tooling import ToolRegistry
+    from ..tooling.audit import ExecutionAuditLog
     from ..tooling.execution import CommandExecutionBackend
+    from ..tooling.snapshot import WorkspaceSnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +51,10 @@ class ToolBindings:
     tool_registry: ToolRegistry | None = None
     command_backend: CommandExecutionBackend | None = None
     pre_tool_use_hooks_loader: Callable[[], list[Any]] | None = None
+    workspace_snapshot: WorkspaceSnapshot | None = None
+    audit_log: ExecutionAuditLog | None = None
+    enable_workspace_snapshot: bool = True
+    enable_audit: bool = True
 
 
 @dataclass(frozen=True, slots=True)
