@@ -1,57 +1,39 @@
-import { AssistantRuntimeProvider, useLocalRuntime } from "@assistant-ui/react";
-import { Thread } from "./components/assistant-ui/thread";
+import React, { useState, useEffect } from "react";
 import { ThreadListSidebar } from "./components/assistant-ui/threadlist-sidebar";
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "./components/ui/sidebar";
-import { Upload } from "lucide-react";
-import { Button } from "./components/ui/button";
+import { Thread } from "./components/assistant-ui/thread";
 
 export default function App() {
-  const runtime = useLocalRuntime({
-    async *run() {
-      yield {
-        content: [{ type: "text", text: "Hello! I am ready to help you." }],
-      };
-    },
-  });
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "dark") {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "light" ? "dark" : "light"));
+  };
 
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <SidebarProvider defaultOpen={true}>
-        <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
-          {/* 左侧侧边栏 */}
-          <ThreadListSidebar />
+    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+      {/* 左侧侧边栏 */}
+      <ThreadListSidebar
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        onNewSession={() => {}}
+        currentTheme={theme}
+        onToggleTheme={toggleTheme}
+      />
 
-          {/* 右侧主工作区 */}
-          <SidebarInset className="flex flex-col h-full overflow-hidden">
-            {/* 顶栏 Header */}
-            <header className="flex h-14 shrink-0 items-center justify-between border-b px-4 bg-background">
-              <div className="flex items-center gap-2">
-                <SidebarTrigger className="-ml-1" />
-                <span className="text-sm font-medium text-foreground">
-                  New Chat
-                </span>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8 text-muted-foreground hover:text-foreground cursor-pointer"
-                aria-label="Share chat"
-              >
-                <Upload className="size-4" />
-              </Button>
-            </header>
-
-            {/* 聊天主视口与居中 Welcome 状态 */}
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <Thread />
-            </div>
-          </SidebarInset>
-        </div>
-      </SidebarProvider>
-    </AssistantRuntimeProvider>
+      {/* 右侧主工作区与对话流 */}
+      <main className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
+        <Thread />
+      </main>
+    </div>
   );
 }
