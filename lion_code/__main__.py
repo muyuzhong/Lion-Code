@@ -41,8 +41,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api-base", default=None, help="OpenAI-compatible API base URL")
     parser.add_argument("--resume", action="store_true", help="Resume last session")
     parser.add_argument("--repl", action="store_true", help="Use the plain REPL instead of the default TUI")
-    parser.add_argument("--max-cost", type=float, default=None, help="Max USD spend")
-    parser.add_argument("--max-turns", type=int, default=None, help="Max agentic turns")
+    parser.add_argument("--web", action="store_true", help="Launch Web server mode")
+    parser.add_argument("--port", type=int, default=8000, help="Web server port (default: 8000)")
+    parser.add_argument("--host", default="127.0.0.1", help="Web server host (default: 127.0.0.1)")
+    parser.add_argument("--no-browser", action="store_true", help="Do not automatically open browser in web mode")
     parser.add_argument("--help", "-h", action="store_true", help="Show help")
     return parser.parse_args()
 
@@ -289,17 +291,18 @@ Examples:
                 model = saved["model"]
 
     prompt = " ".join(args.prompt) if args.prompt else None
-    use_tui = not prompt and not args.repl
+    use_web = args.web
+    use_tui = not prompt and not args.repl and not use_web
 
-    if use_tui:
+    if use_tui or use_web:
         # 完全未配置凭证时使用 OpenAI-compatible 占位端点，
-        # 由新 TUI 承载 /model 首跑配置。
+        # 由 TUI 或 Web 端承载 /model 首跑配置。
         if not resolved_api_key and not resolved_use_openai:
             resolved_use_openai = True
             resolved_api_base = resolved_api_base or "https://api.openai.com/v1"
 
-    # TUI 允许无凭证启动（进入后用 /model 配置）；one-shot 与 REPL 仍需预先配置。
-    if not resolved_api_key and not use_tui:
+    # TUI 与 Web 模式允许无凭证启动（进入后在界面配置）；one-shot 与 REPL 仍需预先配置。
+    if not resolved_api_key and not use_tui and not use_web:
         print_error(
             "API key is required.\n"
             "  Set ANTHROPIC_API_KEY (+ optional ANTHROPIC_BASE_URL) for Anthropic format,\n"
@@ -320,6 +323,21 @@ Examples:
     if args.plan:
         # Plan 激活是 Plan Capability 命令（PR4 起 Permission 不再有 plan 模式）。
         backend.toggle_plan_mode()
+
+    if use_web:
+        from .application.session import LionCodingSession
+        from .server.app import run_server
+
+        session = LionCodingSession(backend=backend, terminal_output=False)
+        if args.resume:
+            asyncio.run(session.restore_latest())
+        run_server(
+            session=session,
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+        return
 
     if use_tui:
         # TUI 内自带输入循环，one-shot prompt 不适用。

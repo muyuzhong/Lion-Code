@@ -19,8 +19,9 @@ _META_AGENT = BOUNDARIES[3]
 _PROVIDERS = BOUNDARIES[4]
 _APPLICATION = BOUNDARIES[5]
 _TUI = BOUNDARIES[6]
-_CAPABILITIES = BOUNDARIES[7]
-_PRODUCTION = BOUNDARIES[8]
+_SERVER = BOUNDARIES[7]
+_CAPABILITIES = BOUNDARIES[8]
+_PRODUCTION = BOUNDARIES[9]
 
 LEGACY_MESSAGE_SYMBOLS = frozenset({"_anthropic_messages", "_openai_messages"})
 HARNESS_MUTATION_METHODS = frozenset({"clear_queues", "follow_up", "replace_messages"})
@@ -1026,6 +1027,15 @@ def test_tui_runtime_imports_stay_within_event_boundary() -> None:
     )
 
     assert not violations, f"TUI bypassed application/core events: {violations}"
+
+
+def test_server_runtime_imports_stay_within_event_boundary() -> None:
+    violations = _unexpected_imports(
+        _source_files("server"),
+        allowed=_SERVER.allowed_roots,
+    )
+
+    assert not violations, f"Server bypassed application/core events: {violations}"
 
 
 def test_capabilities_do_not_import_agent_host_or_frontend() -> None:
