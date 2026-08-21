@@ -1,39 +1,141 @@
-import React, { useState, useEffect } from "react";
-import { ThreadListSidebar } from "./components/assistant-ui/threadlist-sidebar";
-import { Thread } from "./components/assistant-ui/thread";
+import React, { useState, useEffect, useCallback } from "react";
+import { Sidebar } from "@/components/chat/Sidebar";
+import { Header } from "@/components/chat/Header";
+import { ChatArea } from "@/components/chat/ChatArea";
+import { ChatInput } from "@/components/chat/ChatInput";
+import { ConfirmBanner, PlanApprovalModal } from "@/components/chat/ApprovalModals";
+import { SettingsModal } from "@/components/chat/SettingsModal";
+import { useLionChat } from "@/hooks/useLionChat";
+import { fetchSessions, fetchStatus, resumeSession, createNewSession } from "@/lib/api";
+import { ServerStatus, SessionSummary } from "@/types/chat";
+import { Toaster, toast } from "sonner";
 
-export default function App() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+export function App() {
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [status, setStatus] = useState<ServerStatus | null>(null);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string>("");
+
+  const {
+    messages,
+    isConnected,
+    isStreaming,
+    confirmRequest,
+    planApprovalRequest,
+    sendMessage,
+    sendCancel,
+    respondConfirm,
+    respondPlanApproval,
+  } = useLionChat(currentSessionId);
+
+  const loadStatusAndSessions = useCallback(async () => {
+    try {
+      const [statusData, sessionsData] = await Promise.all([
+        fetchStatus().catch(() => null),
+        fetchSessions().catch(() => []),
+      ]);
+      if (statusData) {
+        setStatus(statusData);
+        if (!currentSessionId) {
+          setCurrentSessionId(statusData.session_id);
+        }
+      }
+      setSessions(sessionsData);
+    } catch (err) {
+      console.error("Failed to load initial data:", err);
+    }
+  }, [currentSessionId]);
 
   useEffect(() => {
-    const root = document.documentElement;
-    if (theme === "dark") {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
-  }, [theme]);
+    loadStatusAndSessions();
+  }, [loadStatusAndSessions]);
 
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === "light" ? "dark" : "light"));
+  const handleSelectSession = async (sessionId: string) => {
+    try {
+      await resumeSession(sessionId);
+      setCurrentSessionId(sessionId);
+      await loadStatusAndSessions();
+      toast.success("已切换到指定会话");
+    } catch (err: any) {
+      toast.error(err.message || "切换会话失败");
+    }
+  };
+
+  const handleNewSession = async () => {
+    try {
+      const res = await createNewSession();
+      setCurrentSessionId(res.session_id);
+      await loadStatusAndSessions();
+      toast.success("已创建新会话");
+    } catch (err: any) {
+      toast.error(err.message || "创建新会话失败");
+    }
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
-      {/* 左侧侧边栏 */}
-      <ThreadListSidebar
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        onNewSession={() => {}}
-        currentTheme={theme}
-        onToggleTheme={toggleTheme}
+    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+      <Toaster position="top-right" richColors />
+
+      {/* Left Sidebar */}
+      <Sidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        onSelectSession={handleSelectSession}
+        onNewSession={handleNewSession}
+        onOpenSettings={() => setSettingsOpen(true)}
+        status={status}
       />
 
-      {/* 右侧主工作区与对话流 */}
-      <main className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
-        <Thread />
+      {/* Main Content Area */}
+      <main className="flex flex-1 flex-col overflow-hidden relative">
+        {/* Top Header */}
+        <Header
+          onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+          onNewChat={handleNewSession}
+          onOpenSettings={() => setSettingsOpen(true)}
+          status={status}
+          isConnected={isConnected}
+        />
+
+        {/* Message Stream Area */}
+        <ChatArea
+          messages={messages}
+          onSelectPrompt={(text) => sendMessage(text)}
+        />
+
+        {/* Bottom Input Box */}
+        <ChatInput
+          onSendMessage={sendMessage}
+          onCancel={sendCancel}
+          isStreaming={isStreaming}
+          disabled={!isConnected}
+        />
+
+        {/* Action Confirm Banner */}
+        <ConfirmBanner
+          request={confirmRequest}
+          onRespond={respondConfirm}
+        />
+
+        {/* Plan Approval Modal */}
+        <PlanApprovalModal
+          request={planApprovalRequest}
+          onRespond={respondPlanApproval}
+        />
+
+        {/* Settings Modal */}
+        <SettingsModal
+          isOpen={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          status={status}
+          onStatusUpdated={loadStatusAndSessions}
+        />
       </main>
     </div>
   );
 }
+
+export default App;
