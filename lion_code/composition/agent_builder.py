@@ -293,6 +293,7 @@ def build_agent_composition(
             host
             for host in (
                 host_of(config.anthropic_base_url or DEFAULT_ANTHROPIC_BASE_URL),
+                host_of(config.api_base) if config.api_base else None,
             )
             if host
         ),
@@ -686,16 +687,17 @@ def _build_tooling_graph(
         workspace_snapshot = tool_bindings.workspace_snapshot or WorkspaceSnapshot(
             foundation.cwd
         )
-    audit_log = None
-    if tool_bindings.enable_audit:
-        audit_log = tool_bindings.audit_log or ExecutionAuditLog(
-            Path.home() / ".lion_code" / "execution.audit"
-        )
     secret_store = None
     if tool_bindings.enable_secret_boundary:
         secret_store = tool_bindings.secret_store or load_secret_store(
             workspace=foundation.cwd,
             key_file=Path.home() / ".lion_code" / "sanitizer.key",
+        )
+    audit_log = None
+    if tool_bindings.enable_audit:
+        audit_log = tool_bindings.audit_log or ExecutionAuditLog(
+            Path.home() / ".lion_code" / "execution.audit",
+            store=secret_store,
         )
     egress_whitelist = None
     if tool_bindings.enable_egress_guard:

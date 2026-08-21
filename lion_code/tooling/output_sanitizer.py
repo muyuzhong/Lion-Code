@@ -34,6 +34,35 @@ def _value_candidates(chunk: str) -> list[str]:
     return candidates
 
 
+def sanitize_text(text: str, store: SecretStore) -> tuple[str, int]:
+    """指纹比对 redact；供输出窄腰与审计参数序列化共用。"""
+    if not store.fingerprints():
+        return text, 0
+    hits = 0
+    lines = text.split("\n")
+    for index, line in enumerate(lines):
+        replaced, count = _sanitize_line(line, store)
+        hits += count
+        lines[index] = replaced
+    return "\n".join(lines), hits
+
+
+def _sanitize_line(line: str, store: SecretStore) -> tuple[str, int]:
+    # 行粒度先比对：覆盖独占一行的裸值与 KEY="含空格值" 两种形态
+    for candidate in _value_candidates(line):
+        if store.matches(candidate):
+            return line.replace(candidate, REDACTED), 1
+    parts = _SPLIT.split(line)
+    hits = 0
+    for index in range(0, len(parts), 2):
+        for candidate in _value_candidates(parts[index]):
+            if store.matches(candidate):
+                parts[index] = parts[index].replace(candidate, REDACTED)
+                hits += 1
+                break
+    return "".join(parts), hits
+
+
 class OutputSanitizerMiddleware:
     """对工具结果内容做指纹比对 redact；计数写入 details 供审计消费。"""
 
@@ -53,34 +82,8 @@ class OutputSanitizerMiddleware:
     ) -> ToolResult:
         del tool, context, tool_call_id, arguments
         result = await call_next()
-        if not self.store.fingerprints():
-            return result
-        sanitized, hits = self._sanitize(result.content)
+        sanitized, hits = sanitize_text(result.content, self.store)
         if hits:
             result.content = sanitized
             result.details = {**result.details, "sanitizer_hits": hits}
         return result
-
-    def _sanitize(self, text: str) -> tuple[str, int]:
-        hits = 0
-        lines = text.split("\n")
-        for index, line in enumerate(lines):
-            replaced, count = self._sanitize_line(line)
-            hits += count
-            lines[index] = replaced
-        return "\n".join(lines), hits
-
-    def _sanitize_line(self, line: str) -> tuple[str, int]:
-        # 行粒度先比对：覆盖独占一行的裸值与 KEY="含空格值" 两种形态
-        for candidate in _value_candidates(line):
-            if self.store.matches(candidate):
-                return line.replace(candidate, REDACTED), 1
-        parts = _SPLIT.split(line)
-        hits = 0
-        for index in range(0, len(parts), 2):
-            for candidate in _value_candidates(parts[index]):
-                if self.store.matches(candidate):
-                    parts[index] = parts[index].replace(candidate, REDACTED)
-                    hits += 1
-                    break
-        return "".join(parts), hits

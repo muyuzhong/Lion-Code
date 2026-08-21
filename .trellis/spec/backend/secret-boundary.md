@@ -74,6 +74,10 @@ The Composition Root creates the default lazily from `foundation.cwd` plus
   candidate; whole-output sliding-window hashing is forbidden.
 - Hits are counted into `result.details["sanitizer_hits"]` and flow into
   `ExecutionEvent.sanitizer_hits`.
+- The audit channel itself is in scope: `ExecutionAuditLog` accepts an
+  optional `SecretStore` and redacts string arguments (including
+  `run_shell` command strings) before serializing `command_or_args`, so a
+  blocked exfil attempt cannot land its payload in the audit file.
 - An empty store short-circuits: unchanged result, no `sanitizer_hits` key.
 
 ### Honesty boundary

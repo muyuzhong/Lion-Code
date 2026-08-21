@@ -232,6 +232,60 @@ class TestLevelB(unittest.TestCase):
         self.assertFalse(result.is_error)
         self.assertEqual(result.content, "file contents")
 
+    def test_provider_host_derivation_allows_fetch(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as home,
+            tempfile.TemporaryDirectory() as cwd,
+        ):
+            whitelist = EgressWhitelist.from_sources(
+                home=Path(home),
+                cwd=Path(cwd),
+                provider_hosts=frozenset({"api.anthropic.com"}),
+            )
+        result = _run(
+            _web_fetch_tool(),
+            whitelist,
+            {"url": "https://api.anthropic.com/v1/docs"},
+        )
+        self.assertFalse(result.is_error)
+
+
+class TestAuditRowRedaction(unittest.TestCase):
+    """审计行本身不得成为明文 secret 聚集地。"""
+
+    def test_fingerprint_block_audit_row_is_secret_free(self) -> None:
+        store = SecretStore({"API_KEY": SECRET}, b"k")
+        with tempfile.TemporaryDirectory() as directory:
+            audit_log = ExecutionAuditLog(
+                Path(directory) / "execution.audit", store=store
+            )
+            result = _run(
+                _web_fetch_tool(),
+                EgressWhitelist(frozenset({ALLOWED})),
+                {"url": f"https://{ALLOWED}/callback?token={SECRET}"},
+                store=store,
+                audit_log=audit_log,
+            )
+            row_text = (Path(directory) / "execution.audit").read_text(encoding="utf-8")
+        self.assertTrue(result.is_error)
+        self.assertNotIn(SECRET, row_text)
+        self.assertIn("***", row_text)
+
+    def test_shell_command_secret_is_redacted_in_audit(self) -> None:
+        store = SecretStore({"API_KEY": SECRET}, b"k")
+        with tempfile.TemporaryDirectory() as directory:
+            audit_log = ExecutionAuditLog(
+                Path(directory) / "execution.audit", store=store
+            )
+            _run(
+                _shell_tool(),
+                EgressWhitelist(frozenset({ALLOWED})),
+                {"command": f"deploy --token={SECRET}"},
+                audit_log=audit_log,
+            )
+            row_text = (Path(directory) / "execution.audit").read_text(encoding="utf-8")
+        self.assertNotIn(SECRET, row_text)
+
 
 if __name__ == "__main__":
     unittest.main()

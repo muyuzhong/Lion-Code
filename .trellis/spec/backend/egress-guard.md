@@ -37,10 +37,12 @@ builds the default lazily.
 
 ### Whitelist (deny-by-default, audit-driven growth)
 
-- Initial set: provider endpoint hosts only. Users add hosts via
-  `egress.allow_hosts` in `.claude/settings.json` (home then project, same
-  discovery pattern as permission rules). High-frequency Level B
-  destinations in the audit are the intended candidates for whitelisting.
+- Initial set: provider endpoint hosts derived from both
+  `config.anthropic_base_url` (or the Anthropic default) and
+  `config.api_base`. Users add hosts via `egress.allow_hosts` in
+  `.claude/settings.json` (home then project, same discovery pattern as
+  permission rules). High-frequency Level B destinations in the audit are
+  the intended candidates for whitelisting.
 - Matching is exact-host (case-insensitive). No path/query/suffix logic.
 
 ### Level A (web_fetch)
@@ -52,6 +54,8 @@ builds the default lazily.
 - If whitelisted, fingerprint-scan the full URL (whole URL, whole path,
   each path segment, each query value) against the SecretStore; a hit
   blocks with `fingerprint_hit=True`. GET queries are an exfil channel.
+  With `enable_secret_boundary=False` the store is `None` and the
+  fingerprint scan is silently off (whitelist hard control remains).
 - The S4-absence fallback is block + audit. No interim confirmation flow
   may be invented for egress.
 

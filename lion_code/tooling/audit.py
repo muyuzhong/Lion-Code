@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from .output_sanitizer import sanitize_text
+from .secret_provider import SecretStore
 from .snapshot import is_sensitive_path
 from .types import JSONValue, LionTool, ToolResult
 
@@ -51,10 +53,19 @@ class ExecutionEvent:
 
 
 class ExecutionAuditLog:
-    """向专用文件追加 JSON 对象；不参与 Session JSONL。"""
+    """向专用文件追加 JSON 对象；不参与 Session JSONL。
 
-    def __init__(self, path: str | Path) -> None:
+    持有可选 SecretStore 用于参数序列化 redact——审计行本身
+    不得成为明文 secret 的聚集地。
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        store: SecretStore | None = None,
+    ) -> None:
         self.path = Path(path).expanduser().resolve()
+        self.store = store
         self._lock = threading.RLock()
 
     def append(self, event: ExecutionEvent) -> None:
@@ -101,7 +112,9 @@ class ExecutionAuditLog:
         self.append(
             ExecutionEvent(
                 tool=tool.name,
-                command_or_args=serialize_tool_arguments(tool, arguments),
+                command_or_args=serialize_tool_arguments(
+                    tool, arguments, store=self.store
+                ),
                 snapshot_id=snapshot_id if isinstance(snapshot_id, str) else None,
                 sanitizer_hits=(
                     sanitizer_hits if isinstance(sanitizer_hits, int) else 0
@@ -119,14 +132,24 @@ class ExecutionAuditLog:
 def serialize_tool_arguments(
     tool: LionTool,
     arguments: Mapping[str, JSONValue],
+    *,
+    store: SecretStore | None = None,
 ) -> str:
     """稳定序列化工具参数，并对敏感文件写入值做脱敏。"""
     if tool.capabilities.executes_process and isinstance(arguments.get("command"), str):
-        return str(arguments["command"])
+        command = str(arguments["command"])
+        if store is not None:
+            command = sanitize_text(command, store)[0]
+        return command
     values: dict[str, JSONValue] = dict(arguments)
     raw_path = values.get("file_path")
     if isinstance(raw_path, str) and is_sensitive_path(raw_path):
         for key in ("content", "old_string", "new_string"):
             if key in values:
                 values[key] = "[REDACTED]"
+    if store is not None:
+        values = {
+            key: (sanitize_text(value, store)[0] if isinstance(value, str) else value)
+            for key, value in values.items()
+        }
     return json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
