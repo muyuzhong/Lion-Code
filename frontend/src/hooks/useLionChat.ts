@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatMessage, ConfirmRequest, PlanApprovalRequest, ToolCallItem } from "@/types/chat";
+import { fetchMessages } from "@/lib/api";
 import { toast } from "sonner";
 
 export function useLionChat(sessionId?: string) {
@@ -181,11 +182,22 @@ export function useLionChat(sessionId?: string) {
     };
   }, [connect]);
 
-  // 当外部切换 session_id 时清空当前消息流
+  // 当外部切换 session_id 时拉取历史会话消息
   useEffect(() => {
-    setMessages([]);
     setConfirmRequest(null);
     setPlanApprovalRequest(null);
+    if (sessionId) {
+      fetchMessages()
+        .then((history) => {
+          setMessages(history);
+        })
+        .catch((err) => {
+          console.error("Failed to load history messages:", err);
+          setMessages([]);
+        });
+    } else {
+      setMessages([]);
+    }
   }, [sessionId]);
 
   const sendMessage = useCallback((content: string) => {

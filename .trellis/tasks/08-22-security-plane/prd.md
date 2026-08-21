@@ -82,6 +82,9 @@ A/B 双层诚实承诺；信任域显式声明为 {本机 + LLM Provider}。
   （S4 缺位期 fallback，不发明临时确认机制）。
 - Level B（best effort）：run_shell 命令字符串提取 URL/域名，比对白名单，
   审计行标注 `best_effort`；不做命令意图分析、不阻断。
+- 白名单默认姿态（Q1 决策）：最小信任 deny-by-default，初始白名单仅含
+  从 provider 配置派生的 endpoints；用户依 Level B 审计中的高频 destination
+  在 settings 中加白（审计驱动演进）。
 - 白名单含方向维度（G4）：fetch 与 push/upload 分离；github.com push、
   pypi.org upload 不因 destination 命中白名单而隐式放行，
   默认落入 require_confirmation。
@@ -102,8 +105,9 @@ A/B 双层诚实承诺；信任域显式声明为 {本机 + LLM Provider}。
 
 ### R4. 审计扩展
 
-- ExecutionEvent schema 按 PR-S1 契约填充新字段：destination、direction、
-  sanitizer_hits、authz_source、best_effort 标注；append-only、存 workspace 外，
+- ExecutionEvent（`lion_code/tooling/audit.py:20`）已有 destination、
+  fingerprint_hit、authorization_source 字段；本任务补充 direction、
+  sanitizer_hits、best_effort 标注；append-only、存 workspace 外，
   只记录不干预。
 
 ### R5. 设计定稿与门禁文档
@@ -131,6 +135,18 @@ A/B 双层诚实承诺；信任域显式声明为 {本机 + LLM Provider}。
 - [ ] 架构测试期望值同步更新且全绿；本地质量门禁
       （ruff / mypy / 基线比对）通过；CI 绿。
 
+## Key Decisions
+
+- D1（Q1，用户已决）：Level A 白名单采用最小信任 deny-by-default，
+  初始仅含配置派生的 provider endpoints，靠审计数据驱动加白演进。
+- D2（G3）：v1 的 T3 谓词基于命令字符串并如实标注 best_effort；
+  git/publish 专用工具（参数级事实源）待审计数据证明需要后另立任务。
+- D3（G5）：快照机制维持 PR-S1 已落地实现（manifest + workspace 外存储），
+  不切换为设计稿的 git stash 方案。
+- D4（G5）：安全平面代码落 `lion_code/tooling/`（Kernel 工具子系统），
+  "禁止进入"的对象修正为 Agent Runtime 层 / MetaAgent / Capability SPI；
+  spec 与架构测试期望值同步更新。
+
 ## Out of Scope
 
 - S4 Sandbox（network namespace / 强制 proxy）——Level B 的完整阻断能力，另立任务，
@@ -140,8 +156,3 @@ A/B 双层诚实承诺；信任域显式声明为 {本机 + LLM Provider}。
 - 历史对话 secret 清洗（已进上下文无法追回，如实声明）；
   .env 三源之外的 secret 自动发现（登记为残余风险，不实现）。
 - 快照机制替换（维持 PR-S1 已落地的 manifest + 外部存储实现）。
-
-## Open Questions
-
-- Q1（阻塞，用户决策）：Level A 出口白名单的默认信任姿态 ——
-  最小信任（仅配置派生的 provider endpoints）还是预置常用 fetch 白名单。

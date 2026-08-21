@@ -1,4 +1,4 @@
-import { ModelChoice, ServerStatus, SessionSummary } from "@/types/chat";
+import { ChatMessage, ModelChoice, ServerStatus, SessionSummary } from "@/types/chat";
 
 const API_BASE = "";
 
@@ -11,6 +11,12 @@ export async function fetchStatus(): Promise<ServerStatus> {
 export async function fetchSessions(): Promise<SessionSummary[]> {
   const res = await fetch(`${API_BASE}/api/sessions`);
   if (!res.ok) throw new Error("Failed to fetch sessions");
+  return res.json();
+}
+
+export async function fetchMessages(): Promise<ChatMessage[]> {
+  const res = await fetch(`${API_BASE}/api/messages`);
+  if (!res.ok) throw new Error("Failed to fetch messages");
   return res.json();
 }
 

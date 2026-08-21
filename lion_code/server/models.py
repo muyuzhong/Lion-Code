@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ─── WebSocket 上行载荷 (Client -> Server) ───────────────────────
 
@@ -113,3 +113,20 @@ class SessionSummaryItem(BaseModel):
 
 class ResumeSessionRequest(BaseModel):
     session_id: str
+
+
+class ToolCallDTO(BaseModel):
+    id: str
+    toolName: str
+    args: Any = None
+    status: Literal["running", "completed", "error"] = "completed"
+    result: str | None = None
+
+
+class ChatMessageDTO(BaseModel):
+    id: str
+    role: Literal["user", "assistant"]
+    content: str
+    reasoning: str | None = None
+    tools: list[ToolCallDTO] = Field(default_factory=list)
+    createdAt: str | None = None

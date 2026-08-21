@@ -16,9 +16,11 @@ from starlette.websockets import WebSocketState
 
 from lion_code.application.session import LionCodingSession
 from lion_code.config import save_api_config
+from lion_code.core.messages import AssistantMessage, ToolResultMessage, UserMessage
 
 from .bridge import SessionWebsocketBridge
 from .models import (
+    ChatMessageDTO,
     ModelChoiceItem,
     ProviderConfigRequest,
     ResumeSessionRequest,
@@ -26,6 +28,7 @@ from .models import (
     SessionSummaryItem,
     SkillItem,
     ThinkingLevelRequest,
+    ToolCallDTO,
 )
 
 
@@ -68,11 +71,69 @@ def create_app(session: LionCodingSession) -> FastAPI:
             is_running=session.is_running,
         )
 
+    @app.get("/api/messages", response_model=list[ChatMessageDTO])
+    async def get_messages() -> list[ChatMessageDTO]:
+        raw_messages = session.messages
+        result: list[ChatMessageDTO] = []
+
+        tool_results: dict[str, tuple[str, bool]] = {}
+        for m in raw_messages:
+            if isinstance(m, ToolResultMessage):
+                tool_results[m.tool_call_id] = (m.text, m.is_error)
+
+        for i, m in enumerate(raw_messages):
+            if isinstance(m, UserMessage):
+                result.append(
+                    ChatMessageDTO(
+                        id=f"msg-{i}",
+                        role="user",
+                        content=m.text,
+                        createdAt=None,
+                    )
+                )
+            elif isinstance(m, AssistantMessage):
+                tools_dto: list[ToolCallDTO] = []
+                for tc in m.tool_calls:
+                    res_tuple = tool_results.get(tc.id)
+                    status = "error" if res_tuple and res_tuple[1] else "completed"
+                    tools_dto.append(
+                        ToolCallDTO(
+                            id=tc.id,
+                            toolName=tc.name,
+                            args=tc.arguments,
+                            status=status,
+                            result=res_tuple[0] if res_tuple else None,
+                        )
+                    )
+                result.append(
+                    ChatMessageDTO(
+                        id=f"msg-{i}",
+                        role="assistant",
+                        content=m.text,
+                        reasoning=m.thinking_text or None,
+                        tools=tools_dto,
+                        createdAt=None,
+                    )
+                )
+        return result
+
     @app.get("/api/sessions", response_model=list[SessionSummaryItem])
     async def list_sessions() -> list[SessionSummaryItem]:
         sessions_meta = await session.list_sessions()
-        cwd_str = str(session.cwd)
-        filtered = [m for m in sessions_meta if m.get("cwd") == cwd_str]
+        current_cwd = session.cwd
+
+        def _is_match(meta_cwd: str | None) -> bool:
+            if not meta_cwd:
+                return True
+            try:
+                return Path(meta_cwd).resolve() == current_cwd.resolve()
+            except Exception:
+                return str(meta_cwd).lower() == str(current_cwd).lower()
+
+        filtered = [m for m in sessions_meta if _is_match(m.get("cwd"))]
+        if not filtered and sessions_meta:
+            filtered = list(sessions_meta)
+
         filtered.sort(key=lambda m: m.get("startTime", ""), reverse=True)
         return [
             SessionSummaryItem(

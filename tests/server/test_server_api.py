@@ -114,6 +114,21 @@ def test_list_and_resume_sessions() -> None:
     assert ("new", None) in backend.session_operations
 
 
+def test_get_messages() -> None:
+    session, backend = _build_test_session()
+    user_msg = AssistantMessage(content=(TextContent(text="Hello!"),))
+    backend.messages = (user_msg,)
+    app = create_app(session)
+    client = TestClient(app)
+
+    res = client.get("/api/messages")
+    assert res.status_code == 200
+    msgs = res.json()
+    assert len(msgs) == 1
+    assert msgs[0]["role"] == "assistant"
+    assert msgs[0]["content"] == "Hello!"
+
+
 def test_configure_provider_and_thinking() -> None:
     session, backend = _build_test_session()
     app = create_app(session)
