@@ -185,6 +185,16 @@ export const App: React.FC = () => {
           onCancel={cancelGeneration}
           isGenerating={isGenerating}
           disabled={!isConnected}
+          currentModel={status?.model}
+          thinkingLevel={status?.thinkingLevel}
+          onThinkingClick={() => {
+            if (status?.availableThinkingLevels) {
+              const currentIdx = status.availableThinkingLevels.indexOf(status.thinkingLevel);
+              const nextIdx = (currentIdx + 1) % status.availableThinkingLevels.length;
+              handleThinkingChange(status.availableThinkingLevels[nextIdx]);
+            }
+          }}
+          onClearChat={clearMessages}
         />
 
         {/* 敏感操作确认浮窗 */}
