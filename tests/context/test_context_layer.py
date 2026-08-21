@@ -172,6 +172,37 @@ def test_context_view_bounds_tool_totals_recent_and_repeated_activity() -> None:
         ("read_file(path=b.py)", 3),
         ("run_shell(path=c.py)", 2),
     ]
+    assert len(view.tool_totals) <= 3
+    assert len(view.recent_tool_calls) <= 3
+    assert len(view.repeated_tool_calls) <= 3
+    assert len(view.recent_failures) <= 3
+
+
+def test_context_view_scans_only_the_latest_64_tool_calls() -> None:
+    messages = [
+        *[_call(index, path=f"old-{index}.py") for index in range(80)],
+        *[
+            _call(index + 80, path="src/app.py", name="grep_search")
+            for index in range(64)
+        ],
+    ]
+    original_messages = tuple(message.model_dump(mode="json") for message in messages)
+
+    view = ContextView.from_messages(messages, current_time="now")
+
+    assert [(trace.name, trace.count) for trace in view.tool_totals] == [
+        ("grep_search", 64),
+    ]
+    assert view.other_tool_calls == 0
+    assert [trace.summary for trace in view.recent_tool_calls] == [
+        "grep_search(path=src/app.py)"
+    ] * 3
+    assert [(trace.summary, trace.count) for trace in view.repeated_tool_calls] == [
+        ("grep_search(path=src/app.py)", 64),
+    ]
+    assert [message.model_dump(mode="json") for message in messages] == list(
+        original_messages
+    )
 
 
 class _Layer:

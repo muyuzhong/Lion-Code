@@ -11,6 +11,7 @@ from typing import Literal
 from lion_code.core.messages import (
     AgentMessage,
     AssistantMessage,
+    ToolCall,
     ToolResultMessage,
 )
 
@@ -26,6 +27,7 @@ CompactionStatus = Literal["not required", "required"]
 MAX_TOOL_ARGUMENT_SUMMARY_CHARS = 240
 MAX_FAILURE_SUMMARY_CHARS = 240
 _TOOL_ACTIVITY_LIMIT = 3
+_TOOL_ACTIVITY_SCAN_LIMIT = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,26 +203,35 @@ def _project_tool_activity(
     tuple[ToolTrace, ...],
     int,
 ]:
+    selected_calls: list[ToolCall] = []
+    for message in reversed(messages):
+        if not isinstance(message, AssistantMessage):
+            continue
+        for call in reversed(message.tool_calls):
+            selected_calls.append(call)
+            if len(selected_calls) == _TOOL_ACTIVITY_SCAN_LIMIT:
+                break
+        if len(selected_calls) == _TOOL_ACTIVITY_SCAN_LIMIT:
+            break
+    selected_calls.reverse()
+
     tool_totals: dict[str, int] = {}
     trace_totals: dict[str, tuple[ToolTrace, int]] = {}
     recent_traces: list[ToolTrace] = []
-    for message in messages:
-        if not isinstance(message, AssistantMessage):
-            continue
-        for call in message.tool_calls:
-            trace = ToolTrace(
-                tool_name=call.name,
-                argument_summary=_summarize_arguments(call.arguments),
-            )
-            tool_totals[call.name] = tool_totals.get(call.name, 0) + 1
-            previous = trace_totals.get(trace.summary)
-            trace_totals[trace.summary] = (
-                trace,
-                1 if previous is None else previous[1] + 1,
-            )
-            recent_traces.append(trace)
-            if len(recent_traces) > _TOOL_ACTIVITY_LIMIT:
-                del recent_traces[0]
+    for call in selected_calls:
+        trace = ToolTrace(
+            tool_name=call.name,
+            argument_summary=_summarize_arguments(call.arguments),
+        )
+        tool_totals[call.name] = tool_totals.get(call.name, 0) + 1
+        previous = trace_totals.get(trace.summary)
+        trace_totals[trace.summary] = (
+            trace,
+            1 if previous is None else previous[1] + 1,
+        )
+        recent_traces.append(trace)
+        if len(recent_traces) > _TOOL_ACTIVITY_LIMIT:
+            del recent_traces[0]
 
     ranked_tools = sorted(tool_totals.items(), key=lambda item: -item[1])
     bounded_tool_totals = tuple(
