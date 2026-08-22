@@ -3,9 +3,9 @@
 证据基线：`research/frontend-current-state.md`（含两轮核查，file:line 均为调研时点）。
 分层原则：P0 = 后端/协议已就绪、仅前端接线；P1 = 前端少量新代码；P2 = 需后端配合。
 
-## 决策记录（grilling Round 1，2026-08-22）
+## 决策记录（grilling，2026-08-22）
 
-用户已拍板（均采推荐项）：
+用户已拍板（均采推荐项）。Round 1：
 
 - D1 流式期间输入语义：Enter 默认 `follow_up` 排队，`steer`（立即改向）做成显式按钮。
   理由：steer 会改向正在执行的任务，误触代价高；排队是 Claude Code / Cursor 的成熟惯例。
@@ -15,6 +15,15 @@
 - D4 Skills 交互：点击条目填入自然句式引用（"用 \<name\> 技能帮我："），用户补全后发送。
 - D5 P2 项保持粗粒度，落地前另立设计任务细化契约。
 - D6 测试策略：每个 PR 补协议层单测（reducer / api），UI 组件不强制。
+
+Round 2：
+
+- D7 排队消息呈现：消息流内带"排队中"徽标 + 输入框上方计数徽标，数据源统一为
+  `queue_update` 快照；被消费转正式 UserMessage 后徽标消失。
+- D8 转向按钮形态：次级图标按钮，仅 `isStreaming` 时出现在发送按钮旁，点击即按
+  `steer` 发送当前输入；不做模式切换（避免忘记切回导致误转向）。
+- D9 agent 结果卡片深度：头部（`agent · type · description` + 状态）+ 结果
+  Markdown 渲染；prompt 沿用 ToolView 现有入参折叠区，不加专属折叠区。
 
 ---
 
