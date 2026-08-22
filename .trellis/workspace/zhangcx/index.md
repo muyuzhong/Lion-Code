@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 50
+- **Total Sessions**: 51
 - **Last Active**: 2026-08-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1566 | Active |
+| `journal-1.md` | ~1659 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 51 | 2026-08-22 | 前端任务功能补充设计（grilling 三轮收敛） | `f133566`, `f1fb52a`, `ed2bdb6`, `11c1ac9`, `f04a5de` | `master` |
 | 49 | 2026-08-22 | 权限与安全平面落地（PR-S2/S3/S5 + 设计定稿） | `7491a19` | `muyuzhong/web-local-access-security` |
 | 50 | 2026-08-22 | Web 本机访问安全边界 | `fa1a6f6` | `muyuzhong/web-local-access-security` |
 | 51 | 2026-08-22 | WebSocket 协议与连接生命周期 | `c66b17c` | `muyuzhong/websocket-protocol-lifecycle` |

@@ -1632,3 +1632,28 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 51: 前端任务功能补充设计（grilling 三轮收敛）
+
+**Date**: 2026-08-22
+**Task**: 前端任务功能补充设计（grilling 三轮收敛）
+**Branch**: `master`
+
+### Summary
+
+调研 Lion Web 前端任务功能现状并建设计任务；经 grilling 三轮拷问收敛为 12 项设计（P0×4/P1×4/P2×4）+候选池，PR 计划 5 个前端 PR；对照 deepseek-harness 扩充 Trajectory 简版/统计行/ANSI 卡片；修正两处初版错误（on_update 通道未接线、流式输入默认语义改 follow_up 排队）。设计已确认共识，任务归档于 archive/2026-08/。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f133566` | (see git log) |
+| `f1fb52a` | (see git log) |
+| `ed2bdb6` | (see git log) |
+| `11c1ac9` | (see git log) |
+| `f04a5de` | (see git log) |
+
+### Status
+
+[OK] **Completed**
