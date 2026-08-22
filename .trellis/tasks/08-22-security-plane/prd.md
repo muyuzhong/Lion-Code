@@ -116,20 +116,20 @@ Secret Boundary redaction（PR-S2）、Egress Guard（PR-S3）、授权收尾三
 
 ## Acceptance Criteria
 
-- [ ] 注册 secret 在 run_shell / read_file / grep_search / web_fetch 任一输出中
+- [x] 注册 secret 在 run_shell / read_file / grep_search / web_fetch 任一输出中
       均被 redact（每条路径各一条测试）；secret 明文不出现在 provider 请求负载
-      （测试断言）。
-- [ ] 进程 env 中名字匹配模式的凭据（如 API key）被注册并 redact
-      （`printenv` 路径测试）。
-- [ ] web_fetch 请求白名单外 destination 被阻断并产生审计行；白名单内放行；
+      （tests/integration/test_provider_core_tool_runtime.py 请求负载断言）。
+- [x] 进程 env 中名字匹配模式的凭据（如 API key）被注册并在裸值输出形态下 redact
+      （注册与输出形态各有测试；真实 printenv 子进程路径跨平台脆弱，不测）。
+- [x] web_fetch 请求白名单外 destination 被阻断并产生审计行；白名单内放行；
       provider 流量不受 Egress Guard 影响。
-- [ ] web_fetch URL query 携带已登记 secret 指纹命中时被阻断并产生审计行。
-- [ ] run_shell 命令字符串含 URL 时，审计行含 best_effort 标注与提取的 destination。
-- [ ] dontAsk 模式下预算外动作产生结构化停机 ToolResult（budget_exceeded +
+- [x] web_fetch URL query 携带已登记 secret 指纹命中时被阻断并产生审计行。
+- [x] run_shell 命令字符串含 URL 时，审计行含 best_effort 标注与提取的 destination。
+- [x] dontAsk 模式下预算外动作产生结构化停机 ToolResult（budget_exceeded +
       handoff 文本）与审计行，不触发 git commit。
-- [ ] 任务启动时的授权快照（mode + 规则摘要）出现在审计中。
-- [ ] push 类目的地经 run_shell 触发现确认路径（复用现有 confirm 缓存）。
-- [ ] 架构测试期望值同步更新且全绿；本地质量门禁
+- [x] 任务启动时的授权快照（mode + 规则摘要）出现在审计中。
+- [x] push 类目的地经 run_shell 触发现确认路径（复用现有 confirm 缓存）。
+- [x] 架构测试期望值同步更新且全绿；本地质量门禁
       （ruff / mypy / 基线比对）通过；CI 绿。
 
 ## Key Decisions

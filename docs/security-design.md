@@ -61,9 +61,9 @@ Agent 会读取互联网内容（web_fetch），注入是主要对手。逐通�
 执行管线（`lion_code/tooling/`）：
 
 ```
-pre ：Cancellation → WorkspaceSnapshot → PreToolHook → Permission → EgressGuard
+pre ：Cancellation → WorkspaceSnapshot → PreToolHook → Permission → EgressGuard → ReadFreshness
 执行：tool（含异常路径——异常结果同样过 post 链）
-post：OutputSanitizer → ReadFreshness → ResultPolicy → Audit
+post：OutputSanitizer → ResultPolicy → Audit
 ```
 
 ## 4. 关键决策记录
@@ -90,6 +90,8 @@ post：OutputSanitizer → ReadFreshness → ResultPolicy → Audit
   budget_exceeded ToolResult（触发原因 + 挂起说明）+ `terminate` 停止
   循环 + 审计 blocked 行。不做 git commit——进度保存/恢复归 Supervisor
   平面，权限层不触发 workspace mutation。
+  边界（沿用 core loop 既有"全停才停"语义）：同一批并行工具调用中只要
+  有一个未停机，循环会继续；停机结果本身已入对话记录，恢复时可见。
 - **不建谓词引擎（D5）**：现有规则格式 + capabilities 判定 + S3 白名单
   已覆盖全部机械事实表达；语义动作名只作审计标签。
 

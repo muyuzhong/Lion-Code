@@ -78,7 +78,8 @@ details; no conversation-runtime mutation is allowed.
 ### Audit contract
 
 `ExecutionAuditLog` appends one UTF-8 JSON object per line to a dedicated
-non-session `.audit` file. Every row has exactly this schema:
+non-session `.audit` file. Every row has exactly this schema (additive
+fields land as nullable columns, existing keys never rename):
 
 ```json
 {
@@ -91,12 +92,17 @@ non-session `.audit` file. Every row has exactly this schema:
   "destination": null,
   "fingerprint_hit": null,
   "authorization_source": null,
+  "sanitizer_hits": 0,
+  "best_effort": null,
   "notes": []
 }
 ```
 
 PR-S1 fills execution results as `success` or `failed`, and rollback success
-as `rolled_back`; reserved fields remain `null`.
+as `rolled_back`. PR-S2/S3/S5 fill the remaining columns: `sanitizer_hits`
+from redaction, `destination`/`best_effort`/`fingerprint_hit` from the egress
+guard, `blocked` + notes for egress blocks and budget-exceeded shutdowns,
+and `session-grant` rows record the authorization snapshot at build time.
 
 ## 4. Validation & Error Matrix
 

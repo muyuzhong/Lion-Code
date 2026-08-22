@@ -25,8 +25,10 @@ from lion_code.providers.config import OpenAICompatibleConfig
 from lion_code.providers.openai_compatible import OpenAICompatibleProvider
 from lion_code.runtime.session_identity import SessionIdentityState
 from lion_code.tooling.context import ToolContext
+from lion_code.tooling.output_sanitizer import OutputSanitizerMiddleware
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
+from lion_code.tooling.secret_provider import SecretStore
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 
 
@@ -72,7 +74,9 @@ def _sse(*items: Any) -> bytes:
     return "".join(parts).encode()
 
 
-def _chat_delta(delta: dict[str, Any], *, finish_reason: str | None = None) -> dict[str, Any]:
+def _chat_delta(
+    delta: dict[str, Any], *, finish_reason: str | None = None
+) -> dict[str, Any]:
     choice: dict[str, Any] = {"delta": delta}
     if finish_reason is not None:
         choice["finish_reason"] = finish_reason
@@ -80,7 +84,9 @@ def _chat_delta(delta: dict[str, Any], *, finish_reason: str | None = None) -> d
 
 
 class TestProviderCoreToolRuntimeLoop(unittest.IsolatedAsyncioTestCase):
-    async def test_closed_loop_carries_tool_transcript_into_second_request(self) -> None:
+    async def test_closed_loop_carries_tool_transcript_into_second_request(
+        self,
+    ) -> None:
         registry = ToolRegistry()
         registry.register(_echo_lion_tool())
         runtime = ToolRuntime(registry, _context(registry))
@@ -166,11 +172,102 @@ class TestProviderCoreToolRuntimeLoop(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool_call_payload["id"], "call-1")
         self.assertEqual(tool_call_payload["type"], "function")
         self.assertEqual(tool_call_payload["function"]["name"], "echo")
-        self.assertEqual(json.loads(tool_call_payload["function"]["arguments"]), {"msg": "hi"})
+        self.assertEqual(
+            json.loads(tool_call_payload["function"]["arguments"]), {"msg": "hi"}
+        )
         self.assertEqual(
             msgs[3],
-            {"role": "tool", "tool_call_id": "call-1", "name": "echo", "content": "echo:hi"},
+            {
+                "role": "tool",
+                "tool_call_id": "call-1",
+                "name": "echo",
+                "content": "echo:hi",
+            },
         )
+
+    async def test_sanitized_tool_result_never_reaches_provider_payload(self) -> None:
+        """AC：secret 明文不出现在 provider 请求负载（ToolRuntime 后接 sanitizer）。"""
+        secret = "sk-live-abcdef123456"
+
+        async def leak(_ctx, _id, _arguments, _on_update):
+            return ToolResult(content=f"config dump: token={secret}\n")
+
+        registry = ToolRegistry()
+        registry.register(
+            LionTool(
+                name="leak",
+                label="Leak",
+                description="returns a fixed config dump",
+                parameters={"type": "object", "properties": {}},
+                execute_fn=leak,
+                capabilities=ToolCapabilities(read_only=True),
+            )
+        )
+        runtime = ToolRuntime(
+            registry,
+            _context(registry),
+            [OutputSanitizerMiddleware(SecretStore({"API_KEY": secret}, b"k"))],
+        )
+
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if len(requests) == 1:
+                return httpx.Response(
+                    200,
+                    content=_sse(
+                        _chat_delta(
+                            {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call-1",
+                                        "function": {
+                                            "name": "leak",
+                                            "arguments": "{}",
+                                        },
+                                    }
+                                ]
+                            }
+                        ),
+                        _chat_delta({}, finish_reason="tool_calls"),
+                        "[DONE]",
+                    ),
+                )
+            return httpx.Response(
+                200,
+                content=_sse(
+                    _chat_delta({"content": "done"}),
+                    _chat_delta({}, finish_reason="stop"),
+                    "[DONE]",
+                ),
+            )
+
+        config = OpenAICompatibleConfig(
+            api_key="test-key",
+            base_url="https://example.test/v1",
+            max_retries=2,
+            max_retry_delay_seconds=0.0,
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = OpenAICompatibleProvider(config, client=client)
+            harness = AgentHarness(
+                AgentHarnessConfig(
+                    provider=provider,
+                    model="gpt-4",
+                    system="s",
+                    tools=[],
+                    get_tools=lambda: adapt_active_tools(runtime),
+                )
+            )
+            async for _ in harness.prompt("dump config"):
+                pass
+
+        self.assertEqual(len(requests), 2)
+        second_payload = requests[1].content
+        self.assertNotIn(secret.encode("utf-8"), second_payload)
+        self.assertIn(b"***", second_payload)
 
 
 if __name__ == "__main__":

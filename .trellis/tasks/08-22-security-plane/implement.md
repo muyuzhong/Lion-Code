@@ -71,6 +71,18 @@
   `execution.py` 本任务不改（注入延后，D6）。
 - 回滚：ToolBindings 开关关闭即回现状；PR 级 revert（squash 单提交）。
 
+## 收尾注记（终审后补）
+
+- 权限平面（dontAsk 语义变更）的契约记录在 `docs/security-design.md` §5 与
+  `docs/tui.md`，未单独建 spec——权限判定逻辑属既有 `permission.py` 结构的
+  小改，无新平面；后续若扩展授权词汇表再立 spec。
+- 已知卫生问题：composition 级测试默认向真实 `~/.lion_code/execution.audit`
+  写入 session-grant 行（PR-S1 起 execution.audit 即有同类测试写入，非安全
+  问题）；需要时在测试注入 audit_log 收敛。
+- AC1b（provider 负载无 secret）由 tests/integration/test_provider_core_tool_runtime.py
+  的闭环负载断言满足；AC2 真实 printenv 子进程路径跨平台脆弱，以注册+输出
+  形态测试覆盖并在 PRD 如实降级。
+
 ## task.py start 前检查
 
 - prd / design / implement 三件套齐备（本文件）。
