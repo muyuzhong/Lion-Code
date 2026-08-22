@@ -3,7 +3,7 @@
   "name": "fastapi-web-boundary-hardening",
   "title": "FastAPI Web 前后端边界修复",
   "description": "",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "zhangcx",
   "assignee": "zhangcx",
   "createdAt": "2026-08-22",
-  "completedAt": null,
+  "completedAt": "2026-08-22",
   "branch": null,
   "base_branch": "master",
   "worktree_path": null,
@@ -27,6 +27,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "子任务进度（2026-08-22）：1/5 web-local-access-security 已完成归档（fa1a6f6）；2/5 websocket-protocol-lifecycle 已完成归档（c66b17c）。3/5 web-provider-settings-integrity 已完成（8cf550a，分支 muyuzhong/web-provider-settings-integrity，待开 PR）。4/5 web-session-workspace-isolation 已完成（6ca66ce，分支 muyuzhong/web-session-workspace-isolation，待开 PR）。下一个：5/5 web-server-delivery-lifecycle（P2）。",
+  "notes": "子任务进度（2026-08-22）：1/5 web-local-access-security 已完成归档（fa1a6f6）；2/5 websocket-protocol-lifecycle 已完成归档（c66b17c）。3/5 web-provider-settings-integrity 已完成（8cf550a，分支 muyuzhong/web-provider-settings-integrity，待开 PR）。4/5 web-session-workspace-isolation 已完成（6ca66ce，分支 muyuzhong/web-session-workspace-isolation，待开 PR）。5/5 web-server-delivery-lifecycle 已完成（576c53d，分支 muyuzhong/web-server-delivery-lifecycle，待开 PR）。五个子任务全部完成。",
   "meta": {}
 }
