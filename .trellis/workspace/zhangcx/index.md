@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 49
+- **Total Sessions**: 50
 - **Last Active**: 2026-08-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1545 | Active |
+| `journal-1.md` | ~1566 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -31,6 +31,7 @@
 |---|------|-------|---------|--------|
 | 49 | 2026-08-22 | 权限与安全平面落地（PR-S2/S3/S5 + 设计定稿） | `7491a19` | `muyuzhong/web-local-access-security` |
 | 50 | 2026-08-22 | Web 本机访问安全边界 | `fa1a6f6` | `muyuzhong/web-local-access-security` |
+| 51 | 2026-08-22 | WebSocket 协议与连接生命周期 | `c66b17c` | `muyuzhong/websocket-protocol-lifecycle` |
 | 48 | 2026-08-21 | PR-S1 Workspace Snapshot 与 Rollback Event | `968b6c9` | `muyuzhong/contextview-bounded-tool-activity` |
 | 47 | 2026-08-21 | 上下文压缩与状态投影加固 | `0e47232`, `6e74beb`, `9e861cf`, `023901e`, `0ea421c`, `103e7f7`, `da9281d`, `5642194` | `muyuzhong/context-compaction-hardening` |
 | 46 | 2026-08-20 | 完成 PR5 Runtime DAG Closure | `b88d470`, `c62154f`, `a478fe8`, `ef22962`, `acda907`, `78a8b8c`, `6566803`, `3f44ef1`, `893b782` | `muyuzhong/pr4-product-adapter-feature-cohesion` |

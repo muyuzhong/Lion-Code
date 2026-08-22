@@ -1549,3 +1549,24 @@ FastAPI 固定绑定 127.0.0.1，引入进程内 capability，并统一 REST、W
 ### Status
 
 [OK] **Completed**
+
+
+## Session 50: WebSocket 协议与连接生命周期
+
+**Date**: 2026-08-22
+**Task**: WebSocket 协议与连接生命周期
+**Branch**: `muyuzhong/websocket-protocol-lifecycle`
+
+### Summary
+
+建立严格 camelCase WebSocket 协议、单连接租约与幂等断线收敛；前端使用完整事件解码和纯 reducer，并补齐重连、工具、错误及控制动作测试。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c66b17c` | (see git log) |
+
+### Status
+
+[OK] **Completed**
