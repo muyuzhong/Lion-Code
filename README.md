@@ -571,6 +571,23 @@ python -m compileall -q lion_code tests
 python benchmarks/context_management/formal_benchmark.py
 ```
 
+## Web 前端发布
+
+前端 Vite 构建产物直接写入 `lion_code/server/static`（package data），随
+wheel/sdist 发布；运行时以 package resource 定位，产物缺失时 Web 服务启动
+明确失败。前端源码改动后的唯一 rebuild 命令：
+
+```bash
+python scripts/build_frontend.py   # 内部执行 npm --prefix frontend run build
+```
+
+构建产物入库，差异随 git 提交可审计。发布物验证（wheel 静态内容 + 安装态
+smoke）：
+
+```bash
+python scripts/verify_web_delivery.py
+```
+
 ---
 
 ## 路线图

@@ -39,6 +39,10 @@ lion-code = "lion_code.__main__:main"
 [tool.setuptools.packages.find]
 include = ["lion_code*"]
 
+# 前端 Vite 构建产物随包发布；rebuild 唯一入口: python scripts/build_frontend.py
+[tool.setuptools.package-data]
+"lion_code.server" = ["static/**/*"]
+
 # ===========================================================================
 # 质量基线工具配置（2026-08-01 建立，基线模式）
 # 原则：记录基线、执行「不得继续恶化」，不追求立即全绿。

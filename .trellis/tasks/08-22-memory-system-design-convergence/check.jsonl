@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Check that the new capability stays private and does not add a Runtime, facade, Application, or Supervisor owner."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Check that Session, Compaction, ContextLayer, Profile, and Full product contracts remain coherent."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Run focused tests, full verification, diff checks, and update truthful specs/comments."}
+{"file":".trellis/tasks/08-22-memory-system-design-convergence/research/current-architecture-evidence.md","reason":"Verify implementation claims against the current source anchors and the exact removed legacy graph."}
