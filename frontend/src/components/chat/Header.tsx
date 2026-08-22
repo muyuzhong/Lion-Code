@@ -1,5 +1,5 @@
 import React from "react";
-import { PanelLeft, Plus, Settings, Sun, Moon } from "lucide-react";
+import { PanelLeft, Plus, Route, Settings, Sun, Moon } from "lucide-react";
 import { ModelChoice, ServerStatus } from "@/types/chat";
 import { ModelSelectorDropdown } from "./ModelSelectorDropdown";
 import { useTheme } from "@/context/ThemeContext";
@@ -8,6 +8,7 @@ interface HeaderProps {
   onToggleSidebar: () => void;
   onNewChat: () => void;
   onOpenSettings: () => void;
+  onOpenTrajectory: () => void;
   status: ServerStatus | null;
   models: ModelChoice[];
   onModelChanged: () => void;
@@ -18,6 +19,7 @@ export function Header({
   onToggleSidebar,
   onNewChat,
   onOpenSettings,
+  onOpenTrajectory,
   status,
   models,
   onModelChanged,
@@ -83,6 +85,16 @@ export function Header({
             {status.cwd.split(/[/\\]/).pop()}
           </div>
         )}
+
+        {/* Trajectory Panel Toggle */}
+        <button
+          type="button"
+          onClick={onOpenTrajectory}
+          className="flex size-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 transition"
+          title="执行轨迹"
+        >
+          <Route className="size-4" />
+        </button>
 
         {/* Theme Toggle Button */}
         <button

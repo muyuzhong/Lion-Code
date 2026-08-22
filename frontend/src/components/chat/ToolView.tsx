@@ -13,12 +13,15 @@ import {
   Copy,
   Check,
   Eye,
+  ScanSearch,
 } from "lucide-react";
 import { ToolCallItem } from "@/types/chat";
 import { ToolResultView } from "./ToolResultView";
 
 interface ToolViewProps {
   tool: ToolCallItem;
+  // 轨迹面板"检查"联动（P1-7）：点击打开面板并定位到该调用
+  onInspect?: (toolCallId: string) => void;
 }
 
 // agent 卡片头部元信息：`agent · <type> · <description>`（入参来自
@@ -103,7 +106,7 @@ function getToolConfig(name: string) {
   };
 }
 
-export function ToolView({ tool }: ToolViewProps) {
+export function ToolView({ tool, onInspect }: ToolViewProps) {
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const config = getToolConfig(tool.toolName);
@@ -166,6 +169,20 @@ export function ToolView({ tool }: ToolViewProps) {
 
         {/* 状态徽标 */}
         <div className="flex items-center gap-3 shrink-0 ml-2">
+          {onInspect && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onInspect(tool.id);
+              }}
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 transition"
+              title="在轨迹面板中检查"
+            >
+              <ScanSearch className="size-3" />
+              <span className="hidden sm:inline">检查</span>
+            </button>
+          )}
           {tool.status === "running" && (
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 border border-amber-500/20 animate-pulse font-sans">
               <Loader2 className="size-3 animate-spin" /> 执行中

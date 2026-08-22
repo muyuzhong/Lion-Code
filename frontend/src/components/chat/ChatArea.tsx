@@ -8,6 +8,7 @@ interface ChatAreaProps {
   messages: ChatMessage[];
   queue: ChatQueueState;
   onSelectPrompt: (prompt: string) => void;
+  onInspectTool?: (toolCallId: string) => void;
 }
 
 // 排队消息的流内呈现（D7）：用户消息样式 + 徽标，数据源为 queue_update 快照；
@@ -57,7 +58,7 @@ const STARTER_PROMPTS = [
   },
 ];
 
-export function ChatArea({ messages, queue, onSelectPrompt }: ChatAreaProps) {
+export function ChatArea({ messages, queue, onSelectPrompt, onInspectTool }: ChatAreaProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
@@ -129,7 +130,7 @@ export function ChatArea({ messages, queue, onSelectPrompt }: ChatAreaProps) {
     >
       <div className="mx-auto max-w-4xl divide-y divide-zinc-100 dark:divide-zinc-800/40 py-4">
         {messages.map((message) => (
-          <MessageItem key={message.id} message={message} />
+          <MessageItem key={message.id} message={message} onInspectTool={onInspectTool} />
         ))}
         {/* steering 先于 followUp 展示，与后端消费顺序一致 */}
         {queue.steering.map((text, index) => (
