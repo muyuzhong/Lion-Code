@@ -1,11 +1,33 @@
 import React, { useEffect, useRef, useState } from "react";
 import { MessageItem } from "./MessageItem";
 import { ChatMessage } from "@/types/chat";
-import { Code2, Bug, FileText, Sparkles, ArrowDown } from "lucide-react";
+import type { ChatQueueState } from "@/lib/chatProtocol";
+import { Code2, Bug, FileText, Sparkles, ArrowDown, User } from "lucide-react";
 
 interface ChatAreaProps {
   messages: ChatMessage[];
+  queue: ChatQueueState;
   onSelectPrompt: (prompt: string) => void;
+}
+
+// 排队消息的流内呈现（D7）：用户消息样式 + 徽标，数据源为 queue_update 快照；
+// 被消费转为正式 UserMessage 后由 reducer 移出队列，徽标随之消失
+function QueuedUserMessage({ text, badge, badgeClass }: { text: string; badge: string; badgeClass: string }) {
+  return (
+    <div className="group relative flex justify-end gap-3 px-4 py-3">
+      <div className="flex flex-col items-end max-w-2xl">
+        <span className={`mb-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${badgeClass}`}>
+          {badge}
+        </span>
+        <div className="rounded-2xl bg-zinc-900/80 text-zinc-50 dark:bg-zinc-100/80 dark:text-zinc-950 px-4 py-2.5 text-sm leading-relaxed shadow-sm border border-dashed border-zinc-600 dark:border-zinc-400">
+          <p className="whitespace-pre-wrap">{text}</p>
+        </div>
+      </div>
+      <div className="flex size-7 shrink-0 select-none items-center justify-center rounded-full bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+        <User className="size-4" />
+      </div>
+    </div>
+  );
 }
 
 const STARTER_PROMPTS = [
@@ -35,7 +57,7 @@ const STARTER_PROMPTS = [
   },
 ];
 
-export function ChatArea({ messages, onSelectPrompt }: ChatAreaProps) {
+export function ChatArea({ messages, queue, onSelectPrompt }: ChatAreaProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
@@ -46,7 +68,7 @@ export function ChatArea({ messages, onSelectPrompt }: ChatAreaProps) {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, queue]);
 
   const handleScroll = () => {
     if (!containerRef.current) return;
@@ -108,6 +130,23 @@ export function ChatArea({ messages, onSelectPrompt }: ChatAreaProps) {
       <div className="mx-auto max-w-4xl divide-y divide-zinc-100 dark:divide-zinc-800/40 py-4">
         {messages.map((message) => (
           <MessageItem key={message.id} message={message} />
+        ))}
+        {/* steering 先于 followUp 展示，与后端消费顺序一致 */}
+        {queue.steering.map((text, index) => (
+          <QueuedUserMessage
+            key={`queued-steer-${index}`}
+            text={text}
+            badge="转向"
+            badgeClass="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+          />
+        ))}
+        {queue.followUp.map((text, index) => (
+          <QueuedUserMessage
+            key={`queued-followup-${index}`}
+            text={text}
+            badge="排队中"
+            badgeClass="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700"
+          />
         ))}
         <div ref={bottomRef} className="h-6" />
       </div>

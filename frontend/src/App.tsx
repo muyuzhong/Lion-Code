@@ -28,7 +28,10 @@ function ChatApp() {
     isStreaming,
     confirmRequest,
     planApprovalRequest,
+    queue,
     sendMessage,
+    sendFollowUp,
+    sendSteer,
     sendCancel,
     respondConfirm,
     respondPlanApproval,
@@ -128,15 +131,19 @@ function ChatApp() {
         {/* Message Stream Area */}
         <ChatArea
           messages={messages}
+          queue={queue}
           onSelectPrompt={(text) => sendMessage(text)}
         />
 
         {/* Bottom Input Box */}
         <ChatInput
           onSendMessage={sendMessage}
+          onFollowUp={sendFollowUp}
+          onSteer={sendSteer}
           onCancel={sendCancel}
           isStreaming={isStreaming}
           disabled={!isConnected}
+          queueCount={queue.steering.length + queue.followUp.length}
           prefill={skillPrompt}
         />
 

@@ -217,6 +217,7 @@ export function useLionChat(sessionId?: string) {
     isStreaming: state.isStreaming,
     confirmRequest: state.confirmRequest,
     planApprovalRequest: state.planApprovalRequest,
+    queue: state.queue,
     sendMessage,
     sendCommand,
     sendContinue,

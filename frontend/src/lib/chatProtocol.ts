@@ -428,6 +428,14 @@ export function decodeServerEvent(value: unknown): ServerEvent | null {
   return valid ? (value as ServerEvent) : null;
 }
 
+// steering / followUp 队列的文本快照，与后端 queue_update 事件字段一一对应
+export interface ChatQueueState {
+  steering: string[];
+  followUp: string[];
+}
+
+const emptyChatQueue: ChatQueueState = { steering: [], followUp: [] };
+
 export interface ChatProtocolState {
   messages: ChatMessage[];
   isStreaming: boolean;
@@ -435,6 +443,7 @@ export interface ChatProtocolState {
   nextAssistantSequence: number;
   confirmRequest: ConfirmRequest | null;
   planApprovalRequest: PlanApprovalRequest | null;
+  queue: ChatQueueState;
 }
 
 export const initialChatProtocolState: ChatProtocolState = {
@@ -444,6 +453,7 @@ export const initialChatProtocolState: ChatProtocolState = {
   nextAssistantSequence: 1,
   confirmRequest: null,
   planApprovalRequest: null,
+  queue: emptyChatQueue,
 };
 
 export type ChatProtocolAction =
@@ -468,6 +478,8 @@ export function reduceChatProtocol(
         currentAssistantId: null,
         confirmRequest: null,
         planApprovalRequest: null,
+        // 队列是服务端瞬态状态，不在 canonical history 内；重连/换会话后等下一次 queue_update 同步
+        queue: emptyChatQueue,
       };
     case "append_user":
       return {
@@ -502,9 +514,13 @@ function reduceServerEvent(
     case "agent_start":
       return { ...state, isStreaming: true };
     case "message_start":
-      return event.message.role === "assistant"
-        ? startAssistantMessage(state, event.message)
-        : state;
+      if (event.message.role === "assistant") {
+        return startAssistantMessage(state, event.message);
+      }
+      if (event.message.role === "user") {
+        return consumeQueuedUserMessage(state, event.message);
+      }
+      return state;
     case "message_update": {
       const delta = event.assistantMessageEvent;
       if (delta.type === "error") {
@@ -557,6 +573,12 @@ function reduceServerEvent(
         ...state,
         confirmRequest: { requestId: event.requestId, message: event.message },
       };
+    case "queue_update":
+      // 后端只保证全量快照（无逐项增量事件），直接替换才能维持单一事实源
+      return {
+        ...state,
+        queue: { steering: event.steering, followUp: event.followUp },
+      };
     case "plan_approval_request":
       return {
         ...state,
@@ -580,7 +602,6 @@ function reduceServerEvent(
     case "turn_start":
     case "turn_end":
     case "session_agent_end":
-    case "queue_update":
     case "compaction_started":
     case "compaction_completed":
     case "compaction_start":
@@ -588,6 +609,53 @@ function reduceServerEvent(
     case "notice":
       return state;
   }
+}
+
+// 排队消息被后端消费时以 user 角色 message_start 入流；后端在消费时不发
+// queue_update，前端须在入流的同时本地移除对应队列项，否则徽标永不消失。
+// 初始 prompt 的 message_start 是服务端回显，本地已乐观 append，按队列文本
+// 匹配不到时直接忽略，避免重复入流。
+function consumeQueuedUserMessage(
+  state: ChatProtocolState,
+  message: WireMessage & { role: "user" },
+): ChatProtocolState {
+  const text = userContentText(message.content);
+  const steeringIndex = state.queue.steering.indexOf(text);
+  const followUpIndex = state.queue.followUp.indexOf(text);
+  if (steeringIndex === -1 && followUpIndex === -1) return state;
+
+  // 一次消费只移除一个队列项；steering 优先（后端消费顺序：steering 先于 follow_up）
+  const queue: ChatQueueState = {
+    steering:
+      steeringIndex === -1
+        ? state.queue.steering
+        : state.queue.steering.filter((_, index) => index !== steeringIndex),
+    followUp:
+      steeringIndex !== -1 || followUpIndex === -1
+        ? state.queue.followUp
+        : state.queue.followUp.filter((_, index) => index !== followUpIndex),
+  };
+  const id = `user-live-${state.nextAssistantSequence}`;
+  return {
+    ...state,
+    queue,
+    nextAssistantSequence: state.nextAssistantSequence + 1,
+    messages: [
+      ...state.messages,
+      { id, role: "user" as const, content: text },
+    ],
+  };
+}
+
+function userContentText(
+  content: string | Array<TextContent | ImageContent>,
+): string {
+  return typeof content === "string"
+    ? content
+    : content
+        .filter((block): block is TextContent => block.type === "text")
+        .map((block) => block.text)
+        .join("");
 }
 
 function startAssistantMessage(

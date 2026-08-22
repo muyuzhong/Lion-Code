@@ -216,6 +216,8 @@ describe("ChatInput command control", () => {
     render(
       <ChatInput
         onSendMessage={onSendMessage}
+        onFollowUp={vi.fn()}
+        onSteer={vi.fn()}
         onCancel={vi.fn()}
         isStreaming={false}
       />,
@@ -231,6 +233,8 @@ describe("ChatInput command control", () => {
     render(
       <ChatInput
         onSendMessage={onSendMessage}
+        onFollowUp={vi.fn()}
+        onSteer={vi.fn()}
         onCancel={vi.fn()}
         isStreaming
       />,
