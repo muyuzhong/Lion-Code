@@ -6,6 +6,7 @@ import {
   FileCode,
   Search,
   Wrench,
+  Bot,
   CheckCircle2,
   XCircle,
   Loader2,
@@ -14,12 +15,39 @@ import {
   Eye,
 } from "lucide-react";
 import { ToolCallItem } from "@/types/chat";
+import { ToolResultView } from "./ToolResultView";
 
 interface ToolViewProps {
   tool: ToolCallItem;
 }
 
+// agent 卡片头部元信息：`agent · <type> · <description>`（入参来自
+// tooling/internal.py 的 agent 工具，type/description 均可缺省）。
+// 必须先按 toolName 精确限定：其他工具（含 MCP 工具）的入参完全可能
+// 含同名字符串字段，误配会劫持其头部并隐藏参数摘要
+function getAgentMeta(
+  toolName: string,
+  args: ToolCallItem["args"],
+): { type: string; description: string } | null {
+  if (toolName !== "agent") return null;
+  if (!args || typeof args === "string") return null;
+  const type = typeof args.type === "string" ? args.type : "";
+  const description = typeof args.description === "string" ? args.description : "";
+  if (!type && !description) return null;
+  return { type, description };
+}
+
 function getToolConfig(name: string) {
+  // agent 是子任务卡片（唯一暴露的派生工具），单独配色与通用工具区分
+  if (name === "agent") {
+    return {
+      icon: Bot,
+      color: "text-violet-600 dark:text-violet-400",
+      bg: "bg-violet-500/10",
+      border: "border-violet-500/30",
+      label: "子任务",
+    };
+  }
   const lower = name.toLowerCase();
   if (lower.includes("command") || lower.includes("bash") || lower.includes("shell") || lower.includes("exec")) {
     return {
@@ -108,6 +136,11 @@ export function ToolView({ tool }: ToolViewProps) {
   };
 
   const paramSummary = getParamSummary();
+  const agentMeta = getAgentMeta(tool.toolName, tool.args);
+  // agent 卡片头部用 `agent · type · description` 取代默认的工具名 + 参数摘要
+  const headerTitle = agentMeta
+    ? ["agent", agentMeta.type, agentMeta.description].filter(Boolean).join(" · ")
+    : tool.toolName;
 
   return (
     <div className="my-2 overflow-hidden rounded-xl border border-zinc-200/90 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 text-xs shadow-2xs transition-all">
@@ -122,8 +155,8 @@ export function ToolView({ tool }: ToolViewProps) {
           </div>
 
           <div className="flex items-center gap-2 truncate min-w-0 font-mono">
-            <span className="font-semibold text-zinc-900 dark:text-zinc-100">{tool.toolName}</span>
-            {paramSummary && (
+            <span className="truncate font-semibold text-zinc-900 dark:text-zinc-100">{headerTitle}</span>
+            {!agentMeta && paramSummary && (
               <span className="truncate rounded-md bg-zinc-100 dark:bg-zinc-800/80 px-2 py-0.5 text-[11px] text-zinc-600 dark:text-zinc-300 max-w-[200px] sm:max-w-[360px]">
                 {paramSummary}
               </span>
@@ -186,13 +219,7 @@ export function ToolView({ tool }: ToolViewProps) {
                   <span>{copied ? "已复制输出" : "复制输出"}</span>
                 </button>
               </div>
-              <pre
-                className={`max-h-64 overflow-y-auto rounded-lg bg-zinc-950 p-2.5 whitespace-pre-wrap border border-zinc-800 font-mono text-[11px] leading-relaxed select-text ${
-                  tool.status === "error" ? "text-rose-400" : "text-zinc-300"
-                }`}
-              >
-                {tool.result}
-              </pre>
+              <ToolResultView tool={tool} />
             </div>
           )}
         </div>
