@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify wheel contents, isolated install smoke test, and shutdown tests."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Verify exactly-once close through the Application interface."}

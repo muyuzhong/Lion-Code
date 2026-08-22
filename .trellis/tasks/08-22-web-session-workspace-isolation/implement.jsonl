@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Preserve JSONL and legacy session persistence boundaries."}
+{"file":".trellis/tasks/08-22-fastapi-web-boundary-hardening/research/current-web-boundary-review.md","reason":"Fix verified empty-filter cross-workspace fallback."}

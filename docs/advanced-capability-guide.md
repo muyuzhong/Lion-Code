@@ -277,3 +277,16 @@ meta_agent.py
 后续所有高级功能 PR 的第一条架构门禁：
 
 > **先判断需求应该进入 Capability、Composition 还是 Supervisor；默认不要从 Runtime 开始开发。**
+
+## 附：架构门禁第二条（安全窄腰）
+
+安全平面的全部承诺都建立在"窄腰覆盖全部路径"之上：
+
+> **ToolRuntime 是工具调用的唯一路径。任何新工具（含 Capability 提供的
+> ToolSource 贡献）自动继承 Output Sanitizer（输出 redact）、Egress Guard
+> （出口控制）与权限判定，不得提供旁路执行通道；任何新的应用层网络出口
+> （Browser、MCP 类）必须接入 Egress Guard 的 Level A 覆盖面，做不到的
+> 显式标注 best_effort 并登记残余风险。**
+
+判定入口见 `docs/security-design.md` 与 `.trellis/spec/backend/secret-boundary.md`、
+`egress-guard.md`。

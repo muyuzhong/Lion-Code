@@ -266,6 +266,7 @@ def test_agent_state_groups_repeated_tool_activity() -> None:
     assert "Context: 500 / 10k tokens (5.0%)" in rendered
     assert "read_file: 4 calls" in rendered
     assert "read_file(path=a.py) ×4" in rendered
+    assert "Recent tool totals:" in rendered
     assert "Recent activity:" in rendered
     assert "Recent failures:" in rendered
 

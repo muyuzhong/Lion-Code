@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Keep ProviderController as the only runtime provider write owner."}
+{"file":".trellis/tasks/08-22-fastapi-web-boundary-hardening/research/current-web-boundary-review.md","reason":"Fix verified sparse update and real-config test side effects."}

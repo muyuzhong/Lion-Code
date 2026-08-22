@@ -17,6 +17,8 @@ ProviderController 最后创建，构造时直接持有 Conversation/Context/Ses
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import time
 import uuid
@@ -55,6 +57,7 @@ from ..prompt import (
     build_dynamic_system_context,
     build_static_system_prompt,
 )
+from ..providers.config import DEFAULT_ANTHROPIC_BASE_URL
 from ..providers.factory import create_provider
 from ..providers.thinking import ThinkingLevel
 from ..runtime.agent import AgentRuntime
@@ -78,8 +81,10 @@ from ..tooling import (
     ToolRegistry,
     ToolRuntime,
 )
+from ..tooling.audit import ExecutionAuditLog, ExecutionEvent
 from ..tooling.builtin import create_builtin_tools
 from ..tooling.context import ToolContext
+from ..tooling.egress_guard import EgressGuardMiddleware, EgressWhitelist, host_of
 from ..tooling.internal import create_internal_tools
 from ..tooling.middleware import (
     AuditMiddleware,
@@ -88,9 +93,14 @@ from ..tooling.middleware import (
     PreToolHookMiddleware,
     ReadFreshnessMiddleware,
     ResultPolicyMiddleware,
+    ToolMiddleware,
+    WorkspaceSnapshotMiddleware,
 )
-from ..tooling.permission import PermissionPolicy
+from ..tooling.output_sanitizer import OutputSanitizerMiddleware
+from ..tooling.permission import PermissionPolicy, load_permission_rules
 from ..tooling.result_store import ResultStore
+from ..tooling.secret_provider import load_secret_store
+from ..tooling.snapshot import WorkspaceSnapshot
 from ..tooling.types import LionTool
 from ..usage import BudgetPolicy, UsageLedger
 from .bindings import RuntimeBindings
@@ -278,7 +288,18 @@ def build_agent_composition(
     )
 
     tooling_graph = _build_tooling_graph(
-        selection, foundation, capability_graph.capability_registry
+        selection,
+        foundation,
+        capability_graph.capability_registry,
+        provider_hosts=frozenset(
+            host
+            for host in (
+                host_of(config.anthropic_base_url or DEFAULT_ANTHROPIC_BASE_URL),
+                host_of(config.api_base) if config.api_base else None,
+            )
+            if host
+        ),
+        permission_mode=config.permission_mode,
     )
 
     context = ContextRuntime(
@@ -649,6 +670,9 @@ def _build_tooling_graph(
     selection: _ProfileSelection,
     foundation: _FoundationGraph,
     capability_registry: CapabilityRegistry,
+    *,
+    provider_hosts: frozenset[str] = frozenset(),
+    permission_mode: str = "default",
 ) -> _ToolingGraph:
     prompt_composer = PromptComposer(
         stable_base_prompt=selection.base_prompt,
@@ -661,6 +685,56 @@ def _build_tooling_graph(
         ),
         layers=lambda: capability_registry.prompt_layers,
     )
+    tool_bindings = foundation.bindings.tool
+    workspace_snapshot = None
+    if tool_bindings.enable_workspace_snapshot:
+        workspace_snapshot = tool_bindings.workspace_snapshot or WorkspaceSnapshot(
+            foundation.cwd
+        )
+    secret_store = None
+    if tool_bindings.enable_secret_boundary:
+        secret_store = tool_bindings.secret_store or load_secret_store(
+            workspace=foundation.cwd,
+            key_file=Path.home() / ".lion_code" / "sanitizer.key",
+        )
+    audit_log = None
+    if tool_bindings.enable_audit:
+        audit_log = tool_bindings.audit_log or ExecutionAuditLog(
+            Path.home() / ".lion_code" / "execution.audit",
+            store=secret_store,
+        )
+        # 授权快照：任务启动时的授权声明本身就是审计记录——事后才能区分
+        # "Agent 越权"与"人类授权过但结果不好"
+        rules = load_permission_rules(Path.home(), foundation.cwd)
+        rules_digest = hashlib.sha256(
+            json.dumps(rules, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:12]
+        audit_log.append(
+            ExecutionEvent(
+                tool="session-grant",
+                command_or_args=f"mode={permission_mode}",
+                authorization_source=f"session-grant:{rules_digest}",
+                notes=[
+                    f"allow_rules={len(rules['allow'])}",
+                    f"deny_rules={len(rules['deny'])}",
+                ],
+            )
+        )
+    egress_whitelist = None
+    if tool_bindings.enable_egress_guard:
+        egress_whitelist = (
+            tool_bindings.egress_whitelist
+            or EgressWhitelist.from_sources(
+                home=Path.home(),
+                cwd=foundation.cwd,
+                provider_hosts=provider_hosts,
+            )
+        )
+
+    def record_audit(tool, arguments, result) -> None:
+        if audit_log is not None:
+            audit_log.record_tool(tool, arguments, result)
+
     tool_context = ToolContext(
         session=foundation.session_state,
         cancellation=foundation.execution.cancellation,
@@ -671,23 +745,42 @@ def _build_tooling_graph(
         confirm_fn=foundation.confirmation.confirm,
         hooks=foundation.hooks_loader(),
         confirm_hook_trust=foundation.confirmation.confirm_hook_trust,
+        audit_fn=record_audit if audit_log is not None else None,
+        workspace_snapshot=workspace_snapshot,
+        audit_log=audit_log,
     )
     permission_policy = PermissionPolicy(cwd=foundation.cwd)
     result_store = ResultStore()
-    tool_runtime = ToolRuntime(
-        foundation.tool_registry,
-        tool_context,
+    middleware: list[ToolMiddleware] = [
+        CancellationMiddleware(),
+    ]
+    if workspace_snapshot is not None:
+        middleware.append(WorkspaceSnapshotMiddleware(workspace_snapshot))
+    # post 链首位：redact 必须先于 ResultStore 落盘与审计记录
+    if secret_store is not None:
+        middleware.append(OutputSanitizerMiddleware(secret_store))
+    middleware.extend(
         [
-            CancellationMiddleware(),
             PreToolHookMiddleware(),
             PermissionMiddleware(
                 permission_policy,
                 foundation.permission_controller,
             ),
+            # 出口判定在权限之后、执行之前
+            *(
+                [EgressGuardMiddleware(egress_whitelist, secret_store)]
+                if egress_whitelist is not None
+                else []
+            ),
             ReadFreshnessMiddleware(),
             ResultPolicyMiddleware(result_store),
             AuditMiddleware(),
-        ],
+        ]
+    )
+    tool_runtime = ToolRuntime(
+        foundation.tool_registry,
+        tool_context,
+        middleware,
     )
     context_layers = capability_registry.context_layers
     context_manager = foundation.bindings.session.context_manager

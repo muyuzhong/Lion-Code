@@ -41,7 +41,10 @@
   session history and may contain user/model/tool content; only completed Core
   entries are recorded by the existing recorder.  The repository demonstrates no
   separate redaction or diagnostic-log policy, so a feature needing one requires
-  an explicit design rather than an undocumented new sink.
+  an explicit design rather than an undocumented new sink.  PR-S1 is the explicit
+  exception: `lion_code/tooling/audit.py::ExecutionAuditLog` writes the fixed
+  append-only `ExecutionEvent` schema to an injectable non-session `.audit` file,
+  with sensitive file-write values redacted before serialization.
 - Do not reintroduce a process-global UI sink or stdout capture to feed Textual.
   `runtime-boundaries.md` and `tui-interaction.md` record the current
   instance-scoped frontend ownership contract.

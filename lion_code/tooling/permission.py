@@ -37,10 +37,35 @@ def is_dangerous(command: str) -> bool:
     return any(pattern.search(command) for pattern in DANGEROUS_PATTERNS)
 
 
+# T3 发布类语境的机械前缀匹配：事实源是命令字符串，防护强度如实按 best_effort；
+# git push 已由 DANGEROUS_PATTERNS 覆盖
+_PUBLISH_CONTEXTS = (
+    "npm publish",
+    "yarn publish",
+    "pnpm publish",
+    "docker push",
+    "podman push",
+    "twine upload",
+    "cargo publish",
+    "helm push",
+)
+
+
+def is_publish_like(command: str) -> bool:
+    """返回命令是否为发布/上传类前缀语境。"""
+    stripped = command.strip()
+    return any(
+        stripped == prefix or stripped.startswith(prefix + " ")
+        for prefix in _PUBLISH_CONTEXTS
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PermissionDecision:
     action: Literal["allow", "deny", "confirm"]
     message: str = ""
+    # 预算外（dontAsk 下需确认）：人类未预授权，判定为优雅停机而非普通拒绝
+    budget_exceeded: bool = False
 
 
 class ToolPermissionStrategy(Protocol):
@@ -212,8 +237,9 @@ class PermissionPolicy:
         confirm_message = ""
         if capabilities.requires_confirmation:
             confirm_message = f"use tool: {tool.name}"
-        elif capabilities.executes_process and is_dangerous(
-            str(arguments.get("command", ""))
+        elif capabilities.executes_process and (
+            is_dangerous(str(arguments.get("command", "")))
+            or is_publish_like(str(arguments.get("command", "")))
         ):
             confirm_message = str(arguments.get("command", ""))
         elif capabilities.mutates_workspace and capabilities.requires_read_before_write:
@@ -228,7 +254,8 @@ class PermissionPolicy:
             if mode == "dontAsk":
                 return PermissionDecision(
                     "deny",
-                    f"Auto-denied (dontAsk mode): {confirm_message}",
+                    confirm_message,
+                    budget_exceeded=True,
                 )
             return PermissionDecision("confirm", confirm_message)
 

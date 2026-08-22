@@ -1,0 +1,32 @@
+# Web 本机访问安全边界
+
+## Goal
+
+让本机 Web UI 成为唯一可用控制面，阻断远程网页、DNS rebinding、无 capability
+客户端和局域网访问，同时不引入账号系统。
+
+## Requirements
+
+- 固定 `127.0.0.1` 监听并删除 `--host`/remote surface，无兼容 fallback。
+- 每进程生成临时 capability；不持久化、不打印、不进入 query/access log。
+- 受保护 REST 使用 Bearer capability，WebSocket 在 accept 前校验 capability、Host、
+  Origin；开发 Vite 只允许精确 loopback Origin。
+- 前端从启动 URL fragment 导入 capability 到当前 tab，随后清理 URL。
+- Server 仍只依赖 Application/Core；不得把认证状态放入 Session/Runtime。
+
+## Acceptance Criteria
+
+- [ ] foreign Origin、非 loopback Host、错误/缺 token 无法读取 status 或控制 Agent。
+- [ ] 正确 token 的静态页面、REST、WebSocket 和 Vite proxy 正常。
+- [ ] token 不出现在日志、配置、session JSONL、URL query 或错误文本。
+- [ ] CLI 不再接受远程 host；现有 `--port`、`--no-browser` 保持。
+- [ ] 测试不打开真实浏览器且覆盖安全矩阵。
+
+## Dependency
+
+无子任务依赖；实现基于当前本地 Web baseline。完成 commit 是
+`08-22-websocket-protocol-lifecycle` 的显式 base。
+
+## Out of Scope
+
+远程访问、用户账号、TLS、反向代理和持久 token。

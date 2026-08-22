@@ -1,0 +1,32 @@
+{
+  "id": "fastapi-web-boundary-hardening",
+  "name": "fastapi-web-boundary-hardening",
+  "title": "FastAPI Web 前后端边界修复",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-22",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-22-web-local-access-security",
+    "08-22-websocket-protocol-lifecycle",
+    "08-22-web-provider-settings-integrity",
+    "08-22-web-session-workspace-isolation",
+    "08-22-web-server-delivery-lifecycle"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

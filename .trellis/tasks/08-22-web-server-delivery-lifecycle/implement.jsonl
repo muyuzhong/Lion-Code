@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Close the Application session without bypassing ownership."}
+{"file":".trellis/tasks/08-22-fastapi-web-boundary-hardening/research/current-web-boundary-review.md","reason":"Fix verified shutdown and source-tree static packaging gaps."}

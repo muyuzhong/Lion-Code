@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Keep access control in the Server interface boundary."}
+{"file":".trellis/tasks/08-22-fastapi-web-boundary-hardening/research/current-web-boundary-review.md","reason":"Use verified cross-origin and token threat evidence."}

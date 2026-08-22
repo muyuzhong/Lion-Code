@@ -44,6 +44,11 @@ TUI 通过 `LionCodingSession` 消费 Core/application 事件。文本与 thinki
 Textual 争用 stdout。REPL 则保留 `ui.print_*` 的直接终端输出。两种前端之间不存在全局
 可变 sink。
 
+权限模式语义（`docs/security-design.md` §5）：`default` 下需确认的动作走注入式
+confirm 回调（会话内确认缓存）；`dontAsk`（无人值守）下同样动作不再弹确认，而是
+优雅停机——工具返回结构化 budget_exceeded 结果并 `terminate` 结束循环，恢复时由
+人类决定是否授权后继续。
+
 ## TUI 命令
 
 | 命令 | 作用 |

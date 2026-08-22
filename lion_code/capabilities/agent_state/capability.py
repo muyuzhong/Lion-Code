@@ -22,7 +22,7 @@ class AgentStateLayer:
                 f"({utilization.percentage:.1f}%),  "
                 f"compaction: {utilization.compaction}"
             ),
-            "Activity:",
+            "Recent tool totals:",
         ]
         if view.tool_totals:
             lines.extend(
