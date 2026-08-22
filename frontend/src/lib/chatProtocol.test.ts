@@ -240,3 +240,99 @@ describe("typed input actions", () => {
     });
   });
 });
+
+describe("queued interaction (steer / follow_up)", () => {
+  it("replaces the queue wholesale on each queue_update snapshot", () => {
+    let state = apply(initialChatProtocolState, {
+      type: "queue_update",
+      steering: ["改向"],
+      followUp: ["第一句"],
+    });
+    expect(state.queue).toEqual({ steering: ["改向"], followUp: ["第一句"] });
+
+    // 后端只发全量快照：旧条目消失说明是替换而非 append 合并
+    state = apply(state, {
+      type: "queue_update",
+      steering: [],
+      followUp: ["第二句"],
+    });
+    expect(state.queue).toEqual({ steering: [], followUp: ["第二句"] });
+  });
+
+  it("turns a consumed queued message into a formal user message and dequeues it", () => {
+    let state = apply(initialChatProtocolState, {
+      type: "queue_update",
+      steering: ["先改向"],
+      followUp: ["第一句", "第二句"],
+    });
+
+    state = apply(state, {
+      type: "message_start",
+      message: { role: "user", content: "先改向" },
+    });
+    expect(state.queue).toEqual({ steering: [], followUp: ["第一句", "第二句"] });
+    expect(state.messages.at(-1)).toEqual(
+      expect.objectContaining({ role: "user", content: "先改向" }),
+    );
+
+    state = apply(state, {
+      type: "message_start",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "第一句" }],
+      },
+    });
+    expect(state.queue.followUp).toEqual(["第二句"]);
+    expect(state.messages.at(-1)).toEqual(
+      expect.objectContaining({ role: "user", content: "第一句" }),
+    );
+  });
+
+  it("consumes one queue entry per message even when both queues hold the same text", () => {
+    let state = apply(initialChatProtocolState, {
+      type: "queue_update",
+      steering: ["同样文本"],
+      followUp: ["同样文本"],
+    });
+
+    state = apply(state, {
+      type: "message_start",
+      message: { role: "user", content: "同样文本" },
+    });
+
+    expect(state.queue).toEqual({ steering: [], followUp: ["同样文本"] });
+    expect(state.messages).toHaveLength(1);
+  });
+
+  it("ignores the initial prompt echo that duplicates the optimistic user message", () => {
+    let state = reduceChatProtocol(initialChatProtocolState, {
+      type: "append_user",
+      message: {
+        id: "user-1",
+        role: "user",
+        content: "新提问",
+        createdAt: "10:00:00",
+      },
+    });
+
+    const echoed = apply(state, {
+      type: "message_start",
+      message: { role: "user", content: "新提问" },
+    });
+
+    expect(echoed).toBe(state);
+    expect(echoed.messages.filter((item) => item.role === "user")).toHaveLength(1);
+  });
+
+  it("resets the queue when canonical history replaces the state", () => {
+    let state = apply(initialChatProtocolState, {
+      type: "queue_update",
+      steering: ["残留"],
+      followUp: [],
+    });
+
+    state = reduceChatProtocol(state, { type: "replace_history", messages: [] });
+
+    expect(state.queue).toEqual({ steering: [], followUp: [] });
+  });
+});
