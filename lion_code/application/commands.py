@@ -62,6 +62,7 @@ class CommandResult:
     exit_requested: bool = False
     clear_requested: bool = False
     new_session_requested: bool = False
+    handoff_requested: bool = False
     compact_summary: str | None = None
     resume_session_id: str | None = None
     resume_picker_requested: bool = False
@@ -224,6 +225,12 @@ def create_default_command_registry() -> CommandRegistry:
             usage="/clear",
             handler=lambda _ctx: CommandResult(handled=True, new_session_requested=True),
             aliases=("new",),
+        ),
+        SlashCommand(
+            name="handoff",
+            description="携带当前任务摘要新建会话",
+            usage="/handoff",
+            handler=lambda _ctx: CommandResult(handled=True, handoff_requested=True),
         ),
         SlashCommand(
             name="plan",

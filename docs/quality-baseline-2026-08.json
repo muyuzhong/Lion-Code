@@ -26,7 +26,7 @@
         "lion_code/hooks.py:3:1:I001",
         "lion_code/session_runtime/__init__.py:12:11:RUF022",
         "lion_code/session_runtime/__init__.py:3:1:I001",
-        "lion_code/session_runtime/repository.py:74:49:UP017",
+        "lion_code/session_runtime/repository.py:82:49:UP017",
         "lion_code/tooling/registry.py:77:10:UP037",
         "lion_code/tooling/result_store.py:3:1:I001",
         "lion_code/tools.py:158:32:E741",
@@ -186,7 +186,7 @@
         "lion_code/session_runtime/legacy.py:156:28:arg-type",
         "lion_code/session_runtime/legacy.py:185:32:arg-type",
         "lion_code/tools.py:115:8:var-annotated",
-        "lion_code/tui/app.py:1335:55:attr-defined",
+        "lion_code/tui/app.py:1347:55:attr-defined",
         "lion_code/tui/app.py:206:11:assignment",
         "lion_code/tui/app.py:211:24:operator",
         "lion_code/tui/app.py:213:24:operator",
@@ -211,7 +211,7 @@
         "F"
       ],
       "fingerprints": [
-        "lion_code/application/session.py:321:LionCodingSession._drive:D:28",
+        "lion_code/application/session.py:325:LionCodingSession._drive:D:28",
         "lion_code/core/loop.py:68:run_agent_loop:F:44",
         "lion_code/core/session/jsonl.py:59:_migrate_message:D:24",
         "lion_code/providers/anthropic.py:154:_AnthropicStreamParser.feed:D:24",
@@ -219,7 +219,7 @@
         "lion_code/session_runtime/legacy.py:123:_anthropic_messages:D:24",
         "lion_code/tui/adapter.py:24:TuiEventAdapter.apply:D:21",
         "lion_code/tui/app.py:1040:LionTuiApp._apply_streaming_transcript_event:E:32",
-        "lion_code/__main__.py:222:main:E:36"
+        "lion_code/__main__.py:227:main:E:36"
       ]
     },
     "vulture": {
@@ -231,7 +231,7 @@
         "lion_code/providers/thinking.py:113:unused variable 'provider_kind':100",
         "tests/benchmarks/test_external_anchor.py:65:unused variable 'output_dir':100",
         "tests/test_agent_run.py:68:unsatisfiable 'if' condition:100",
-        "lion_code/__main__.py:168:unused variable 'sig':100"
+        "lion_code/__main__.py:173:unused variable 'sig':100"
       ]
     }
   },

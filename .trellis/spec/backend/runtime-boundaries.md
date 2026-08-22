@@ -177,6 +177,18 @@ Core messages/events
 the explicit facade orchestration above; SessionRuntime never calls back into
 the ProviderController.
 
+Explicit session handoff (`handoff_session`) is orchestrated the same way as
+new/restore: AgentRuntime first reuses the ContextRuntime compaction contract
+(same `ContextCompactor` and nine fixed headings, no second prompt) to
+summarize the whole old canonical context, then switches to a fresh Session
+whose first context entry is a `BranchSummaryEntry(branch_root_id=<old
+session id>)` written through the SessionRuntime `record_branch_summary`
+narrow port. Old JSONL stays append-only; raw old messages are never copied.
+Any failure before or during the switch rolls identity, active context, and
+usage back to the old session and deletes the half-initialized new JSONL.
+Plain `new_session` keeps its clean-session semantics and never carries the
+old task over.
+
 `lion_code/core/session/memory.py` remains the JSONL compaction-entry module.
 Its name is historical session terminology, not a project Memory subsystem.
 Canonical history, restore, compaction, legacy JSON read-only migration, and
