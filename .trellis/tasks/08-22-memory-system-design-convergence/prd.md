@@ -88,6 +88,6 @@
 - 用 Memory 自然语言替代 Hook、Permission 或 CI workflow gate 的硬约束。
 - 迁移或兼容旧版 Memory / Dream / Learning 数据和 API。
 
-## Open Question
+## Resolved Decisions
 
-- handoff 应作为显式的“携带当前任务新建会话”操作，还是每次普通 new session 都自动携带未完成任务。推荐前者，以保留真正的 clean session 语义；等待用户确认。
+- handoff UX（2026-08-23 用户批准启动计划时落定）：采用显式“携带当前任务新建会话”操作（`handoff_session` / Continue in new session）。普通 `new_session` / clear 保持干净会话语义，不自动携带未完成任务。

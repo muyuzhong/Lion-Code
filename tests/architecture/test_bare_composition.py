@@ -157,8 +157,10 @@ def test_tool_runtime_does_not_import_external_tool_protocol() -> None:
     assert not any("environment" in arg.arg for arg in args)
 
 
-def test_base_prompt_does_not_reference_features() -> None:
+def test_base_prompt_does_not_reference_features(tmp_path, monkeypatch) -> None:
     """Meta base prompt 不引用不存在的 Feature。"""
+    # 动态尾部会加载 cwd 的项目指令；切到空目录，断言只覆盖 Lion 自有模板。
+    monkeypatch.chdir(tmp_path)
     static = build_static_system_prompt()
     dynamic = build_dynamic_system_context(deferred_tool_names=[])
     combined = static + dynamic

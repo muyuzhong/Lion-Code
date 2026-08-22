@@ -289,6 +289,49 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
     assert "# Environment" in system
 
 
+def _composition_with_provider(profile, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with patch(
+        "lion_code.composition.agent_builder.create_provider",
+        return_value=_fake_provider(),
+    ):
+        return build_agent_composition(
+            profile,
+            config=AgentConfig(api_key="test-key", terminal_output=False),
+            bindings=RuntimeBindings(),
+        )
+
+
+def test_full_profile_default_prompt_appends_project_instructions(
+    tmp_path, monkeypatch
+) -> None:
+    """默认 FullProfile：root-to-cwd 项目指令进入动态尾部，追加不覆盖静态模板。"""
+    (tmp_path / "AGENTS.md").write_text("agents: run local gates", encoding="utf-8")
+    composition = _composition_with_provider(FullProfile(), tmp_path, monkeypatch)
+
+    system = composition.tooling.prompt_composer.get_system()
+    assert build_static_system_prompt() in system
+    assert system.index(build_static_system_prompt()) < system.index(
+        "# Project Instructions"
+    )
+    assert "agents: run local gates" in system
+
+
+def test_full_profile_custom_prompt_keeps_replacement_semantics(
+    tmp_path, monkeypatch
+) -> None:
+    """custom prompt 沿用现有语义：替换默认 base 与动态尾部，不追加项目指令。"""
+    (tmp_path / "AGENTS.md").write_text("agents: run local gates", encoding="utf-8")
+    composition = _composition_with_provider(
+        FullProfile(system_prompt="custom full prompt"), tmp_path, monkeypatch
+    )
+
+    system = composition.tooling.prompt_composer.get_system()
+    assert system.startswith("custom full prompt")
+    assert "agents: run local gates" not in system
+    assert "# Environment" not in system
+
+
 def _repo(tmp_path: Path) -> SessionRepository:
     return SessionRepository(tmp_path / "sessions")
 

@@ -1,4 +1,4 @@
-# Lion 内建 Memory — 平衡型技术设计（待确认 handoff UX）
+# Lion 内建 Memory — 平衡型技术设计（handoff UX 已确认：显式操作）
 
 ## 1. 修订结论
 
@@ -47,6 +47,8 @@ current canonical Session
 不复制旧 raw messages，不把任务进度写入 semantic-memory SQLite。用户仍可 restore 旧 Session 查看完整历史。
 
 待用户确认的 UX：推荐新增显式 `handoff_session` / “Continue in new session”，普通 `new_session` / clear 继续表示干净会话。自动对所有 new session 携带任务会让“彻底清空”变得含糊。
+
+**已确认（2026-08-23）**：采用显式 `handoff_session` 操作；普通 `new_session` / clear 保持干净会话语义。
 
 ### 3.2 AGENTS 中的 CI 规则经常不执行
 
