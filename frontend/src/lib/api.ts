@@ -1,4 +1,4 @@
-import { ChatMessage, ModelChoice, ServerStatus, SessionSummary } from "@/types/chat";
+import { ChatMessage, ModelChoice, ServerStatus, SessionSummary, SkillItem } from "@/types/chat";
 import { capabilityHeaders } from "@/lib/capability";
 
 const API_BASE = "";
@@ -58,6 +58,12 @@ export async function createNewSession(): Promise<{ success: boolean; session_id
 export async function fetchModels(): Promise<ModelChoice[]> {
   const res = await authorizedFetch("/api/models");
   if (!res.ok) throw new Error("Failed to fetch models");
+  return res.json();
+}
+
+export async function fetchSkills(): Promise<SkillItem[]> {
+  const res = await authorizedFetch("/api/skills");
+  if (!res.ok) throw new Error("Failed to fetch skills");
   return res.json();
 }
 
