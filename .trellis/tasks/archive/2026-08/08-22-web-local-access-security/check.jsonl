@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify focused security tests and repository quality gates."}
+{"file":".trellis/tasks/08-22-fastapi-web-boundary-hardening/research/current-web-boundary-review.md","reason":"Repeat foreign Origin, Host, and WebSocket rejection probes."}
+{"file": ".trellis/spec/backend/secret-boundary.md", "reason": "Audit all token exposure channels and persistence sinks."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify the browser-to-server capability data flow end to end."}
