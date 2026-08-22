@@ -1,4 +1,4 @@
 {"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Preserve current Capability, Runtime, Session, Composition, Supervisor, and Interface ownership boundaries."}
 {"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Preserve the single canonical session writer, prepared-context contract, profile composition, and removed legacy Memory boundary."}
-{"file":".trellis/spec/backend/database-guidelines.md","reason":"Keep Session JSONL semantics separate and make the Project Lessons snapshot an explicit new persistence design."}
-{"file":".trellis/tasks/08-22-memory-system-design-convergence/research/current-architecture-evidence.md","reason":"Use the verified current loaders, project identity, capability seams, missing wiring, and legacy-removal evidence."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Keep Session JSONL semantics separate from the two scope-owned Memory snapshots and preserve strict atomic persistence."}
+{"file":".trellis/tasks/08-22-memory-system-design-convergence/research/current-architecture-evidence.md","reason":"Use the verified project identity, capability seams, product boundary correction, and legacy-removal evidence."}
