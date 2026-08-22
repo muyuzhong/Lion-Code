@@ -3,7 +3,7 @@
   "name": "ephemeral-agent-state-context",
   "title": "Ephemeral Agent State Context",
   "description": "",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "zhangcx",
   "assignee": "zhangcx",
   "createdAt": "2026-08-20",
-  "completedAt": null,
+  "completedAt": "2026-08-20",
   "branch": null,
   "base_branch": "master",
   "worktree_path": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "验收项全部勾选；内容经 PR #70（e5d36c3）合入 master，2026-08-22 收口归档。",
   "meta": {}
 }
