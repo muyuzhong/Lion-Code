@@ -9,9 +9,10 @@ import { CodeBlock } from "./CodeBlock";
 
 interface MessageItemProps {
   message: ChatMessage;
+  onInspectTool?: (toolCallId: string) => void;
 }
 
-export function MessageItem({ message }: MessageItemProps) {
+export function MessageItem({ message, onInspectTool }: MessageItemProps) {
   const [copiedMsg, setCopiedMsg] = useState(false);
   const isUser = message.role === "user";
 
@@ -63,7 +64,7 @@ export function MessageItem({ message }: MessageItemProps) {
         {message.tools && message.tools.length > 0 && (
           <div className="space-y-1.5 my-2.5">
             {message.tools.map((tool) => (
-              <ToolView key={tool.id} tool={tool} />
+              <ToolView key={tool.id} tool={tool} onInspect={onInspectTool} />
             ))}
           </div>
         )}

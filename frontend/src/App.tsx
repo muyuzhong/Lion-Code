@@ -5,6 +5,7 @@ import { ChatArea } from "@/components/chat/ChatArea";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ConfirmBanner, PlanApprovalModal } from "@/components/chat/ApprovalModals";
 import { SettingsModal } from "@/components/chat/SettingsModal";
+import { TrajectoryPanel } from "@/components/chat/TrajectoryPanel";
 import { useLionChat } from "@/hooks/useLionChat";
 import { fetchSessions, fetchStatus, resumeSession, createNewSession, fetchModels, fetchSkills } from "@/lib/api";
 import { ModelChoice, ServerStatus, SessionSummary, SkillItem } from "@/types/chat";
@@ -21,6 +22,11 @@ function ChatApp() {
   const [skills, setSkills] = useState<SkillItem[]>([]);
   // 用对象引用而非裸 string：重复点击同一 skill 时文案相同，靠每次新建对象触发 ChatInput 的填入 effect
   const [skillPrompt, setSkillPrompt] = useState<{ text: string } | null>(null);
+  // 轨迹面板 UI 开关；打点数据在 useLionChat 常驻，面板卸载不丢（R5）
+  const [trajectoryOpen, setTrajectoryOpen] = useState(false);
+  // 对象引用语义同 skillPrompt：重复"检查"同一工具时 id 相同，
+  // 靠每次新建对象触发 TrajectoryPanel 的定位 effect
+  const [trajectoryFocus, setTrajectoryFocus] = useState<{ id: string } | null>(null);
 
   const {
     messages,
@@ -31,6 +37,7 @@ function ChatApp() {
     queue,
     runtimeNotice,
     metrics,
+    trajectoryLive,
     sendMessage,
     sendFollowUp,
     sendSteer,
@@ -76,6 +83,12 @@ function ChatApp() {
   // D4：只填入自然句式引用，由用户补全意图后发送，不伪造"直接执行 skill"语义
   const handleSelectSkill = useCallback((name: string) => {
     setSkillPrompt({ text: `用 ${name} 技能帮我：` });
+  }, []);
+
+  // R4：工具卡片"检查"——打开轨迹面板并定位到该调用
+  const handleInspectTool = useCallback((toolCallId: string) => {
+    setTrajectoryFocus({ id: toolCallId });
+    setTrajectoryOpen(true);
   }, []);
 
   const handleSelectSession = async (sessionId: string) => {
@@ -124,6 +137,7 @@ function ChatApp() {
           onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
           onNewChat={handleNewSession}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenTrajectory={() => setTrajectoryOpen(true)}
           status={status}
           models={models}
           onModelChanged={loadData}
@@ -135,6 +149,7 @@ function ChatApp() {
           messages={messages}
           queue={queue}
           onSelectPrompt={(text) => sendMessage(text)}
+          onInspectTool={handleInspectTool}
         />
 
         {/* Bottom Input Box */}
@@ -169,6 +184,15 @@ function ChatApp() {
           onClose={() => setSettingsOpen(false)}
           status={status}
           onStatusUpdated={loadData}
+        />
+
+        {/* Trajectory Side Panel (P1-7) */}
+        <TrajectoryPanel
+          open={trajectoryOpen}
+          onClose={() => setTrajectoryOpen(false)}
+          messages={messages}
+          live={trajectoryLive}
+          focusTarget={trajectoryFocus}
         />
       </main>
     </div>

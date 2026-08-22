@@ -11,12 +11,22 @@ import {
   PlanApprovalChoice,
   reduceChatProtocol,
 } from "@/lib/chatProtocol";
+import {
+  initialTrajectoryLiveState,
+  reduceTrajectoryLive,
+} from "@/lib/trajectory";
 import type { ChatMessage } from "@/types/chat";
 
 export function useLionChat(sessionId?: string) {
   const [state, dispatch] = useReducer(
     reduceChatProtocol,
     initialChatProtocolState,
+  );
+  // 轨迹实时打点（R5）：与主 reducer 同一事件流并行折叠，数据层随 hook
+  // 常驻——面板只是 UI 开关，关闭不中断采集
+  const [trajectoryLive, dispatchTrajectory] = useReducer(
+    reduceTrajectoryLive,
+    initialTrajectoryLiveState,
   );
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -67,6 +77,8 @@ export function useLionChat(sessionId?: string) {
     ws.onclose = () => {
       setIsConnected(false);
       dispatch({ type: "disconnected" });
+      // 断连后收不到后续 end 事件，进行中打点就地收尾，避免面板挂"进行中"
+      dispatchTrajectory({ type: "finalize" });
       wsRef.current = null;
       if (reconnectEnabledRef.current) {
         reconnectTimeoutRef.current = window.setTimeout(connect, 2000);
@@ -102,6 +114,7 @@ export function useLionChat(sessionId?: string) {
           toast.error(event.message);
         }
         dispatch({ type: "server_event", event });
+        dispatchTrajectory({ type: "server_event", event });
       } catch {
         rejectInvalidEvent();
       }
@@ -123,6 +136,9 @@ export function useLionChat(sessionId?: string) {
   useEffect(() => {
     historyRequestRef.current += 1;
     dispatch({ type: "replace_history", messages: [] });
+    // 换会话清空打点（不跨会话累计，与 metrics 同规则）；
+    // WS 重连路径（onopen → loadCanonicalHistory）不清，尾部对齐自愈
+    dispatchTrajectory({ type: "reset" });
     if (sessionId) void loadCanonicalHistory();
   }, [loadCanonicalHistory, sessionId]);
 
@@ -181,6 +197,7 @@ export function useLionChat(sessionId?: string) {
   const sendCancel = useCallback(() => {
     if (sendAction({ action: "cancel" })) {
       dispatch({ type: "disconnected" });
+      dispatchTrajectory({ type: "finalize" });
     }
   }, [sendAction]);
 
@@ -220,6 +237,7 @@ export function useLionChat(sessionId?: string) {
     queue: state.queue,
     runtimeNotice: state.runtimeNotice,
     metrics: state.metrics,
+    trajectoryLive,
     sendMessage,
     sendCommand,
     sendContinue,
