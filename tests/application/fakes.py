@@ -49,6 +49,7 @@ class FakeCodingSessionBackend:
     compact_calls: int = field(default=0, init=False)
     cancel_calls: int = field(default=0, init=False)
     closed: bool = field(default=False, init=False)
+    aclose_calls: int = field(default=0, init=False)
     terminal_output: bool = field(default=False, init=False)
     provider_configure_calls: list[dict[str, Any]] = field(
         default_factory=list, init=False
@@ -140,6 +141,7 @@ class FakeCodingSessionBackend:
 
     async def aclose(self) -> None:
         self.closed = True
+        self.aclose_calls += 1
 
     def provider_config(self) -> dict[str, Any]:
         return dict(self.provider_config_data)

@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -965,3 +965,75 @@ async def test_websocket_close_unblocks_run_waiting_behind_notice_send() -> None
     assert websocket.send_cancelled is True
     assert backend.cancel_calls == 1
     assert session.is_running is False
+
+
+# ─── 服务生命周期与静态发布 ────────────────────────────────────
+
+
+def _make_static_dir(tmp_path: Path) -> Path:
+    static = tmp_path / "static"
+    (static / "assets").mkdir(parents=True)
+    (static / "index.html").write_text("<html>lion</html>", encoding="utf-8")
+    (static / "assets" / "app.CAfEf00.js").write_text("console.log(1)", encoding="utf-8")
+    return static
+
+
+def test_create_app_without_static_assets_fails(tmp_path: Path) -> None:
+    session, _ = _build_test_session()
+
+    with pytest.raises(RuntimeError, match="前端静态产物缺失"):
+        create_app(session, capability=_CAPABILITY, static_dir=tmp_path / "missing")
+
+
+def test_static_index_and_hashed_assets_served(tmp_path: Path) -> None:
+    session, _ = _build_test_session()
+    client = TestClient(
+        create_app(
+            session, capability=_CAPABILITY, static_dir=_make_static_dir(tmp_path)
+        ),
+        base_url=_APP_ORIGIN,
+    )
+
+    index = client.get("/")
+    asset = client.get("/assets/app.CAfEf00.js")
+
+    assert index.status_code == 200
+    assert "lion" in index.text
+    assert asset.status_code == 200
+
+
+def test_lifespan_shutdown_closes_session_exactly_once(tmp_path: Path) -> None:
+    session, backend = _build_test_session()
+    app = create_app(
+        session, capability=_CAPABILITY, static_dir=_make_static_dir(tmp_path)
+    )
+
+    with TestClient(app, base_url=_APP_ORIGIN) as client:
+        assert client.get("/api/health").status_code == 200
+    assert backend.closed is True
+    assert backend.aclose_calls == 1
+
+    async def _second_lifespan_cycle() -> None:
+        async with app.router.lifespan_context(app):
+            pass
+
+    asyncio.run(_second_lifespan_cycle())
+    assert backend.aclose_calls == 1
+
+
+def test_websocket_lease_exposes_current_owner() -> None:
+    # 只验证对象身份语义，不构造真实 bridge
+    from lion_code.server.bridge import SessionWebsocketBridge, WebsocketConnectionLease
+
+    lease = WebsocketConnectionLease()
+    first = cast(SessionWebsocketBridge, object())
+    second = cast(SessionWebsocketBridge, object())
+
+    assert lease.owner is None
+    assert lease.acquire(first) is True
+    assert lease.owner is first
+    lease.release(first)
+    assert lease.owner is None
+    assert lease.acquire(second) is True
+    lease.release(first)
+    assert lease.owner is second

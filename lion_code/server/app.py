@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import importlib.resources
 import os
 import re
 import secrets
 import threading
 import time
 import webbrowser
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
@@ -98,6 +100,12 @@ def _generate_capability() -> str:
     return secrets.token_urlsafe(32)
 
 
+def _default_static_dir() -> Path:
+    """以 package resource 定位随包发布的前端产物目录。"""
+    resource = importlib.resources.files("lion_code.server") / "static"
+    return Path(str(resource))
+
+
 def _browser_url(port: int, capability: str) -> str:
     return f"{_http_origin(port)}/#capability={capability}"
 
@@ -107,15 +115,35 @@ def create_app(
     *,
     capability: str,
     port: int = 8000,
+    static_dir: Path | None = None,
 ) -> FastAPI:
     """创建仅接受本机 capability 客户端的应用。
 
     静态页面与健康检查保持公开，其余 REST/WS 控制面共享传入的进程内
     capability。函数不持久化或输出该值；格式不符合 URL-safe token 契约时抛出
-    ``ValueError``。
+    ``ValueError``。前端静态产物缺失时抛出 ``RuntimeError``，不提供
+    API-only fallback。进程关闭时按「活动连接 → Session」顺序各关闭一次。
     """
     if _CAPABILITY_PATTERN.fullmatch(capability) is None:
         raise ValueError("capability 必须是 URL-safe token")
+
+    websocket_lease = WebsocketConnectionLease()
+    session_closed = False
+
+    async def _shutdown_once() -> None:
+        nonlocal session_closed
+        if session_closed:
+            return
+        session_closed = True
+        owner = websocket_lease.owner
+        if owner is not None:
+            await owner.aclose()
+        await session.aclose()
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        yield
+        await _shutdown_once()
 
     app_origin = _http_origin(port)
     expected_host = _expected_host(port)
@@ -127,6 +155,7 @@ def create_app(
         openapi_url=None,
         docs_url=None,
         redoc_url=None,
+        lifespan=_lifespan,
     )
 
     app.add_middleware(
@@ -136,7 +165,6 @@ def create_app(
         allow_methods=["GET", "POST"],
         allow_headers=["Authorization", "Content-Type"],
     )
-    websocket_lease = WebsocketConnectionLease()
 
     # ─── REST 接口 ───────────────────────────────────────────────
 
@@ -425,10 +453,18 @@ def create_app(
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.close()
 
-    # ─── 静态前端页面挂载 (如果已构建 frontend/dist) ──────────────
-    dist_dir = Path(__file__).resolve().parents[2] / "frontend" / "dist"
-    if dist_dir.exists():
-        app.mount("/", StaticFiles(directory=str(dist_dir), html=True), name="frontend")
+    # ─── 静态前端页面（package resource，缺失即启动失败）──────────
+    static_root = (
+        static_dir if static_dir is not None else _default_static_dir()
+    )
+    if not (static_root / "index.html").is_file():
+        raise RuntimeError(
+            f"前端静态产物缺失: {static_root}。先运行 python scripts/build_frontend.py"
+            " 重建后再启动 Web 服务。"
+        )
+    app.mount(
+        "/", StaticFiles(directory=str(static_root), html=True), name="frontend"
+    )
 
     return app
 

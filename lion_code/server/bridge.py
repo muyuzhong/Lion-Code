@@ -324,3 +324,9 @@ class WebsocketConnectionLease:
         with self._lock:
             if self._owner is owner:
                 self._owner = None
+
+    @property
+    def owner(self) -> SessionWebsocketBridge | None:
+        """当前持有租约的连接；lifespan 关闭时按 owner 顺序先收敛它。"""
+        with self._lock:
+            return self._owner
