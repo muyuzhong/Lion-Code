@@ -1657,3 +1657,24 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 52: 前端任务功能实施收官：5 PR 合入与集成审查通过
+
+**Date**: 2026-08-23
+**Task**: 前端任务功能实施收官：5 PR 合入与集成审查通过
+**Branch**: `master`
+
+### Summary
+
+落地前端任务功能设计终稿 5 个 PR（#82 信息展示/#84 排队转向/#85 状态统计/#86 ToolView/#87 轨迹面板），各 PR 经 implement/check 子代理实现质检后合入 master、CI 全绿。集成审查用本地 mock provider 全链路实测 5 项清单全过：流式排队转向消费、错误卡片无状态条残留、Skills/标题联动、diff 红绿/ANSI 终端/agent 卡片（截图视觉确认）、轨迹面板衔接与检查跳转高亮。沉淀 3 份前端 spec 契约，回炉修订 3 处 PRD（手动 compact 无事件、provider 重试被吞、历史时间戳缺失，均归 P2 后端配合项）。父任务集成审查通过后归档。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8a1eee3` | (see git log) |
+
+### Status
+
+[OK] **Completed**
