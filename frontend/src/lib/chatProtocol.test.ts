@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
   actionForInput,
   decodeServerEvent,
+  emptyChatMetrics,
+  formatRunDuration,
   initialChatProtocolState,
   reduceChatProtocol,
   type ChatProtocolState,
@@ -12,6 +14,17 @@ import {
 function apply(state: ChatProtocolState, event: ServerEvent) {
   return reduceChatProtocol(state, { type: "server_event", event });
 }
+
+const emptyAssistant = {
+  role: "assistant" as const,
+  content: [] as never[],
+  stopReason: "stop" as const,
+  errorMessage: null,
+};
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function startAssistant(state = initialChatProtocolState) {
   return apply(state, {
@@ -334,5 +347,347 @@ describe("queued interaction (steer / follow_up)", () => {
     state = reduceChatProtocol(state, { type: "replace_history", messages: [] });
 
     expect(state.queue).toEqual({ steering: [], followUp: [] });
+  });
+});
+
+describe("runtime notice (auto retry / compaction)", () => {
+  it("sets the retry notice from auto_retry_start and clears it on success", () => {
+    let state = apply(initialChatProtocolState, {
+      type: "auto_retry_start",
+      attempt: 2,
+      maxAttempts: 5,
+      delayMs: 3000,
+      errorMessage: "429 rate limited",
+    });
+
+    expect(state.runtimeNotice).toEqual({
+      kind: "retry",
+      attempt: 2,
+      maxAttempts: 5,
+      delayMs: 3000,
+      errorMessage: "429 rate limited",
+    });
+
+    state = apply(state, {
+      type: "auto_retry_end",
+      success: true,
+      attempt: 2,
+      finalError: null,
+    });
+
+    expect(state.runtimeNotice).toBeNull();
+  });
+
+  it("overwrites an earlier notice with a later one (单值)", () => {
+    // 溢出恢复链的真实次序：compaction_start → compaction_started → auto_retry_start
+    let state = apply(initialChatProtocolState, {
+      type: "auto_retry_start",
+      attempt: 1,
+      maxAttempts: 1,
+      delayMs: 0,
+      errorMessage: "Context overflow",
+    });
+    state = apply(state, { type: "compaction_start", reason: "overflow" });
+    expect(state.runtimeNotice).toEqual({ kind: "compaction", reason: "overflow" });
+
+    state = apply(state, { type: "compaction_started", reason: "overflow" });
+    expect(state.runtimeNotice).toEqual({ kind: "compaction", reason: "overflow" });
+
+    state = apply(state, {
+      type: "auto_retry_start",
+      attempt: 1,
+      maxAttempts: 1,
+      delayMs: 0,
+      errorMessage: "Context overflow",
+    });
+    expect(state.runtimeNotice).toEqual(
+      expect.objectContaining({ kind: "retry", attempt: 1 }),
+    );
+  });
+
+  it("clears the notice when retry ends in failure (错误由 failStreaming 呈现)", () => {
+    let state = apply(initialChatProtocolState, {
+      type: "auto_retry_start",
+      attempt: 1,
+      maxAttempts: 1,
+      delayMs: 0,
+      errorMessage: "Context overflow",
+    });
+
+    state = apply(state, {
+      type: "auto_retry_end",
+      success: false,
+      attempt: 1,
+      finalError: "still overflowing",
+    });
+
+    // 失败由 failStreaming 的错误卡片呈现；"重试中"状态条不得在流终止后挂死
+    expect(state.runtimeNotice).toBeNull();
+    expect(state.messages.at(-1)?.error).toBe("still overflowing");
+    expect(state.isStreaming).toBe(false);
+  });
+
+  it("clears the compaction notice on core completed events (阈值压缩无应用级 end)", () => {
+    let state = apply(initialChatProtocolState, {
+      type: "compaction_started",
+      reason: "threshold",
+    });
+    expect(state.runtimeNotice).toEqual({ kind: "compaction", reason: "threshold" });
+
+    state = apply(state, {
+      type: "compaction_completed",
+      reason: "threshold",
+      aborted: false,
+    });
+    expect(state.runtimeNotice).toBeNull();
+  });
+
+  it("clears the compaction notice on a clean compaction_end and on error", () => {
+    let state = apply(initialChatProtocolState, {
+      type: "compaction_start",
+      reason: "overflow",
+    });
+
+    state = apply(state, {
+      type: "compaction_end",
+      reason: "overflow",
+      aborted: false,
+      willRetry: true,
+      errorMessage: null,
+    });
+    expect(state.runtimeNotice).toBeNull();
+
+    state = apply(state, { type: "compaction_start", reason: "overflow" });
+    state = apply(state, {
+      type: "compaction_end",
+      reason: "overflow",
+      aborted: true,
+      willRetry: false,
+      errorMessage: "compaction backend failed",
+    });
+    expect(state.runtimeNotice).toBeNull();
+    expect(state.messages.at(-1)?.error).toBe("compaction backend failed");
+  });
+
+  it("clears a stale notice when the run settles (兜底，防事件丢失挂死)", () => {
+    // compaction_started 后 completed 丢失的防御场景：Settled 终态兜底清除
+    let state = apply(initialChatProtocolState, {
+      type: "compaction_started",
+      reason: "threshold",
+    });
+    state = apply(state, { type: "agent_settled" });
+
+    expect(state.runtimeNotice).toBeNull();
+    expect(state.isStreaming).toBe(false);
+  });
+
+  it("clears the notice when canonical history replaces the state", () => {
+    let state = apply(initialChatProtocolState, {
+      type: "auto_retry_start",
+      attempt: 1,
+      maxAttempts: 1,
+      delayMs: 0,
+      errorMessage: "Context overflow",
+    });
+
+    state = reduceChatProtocol(state, { type: "replace_history", messages: [] });
+
+    expect(state.runtimeNotice).toBeNull();
+  });
+});
+
+describe("local run metrics (steps / LLM / tool durations)", () => {
+  it("counts turn steps and accumulates LLM durations across rounds", () => {
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(1_000);
+    let state = apply(initialChatProtocolState, { type: "turn_start" });
+    state = apply(state, { type: "message_start", message: emptyAssistant });
+
+    now.mockReturnValue(4_000);
+    state = apply(state, { type: "message_end", message: emptyAssistant });
+    expect(state.metrics.steps).toBe(1);
+    expect(state.metrics.llmMs).toBe(3_000);
+
+    // 第二轮 LLM 调用：步数与耗时累计而非覆盖
+    now.mockReturnValue(10_000);
+    state = apply(state, { type: "turn_start" });
+    state = apply(state, { type: "message_start", message: emptyAssistant });
+    now.mockReturnValue(12_000);
+    state = apply(state, { type: "message_end", message: emptyAssistant });
+
+    expect(state.metrics.steps).toBe(2);
+    expect(state.metrics.llmMs).toBe(5_000);
+    expect(state.metrics.llmStartMs).toBeNull();
+  });
+
+  it("pairs tool durations by toolCallId for parallel executions", () => {
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(20_000);
+    let state = apply(initialChatProtocolState, {
+      type: "tool_execution_start",
+      toolCallId: "call-a",
+      toolName: "read_file",
+      args: {},
+    });
+    now.mockReturnValue(21_000);
+    state = apply(state, {
+      type: "tool_execution_start",
+      toolCallId: "call-b",
+      toolName: "exec_command",
+      args: {},
+    });
+    now.mockReturnValue(23_000);
+    state = apply(state, {
+      type: "tool_execution_end",
+      toolCallId: "call-a",
+      toolName: "read_file",
+      result: { content: [], isError: false },
+      isError: false,
+    });
+    now.mockReturnValue(26_000);
+    state = apply(state, {
+      type: "tool_execution_end",
+      toolCallId: "call-b",
+      toolName: "exec_command",
+      result: { content: [], isError: false },
+      isError: false,
+    });
+
+    // call-a 3s + call-b 5s，乱序返回不影响各自配对
+    expect(state.metrics.toolMs).toBe(8_000);
+    expect(state.metrics.toolStartMs).toEqual({});
+  });
+
+  it("ignores a tool_execution_end that has no tracked start", () => {
+    const state = apply(initialChatProtocolState, {
+      type: "tool_execution_end",
+      toolCallId: "orphan",
+      toolName: "read_file",
+      result: { content: [], isError: false },
+      isError: false,
+    });
+
+    expect(state.metrics.toolMs).toBe(0);
+  });
+
+  it("resets metrics when canonical history replaces the state", () => {
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(1_000);
+    let state = apply(initialChatProtocolState, { type: "turn_start" });
+    state = apply(state, { type: "message_start", message: emptyAssistant });
+    now.mockReturnValue(2_000);
+    state = apply(state, { type: "message_end", message: emptyAssistant });
+    expect(state.metrics.steps).toBe(1);
+
+    state = reduceChatProtocol(state, { type: "replace_history", messages: [] });
+
+    expect(state.metrics).toEqual(emptyChatMetrics);
+  });
+});
+
+describe("reasoning duration (thinking span tracking)", () => {
+  it("writes accumulated thinking time onto the finalized assistant message", () => {
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(1_000);
+    let state = apply(initialChatProtocolState, {
+      type: "message_start",
+      message: emptyAssistant,
+    });
+    state = apply(state, {
+      type: "message_update",
+      message: emptyAssistant,
+      assistantMessageEvent: {
+        type: "thinking_start",
+        contentIndex: 0,
+        partial: emptyAssistant,
+      },
+    });
+
+    now.mockReturnValue(2_500);
+    state = apply(state, {
+      type: "message_update",
+      message: emptyAssistant,
+      assistantMessageEvent: {
+        type: "thinking_end",
+        contentIndex: 0,
+        content: "thought",
+        partial: emptyAssistant,
+      },
+    });
+
+    state = apply(state, {
+      type: "message_end",
+      message: {
+        ...emptyAssistant,
+        content: [{ type: "thinking", thinking: "thought" }],
+      },
+    });
+
+    expect(state.messages[0].reasoningDuration).toBe(1_500);
+  });
+
+  it("resets the accumulator for the next assistant message", () => {
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(1_000);
+    let state = apply(initialChatProtocolState, {
+      type: "message_start",
+      message: emptyAssistant,
+    });
+    state = apply(state, {
+      type: "message_update",
+      message: emptyAssistant,
+      assistantMessageEvent: {
+        type: "thinking_start",
+        contentIndex: 0,
+        partial: emptyAssistant,
+      },
+    });
+    now.mockReturnValue(3_000);
+    state = apply(state, {
+      type: "message_update",
+      message: emptyAssistant,
+      assistantMessageEvent: {
+        type: "thinking_end",
+        contentIndex: 0,
+        content: "first",
+        partial: emptyAssistant,
+      },
+    });
+    state = apply(state, {
+      type: "message_end",
+      message: {
+        ...emptyAssistant,
+        content: [{ type: "thinking", thinking: "first" }],
+      },
+    });
+    expect(state.messages[0].reasoningDuration).toBe(2_000);
+
+    // 下一条消息未产生 thinking 事件：不继承上一条的累计值
+    state = apply(state, { type: "message_start", message: emptyAssistant });
+    state = apply(state, {
+      type: "message_end",
+      message: {
+        ...emptyAssistant,
+        content: [{ type: "text", text: "answer" }],
+      },
+    });
+
+    expect(state.messages.at(-1)?.reasoningDuration).toBeUndefined();
+  });
+});
+
+describe("formatRunDuration", () => {
+  it("formats sub-minute durations with one decimal", () => {
+    expect(formatRunDuration(0)).toBe("0.0s");
+    expect(formatRunDuration(1_500)).toBe("1.5s");
+    expect(formatRunDuration(59_949)).toBe("59.9s");
+    // 59.95s+ 已按分钟进位，不得显示 "60.0s"
+    expect(formatRunDuration(59_999)).toBe("1m0s");
+  });
+
+  it("carries seconds into minutes instead of rendering 1m60s", () => {
+    expect(formatRunDuration(119_700)).toBe("2m0s");
+    expect(formatRunDuration(60_000)).toBe("1m0s");
+    expect(formatRunDuration(125_000)).toBe("2m5s");
   });
 });

@@ -1,5 +1,20 @@
 import React, { useState, useRef, useEffect } from "react";
-import { ArrowUp, Square, Paperclip, Sparkles, CornerUpRight, Hourglass } from "lucide-react";
+import {
+  ArrowUp,
+  Square,
+  Paperclip,
+  Sparkles,
+  CornerUpRight,
+  Hourglass,
+  RefreshCw,
+  Archive,
+} from "lucide-react";
+import {
+  emptyChatMetrics,
+  formatRunDuration,
+  type ChatMetrics,
+  type RuntimeNotice,
+} from "@/lib/chatProtocol";
 
 interface ChatInputProps {
   // 非流式：按 prompt 发起新一轮
@@ -13,9 +28,20 @@ interface ChatInputProps {
   disabled?: boolean;
   // 已排队总数（steering + followUp），来自 queue_update 快照（D7）
   queueCount?: number;
+  // 进行中的重试/压缩提示（单值），结束事件清除后自动消失
+  runtimeNotice?: RuntimeNotice | null;
+  // 当前会话累计的本地打点指标（D11：仅耗时类）
+  metrics?: ChatMetrics;
   // 侧边栏 skill 引用等外部注入的草稿；父组件每次传入新对象引用即覆盖当前输入并聚焦
   prefill?: { text: string } | null;
 }
+
+// 状态条展示压缩原因的中文标签，未匹配时回退原始值
+const COMPACTION_REASON_LABELS: Record<string, string> = {
+  manual: "手动",
+  threshold: "阈值",
+  overflow: "溢出",
+};
 
 export function ChatInput({
   onSendMessage,
@@ -25,6 +51,8 @@ export function ChatInput({
   isStreaming,
   disabled,
   queueCount = 0,
+  runtimeNotice = null,
+  metrics = emptyChatMetrics,
   prefill,
 }: ChatInputProps) {
   const [input, setInput] = useState<string>("");
@@ -80,12 +108,50 @@ export function ChatInput({
   return (
     <div className="border-t border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-950/95 px-4 pb-4 pt-2 backdrop-blur-sm transition-colors">
       <form onSubmit={handleSubmit} className="mx-auto max-w-4xl">
-        {queueCount > 0 && (
-          <div className="mb-1.5 flex justify-end">
-            <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-              <Hourglass className="size-3" />
-              <span>已排队 ×{queueCount}</span>
-            </span>
+        {(runtimeNotice || metrics.steps > 0 || queueCount > 0) && (
+          <div className="mb-1.5 flex items-center justify-between gap-3">
+            {/* 运行状态条（zinc 弱提示）：成功/完成/失败/流终止事件清除后自动消失 */}
+            <div className="min-w-0 flex-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+              {runtimeNotice?.kind === "retry" && (
+                <span
+                  className="flex items-center gap-1.5 truncate"
+                  title={runtimeNotice.errorMessage}
+                >
+                  <RefreshCw className="size-3 shrink-0 animate-spin" />
+                  <span className="truncate">
+                    API 错误，第 {runtimeNotice.attempt}/
+                    {runtimeNotice.maxAttempts} 次重试（
+                    {Math.max(1, Math.round(runtimeNotice.delayMs / 1000))}s
+                    后）…
+                  </span>
+                </span>
+              )}
+              {runtimeNotice?.kind === "compaction" && (
+                <span className="flex items-center gap-1.5 truncate">
+                  <Archive className="size-3 shrink-0" />
+                  <span className="truncate">
+                    正在压缩上下文（
+                    {COMPACTION_REASON_LABELS[runtimeNotice.reason] ??
+                      runtimeNotice.reason}
+                    ）…
+                  </span>
+                </span>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {metrics.steps > 0 && (
+                <span className="text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500">
+                  {metrics.steps} 步 · LLM {formatRunDuration(metrics.llmMs)} ·
+                  工具 {formatRunDuration(metrics.toolMs)}
+                </span>
+              )}
+              {queueCount > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                  <Hourglass className="size-3" />
+                  <span>已排队 ×{queueCount}</span>
+                </span>
+              )}
+            </div>
           </div>
         )}
         <div className="relative flex flex-col rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 shadow-xs focus-within:border-zinc-400 dark:focus-within:border-zinc-600 focus-within:ring-1 focus-within:ring-zinc-400 dark:focus-within:ring-zinc-600 transition">
