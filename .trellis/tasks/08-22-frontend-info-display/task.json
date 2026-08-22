@@ -12,7 +12,7 @@
   "assignee": "zhangcx",
   "createdAt": "2026-08-22",
   "completedAt": null,
-  "branch": null,
+  "branch": "frontend-info-display",
   "base_branch": "master",
   "worktree_path": null,
   "commit": null,
