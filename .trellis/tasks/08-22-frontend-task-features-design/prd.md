@@ -25,24 +25,31 @@
 - R3：P0 各项不得引入后端改动、新依赖或新协议事件；只消费既有 API 与既有
   ServerEvent。
 - R4：steer/follow_up 设计必须与 bridge 现有语义一致：运行中 `prompt` 被拒，
-  补充指令走 `steer` / `follow_up`；排队状态只展示（撤销排队需要新协议 action，
+  补充指令走 `steer` / `follow_up`。流式期间 Enter 默认 `follow_up` 排队，
+  `steer` 作为显式按钮；排队状态只展示（撤销排队需要新协议 action，
   记为后续扩展，不在本轮设计内实现）。
 - R5：skill 是 agent 侧工具（`skill` tool），前端只做浏览与引用辅助，不伪造
   "用户直接执行 skill"的语义。
-- R6：子任务（subagent）设计不新增后端事件时，必须基于 `tool_execution_update`
-  的 `partialResult` 呈现进度；结构化子代理事件流列为可选扩展，另行设计。
-- R7：需要后端配合的项（会话标题/删除/搜索、git 状态面板）只记录接口形态与
-  边界问题，接口契约在各自实现任务中细化。
-- R8：设计文档给出 PR 拆分计划，每个 PR 一个职责，标注依赖关系与回滚点。
+- R6：子任务（subagent）本轮只做 `agent` 工具的结果卡片（前端 only）；
+  实时进度依赖的 `on_update` 通道后端未接线（research §5），
+  接线改造单列为 P2-9，不与前端卡片耦合。
+- R7：需要后端配合的项（会话标题/删除/搜索、git 状态面板、subagent 进度接线）
+  只记录接口形态与边界问题，接口契约在各自实现任务中细化。
+- R8：设计文档给出 PR 拆分计划：前端按职责聚合为 4 个 PR（各自可独立回滚），
+  后端配合项另立任务；每个 PR 标注依赖关系与回滚点。
+- R9：每个前端 PR 交付时补协议层单测（vitest：reducer / api 契约），
+  UI 组件渲染测试不强制；交付前跑 `scripts/build_frontend.py` 更新随包 dist。
 
 ## Acceptance Criteria
 
 - [ ] `research/frontend-current-state.md` 完整记录前端组件、API 面、协议事件
       （含被 reducer 忽略的事件）与后端能力缺口的对照。
-- [ ] `design.md` 覆盖 8 项补充设计（P0×4、P1×2、P2×2），每项含现状证据、
-      设计方案、UI 形态、数据流与"不做"边界。
+- [ ] `design.md` 覆盖 9 项补充设计（P0×4、P1×2、P2×3，含 grilling 二轮核查
+      拆出的 P2-9），每项含现状证据、设计方案、UI 形态、数据流与"不做"边界。
 - [ ] P0 各项设计均不要求后端改动或新依赖。
-- [ ] `design.md` 给出 PR 拆分计划（每项一个独立 PR，P2 项标注需后端配合）。
+- [ ] `design.md` 给出 PR 拆分计划（前端 4 个聚合 PR + 后端另立任务，
+      标注依赖与回滚点）。
+- [ ] 测试策略已定义：每个前端 PR 的协议层单测范围明确（R9）。
 - [ ] 设计评审通过后，后续实现按 PR 计划另建实现任务（或本任务转实施），
       本轮不执行 `task.py start`。
 

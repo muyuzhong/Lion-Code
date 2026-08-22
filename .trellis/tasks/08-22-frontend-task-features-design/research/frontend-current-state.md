@@ -69,7 +69,29 @@ ServerEvent 全集（chatProtocol.ts:105-169）。reducer 中**被解码但直�
 | auto_retry / compaction 进度 | 事件已到前端，reducer 忽略 | 无提示 |
 | permission_mode | status 已返回 | 未展示 |
 
-## 5. 技术约束
+## 5. 二轮核查补充（grilling Round 1，2026-08-22）
+
+以下事实推翻或简化了初版设计的对应条目：
+
+1. **`on_update` 进度通道是死的**：`core/loop.py:405-470` 的 `tool_execution_update`
+   机制要求工具主动调用 `on_update` 回调上报中间结果，但全部工具实现均未接线——
+   `tooling/internal.py` 各工具 `del on_update`（10-13、46-47、76-77…），
+   `tooling/builtin.py:45` 同样 `del`，subagent / skill 的 runtime 无任何调用。
+   结论：任何依赖 `partialResult` 的前端设计当前不可实现。
+2. **edit 工具输出已含 diff**：`tools.py:86-106` `_edit_file` 返回
+   `Successfully edited <path>\n\n<diff>`，diff 由 `_generate_diff`（tools.py:72-84）
+   产出标准 `@@ -n,x +n,y @@` + `- `/`+ ` 行。`_write_file`（tools.py:38-49）返回
+   行号预览，不含 diff。
+3. **subagent 只暴露一个 `agent` 工具**：`tooling/internal.py:10-41`，入参
+   `description`（3-5 词）、`prompt`、`type ∈ {explore, plan, general}`——
+   足够构成结果卡片头部信息。
+4. **前端有 vitest**：`frontend/package.json` scripts 含 `"test": "vitest run"`；
+   已有 `chatProtocol.test.ts` / `useLionChat.test.tsx` / `capability.test.ts`。
+5. **steer / follow_up 同队列**：`application/session.py:152-163`——运行中
+   `prompt` 必须指定 `streaming_behavior`，消息入队并发 `QueueUpdateEvent`；
+   steer 改向当前执行，follow_up 等当前轮结束。
+
+## 6. 技术约束
 
 - 前端栈：React + TypeScript + Tailwind + shadcn 风格组件 + react-markdown +
   react-syntax-highlighter（Prism，天然支持 `diff` 语言高亮，无需新依赖）。
