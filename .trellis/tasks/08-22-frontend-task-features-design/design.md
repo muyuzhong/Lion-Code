@@ -179,6 +179,35 @@ id / startTime / messageCount / cwd，无标题；无删除接口。
 
 ---
 
+## 补充候选（对照 deepseek-harness，grilling Round 3 输入）
+
+证据：`research/deepseek-harness-frontend-inventory.md`（含数据面差异表）。
+候选尚未定案，定案后并入对应分层并更新 PR 计划。
+
+- **C1 Trajectory 轨迹视图**：deepseek 的独立 Tab——事件账本 + Network 式时间线 +
+  行内 inspector。Lion 数据面差异：会话 entry 已带服务端时间戳（消息级历史可行），
+  但无 request 级元数据（usage/retry/prompt diff/TTFT）。分期：
+  - 简版（P1 可行）：右侧滑出面板；数据 = 实时 WS 事件（前端本地打时间戳）+
+    `/api/messages` 历史（消息级、服务端时间戳）；呈现 = 纵向时间线
+    （用户/助手/工具/压缩/重试行，耗时条），点行展开详情；Chat 工具卡片加
+    "检查"入口跳转定位。
+  - 完整版（P2-10 候选）：后端持久化细粒度事件 + 分页 + request inspection
+    （system prompt/usage/retry/prompt diff）。
+- **C2 运行统计行**：composer 上方一行——turn 步数、LLM 累计耗时、工具累计耗时
+  （前端本地打点近似，无 per-request usage，降级为耗时类指标；`reasoningDuration`
+  字段已存在未用）。P1 可行。
+- **C3 零后端小件**（纯前端）：
+  - bash 工具结果 ANSI 终端卡片（成熟库 ansi 渲染，或按现有依赖能力实现）；
+  - 会话标题写入浏览器标签页（DocumentTitle 模式）；
+  - `reasoningDuration` 在 ReasoningView 显示思考耗时。
+- **C4 P2 候选池**（记录不立项，落地前另立任务）：
+  - `@` 文件候选菜单（需后端文件列表 API）；
+  - TodoPanel 任务清单（需后端 todo 能力，Lion 无）；
+  - ContextMeter 上下文压力条（需当前 prompt token 数）；
+  - 图片附件上传（需 WS 协议扩展，WireMessage 已支持 image block 但无上传通道）；
+  - 消息级反馈 / fork 分叉（需后端）；
+  - 三栏 DetailsPanel 布局（重构成本高，现有 ToolView 展开已覆盖详情需求）。
+
 ## 测试策略（D6）
 
 - 每个 PR 在 `frontend` 跑 `npm test`（vitest）：
