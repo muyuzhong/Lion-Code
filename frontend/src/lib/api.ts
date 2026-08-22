@@ -34,7 +34,15 @@ export async function resumeSession(sessionId: string): Promise<{ success: boole
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId }),
   });
-  if (!res.ok) throw new Error("Failed to resume session");
+  if (!res.ok) {
+    let detail = "Failed to resume session";
+    try {
+      detail = (await res.json()).detail || detail;
+    } catch {
+      // 非 JSON 错误响应时保留默认信息
+    }
+    throw new Error(detail);
+  }
   return res.json();
 }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 import threading
@@ -230,23 +231,31 @@ def create_app(
                 )
         return result
 
+    def _is_same_workspace(meta_cwd: str | None) -> bool:
+        """list 与 resume 共用的当前 cwd eligibility 判断。
+
+        无 cwd 的 legacy session 保持可恢复；resolve 异常时退化为
+        normcase 规范化路径文本比较，绝不扩大到其他 workspace。
+        """
+        if not meta_cwd:
+            return True
+        try:
+            return os.path.normcase(str(Path(meta_cwd).resolve())) == os.path.normcase(
+                str(session.cwd.resolve())
+            )
+        except Exception:
+            return os.path.normcase(str(Path(meta_cwd))) == os.path.normcase(
+                str(session.cwd)
+            )
+
+    async def _eligible_sessions() -> list[dict]:
+        """只保留属于当前 cwd 的会话元数据；零匹配返回空列表。"""
+        sessions_meta = await session.list_sessions()
+        return [m for m in sessions_meta if _is_same_workspace(m.get("cwd"))]
+
     @api.get("/sessions", response_model=list[SessionSummaryItem])
     async def list_sessions() -> list[SessionSummaryItem]:
-        sessions_meta = await session.list_sessions()
-        current_cwd = session.cwd
-
-        def _is_match(meta_cwd: str | None) -> bool:
-            if not meta_cwd:
-                return True
-            try:
-                return Path(meta_cwd).resolve() == current_cwd.resolve()
-            except Exception:
-                return str(meta_cwd).lower() == str(current_cwd).lower()
-
-        filtered = [m for m in sessions_meta if _is_match(m.get("cwd"))]
-        if not filtered and sessions_meta:
-            filtered = list(sessions_meta)
-
+        filtered = await _eligible_sessions()
         filtered.sort(key=lambda m: m.get("startTime", ""), reverse=True)
         return [
             SessionSummaryItem(
@@ -262,6 +271,11 @@ def create_app(
     async def resume_session(body: ResumeSessionRequest) -> dict[str, Any]:
         if session.is_running:
             raise HTTPException(status_code=400, detail="会话正在运行中，无法切换")
+        # 与 list 同一 eligibility 判断：跨 workspace 的 id 与不存在的 id
+        # 返回同一 404，不泄漏存在性差异。
+        eligible_ids = {str(m.get("id", "")) for m in await _eligible_sessions()}
+        if body.session_id not in eligible_ids:
+            raise HTTPException(status_code=404, detail="恢复会话失败或会话不存在")
         success = await session.resume(body.session_id)
         if not success:
             raise HTTPException(status_code=404, detail="恢复会话失败或会话不存在")
