@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { Check, Copy, Sparkles, User, Clock } from "lucide-react";
+import { AlertCircle, Check, Copy, Sparkles, User } from "lucide-react";
 import { ChatMessage } from "@/types/chat";
 import { ReasoningView } from "./ReasoningView";
 import { ToolView } from "./ToolView";
@@ -104,6 +104,13 @@ export function MessageItem({ message }: MessageItemProps) {
             {message.tools.map((tool) => (
               <ToolView key={tool.id} tool={tool} />
             ))}
+          </div>
+        )}
+
+        {message.error && (
+          <div className="flex items-start gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-700 dark:text-rose-300">
+            <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+            <span className="whitespace-pre-wrap">{message.error}</span>
           </div>
         )}
 

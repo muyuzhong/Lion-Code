@@ -74,8 +74,9 @@ export function ChatInput({ onSendMessage, onCancel, isStreaming, disabled }: Ch
               </button>
               <button
                 type="button"
-                className="flex items-center gap-1 rounded-md px-2 py-1 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 text-[11px] transition text-amber-600 dark:text-amber-400 font-medium"
-                onClick={() => setInput("/plan ")}
+                disabled={disabled || isStreaming}
+                className="flex items-center gap-1 rounded-md px-2 py-1 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 text-[11px] transition text-amber-600 dark:text-amber-400 font-medium disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => onSendMessage("/plan")}
               >
                 <Sparkles className="size-3" />
                 <span>Plan 模式</span>

@@ -1,2 +1,0 @@
-{"file":".trellis/spec/backend/tui-interaction.md","reason":"Verify stream deltas, tool rows, final messages, and instance callbacks."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Run Python and frontend contract quality gates."}

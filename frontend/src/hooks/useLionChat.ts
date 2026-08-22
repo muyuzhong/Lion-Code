@@ -1,273 +1,230 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ChatMessage, ConfirmRequest, PlanApprovalRequest, ToolCallItem } from "@/types/chat";
-import { fetchMessages } from "@/lib/api";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { toast } from "sonner";
 
-export function useLionChat(sessionId?: string) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [isStreaming, setIsStreaming] = useState<boolean>(false);
-  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
-  const [planApprovalRequest, setPlanApprovalRequest] = useState<PlanApprovalRequest | null>(null);
+import { fetchMessages } from "@/lib/api";
+import { getCapability, websocketProtocols } from "@/lib/capability";
+import {
+  actionForInput,
+  ClientAction,
+  decodeServerEvent,
+  initialChatProtocolState,
+  PlanApprovalChoice,
+  reduceChatProtocol,
+} from "@/lib/chatProtocol";
+import type { ChatMessage } from "@/types/chat";
 
+export function useLionChat(sessionId?: string) {
+  const [state, dispatch] = useReducer(
+    reduceChatProtocol,
+    initialChatProtocolState,
+  );
+  const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
-  const currentMsgIdRef = useRef<string | null>(null);
+  const reconnectEnabledRef = useRef(true);
+  const historyRequestRef = useRef(0);
+
+  const loadCanonicalHistory = useCallback(async () => {
+    const requestId = ++historyRequestRef.current;
+    try {
+      const history = await fetchMessages();
+      if (historyRequestRef.current === requestId) {
+        dispatch({ type: "replace_history", messages: history });
+      }
+    } catch (error) {
+      console.error("Failed to load canonical history:", error);
+    }
+  }, []);
 
   const connect = useCallback(() => {
-    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+    if (
+      wsRef.current &&
+      (wsRef.current.readyState === WebSocket.OPEN ||
+        wsRef.current.readyState === WebSocket.CONNECTING)
+    ) {
       return;
     }
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws/chat`;
+    const capability = getCapability();
+    if (!capability) return;
 
-    const ws = new WebSocket(wsUrl);
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(
+      `${protocol}//${window.location.host}/ws/chat`,
+      websocketProtocols(capability),
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
       setIsConnected(true);
-      if (reconnectTimeoutRef.current) {
+      if (reconnectTimeoutRef.current !== null) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
+      void loadCanonicalHistory();
     };
 
     ws.onclose = () => {
       setIsConnected(false);
-      setIsStreaming(false);
+      dispatch({ type: "disconnected" });
       wsRef.current = null;
-      // 自动重连
-      reconnectTimeoutRef.current = window.setTimeout(() => {
-        connect();
-      }, 2000);
+      if (reconnectEnabledRef.current) {
+        reconnectTimeoutRef.current = window.setTimeout(connect, 2000);
+      }
     };
 
     ws.onerror = () => {
       setIsConnected(false);
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = (message) => {
+      const rejectInvalidEvent = () => {
+        const protocolMessage = "服务端消息不符合 WebSocket event 契约";
+        toast.error(protocolMessage);
+        dispatch({
+          type: "server_event",
+          event: { type: "protocol_error", message: protocolMessage },
+        });
+      };
       try {
-        const data = JSON.parse(event.data);
-        handleServerEvent(data);
-      } catch (err) {
-        console.error("Failed to parse incoming WebSocket message:", err);
+        const event = decodeServerEvent(JSON.parse(message.data));
+        if (!event) {
+          rejectInvalidEvent();
+          return;
+        }
+        if (event.type === "notice") {
+          if (event.role === "error") toast.error(event.text);
+          else toast.info(event.text);
+        } else if (
+          event.type === "server_error" ||
+          event.type === "protocol_error"
+        ) {
+          toast.error(event.message);
+        }
+        dispatch({ type: "server_event", event });
+      } catch {
+        rejectInvalidEvent();
       }
     };
-  }, []);
-
-  const handleServerEvent = (event: any) => {
-    const type = event.type;
-
-    if (type === "agent_start") {
-      setIsStreaming(true);
-      const assistantMsgId = `asst-${Date.now()}`;
-      currentMsgIdRef.current = assistantMsgId;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: assistantMsgId,
-          role: "assistant",
-          content: "",
-          reasoning: "",
-          tools: [],
-          isStreaming: true,
-          createdAt: new Date().toLocaleTimeString(),
-        },
-      ]);
-    } else if (type === "message_update") {
-      const deltaEvent = event.assistantMessageEvent || event.assistant_message_event;
-      if (!deltaEvent) return;
-
-      const deltaType = deltaEvent.type;
-      const targetId = currentMsgIdRef.current;
-
-      setMessages((prev) =>
-        prev.map((msg) => {
-          if (msg.id !== targetId) return msg;
-
-          if (deltaType === "thinking_delta") {
-            return {
-              ...msg,
-              reasoning: (msg.reasoning || "") + (deltaEvent.delta || ""),
-            };
-          } else if (deltaType === "text_delta") {
-            return {
-              ...msg,
-              content: msg.content + (deltaEvent.delta || ""),
-            };
-          }
-          return msg;
-        })
-      );
-    } else if (type === "tool_start" || (event.tool_name && type === "tool_execution_start")) {
-      const toolName = event.tool_name || event.toolName || "Tool";
-      const toolId = event.tool_id || `tool-${Date.now()}`;
-      const args = event.parameters || event.args || {};
-      const targetId = currentMsgIdRef.current;
-
-      const newTool: ToolCallItem = {
-        id: toolId,
-        toolName,
-        args,
-        status: "running",
-        expanded: false,
-      };
-
-      setMessages((prev) =>
-        prev.map((msg) => {
-          if (msg.id !== targetId) return msg;
-          return {
-            ...msg,
-            tools: [...(msg.tools || []), newTool],
-          };
-        })
-      );
-    } else if (type === "tool_end" || type === "tool_execution_end") {
-      const toolId = event.tool_id;
-      const result = event.result || event.output || "";
-      const isError = Boolean(event.error || event.is_error);
-      const targetId = currentMsgIdRef.current;
-
-      setMessages((prev) =>
-        prev.map((msg) => {
-          if (msg.id !== targetId) return msg;
-          const updatedTools = (msg.tools || []).map((t) => {
-            if (t.id === toolId || (!toolId && t.status === "running")) {
-              return {
-                ...t,
-                status: isError ? ("error" as const) : ("completed" as const),
-                result: typeof result === "object" ? JSON.stringify(result, null, 2) : String(result),
-              };
-            }
-            return t;
-          });
-          return { ...msg, tools: updatedTools };
-        })
-      );
-    } else if (type === "session_agent_end" || type === "agent_settled" || type === "agent_end") {
-      setIsStreaming(false);
-      const targetId = currentMsgIdRef.current;
-      setMessages((prev) =>
-        prev.map((msg) => (msg.id === targetId ? { ...msg, isStreaming: false } : msg))
-      );
-    } else if (type === "confirm_request") {
-      setConfirmRequest({
-        request_id: event.request_id,
-        message: event.message,
-      });
-    } else if (type === "plan_approval_request") {
-      setPlanApprovalRequest({
-        request_id: event.request_id,
-        plan: event.plan,
-      });
-    } else if (type === "notice") {
-      const text = event.text || "";
-      const role = event.role || "info";
-      if (role === "error") {
-        toast.error(text);
-      } else {
-        toast.info(text);
-      }
-    }
-  };
+  }, [loadCanonicalHistory]);
 
   useEffect(() => {
+    reconnectEnabledRef.current = true;
     connect();
     return () => {
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (wsRef.current) wsRef.current.close();
+      reconnectEnabledRef.current = false;
+      if (reconnectTimeoutRef.current !== null) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      wsRef.current?.close();
     };
   }, [connect]);
 
-  // 当外部切换 session_id 时拉取历史会话消息
   useEffect(() => {
-    setConfirmRequest(null);
-    setPlanApprovalRequest(null);
-    if (sessionId) {
-      fetchMessages()
-        .then((history) => {
-          setMessages(history);
-        })
-        .catch((err) => {
-          console.error("Failed to load history messages:", err);
-          setMessages([]);
-        });
-    } else {
-      setMessages([]);
-    }
-  }, [sessionId]);
+    historyRequestRef.current += 1;
+    dispatch({ type: "replace_history", messages: [] });
+    if (sessionId) void loadCanonicalHistory();
+  }, [loadCanonicalHistory, sessionId]);
 
-  const sendMessage = useCallback((content: string) => {
-    if (!content.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: content.trim(),
-      createdAt: new Date().toLocaleTimeString(),
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    setIsStreaming(true);
-
-    wsRef.current.send(
-      JSON.stringify({
-        action: "prompt",
-        prompt: content.trim(),
-      })
-    );
+  const sendAction = useCallback((action: ClientAction): boolean => {
+    const websocket = wsRef.current;
+    if (!websocket || websocket.readyState !== WebSocket.OPEN) return false;
+    websocket.send(JSON.stringify(action));
+    return true;
   }, []);
 
-  const sendCancel = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ action: "cancel" }));
-      setIsStreaming(false);
-    }
-  }, []);
-
-  const respondConfirm = useCallback((requestId: string, approved: boolean) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          action: "confirm_response",
-          request_id: requestId,
-          approved,
-        })
-      );
-      setConfirmRequest(null);
-    }
-  }, []);
-
-  const respondPlanApproval = useCallback(
-    (requestId: string, choice: "clear-and-execute" | "execute" | "manual-execute" | "keep-planning", feedback?: string) => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            action: "plan_approval_response",
-            request_id: requestId,
-            choice,
-            feedback,
-          })
-        );
-        setPlanApprovalRequest(null);
+  const sendMessage = useCallback(
+    (content: string) => {
+      const action = actionForInput(content);
+      if (!action || !sendAction(action)) return;
+      if (action.action === "prompt") {
+        const userMessage: ChatMessage = {
+          id: `user-${Date.now()}`,
+          role: "user",
+          content: action.prompt,
+          createdAt: new Date().toLocaleTimeString(),
+        };
+        dispatch({ type: "append_user", message: userMessage });
+      } else if (action.action === "continue") {
+        dispatch({ type: "run_requested" });
       }
     },
-    []
+    [sendAction],
+  );
+
+  const sendCommand = useCallback(
+    (command: string) => sendAction({ action: "command", command }),
+    [sendAction],
+  );
+
+  const sendContinue = useCallback(() => {
+    if (sendAction({ action: "continue" })) {
+      dispatch({ type: "run_requested" });
+    }
+  }, [sendAction]);
+
+  const sendCompact = useCallback(
+    () => sendAction({ action: "compact" }),
+    [sendAction],
+  );
+
+  const sendSteer = useCallback(
+    (prompt: string) => sendAction({ action: "steer", prompt }),
+    [sendAction],
+  );
+
+  const sendFollowUp = useCallback(
+    (prompt: string) => sendAction({ action: "follow_up", prompt }),
+    [sendAction],
+  );
+
+  const sendCancel = useCallback(() => {
+    if (sendAction({ action: "cancel" })) {
+      dispatch({ type: "disconnected" });
+    }
+  }, [sendAction]);
+
+  const respondConfirm = useCallback(
+    (requestId: string, approved: boolean) => {
+      if (
+        sendAction({ action: "confirm_response", requestId, approved })
+      ) {
+        dispatch({ type: "clear_confirm" });
+      }
+    },
+    [sendAction],
+  );
+
+  const respondPlanApproval = useCallback(
+    (requestId: string, choice: PlanApprovalChoice, feedback?: string) => {
+      if (
+        sendAction({
+          action: "plan_approval_response",
+          requestId,
+          choice,
+          feedback,
+        })
+      ) {
+        dispatch({ type: "clear_plan_approval" });
+      }
+    },
+    [sendAction],
   );
 
   return {
-    messages,
+    messages: state.messages,
     isConnected,
-    isStreaming,
-    confirmRequest,
-    planApprovalRequest,
+    isStreaming: state.isStreaming,
+    confirmRequest: state.confirmRequest,
+    planApprovalRequest: state.planApprovalRequest,
     sendMessage,
+    sendCommand,
+    sendContinue,
+    sendCompact,
+    sendSteer,
+    sendFollowUp,
     sendCancel,
     respondConfirm,
     respondPlanApproval,
-    setMessages,
   };
 }

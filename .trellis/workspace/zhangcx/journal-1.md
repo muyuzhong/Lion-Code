@@ -1528,17 +1528,44 @@ Updated the current logging spec to reference CodingSessionBackendAdapter. Resid
 
 **Date**: 2026-08-22
 **Task**: 权限与安全平面落地（PR-S2/S3/S5 + 设计定稿）
+## Session 49: Web 本机访问安全边界
+
+**Date**: 2026-08-22
+**Task**: Web 本机访问安全边界
 **Branch**: `muyuzhong/web-local-access-security`
 
 ### Summary
 
 完成安全平面三件套并 squash 合入 master（PR #74，7491a19）：PR-S2 Secret Boundary redact-only（.env+进程env登记、HMAC指纹族、post链首位全工具输出redact、异常路径过链、审计参数序列化redact，原分支提交 d21641c/e9652b9）；PR-S3 Egress Guard（Level A web_fetch 白名单硬控+URL指纹扫描、Level B shell 出口 best_effort 观测，122d04e/f0fb581）；PR-S5-lite（dontAsk 优雅停机 budget_exceeded+terminate、会话授权快照 session-grant 入审计、publish 语境接 confirm，094dedc）；docs/security-design.md 定稿（信任域/对手模型/R1-R9 残余风险登记/D1-D8 削减决策）与架构门禁第二条；质量基线同步分支既有漂移（de712d5）。契约文档：.trellis/spec/backend/{secret-boundary,egress-guard}.md，任务归档 archive/2026-08/08-22-security-plane。全部门禁绿：unittest 384 / pytest 857 / ruff/mypy/radon/vulture/format 基线内。
+FastAPI 固定绑定 127.0.0.1，引入进程内 capability，并统一 REST、WebSocket、Vite 本机访问校验；补齐前端凭证导入与后端安全矩阵测试。
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
 | `7491a19` | (see git log) |
+| `fa1a6f6` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 50: WebSocket 协议与连接生命周期
+
+**Date**: 2026-08-22
+**Task**: WebSocket 协议与连接生命周期
+**Branch**: `muyuzhong/websocket-protocol-lifecycle`
+
+### Summary
+
+建立严格 camelCase WebSocket 协议、单连接租约与幂等断线收敛；前端使用完整事件解码和纯 reducer，并补齐重连、工具、错误及控制动作测试。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c66b17c` | (see git log) |
 
 ### Status
 

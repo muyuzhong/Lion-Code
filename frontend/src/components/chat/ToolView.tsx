@@ -94,11 +94,16 @@ export function ToolView({ tool }: ToolViewProps) {
   const getParamSummary = () => {
     if (!tool.args) return null;
     if (typeof tool.args === "string") return tool.args;
-    if (tool.args.CommandLine) return tool.args.CommandLine;
-    if (tool.args.TargetFile) return tool.args.TargetFile.split(/[/\\]/).pop();
-    if (tool.args.AbsolutePath) return tool.args.AbsolutePath.split(/[/\\]/).pop();
-    if (tool.args.Query) return `"${tool.args.Query}"`;
-    if (tool.args.Pattern) return `Pattern: ${tool.args.Pattern}`;
+    const commandLine = tool.args.CommandLine;
+    if (typeof commandLine === "string") return commandLine;
+    const targetFile = tool.args.TargetFile;
+    if (typeof targetFile === "string") return targetFile.split(/[/\\]/).pop();
+    const absolutePath = tool.args.AbsolutePath;
+    if (typeof absolutePath === "string") return absolutePath.split(/[/\\]/).pop();
+    const query = tool.args.Query;
+    if (typeof query === "string") return `"${query}"`;
+    const pattern = tool.args.Pattern;
+    if (typeof pattern === "string") return `Pattern: ${pattern}`;
     return null;
   };
 

@@ -1,73 +1,118 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+
+from lion_code.core.messages import WireModel
 
 # ─── WebSocket 上行载荷 (Client -> Server) ───────────────────────
 
-class PromptAction(BaseModel):
+
+class ClientActionModel(WireModel):
+    """浏览器控制消息必须严格匹配唯一 action 变体。"""
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_by_name=False,
+        validate_by_alias=True,
+    )
+
+
+class PromptAction(ClientActionModel):
     action: Literal["prompt"] = "prompt"
     prompt: str
-    streaming_behavior: Literal["steer", "follow_up"] | None = None
 
 
-class CancelAction(BaseModel):
+class SteerAction(ClientActionModel):
+    action: Literal["steer"] = "steer"
+    prompt: str
+
+
+class FollowUpAction(ClientActionModel):
+    action: Literal["follow_up"] = "follow_up"
+    prompt: str
+
+
+class CancelAction(ClientActionModel):
     action: Literal["cancel"] = "cancel"
 
 
-class ContinueAction(BaseModel):
+class ContinueAction(ClientActionModel):
     action: Literal["continue"] = "continue"
 
 
-class CompactAction(BaseModel):
+class CompactAction(ClientActionModel):
     action: Literal["compact"] = "compact"
 
 
-class CommandAction(BaseModel):
+class CommandAction(ClientActionModel):
     action: Literal["command"] = "command"
     command: str
 
 
-class ConfirmResponseAction(BaseModel):
+class ConfirmResponseAction(ClientActionModel):
     action: Literal["confirm_response"] = "confirm_response"
     request_id: str
     approved: bool
 
 
-class PlanApprovalResponseAction(BaseModel):
+class PlanApprovalResponseAction(ClientActionModel):
     action: Literal["plan_approval_response"] = "plan_approval_response"
     request_id: str
     choice: Literal["clear-and-execute", "execute", "manual-execute", "keep-planning"]
     feedback: str | None = None
 
 
+type ClientAction = Annotated[
+    PromptAction
+    | SteerAction
+    | FollowUpAction
+    | CancelAction
+    | ContinueAction
+    | CompactAction
+    | CommandAction
+    | ConfirmResponseAction
+    | PlanApprovalResponseAction,
+    Field(discriminator="action"),
+]
+
+CLIENT_ACTION_ADAPTER: TypeAdapter[ClientAction] = TypeAdapter(ClientAction)
+
+
 # ─── WebSocket 下行专有事件 (Server -> Client) ───────────────────
 
-class ConfirmRequestEvent(BaseModel):
+
+class ConfirmRequestEvent(WireModel):
     type: Literal["confirm_request"] = "confirm_request"
     request_id: str
     message: str
 
 
-class PlanApprovalRequestEvent(BaseModel):
+class PlanApprovalRequestEvent(WireModel):
     type: Literal["plan_approval_request"] = "plan_approval_request"
     request_id: str
     plan: str
 
 
-class NoticeEvent(BaseModel):
+class NoticeEvent(WireModel):
     type: Literal["notice"] = "notice"
     text: str
     role: Literal["info", "error", "status"] = "info"
 
 
-class ServerErrorEvent(BaseModel):
-    type: Literal["error"] = "error"
-    error: str
+class ServerErrorEvent(WireModel):
+    type: Literal["server_error"] = "server_error"
+    message: str
+
+
+class ProtocolErrorEvent(WireModel):
+    type: Literal["protocol_error"] = "protocol_error"
+    message: str
 
 
 # ─── REST 接口模型 ───────────────────────────────────────────────
+
 
 class ServerStatusResponse(BaseModel):
     session_id: str
@@ -129,4 +174,5 @@ class ChatMessageDTO(BaseModel):
     content: str
     reasoning: str | None = None
     tools: list[ToolCallDTO] = Field(default_factory=list)
+    error: str | None = None
     createdAt: str | None = None

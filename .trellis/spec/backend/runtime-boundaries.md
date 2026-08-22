@@ -328,6 +328,151 @@ unknown-command behavior.
 The TUI imports application contracts only. The REPL may render terminal output
 but must not own session persistence or a second command dispatcher.
 
+## Local Web access boundary
+
+### 1. Scope / Trigger
+
+This contract applies to the FastAPI/React interface started by the CLI Web
+mode. It keeps a browser-only loopback control plane without adding account,
+TLS, reverse-proxy, or persistent-token state to Application or Runtime.
+
+### 2. Signatures
+
+```python
+def create_app(
+    session: LionCodingSession,
+    *,
+    capability: str,
+    port: int = 8000,
+) -> FastAPI: ...
+
+def run_server(
+    session: LionCodingSession,
+    port: int = 8000,
+    open_browser: bool = True,
+) -> None: ...
+```
+
+The CLI exposes `--web`, `--port`, and `--no-browser`; it has no host override.
+The browser transport contract is:
+
+```text
+startup URL fragment: #capability=<URL-safe process token>
+REST: Authorization: Bearer <token>
+WebSocket protocols: lion-code, lion-code-capability.<token>
+```
+
+### 3. Contracts
+
+- Uvicorn and the Vite development server bind only `127.0.0.1`. Production
+  Host must equal the selected loopback host/port; the only additional allowed
+  Origin is the fixed Vite loopback Origin.
+- `run_server` generates one in-memory capability per process. It is never
+  printed, persisted, placed in a query string, included in error text, or
+  negotiated back as the selected WebSocket subprotocol.
+- The browser imports the fragment into current-tab `sessionStorage` and
+  immediately removes the fragment from visible history. REST and WebSocket
+  clients read the same stored capability.
+- Static assets and `/api/health` are public. Status, messages, sessions,
+  provider/model settings, skills, thinking, and Agent controls require the
+  capability. FastAPI OpenAPI/docs routes remain disabled.
+- REST validates Host, any supplied Origin, and Bearer capability at the Server
+  entry point. WebSocket validates Host, required Origin, and both offered
+  subprotocol values before `accept()` and before binding interaction callbacks.
+- After transport validation, an app-scoped identity lease is acquired before
+  `accept()` and callback binding. A second connection closes with 1008 without
+  changing the first connection's callbacks; only the matching owner may release
+  the lease.
+- Browser actions are one strict, alias-only Pydantic discriminated union with
+  `extra="forbid"`. Snake-case fields, coercions such as `"false"`, unknown
+  actions, invalid approval choices, and extra fields emit `protocol_error` and
+  do not resolve a pending interaction future.
+- The accepted bridge exclusively owns pending confirmation/Plan futures, the
+  active run task, and notice tasks. Cancel denies pending interactions before
+  cancelling the Session. Disconnect performs deny -> Session cancel -> collect
+  run/notice tasks -> unbind, and the close operation is idempotent.
+- Server events serialize only canonical camelCase Application/Core models. The
+  browser decodes `unknown` once at the protocol boundary before reduction; it
+  has no snake-case fallback. Tool results join by `toolCallId`, terminal errors
+  stop streaming, and final assistant messages replace provisional content.
+- Every successful socket open reloads `/api/messages`; only the latest history
+  request may replace state, and replacement discards all provisional transcript
+  and approval state. The Web layer does not retain an event replay buffer.
+- Input maps `/continue` and `/compact` to their typed actions and other slash
+  text to `command`. Plan mode uses that command path. `steer` and `follow_up`
+  remain typed senders without adding a second queue UI.
+- `--no-browser` is health-probe-only: it does not construct or disclose a
+  capability URL and does not add an anonymous bootstrap path.
+- Server authentication remains interface-owned. `LionCodingSession`, Core,
+  Runtime, session JSONL, and provider state do not retain the capability.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Missing or incorrect REST Bearer capability | HTTP 401 without echoing either token |
+| Foreign Origin or non-loopback Host on protected REST | HTTP 403 before session access |
+| Foreign CORS preflight | No `Access-Control-Allow-Origin` grant |
+| Missing/incorrect WS token, missing/foreign Origin, or wrong Host | Close 1008 before accept/callback binding |
+| A valid second WS connection while one owner is active | Close 1008; preserve the first callback owner |
+| Invalid/coerced/snake-case WS action | Emit `protocol_error`; leave pending futures unresolved |
+| Cancel while approval is pending | Deny the approval, cancel the Session, and leave no hidden future |
+| WS disconnect during a run or notice send | Collect all bridge-owned tasks, unbind callbacks, then release the lease |
+| Malformed or snake-case server event in the browser | Reject at the decoder and expose a terminal protocol error |
+| Reconnect history responses complete out of order | Apply only the newest canonical `/api/messages` response |
+| Invalid capability passed to `create_app` | `ValueError` before route construction |
+| `--no-browser` startup | Loopback server and public health only; no browser thread or capability URL |
+
+### 5. Good / Base / Bad Cases
+
+- Good: the CLI opens `http://127.0.0.1:<port>/#capability=...`; the React entry
+  imports and erases the fragment, then authenticated REST and WebSocket calls
+  succeed from that exact Origin.
+- Base: a Vite page supplied an explicit valid fragment and reaches the backend
+  through the fixed loopback proxy while preserving the Vite Origin.
+- Bad: restore `allow_origins=["*"]`, accept a WebSocket before validation, add
+  `--host 0.0.0.0`, put the token in `?token=`, print it for headless use, or
+  cache it in Application/Runtime/session persistence.
+
+### 6. Tests Required
+
+- `tests/server/test_server_api.py` asserts the REST/CORS/WS Host-Origin-token
+  matrix, pre-accept WS denial, disabled docs, fragment-only browser URL, fixed
+  uvicorn host, and headless non-disclosure.
+- `tests/test_cli.py` rejects `--host` and preserves the documented `--port` and
+  headless `--no-browser` surface.
+- Frontend capability tests assert fragment import/cleanup, current-tab storage,
+  Bearer injection, and the two WebSocket subprotocol values. TypeScript build
+  must cover all transport call sites.
+- Bridge tests assert alias-only strict actions, approval cancellation, duplicate
+  prompt rejection, second-owner rejection/release, idempotent disconnect, and a
+  run waiting behind a blocked notice send. Compact success notices come from the
+  Session owner and must not be duplicated by the bridge.
+- Frontend protocol tests assert canonical camelCase decoding, parallel tool
+  correlation/result text/error state, terminal provider/server/protocol errors,
+  final-message reconciliation, latest-request reconnect replacement, and typed
+  Plan/continue/compact/steer/follow-up actions.
+- Server tests must mock config persistence and browser effects; the real user
+  API configuration file must remain byte-for-byte unchanged.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+app.add_middleware(CORSMiddleware, allow_origins=["*"])
+await websocket.accept()
+```
+
+Correct:
+
+```python
+if not trusted_host_origin or not valid_capability:
+    await websocket.close(code=1008)
+    return
+await websocket.accept(subprotocol="lion-code")
+```
+
 ## Product adapter contract (PR4)
 
 ### 1. Scope / Trigger

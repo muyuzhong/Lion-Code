@@ -3,7 +3,7 @@
   "name": "fastapi-web-boundary-hardening",
   "title": "FastAPI Web 前后端边界修复",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -27,6 +27,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "子任务进度（2026-08-22）：1/5 web-local-access-security 已完成归档（fa1a6f6）；2/5 websocket-protocol-lifecycle 已完成归档（c66b17c）。下一个：3/5 web-provider-settings-integrity（P1，未开始实现）。",
   "meta": {}
 }

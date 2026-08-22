@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/tui-interaction.md","reason":"Match canonical event streaming, final reconciliation, and callback ownership."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve cancellation and unexpected run error semantics."}
+{"file":".trellis/tasks/08-22-fastapi-web-boundary-hardening/research/current-web-boundary-review.md","reason":"Fix verified wire aliases, approval coercion, and multi-bridge defects."}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "Preserve Application ownership and capability-aware WS entry boundary."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Define one canonical backend-to-frontend wire union and reducer boundary."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Keep event parsing and state transitions in shared typed adapters rather than scattered casts."}

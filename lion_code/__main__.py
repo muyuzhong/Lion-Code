@@ -45,8 +45,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-turns", type=int, default=None, help="Max agentic turns")
     parser.add_argument("--web", action="store_true", help="Launch Web server mode")
     parser.add_argument("--port", type=int, default=8000, help="Web server port (default: 8000)")
-    parser.add_argument("--host", default="127.0.0.1", help="Web server host (default: 127.0.0.1)")
-    parser.add_argument("--no-browser", action="store_true", help="Do not automatically open browser in web mode")
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Headless Web health check only; do not deliver a control capability",
+    )
     parser.add_argument("--help", "-h", action="store_true", help="Show help")
     return parser.parse_args()
 
@@ -235,6 +238,9 @@ Options:
   --repl              Plain REPL instead of the default TUI
   --max-cost USD      Stop when estimated cost exceeds this amount
   --max-turns N       Stop after N agentic turns
+  --web               Launch the loopback-only Web server
+  --port N            Web server port (default: 8000)
+  --no-browser        Headless health check only; no control capability is delivered
   --help, -h          Show this help
 
 REPL commands:
@@ -335,7 +341,6 @@ Examples:
             asyncio.run(session.restore_latest())
         run_server(
             session=session,
-            host=args.host,
             port=args.port,
             open_browser=not args.no_browser,
         )
