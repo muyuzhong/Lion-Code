@@ -786,9 +786,7 @@ class MemoryStore:
     @staticmethod
     def _missing_paths(entry: MemoryEntry, project_root: Path) -> tuple[str, ...]:
         """确定性存在性校验（设计 7.2）：只判断，不读内容不执行。"""
-        return tuple(
-            path for path in entry.paths if not (project_root / path).exists()
-        )
+        return tuple(path for path in entry.paths if not (project_root / path).exists())
 
     @staticmethod
     def _stale_candidates(
