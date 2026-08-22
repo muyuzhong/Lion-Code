@@ -6,6 +6,7 @@
 
 - [chat-queue-contract.md](chat-queue-contract.md) — 聊天队列事件契约：queue_update 快照语义与消费出队规则（跨层契约，改队列相关代码必读）
 - [runtime-events-contract.md](runtime-events-contract.md) — 运行时事件契约：重试/压缩两层事件架构、状态条生命周期、耗时统计边界（改 runtimeNotice/metrics/轨迹面板必读）
+- [toolview-display-contract.md](toolview-display-contract.md) — ToolView 展示契约：diff hunk 跨层格式依赖、agent 精确判定、分类耦合与 ANSI 解析边界
 
 ## Pre-Development Checklist
 
