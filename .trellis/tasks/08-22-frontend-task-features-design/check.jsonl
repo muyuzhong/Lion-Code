@@ -1,0 +1,1 @@
+{"file": ".trellis/tasks/08-22-frontend-task-features-design/research/frontend-current-state.md", "reason": "校验实现是否越界：P0 项不得引入后端改动或新依赖，steer 语义必须与 bridge 现有行为一致。"}

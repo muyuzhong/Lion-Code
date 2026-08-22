@@ -1,0 +1,1 @@
+{"file": ".trellis/tasks/08-22-frontend-task-features-design/research/frontend-current-state.md", "reason": "实现任何补充设计前的证据基线：前端组件职责、API 面、协议事件（含被 reducer 忽略的事件）与后端能力缺口对照。"}
