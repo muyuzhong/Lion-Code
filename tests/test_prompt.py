@@ -64,6 +64,18 @@ def test_project_context_skips_blank_files(tmp_path) -> None:
     assert [item.content for item in files] == ["child agents"]
 
 
+def test_project_context_skips_unreadable_files(tmp_path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir(parents=True)
+    (root / "CLAUDE.md").write_bytes(b"\xff\xfe\x00broken")
+    (root / "AGENTS.md").write_text("agents rule")
+    identity = ProjectIdentity(root=root.resolve(), key="project", is_git=True)
+
+    files = load_project_context_files(cwd=root, identity=identity)
+
+    assert [item.content for item in files] == ["agents rule"]
+
+
 def test_dynamic_system_context_appends_project_instructions(
     tmp_path, monkeypatch
 ) -> None:
