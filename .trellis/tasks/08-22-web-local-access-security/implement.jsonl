@@ -1,4 +1,0 @@
-{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Keep access control in the Server interface boundary."}
-{"file":".trellis/tasks/08-22-fastapi-web-boundary-hardening/research/current-web-boundary-review.md","reason":"Use verified cross-origin and token threat evidence."}
-{"file": ".trellis/spec/backend/secret-boundary.md", "reason": "Keep the ephemeral capability out of persistence, logs, and model-visible channels."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Keep REST and WebSocket authentication contracts aligned across backend and frontend."}
