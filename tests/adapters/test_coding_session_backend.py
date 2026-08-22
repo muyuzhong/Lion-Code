@@ -129,5 +129,17 @@ class TestTerminalAndCallbacks(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(backend.toggle_plan_mode(), "plan")
 
 
+class TestHandoffDelegation(unittest.IsolatedAsyncioTestCase):
+    async def test_handoff_session_delegates_to_meta_agent(self):
+        import tempfile
+        from unittest.mock import AsyncMock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = _backend(Path(tmp))
+            with patch.object(MetaAgent, "handoff_session", new=AsyncMock()) as handoff:
+                await backend.handoff_session()
+            handoff.assert_awaited_once_with()
+
+
 if __name__ == "__main__":
     unittest.main()
