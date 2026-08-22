@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply repository validation, test, and review gates."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Verify Server remains an Interface and creates no duplicate state owner."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify cancellation and unstructured error propagation remain correct."}
+{"file":".trellis/tasks/08-22-fastapi-web-boundary-hardening/research/current-web-boundary-review.md","reason":"Regress every confirmed defect and probe from the initial review."}

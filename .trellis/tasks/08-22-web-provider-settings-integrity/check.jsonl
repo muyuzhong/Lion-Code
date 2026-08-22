@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify atomic failure paths and test filesystem isolation."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Verify no provider writable mirror is introduced in Server or UI."}

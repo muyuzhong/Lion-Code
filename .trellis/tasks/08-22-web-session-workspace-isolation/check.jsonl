@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Verify legacy session handling without widening workspace scope."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Cover Windows path and negative resume matrices."}

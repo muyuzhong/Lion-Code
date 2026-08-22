@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Preserve Server to Application/Core direction and canonical history ownership."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Use structured application and tool errors without hiding orchestration failures."}
+{"file":".trellis/spec/backend/tui-interaction.md","reason":"Reuse instance-scoped frontend callback and streaming reconciliation contracts."}
+{"file":".trellis/tasks/08-22-fastapi-web-boundary-hardening/research/current-web-boundary-review.md","reason":"Implement against verified Web defects, probes, invariants, and dirty baseline."}
