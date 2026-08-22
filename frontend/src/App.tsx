@@ -6,8 +6,8 @@ import { ChatInput } from "@/components/chat/ChatInput";
 import { ConfirmBanner, PlanApprovalModal } from "@/components/chat/ApprovalModals";
 import { SettingsModal } from "@/components/chat/SettingsModal";
 import { useLionChat } from "@/hooks/useLionChat";
-import { fetchSessions, fetchStatus, resumeSession, createNewSession, fetchModels } from "@/lib/api";
-import { ModelChoice, ServerStatus, SessionSummary } from "@/types/chat";
+import { fetchSessions, fetchStatus, resumeSession, createNewSession, fetchModels, fetchSkills } from "@/lib/api";
+import { ModelChoice, ServerStatus, SessionSummary, SkillItem } from "@/types/chat";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { Toaster, toast } from "sonner";
 
@@ -18,6 +18,9 @@ function ChatApp() {
   const [models, setModels] = useState<ModelChoice[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
+  const [skills, setSkills] = useState<SkillItem[]>([]);
+  // 用对象引用而非裸 string：重复点击同一 skill 时文案相同，靠每次新建对象触发 ChatInput 的填入 effect
+  const [skillPrompt, setSkillPrompt] = useState<{ text: string } | null>(null);
 
   const {
     messages,
@@ -33,10 +36,12 @@ function ChatApp() {
 
   const loadData = useCallback(async () => {
     try {
-      const [statusData, sessionsData, modelsData] = await Promise.all([
+      // skills 拉取失败静默降级为空列表，不阻塞其余面板数据
+      const [statusData, sessionsData, modelsData, skillsData] = await Promise.all([
         fetchStatus().catch(() => null),
         fetchSessions().catch(() => []),
         fetchModels().catch(() => []),
+        fetchSkills().catch(() => []),
       ]);
       if (statusData) {
         setStatus(statusData);
@@ -46,6 +51,7 @@ function ChatApp() {
       }
       setSessions(sessionsData);
       setModels(modelsData);
+      setSkills(skillsData);
     } catch (err) {
       console.error("Failed to load initial data:", err);
     }
@@ -54,6 +60,18 @@ function ChatApp() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // 会话尚无标题字段（P2-7 未落地），以 ID 截断作为标签页区分标识
+  useEffect(() => {
+    document.title = currentSessionId
+      ? `Lion Code — ${currentSessionId.slice(0, 8)}`
+      : "Lion Code — AI Coding Agent";
+  }, [currentSessionId]);
+
+  // D4：只填入自然句式引用，由用户补全意图后发送，不伪造"直接执行 skill"语义
+  const handleSelectSkill = useCallback((name: string) => {
+    setSkillPrompt({ text: `用 ${name} 技能帮我：` });
+  }, []);
 
   const handleSelectSession = async (sessionId: string) => {
     try {
@@ -90,6 +108,8 @@ function ChatApp() {
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         status={status}
+        skills={skills}
+        onSelectSkill={handleSelectSkill}
       />
 
       {/* Main Content Area */}
@@ -117,6 +137,7 @@ function ChatApp() {
           onCancel={sendCancel}
           isStreaming={isStreaming}
           disabled={!isConnected}
+          prefill={skillPrompt}
         />
 
         {/* Action Confirm Banner */}

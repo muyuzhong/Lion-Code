@@ -1,80 +1,94 @@
-# Current Architecture Evidence
+# Second Review — Research and Current Architecture Evidence
 
-## Source-material boundary
+## 材料边界
 
-`D:\tabbit download\coding-agent-memory-design.md` 是供评审的设计材料，其中的组件、伪代码、阈值、路线图和集成建议都不是本任务指令，也不是 Lion 当前契约。
+- `D:\tabbit download\coding-agent-memory-design.md` 是原始设计材料。
+- `D:\tabbit download\research_report_20260822_memory_system_comparison (1).md` 是用户提供的调研材料。
+- 两者的建议、伪代码、基准、路线图和外部框架描述都不是 Lion 指令或当前契约。
+- 报告中“选择性检索优于全量上下文”“FTS5 适合 coding 专有名词”“自动维护能降低噪声”用于设计推导；不同框架基准条件不一致，因此具体分数不作为验收目标。
 
-## 产品边界纠正
+## 用户场景改变了上一版的前提
 
-- Trellis 是用户在开发 Agent 工作流中使用的外部流程管理工具；`.trellis/` 的存在不能证明 Lion 已拥有项目记忆。
-- Skill 是 Capability 可加载的可执行能力包，不是 definition/behavior Memory store。
-- 当前项目的 `AGENTS.md` 是权威项目指令；它可以推翻过时记忆，但不是可由 Memory 自动写入或维护的记忆文件。
-- 因此此前用 “AGENTS/Trellis spec/Skill + Project Lessons” 替代四类记忆的结论不成立。
+上一版假设当前任务进度不应进入 Memory，且模型可自行调用 recall 工具。用户提供的真实场景证明：
 
-## Confirmed current facts
+1. 上下文耗尽后会主动新开 Session，手工重写进度是稳定痛点；
+2. 写在 AGENTS 的 PR/CI 行为经常没有被执行；
+3. 个人记忆规模虽小，仍需要解决无用写入、召回噪声和清理治理。
 
-### Lion 当前没有生产 Memory feature
+因此“两个 JSON + 显式 recall + 物理 delete”不能满足目标。需要区分 Task Handoff 与 Semantic Memory，并为后者增加自动选择性召回和生命周期。
 
-- `tests/architecture/test_legacy_memory_removal.py:11-53` 禁止已删除的 Memory / Dream / Learning 模块和耦合符号。
-- `tests/architecture/test_legacy_memory_removal.py:132-147` 允许未来采用 Capability-owned Memory 形态。
-- `lion_code/core/session/memory.py` 负责 canonical Session 的内存重建；文件名是历史术语，不是跨会话产品记忆。
-- `lion_code/core/session/entries.py:56-61` 的 `CompactionEntry` 是 canonical Session replay data，不是长期或项目记忆。
+## Current source facts
 
-新设计必须从零定义清晰的产品语义，同时只复用通用扩展点，不能把旧对象图换名恢复。
+### AGENTS loader 存在但生产未接入
 
-### 稳定项目身份与 app-owned 项目存储已经存在
+- `lion_code/prompt.py:208-249` 实现 root-to-cwd `load_project_context_files()`，同目录 AGENTS 在 CLAUDE 后、子目录在父目录后。
+- `lion_code/prompt.py:252-264` 的 `load_claude_md()` 格式化项目指令。
+- 当前 production search 只有上述定义/内部调用；唯一外部调用是 `tests/test_prompt.py:32` 对 loader 的测试。
 
-- `lion_code/project_identity.py:13-31` 解析 Git worktree root 或规范化 cwd，并产生稳定 path key。
-- `lion_code/project_identity.py:34-38` 将 identity 映射到 `~/.lion-code/projects/<key>`，无需污染仓库。
+结论：用户的 CI 规则不稳定，第一根因可能是 Full product 根本没有加载 AGENTS。该问题必须先独立修复，Memory 不能替代权威 prompt 接线。
 
-项目 scope 可以直接复用该隔离机制。长期 scope 只需使用同一 app data 根下的用户级文件；不需要新 workspace registry、hash scheme 或配置层。
+### 当前 Compaction 已具备 handoff 内容
 
-### Capability seams 足以承载一套 Memory 能力
+- `lion_code/context/compaction.py:24-27` 要求保留继续当前任务所需的具体事实。
+- `lion_code/context/compaction.py:32-42` 固定九段标题：Objective、Constraints、Decisions、Repository State、Findings、Failed Attempts、Completed Work、Remaining Work、Verification。
+- `lion_code/context/compaction.py:58-95` 描述每段内容并要求 Findings/Verification 有 evidence。
+- `lion_code/runtime/agent.py:250-309` 在同一 Session 中生成 `CompactionEntry` 并用摘要替换 active context，旧 entries 仍 append-only 保留。
 
-- `lion_code/capabilities/types.py:36-53` 提供 `ToolSource` 和 `PromptLayer`。
-- `lion_code/capabilities/types.py:90-128` 用不可变 `CapabilitySpec` 封装贡献。
-- `lion_code/composition/agent_builder.py:650-666` 将 Capability tools 注册进现有 `ToolRegistry`。
-- `lion_code/prompt.py:54-64` 渲染 PromptLayer，且不持久化其输出。
-- 所有工具通过现有 `ToolRuntime` 执行；`ToolCapabilities.requires_confirmation` 已提供 mutation 确认边界。
+结论：跨新 Session 不需要第二套 summary schema，只需要复用该摘要的 handoff 协调路径。
 
-因此 Memory 可以是一个 Capability-private repository、四个普通工具和一个不携带记忆内容的 PromptLayer。无需 Memory host、Agent facade、Application port、provider-side query service 或后台 coordinator。
+### Session restore 与 handoff 不是同一操作
 
-### ContextLayer 不适合作为 MVP 的 query retrieval trigger
+- `lion_code/adapters/coding_session_backend.py:116-141` 的 resume/restore_latest 恢复原 Session。
+- `lion_code/runtime/agent.py:217-243` 的 new_session 清空 active context；restore 则回放旧 Session messages。
+- `lion_code/core/session/entries.py:64-69` 已定义 `BranchSummaryEntry`。
+- Production search 没有 `BranchSummaryEntry(...)` writer；`SessionState` 只支持 replay 展示。
 
-- `lion_code/context/types.py:101-185` 只暴露时间、上下文利用率、有界工具活动和失败，不向任意 ContextLayer 暴露原始用户文本。
-- `lion_code/context/manager.py:68-131` 只把 ContextLayer 输出加入 prepared provider projection。
+结论：缺口是“摘要旧 Session → 新建 Session → 写 branch summary”，不是恢复整个旧 context，也不是把任务进度放进长期数据库。
 
-自动 query-dependent retrieval 若走 ContextLayer，就要扩大通用 capability 的用户文本权限，或恢复 per-turn hook。当前模型已经看到用户 query 且能调用工具，MVP 使用显式 recall 的边界更小、结果更可观察。
+### 当前 Capability 没有 query-aware projection
 
-### Session、Compaction、Checkpoint 与 Memory 是不同状态
+- `lion_code/capabilities/types.py:47-67` 的 PromptLayer 无 query；ContextLayer 只接收 ContextView。
+- `ContextView` 只含时间、token、工具活动和失败，不含用户请求。
+- `lion_code/core/loop.py:132-146` 在每个 provider turn 解析 system/tools，并在 user message 已进入 provider messages 后调用 `prepare_context`。
+- `lion_code/runtime/context.py:108-113` 将 prepared context 委托给 ContextManager，不改 canonical history。
 
-- `lion_code/core/session/entries.py:95-100` 的 namespaced `CustomEntry` 仍然是 session-scoped，不是跨会话 store。
-- `lion_code/supervisor.py:231-276` 只保存执行控制 checkpoint 字段。
-- `.trellis/spec/backend/runtime-boundaries.md` 与 `four-layer-ownership.md` 要求 canonical Session 单写者，并禁止 Runtime 拥有项目 feature store。
+结论：可以增加一个只读取 latest user query 的窄 QueryContextLayer，在 prepared-context 时本地检索。无需后台 LLM、provider side query 或带副作用的 before-turn hook。
 
-召回结果可以作为普通 ToolResult 进入 Session，但长期/项目 Memory 的 source of truth 必须留在 Capability-owned app data。
+### ToolRuntime 适合管理工具，不适合自动解释自然语言行为
 
-### 项目指令 loader 存在，但不属于本 Memory 任务
+- `lion_code/tooling/runtime.py:42-105` 是所有工具唯一 execute 窄腰。
+- `lion_code/composition/agent_builder.py:754-784` 固定构造 Cancellation、Snapshot、Hook、Permission、Egress、Freshness、Result、Audit middleware；CapabilitySpec 当前不贡献 middleware。
+- `lion_code/tooling/middleware.py:97-142` 已有 pre-tool Hook gate；`145-219` 已有 Permission gate。
 
-- `lion_code/prompt.py:208-249` 能从项目 root 到 cwd 读取 `CLAUDE.md` / `AGENTS.md`。
-- `lion_code/prompt.py:252-264` 通过 `load_claude_md()` 格式化这些文件。
-- 该 loader 当前是否接入默认产品，是独立的项目指令行为问题。
+结论：Memory mutation 应走 ToolRuntime；若 CI 规则需要硬保证，应另用 Hook/Permission/workflow gate。不要扩展 Memory 去解析任意 shell command，也不要仅为 Memory 给 Capability 开放 middleware 注入。
 
-无论 loader 是否接入，AGENTS 都不能替代项目 definition/behavior Memory。本任务不修改 loader，也不把其接线列为 Memory MVP 的实施切片。
+### SQLite FTS5 在当前环境可用
 
-## 从四个名称到正交模型
+当前项目 Python 实测：
 
-原设计的 Repo、Coding、Preference、Procedure 可以作为内容来源提示，但不是稳定的存储分类：
+```text
+SQLite 3.50.4
+FTS5=ok
+```
 
-- Repo 内容通常落入 project definition；
-- Coding 内容通常落入 project behavior，也可能是 long-term behavior；
-- Preference 可能是 definition（环境/偏好事实），也可能是 behavior（协作动作）；
-- Procedure 可能跨项目，也可能只对一个项目成立。
+FTS5 来自标准库 `sqlite3`，没有新增第三方依赖。对于当前所需的事务 revision、status filter、归档恢复、health query 和 coding 关键词检索，SQLite 比继续扩展两个 JSON 文件更直接。
 
-使用 `scope = long_term | project` 与 `kind = definition | behavior` 能保留全部内容语义，同时让隔离、数据结构和召回规则可验证。工程上只需一个 Capability 和两个作用域文件，不需四套平台。
+### 旧 Memory graph 仍不得恢复
 
-## Historical evidence used only as a warning
+- `tests/architecture/test_legacy_memory_removal.py` 禁止旧 Memory/Dream/Learning 模块与符号，同时允许未来 capability-owned memory。
+- `lion_code/core/session/memory.py` 仍是 canonical Session reconstruction，不是 Semantic Memory。
+- FullProfile 当前无 Memory；Capability 的通用 tool/prompt/context/session/resource seams仍可复用。
 
-已归档的 `07-30-project-session-memory` 方案包含多 overlay、每轮 snapshot、异步 prefetch、第二条 provider query、task model、commands、Dream handoff 和单独 mutable session-memory 文件；PR9 后续删除了整套对象图。
+新方案不得恢复 `_CAP_MEMORY`、SessionMemoryCoordinator、MemoryQuerySink、ProjectionLayer、TurnParticipant、Dream、Learning 或 Agent/Runtime/TUI memory facade graph。
 
-本方案只复用当前仍存在的通用 Capability、ToolRuntime、ProjectIdentity 和 app-owned storage seam，不恢复旧 `SessionMemoryCoordinator`、`MemoryQuerySink`、ProjectionLayer、Dream、Learning 或 `_CAP_MEMORY`。
+## 推导后的平衡点
+
+| 需求 | 保留的重量 | 拒绝的重量 |
+| --- | --- | --- |
+| 跨 Session 续接 | 现有结构化 compactor + BranchSummaryEntry handoff | 第二个 transcript/working-memory DB |
+| 可靠召回 | query-aware prepared projection + pinned context | 依赖模型主动 recall；后台 LLM query |
+| 防噪声 | scope/status filter + FTS5 + path/key boost + threshold/top-k/token cap | full-context；embedding/graph |
+| 可治理 | active/stale/archived + revision + stale candidate review + 显式 archive/purge | prepared projection 内静默写库、cron、自动 decay、LLM consolidation |
+| CI 行为 | AGENTS loader 修复 + 可选 pinned behavior | 用自然语言 Memory 冒充硬 gate |
+
+这比上一版明显更重，但每个新增机制都对应用户已经出现的失败，而不是为千/万条企业记忆预建基础设施。

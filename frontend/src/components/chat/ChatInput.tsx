@@ -6,9 +6,11 @@ interface ChatInputProps {
   onCancel: () => void;
   isStreaming: boolean;
   disabled?: boolean;
+  // 侧边栏 skill 引用等外部注入的草稿；父组件每次传入新对象引用即覆盖当前输入并聚焦
+  prefill?: { text: string } | null;
 }
 
-export function ChatInput({ onSendMessage, onCancel, isStreaming, disabled }: ChatInputProps) {
+export function ChatInput({ onSendMessage, onCancel, isStreaming, disabled, prefill }: ChatInputProps) {
   const [input, setInput] = useState<string>("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -18,6 +20,12 @@ export function ChatInput({ onSendMessage, onCancel, isStreaming, disabled }: Ch
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
     }
   }, [input]);
+
+  useEffect(() => {
+    if (!prefill) return;
+    setInput(prefill.text);
+    textareaRef.current?.focus();
+  }, [prefill]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {

@@ -45,6 +45,12 @@ export interface ModelChoice {
   model: string;
 }
 
+// 对应后端 SkillItem（models.py）：description 可缺失
+export interface SkillItem {
+  name: string;
+  description?: string | null;
+}
+
 export interface ConfirmRequest {
   requestId: string;
   message: string;

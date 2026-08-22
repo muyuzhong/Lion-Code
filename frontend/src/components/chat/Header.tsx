@@ -67,6 +67,16 @@ export function Header({
           <span className="hidden sm:inline font-mono">{isConnected ? "Online" : "Connecting..."}</span>
         </div>
 
+        {/* 权限模式徽标：值来自 status.permission_mode（default/acceptEdits/bypassPermissions/dontAsk），纯展示 */}
+        {status?.permission_mode && (
+          <div
+            className="hidden md:flex text-[11px] font-mono text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-900/60 px-2 py-0.5 rounded border border-zinc-200 dark:border-zinc-800"
+            title="权限模式 (permission_mode)"
+          >
+            {status.permission_mode}
+          </div>
+        )}
+
         {/* Workspace directory */}
         {status?.cwd && (
           <div className="hidden md:flex max-w-[180px] truncate text-[11px] font-mono text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-900/60 px-2 py-0.5 rounded border border-zinc-200 dark:border-zinc-800">
