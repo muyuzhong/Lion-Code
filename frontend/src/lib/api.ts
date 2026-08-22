@@ -1,27 +1,35 @@
 import { ChatMessage, ModelChoice, ServerStatus, SessionSummary } from "@/types/chat";
+import { capabilityHeaders } from "@/lib/capability";
 
 const API_BASE = "";
 
+function authorizedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: capabilityHeaders(init.headers),
+  });
+}
+
 export async function fetchStatus(): Promise<ServerStatus> {
-  const res = await fetch(`${API_BASE}/api/status`);
+  const res = await authorizedFetch("/api/status");
   if (!res.ok) throw new Error("Failed to fetch server status");
   return res.json();
 }
 
 export async function fetchSessions(): Promise<SessionSummary[]> {
-  const res = await fetch(`${API_BASE}/api/sessions`);
+  const res = await authorizedFetch("/api/sessions");
   if (!res.ok) throw new Error("Failed to fetch sessions");
   return res.json();
 }
 
 export async function fetchMessages(): Promise<ChatMessage[]> {
-  const res = await fetch(`${API_BASE}/api/messages`);
+  const res = await authorizedFetch("/api/messages");
   if (!res.ok) throw new Error("Failed to fetch messages");
   return res.json();
 }
 
 export async function resumeSession(sessionId: string): Promise<{ success: boolean; session_id: string }> {
-  const res = await fetch(`${API_BASE}/api/sessions/resume`, {
+  const res = await authorizedFetch("/api/sessions/resume", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId }),
@@ -31,7 +39,7 @@ export async function resumeSession(sessionId: string): Promise<{ success: boole
 }
 
 export async function createNewSession(): Promise<{ success: boolean; session_id: string }> {
-  const res = await fetch(`${API_BASE}/api/sessions/new`, {
+  const res = await authorizedFetch("/api/sessions/new", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
@@ -40,7 +48,7 @@ export async function createNewSession(): Promise<{ success: boolean; session_id
 }
 
 export async function fetchModels(): Promise<ModelChoice[]> {
-  const res = await fetch(`${API_BASE}/api/models`);
+  const res = await authorizedFetch("/api/models");
   if (!res.ok) throw new Error("Failed to fetch models");
   return res.json();
 }
@@ -51,7 +59,7 @@ export async function configureProvider(params: {
   provider?: "openai" | "anthropic";
   base_url?: string;
 }): Promise<{ success: boolean; model: string; provider: string }> {
-  const res = await fetch(`${API_BASE}/api/config/provider`, {
+  const res = await authorizedFetch("/api/config/provider", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
@@ -61,7 +69,7 @@ export async function configureProvider(params: {
 }
 
 export async function setThinkingLevel(level: string): Promise<{ thinking_level: string }> {
-  const res = await fetch(`${API_BASE}/api/thinking`, {
+  const res = await authorizedFetch("/api/thinking", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ level }),

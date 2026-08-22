@@ -24,6 +24,32 @@ def test_legacy_tui_option_is_rejected(monkeypatch) -> None:
         parse_args()
 
 
+def test_web_host_option_is_rejected(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["lion-code", "--web", "--host", "0.0.0.0"],
+    )
+
+    with pytest.raises(SystemExit):
+        parse_args()
+
+
+def test_web_keeps_port_and_no_browser_options(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["lion-code", "--web", "--port", "8123", "--no-browser"],
+    )
+
+    args = parse_args()
+
+    assert args.web is True
+    assert args.port == 8123
+    assert args.no_browser is True
+    assert not hasattr(args, "host")
+
+
 def test_help_describes_default_tui_without_legacy_option(monkeypatch, capsys) -> None:
     monkeypatch.setattr(sys, "argv", ["lion-code", "--help"])
 
@@ -34,6 +60,8 @@ def test_help_describes_default_tui_without_legacy_option(monkeypatch, capsys) -
     output = capsys.readouterr().out
     assert "启动 TUI" in output
     assert "Enable extended thinking for supported models" in output
+    assert "--no-browser        Headless health check only" in output
+    assert "no control capability is delivered" in output
     assert "--legacy-tui" not in output
 
 

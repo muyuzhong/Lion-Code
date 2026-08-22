@@ -328,6 +328,115 @@ unknown-command behavior.
 The TUI imports application contracts only. The REPL may render terminal output
 but must not own session persistence or a second command dispatcher.
 
+## Local Web access boundary
+
+### 1. Scope / Trigger
+
+This contract applies to the FastAPI/React interface started by the CLI Web
+mode. It keeps a browser-only loopback control plane without adding account,
+TLS, reverse-proxy, or persistent-token state to Application or Runtime.
+
+### 2. Signatures
+
+```python
+def create_app(
+    session: LionCodingSession,
+    *,
+    capability: str,
+    port: int = 8000,
+) -> FastAPI: ...
+
+def run_server(
+    session: LionCodingSession,
+    port: int = 8000,
+    open_browser: bool = True,
+) -> None: ...
+```
+
+The CLI exposes `--web`, `--port`, and `--no-browser`; it has no host override.
+The browser transport contract is:
+
+```text
+startup URL fragment: #capability=<URL-safe process token>
+REST: Authorization: Bearer <token>
+WebSocket protocols: lion-code, lion-code-capability.<token>
+```
+
+### 3. Contracts
+
+- Uvicorn and the Vite development server bind only `127.0.0.1`. Production
+  Host must equal the selected loopback host/port; the only additional allowed
+  Origin is the fixed Vite loopback Origin.
+- `run_server` generates one in-memory capability per process. It is never
+  printed, persisted, placed in a query string, included in error text, or
+  negotiated back as the selected WebSocket subprotocol.
+- The browser imports the fragment into current-tab `sessionStorage` and
+  immediately removes the fragment from visible history. REST and WebSocket
+  clients read the same stored capability.
+- Static assets and `/api/health` are public. Status, messages, sessions,
+  provider/model settings, skills, thinking, and Agent controls require the
+  capability. FastAPI OpenAPI/docs routes remain disabled.
+- REST validates Host, any supplied Origin, and Bearer capability at the Server
+  entry point. WebSocket validates Host, required Origin, and both offered
+  subprotocol values before `accept()` and before binding interaction callbacks.
+- `--no-browser` is health-probe-only: it does not construct or disclose a
+  capability URL and does not add an anonymous bootstrap path.
+- Server authentication remains interface-owned. `LionCodingSession`, Core,
+  Runtime, session JSONL, and provider state do not retain the capability.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Missing or incorrect REST Bearer capability | HTTP 401 without echoing either token |
+| Foreign Origin or non-loopback Host on protected REST | HTTP 403 before session access |
+| Foreign CORS preflight | No `Access-Control-Allow-Origin` grant |
+| Missing/incorrect WS token, missing/foreign Origin, or wrong Host | Close 1008 before accept/callback binding |
+| Invalid capability passed to `create_app` | `ValueError` before route construction |
+| `--no-browser` startup | Loopback server and public health only; no browser thread or capability URL |
+
+### 5. Good / Base / Bad Cases
+
+- Good: the CLI opens `http://127.0.0.1:<port>/#capability=...`; the React entry
+  imports and erases the fragment, then authenticated REST and WebSocket calls
+  succeed from that exact Origin.
+- Base: a Vite page supplied an explicit valid fragment and reaches the backend
+  through the fixed loopback proxy while preserving the Vite Origin.
+- Bad: restore `allow_origins=["*"]`, accept a WebSocket before validation, add
+  `--host 0.0.0.0`, put the token in `?token=`, print it for headless use, or
+  cache it in Application/Runtime/session persistence.
+
+### 6. Tests Required
+
+- `tests/server/test_server_api.py` asserts the REST/CORS/WS Host-Origin-token
+  matrix, pre-accept WS denial, disabled docs, fragment-only browser URL, fixed
+  uvicorn host, and headless non-disclosure.
+- `tests/test_cli.py` rejects `--host` and preserves the documented `--port` and
+  headless `--no-browser` surface.
+- Frontend capability tests assert fragment import/cleanup, current-tab storage,
+  Bearer injection, and the two WebSocket subprotocol values. TypeScript build
+  must cover all transport call sites.
+- Server tests must mock config persistence and browser effects; the real user
+  API configuration file must remain byte-for-byte unchanged.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+app.add_middleware(CORSMiddleware, allow_origins=["*"])
+await websocket.accept()
+```
+
+Correct:
+
+```python
+if not trusted_host_origin or not valid_capability:
+    await websocket.close(code=1008)
+    return
+await websocket.accept(subprotocol="lion-code")
+```
+
 ## Product adapter contract (PR4)
 
 ### 1. Scope / Trigger

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatMessage, ConfirmRequest, PlanApprovalRequest, ToolCallItem } from "@/types/chat";
 import { fetchMessages } from "@/lib/api";
+import { getCapability, websocketProtocols } from "@/lib/capability";
 import { toast } from "sonner";
 
 export function useLionChat(sessionId?: string) {
@@ -19,11 +20,14 @@ export function useLionChat(sessionId?: string) {
       return;
     }
 
+    const capability = getCapability();
+    if (!capability) return;
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
     const wsUrl = `${protocol}//${host}/ws/chat`;
 
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl, websocketProtocols(capability));
     wsRef.current = ws;
 
     ws.onopen = () => {

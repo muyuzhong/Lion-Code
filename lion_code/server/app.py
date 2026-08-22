@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import json
+import re
+import secrets
 import threading
 import time
 import webbrowser
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
@@ -31,21 +41,100 @@ from .models import (
     ToolCallDTO,
 )
 
+_LOOPBACK_HOST = "127.0.0.1"
+_VITE_ORIGIN = "http://127.0.0.1:3000"
+_WEBSOCKET_PROTOCOL = "lion-code"
+_WEBSOCKET_CAPABILITY_PREFIX = "lion-code-capability."
+_CAPABILITY_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
 
-def create_app(session: LionCodingSession) -> FastAPI:
-    """创建并配置用于 Lion Code 的 FastAPI 应用。"""
+
+def _http_origin(port: int) -> str:
+    suffix = "" if port == 80 else f":{port}"
+    return f"http://{_LOOPBACK_HOST}{suffix}"
+
+
+def _expected_host(port: int) -> str:
+    return _LOOPBACK_HOST if port == 80 else f"{_LOOPBACK_HOST}:{port}"
+
+
+def _is_local_request(
+    *,
+    host: str | None,
+    origin: str | None,
+    expected_host: str,
+    allowed_origins: frozenset[str],
+    require_origin: bool,
+) -> bool:
+    if host != expected_host:
+        return False
+    if origin is None:
+        return not require_origin
+    return origin in allowed_origins
+
+
+def _has_bearer_capability(authorization: str | None, capability: str) -> bool:
+    if authorization is None:
+        return False
+    scheme, separator, candidate = authorization.partition(" ")
+    return (
+        bool(separator)
+        and scheme.lower() == "bearer"
+        and _CAPABILITY_PATTERN.fullmatch(candidate) is not None
+        and secrets.compare_digest(candidate, capability)
+    )
+
+
+def _has_websocket_capability(protocol_header: str | None, capability: str) -> bool:
+    if protocol_header is None:
+        return False
+    expected_capability = f"{_WEBSOCKET_CAPABILITY_PREFIX}{capability}"
+    protocols = tuple(item.strip() for item in protocol_header.split(","))
+    return _WEBSOCKET_PROTOCOL in protocols and any(
+        secrets.compare_digest(protocol, expected_capability) for protocol in protocols
+    )
+
+
+def _generate_capability() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _browser_url(port: int, capability: str) -> str:
+    return f"{_http_origin(port)}/#capability={capability}"
+
+
+def create_app(
+    session: LionCodingSession,
+    *,
+    capability: str,
+    port: int = 8000,
+) -> FastAPI:
+    """创建仅接受本机 capability 客户端的应用。
+
+    静态页面与健康检查保持公开，其余 REST/WS 控制面共享传入的进程内
+    capability。函数不持久化或输出该值；格式不符合 URL-safe token 契约时抛出
+    ``ValueError``。
+    """
+    if _CAPABILITY_PATTERN.fullmatch(capability) is None:
+        raise ValueError("capability 必须是 URL-safe token")
+
+    app_origin = _http_origin(port)
+    expected_host = _expected_host(port)
+    allowed_origins = frozenset((app_origin, _VITE_ORIGIN))
     app = FastAPI(
         title="Lion Code Web API",
         description="Lion Code 编码 Agent 的 Web 与 WebSocket 服务端",
         version="1.0.0",
+        openapi_url=None,
+        docs_url=None,
+        redoc_url=None,
     )
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=sorted(allowed_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
     # ─── REST 接口 ───────────────────────────────────────────────
@@ -54,7 +143,28 @@ def create_app(session: LionCodingSession) -> FastAPI:
     async def health_check() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/api/status", response_model=ServerStatusResponse)
+    async def require_local_capability(request: Request) -> None:
+        if not _is_local_request(
+            host=request.headers.get("host"),
+            origin=request.headers.get("origin"),
+            expected_host=expected_host,
+            allowed_origins=allowed_origins,
+            require_origin=False,
+        ):
+            raise HTTPException(status_code=403, detail="拒绝非本机请求")
+        if not _has_bearer_capability(request.headers.get("authorization"), capability):
+            raise HTTPException(
+                status_code=401,
+                detail="需要本机访问凭证",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    api = APIRouter(
+        prefix="/api",
+        dependencies=[Depends(require_local_capability)],
+    )
+
+    @api.get("/status", response_model=ServerStatusResponse)
     async def get_status() -> ServerStatusResponse:
         usage = session.token_usage()
         return ServerStatusResponse(
@@ -71,7 +181,7 @@ def create_app(session: LionCodingSession) -> FastAPI:
             is_running=session.is_running,
         )
 
-    @app.get("/api/messages", response_model=list[ChatMessageDTO])
+    @api.get("/messages", response_model=list[ChatMessageDTO])
     async def get_messages() -> list[ChatMessageDTO]:
         raw_messages = session.messages
         result: list[ChatMessageDTO] = []
@@ -95,7 +205,9 @@ def create_app(session: LionCodingSession) -> FastAPI:
                 tools_dto: list[ToolCallDTO] = []
                 for tc in m.tool_calls:
                     res_tuple = tool_results.get(tc.id)
-                    status = "error" if res_tuple and res_tuple[1] else "completed"
+                    status: Literal["completed", "error"] = (
+                        "error" if res_tuple and res_tuple[1] else "completed"
+                    )
                     tools_dto.append(
                         ToolCallDTO(
                             id=tc.id,
@@ -117,7 +229,7 @@ def create_app(session: LionCodingSession) -> FastAPI:
                 )
         return result
 
-    @app.get("/api/sessions", response_model=list[SessionSummaryItem])
+    @api.get("/sessions", response_model=list[SessionSummaryItem])
     async def list_sessions() -> list[SessionSummaryItem]:
         sessions_meta = await session.list_sessions()
         current_cwd = session.cwd
@@ -145,7 +257,7 @@ def create_app(session: LionCodingSession) -> FastAPI:
             for m in filtered
         ]
 
-    @app.post("/api/sessions/resume")
+    @api.post("/sessions/resume")
     async def resume_session(body: ResumeSessionRequest) -> dict[str, Any]:
         if session.is_running:
             raise HTTPException(status_code=400, detail="会话正在运行中，无法切换")
@@ -154,21 +266,23 @@ def create_app(session: LionCodingSession) -> FastAPI:
             raise HTTPException(status_code=404, detail="恢复会话失败或会话不存在")
         return {"success": True, "session_id": session.session_id}
 
-    @app.post("/api/sessions/new")
+    @api.post("/sessions/new")
     async def new_session() -> dict[str, Any]:
         if session.is_running:
-            raise HTTPException(status_code=400, detail="会话正在运行中，无法创建新会话")
+            raise HTTPException(
+                status_code=400, detail="会话正在运行中，无法创建新会话"
+            )
         await session.new_session()
         return {"success": True, "session_id": session.session_id}
 
-    @app.get("/api/models", response_model=list[ModelChoiceItem])
+    @api.get("/models", response_model=list[ModelChoiceItem])
     async def get_models() -> list[ModelChoiceItem]:
         return [
             ModelChoiceItem(provider_name=c.provider_name, model=c.model)
             for c in session.available_model_choices
         ]
 
-    @app.post("/api/config/provider")
+    @api.post("/config/provider")
     async def configure_provider(body: ProviderConfigRequest) -> dict[str, Any]:
         if session.is_running:
             raise HTTPException(status_code=400, detail="会话运行中，无法修改配置")
@@ -200,27 +314,46 @@ def create_app(session: LionCodingSession) -> FastAPI:
         if config_kwargs:
             save_api_config(**config_kwargs)
 
-        return {"success": True, "model": session.model, "provider": session.provider_name}
+        return {
+            "success": True,
+            "model": session.model,
+            "provider": session.provider_name,
+        }
 
-    @app.get("/api/skills", response_model=list[SkillItem])
+    @api.get("/skills", response_model=list[SkillItem])
     async def get_skills() -> list[SkillItem]:
         return [
-            SkillItem(name=s.name, description=s.description)
-            for s in session.skills
+            SkillItem(name=s.name, description=s.description) for s in session.skills
         ]
 
-    @app.post("/api/thinking")
+    @api.post("/thinking")
     async def set_thinking(body: ThinkingLevelRequest) -> dict[str, str]:
         if session.is_running:
-            raise HTTPException(status_code=400, detail="会话运行中，无法切换 thinking 档位")
+            raise HTTPException(
+                status_code=400, detail="会话运行中，无法切换 thinking 档位"
+            )
         effective = session.set_thinking_level(body.level)
         return {"thinking_level": effective}
+
+    app.include_router(api)
 
     # ─── WebSocket 流式接口 ───────────────────────────────────────
 
     @app.websocket("/ws/chat")
     async def websocket_chat_endpoint(websocket: WebSocket) -> None:
-        await websocket.accept()
+        if not _is_local_request(
+            host=websocket.headers.get("host"),
+            origin=websocket.headers.get("origin"),
+            expected_host=expected_host,
+            allowed_origins=allowed_origins,
+            require_origin=True,
+        ) or not _has_websocket_capability(
+            websocket.headers.get("sec-websocket-protocol"), capability
+        ):
+            await websocket.close(code=1008)
+            return
+
+        await websocket.accept(subprotocol=_WEBSOCKET_PROTOCOL)
         bridge = SessionWebsocketBridge(session, websocket)
         bridge.bind_callbacks()
 
@@ -251,21 +384,27 @@ def create_app(session: LionCodingSession) -> FastAPI:
 
 def run_server(
     session: LionCodingSession,
-    host: str = "127.0.0.1",
     port: int = 8000,
     open_browser: bool = True,
 ) -> None:
-    """启动 uvicorn 服务并可选自动打开浏览器。"""
+    """在固定 loopback 地址阻塞运行服务，并生成一次性进程 capability。
+
+    ``open_browser`` 启用时会启动后台线程，用仅在 fragment 中携带 capability
+    的 URL 打开默认浏览器。禁用时不交付 capability，也不提供匿名 bootstrap；
+    headless 客户端只能使用公开 health，不能访问控制面。服务停止前该函数不会返回。
+    """
     import uvicorn
 
-    app = create_app(session=session)
-    url = f"http://{host}:{port}"
+    capability = _generate_capability()
+    app = create_app(session=session, capability=capability, port=port)
 
     if open_browser:
+        url = _browser_url(port, capability)
+
         def _open() -> None:
             time.sleep(0.6)
             webbrowser.open(url)
 
         threading.Thread(target=_open, daemon=True).start()
 
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(app, host=_LOOPBACK_HOST, port=port, log_level="info")
