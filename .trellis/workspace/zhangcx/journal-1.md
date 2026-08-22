@@ -1570,3 +1570,65 @@ FastAPI 固定绑定 127.0.0.1，引入进程内 capability，并统一 REST、W
 ### Status
 
 [OK] **Completed**
+
+## Session 52: Provider 设置一致性
+
+**Date**: 2026-08-22
+**Task**: web-provider-settings-integrity（3/5）
+**Branch**: `muyuzhong/web-provider-settings-integrity`
+
+### Summary
+
+局部 Provider 更新先与 Runtime 快照合并成完整配置再落盘：同 Provider 保留现有凭证、切换校验目标凭证、写盘失败补偿回滚；config 原子写并 path 可注入，测试全程 tmp_path 隔离；前端 SettingsModal 草稿随状态重置、ModelSelector 保留 provider/model 配对。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1a0cda7` | fix(web): Provider 设置局部更新与持久化一致性 (#77) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 53: Web 会话 workspace 隔离
+
+**Date**: 2026-08-22
+**Task**: web-session-workspace-isolation（4/5）
+**Branch**: `muyuzhong/web-session-workspace-isolation`
+
+### Summary
+
+list 与 resume 共用 current-cwd eligibility 判断，移除空结果回退全量行为；normcase 路径比较覆盖 Windows 大小写与 resolve 异常，legacy 无 cwd 会话保持可恢复；跨 workspace 与未知 id 返回同一 404。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4adb4f7` | fix(web): 会话列表与恢复的 workspace 隔离 (#78) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 54: Web 服务生命周期与发布
+
+**Date**: 2026-08-22
+**Task**: web-server-delivery-lifecycle（5/5，父任务收官）
+**Branch**: `muyuzhong/web-server-delivery-lifecycle`
+
+### Summary
+
+FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；Vite 产物构建进 lion_code/server/static 随包发布，运行时 importlib.resources 定位，缺失即启动失败；唯一 rebuild 入口 build_frontend.py 与 wheel/安装态验证脚本入库。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b26505f` | feat(web): 服务生命周期关闭与前端发布物随包 (#79) |
+
+### Status
+
+[OK] **Completed**

@@ -1,207 +1,213 @@
-# Lion Project Memory — Converged Technical Design
+# Lion Memory — 收敛技术设计
 
-## 1. Decision
+## 1. 决策
 
-Do not implement the supplied four-store memory platform. Lion needs two deliberately different planes:
+Lion 不需要四个记忆平台，也不应把四类内容删成两个平面。推荐模型是：
 
-1. **Project Knowledge** — authoritative, versioned instructions and procedures already expressed by `AGENTS.md`, `CLAUDE.md`, `.trellis/spec/`, and Skills. The missing product wiring is to load the existing project instruction files in Full product.
-2. **Project Lessons** — a small, local, non-authoritative set of evidence-backed cross-session lessons. It is a cohesive Capability with explicit recall/write/forget tools and one app-owned JSON snapshot.
+```text
+一个 Memory Capability
+  ├─ scope = long_term     跨项目、用户级
+  │    ├─ kind = definition  记住“是什么”
+  │    └─ kind = behavior    记住“怎么做”
+  └─ scope = project       当前项目隔离
+       ├─ kind = definition  记住“这个项目是什么”
+       └─ kind = behavior    记住“在这个项目怎么做”
+```
 
-There is no third “Session Memory” plane. Canonical Session, context compaction, Supervisor checkpoint, Plan state, Trellis tasks, and project lessons keep their existing or newly assigned single owners.
+四个象限是产品语义；一个 Capability、一个 repository 实现、同一组工具和两份作用域文件是工程实现。收敛的是基础设施数量，不是记忆能力。
 
-## 2. First-principles derivation
+## 2. 对上一版取舍的纠正
 
-### Problem in one sentence
+上一版把 `AGENTS.md`、`.trellis/spec/` 和 Skill 合并成 “Project Knowledge”，只为历史经验增加 Project Lessons。这个选择优化了组件数量、污染风险和实现成本，但代价是：
 
-A fresh Lion session should obtain durable project rules and be able to reuse verified prior lessons without treating historical model output as current truth.
+1. Trellis 被错误算进 Lion 产品边界；
+2. Skill 被错误当成行为记忆；
+3. AGENTS 被错误当成项目定义记忆；
+4. 长期定义和长期行为没有产品内承载者；
+5. 项目行为被压扁成单一 lesson 文本，失去触发条件与行动契约；
+6. Lion 的记忆能力依赖产品外机制才能完整。
 
-### Fundamental truths
+因此上一版不是合理的产品收敛。合理取舍是保留 `长期/项目 × 定义/行为` 四个语义象限，同时删除四套平台、重复运行时和自动维护链。
 
-| Truth | Consequence |
-| --- | --- |
-| Current source, tests, and project instructions are more authoritative than remembered text. | Memory is a hint with evidence, never an instruction or source of truth. |
-| A fresh model request already contains the user's query and can call tools. | No task-start Hook or wrapper is required for query-dependent recall. |
-| Automatic model-written durable state can poison every later session. | Writes are explicit tool calls, require evidence, and use the existing confirmation boundary. |
-| Lion already resolves project identity and app-owned project storage. | Reuse `ProjectIdentity` and `project_storage_dir`; add no root/hash/config abstraction. |
-| Repo rules and reusable procedures already have versioned homes. | Do not copy them into generated Repo/Procedure Memory. |
-| The expected lesson corpus is small and local. | Deterministic in-memory scan is sufficient; no SQLite, FTS, embeddings, cache, or cron. |
-| Session replay and Supervisor recovery solve different problems. | Do not persist lessons as Session entries or checkpoint fields. |
+## 3. 第一性原理
 
-## 3. Review of the supplied design
+### 3.1 记忆必须解决的最小问题
 
-| Proposed element | Verdict | Converged alternative |
+一个新会话需要复用当前上下文没有携带、但用户明确希望跨会话保留的信息。信息只有两个正交维度：
+
+- **适用范围**：对所有项目都成立，还是只对当前项目成立；
+- **使用方式**：描述世界/用户/项目，还是规定遇到条件后如何行动。
+
+作用域决定隔离和存储位置，语义类型决定数据结构和召回后的使用方式。原设计的 Repo、Coding、Preference、Procedure 是内容标签，不能稳定地充当存储边界：一条 preference 可能是定义，也可能是行为；一条 procedure 也可能只适用于某个项目。
+
+### 3.2 四个象限
+
+| 作用域 | 定义：是什么 | 行为：怎么做 |
 | --- | --- | --- |
-| Repo Memory / generated `repo.md` | Reuse existing ability; delete duplicate store | Load `AGENTS.md` / `CLAUDE.md`; route deeper rules to Trellis specs and Skills. |
-| Coding Memory | Keep, but narrow | Store only reusable, evidence-backed project lessons. |
-| Preference Memory | Remove from this feature | Caller/user configuration or system prompt owns collaboration preferences. |
-| Procedure Memory | Remove from this feature | Skills and `.trellis/spec/` own executable procedures. |
-| Unified four-type schema | Delete | One `ProjectLesson` schema; no unused `type`, `scope`, `status`, or usage counters. |
-| Markdown + JSONL + SQLite triple storage | Delete | One strict, atomic `lessons.json` under app-owned project storage. |
-| FTS5 / BM25 / weighted score | Defer | Small deterministic lexical scan with path/key matches and bounded top results. |
-| Task-start Hook / Agent wrapper | Delete | PromptLayer tells the model to call the ordinary recall tool before redundant exploration. |
-| Task-end background LLM extractor | Delete | The active model proposes one explicit `remember_project_lesson` call; no second model request. |
-| Semantic dedupe thresholds (`0.85`, `0.9`) | Delete | Exact stable key updates one entry; different keys stay distinct until a human removes one. |
-| Newer timestamp wins on conflict | Reject | Current code/evidence wins; conflicting memory is verified, then updated or forgotten explicitly. |
-| `use_count` / `last_used_at` mutations | Delete | Recall is read-only; no hidden write on read. |
-| Daily decay / weekly consolidation | Delete | Explicit forget and exact-key replacement; add maintenance only after measured corpus-quality failure. |
-| Hidden `<memory>` prompt injection | Delete for dynamic lessons | Recall returns an ordinary tool result, visible and auditable in canonical Session. |
-| CLI, Viewer, config weights, cron expressions | Defer | Model-facing tools are the MVP control plane. |
+| 长期 | 用户稳定偏好、工作环境、跨项目事实。例如“用户主要在 Windows/PowerShell 工作”。 | 跨项目协作与工程动作。例如“修改脏工作树时只暂存任务拥有的文件”。 |
+| 项目 | 当前仓库架构、所有权、决策、关键命令。例如“ToolRuntime 是唯一工具执行路径”。 | 当前项目触发式规则、已验证失败模式和回归动作。例如“修改 Kernel 后先运行架构门禁”。 |
 
-## 4. Target architecture
+### 3.3 权威性
+
+Memory 是跨会话的历史上下文，不是最高优先级指令。发生冲突时按当前证据处理：
+
+```text
+当前系统/开发者/用户指令、当前源码与测试、当前 AGENTS
+    > Memory
+```
+
+记忆冲突后必须显式更新或删除，不能用“更新时间较新”“命中次数较多”或“向量更相似”自动判真。
+
+## 4. 非 Memory 边界
+
+| 能力/数据 | 定位 | 与 Memory 的关系 |
+| --- | --- | --- |
+| AGENTS.md | 当前项目的权威 Agent 指令 | 可作为验证记忆的当前证据；不是 Memory store。 |
+| Skill | 可执行、可分发的能力和提示包 | 行为记忆可提示用户另行沉淀为 Skill，但不自动晋升，也不由 Memory 读取。 |
+| Trellis | 用户开发 Agent 时使用的外部流程管理工具 | 完全不进入 Lion Memory 的对象图、存储、检索或测试契约。 |
+| canonical Session | 当前会话事件与重放事实 | 记录召回工具结果；不是跨会话记忆源。 |
+| Compaction | 会话上下文有界投影 | 不读写 Memory store。 |
+| Supervisor Checkpoint | 长任务执行恢复 | 不包含记忆内容。 |
+| Plan | 当前任务状态 | 不镜像到 Memory。 |
+
+## 5. 目标架构
 
 ```text
 FullProfile
-  -> Project Instructions (existing loader, dynamic system context)
-  -> ProjectLessons Capability
-       -> ProjectLessonsPromptLayer (behavior only, no stored content)
-       -> recall_project_lessons   [read-only]
-       -> remember_project_lesson  [confirmation]
-       -> forget_project_lesson    [confirmation]
-       -> ProjectLessonRepository
-            -> ~/.lion-code/projects/<project-key>/lessons.json
+  -> MemoryCapability
+       -> MemoryPromptLayer       只说明何时召回及可信度，不注入记忆内容
+       -> recall_memory           只读；同时检索两个作用域
+       -> remember_definition     需确认
+       -> remember_behavior       需确认
+       -> forget_memory           需确认
+       -> MemoryRepository        一个具体实现，不设单实现 Protocol
+            -> ~/.lion-code/memory/long-term.json
+            -> ~/.lion-code/projects/<project-key>/memory.json
 
-Tool calls -> existing ToolRuntime -> permission/audit middleware -> ToolResult
-ToolResult -> ordinary canonical Session JSONL observation
+四类工具调用 -> 现有 ToolRuntime -> 现有权限/审计/ToolResult
+召回结果 -> ordinary Session observation
 ```
 
-### Ownership
+Memory 不进入 Agent Runtime、MetaAgent、Application/TUI facade、PlanRuntime、ContextRuntime 或 Session schema。`AgentComposition` 不暴露 repository 作为 service locator。
 
-| State | Single owner | Persistence / projection |
-| --- | --- | --- |
-| Project rules and procedures | Repository authors / project files | Versioned `AGENTS.md`, `CLAUDE.md`, `.trellis/spec/`, Skills; system prompt only |
-| Project lessons | `ProjectLessonRepository` inside `capabilities/project_lessons/` | App-owned `lessons.json`; recalled through tools |
-| Conversation and recalled observations | `SessionRuntime` / `SessionRecorder` | Existing append-only Session JSONL |
-| Context pressure and summaries | `ContextRuntime` / existing compactor | Existing validated `CompactionEntry` path |
-| Long-running execution recovery | `Supervisor` | Existing checkpoint schema; no lesson content |
-| Plan task state | `PlanRuntime` / Trellis task artifacts | Existing Plan/Trellis contracts; no lesson mirror |
+## 6. 数据契约
 
-Neither Agent Runtime nor `MetaAgent` gains a memory field, repository reference, command delegate, or query port. `AgentComposition` does not expose the repository as a service locator.
-
-## 5. Project Knowledge path
-
-The existing `load_project_context_files()` behavior is retained: resolve one project identity, load root-to-cwd `CLAUDE.md` then `AGENTS.md`, and keep the more specific content later.
-
-`build_full_coding_backend()` changes only its existing dynamic-context builder so the default Full product combines:
-
-```text
-Environment / Git / deferred-tool context
-+ existing load_claude_md() result
-```
-
-No generated Repo Memory file, repo scan, Git commit watcher, or write-back exists. A caller-supplied custom system prompt keeps its current opt-out semantics unless a separate product decision changes that contract.
-
-## 6. Project Lessons capability
-
-### Package shape
-
-Use the fewest cohesive files:
-
-```text
-lion_code/capabilities/project_lessons/
-├── __init__.py
-├── capability.py     # CapabilitySpec, PromptLayer, three LionTools
-└── repository.py     # strict model, load/search/upsert/delete, atomic persistence
-```
-
-Do not introduce `MemoryRuntime`, `MemoryCoordinator`, `MemoryHost`, `MemoryQuerySink`, a repository Protocol with one implementation, or a background resource.
-
-### Stored contract
+两个文件使用同一文档结构；文件位置隐含 scope，条目不重复保存 scope：
 
 ```json
 {
-  "project_root": "D:/harness agent/Lion",
-  "lessons": [
+  "definitions": [
     {
-      "key": "context-runtime-plan-independence",
-      "content": "ContextRuntime must resolve objectives without PlanRuntime coupling.",
-      "evidence": ["tests/architecture/test_runtime_ownership.py", "commit 59e18a5"],
-      "paths": ["lion_code/runtime/context.py"]
+      "key": "primary-shell",
+      "statement": "用户主要使用 Windows PowerShell。",
+      "evidence": ["用户明确说明"]
+    }
+  ],
+  "behaviors": [
+    {
+      "key": "dirty-worktree-staging",
+      "trigger": "工作树包含与当前任务无关的改动",
+      "instruction": "只暂存并提交当前任务拥有的路径。",
+      "evidence": ["用户明确说明"],
+      "paths": ["lion_code/"]
     }
   ]
 }
 ```
 
-Only these fields exist in MVP:
+### Definition
 
-- `key`: stable human-readable identity used for exact replacement;
-- `content`: concise reusable claim, constraint, failed approach, or regression check;
-- `evidence`: at least one current source/test/command/commit/user-decision reference;
-- `paths`: optional normalized project-relative hints.
+- `key`：作用域内稳定、可读的唯一键；
+- `statement`：一个可验证的“是什么”陈述；
+- `evidence`：至少一条用户决定、当前源码、测试、命令结果或提交引用；
+- `paths`：仅项目记忆可选，用于限定相关项目路径。
 
-There is no `version`, `type`, `scope`, `status`, timestamp, usage counter, archived copy, superseded chain, or semantic vector. A changed schema is an intentional breaking design change, not a migration branch.
+### Behavior
 
-### Persistence
+- `key`：作用域内稳定、可读的唯一键；
+- `trigger`：可以判断的适用条件；
+- `instruction`：条件成立时要执行的动作；
+- `evidence`：至少一条来源；
+- `paths`：仅项目记忆可选。
 
-- Resolve `ProjectIdentity` once from the composition cwd.
-- Store at `project_storage_dir(identity) / "lessons.json"`; never dirty the repository.
-- Strictly validate `project_root`, field types, entry bounds, and unique keys.
-- Load the whole file because the corpus is small.
-- Upsert/delete by rewriting a temporary file, flushing/fsyncing it, then `os.replace`, following the existing Supervisor checkpoint pattern.
-- Missing file means an empty set. Invalid UTF-8, malformed JSON, wrong root, duplicate keys, or unknown fields raise a clear repository error and are never overwritten by an empty state.
-- `forget_project_lesson` physically removes the entry; it does not pretend that archived data was forgotten.
-- Forgetting does not rewrite append-only Session JSONL that already recorded an earlier recall result; deleting historical sessions is a separate user-authorized operation.
-- No migration or fallback is provided. A future schema change replaces the contract through a separately reviewed design.
+MVP 不保存 `version`、时间戳、状态、置信度、使用次数、最后命中时间、归档副本、superseded 链或向量。定义和行为使用不同写入工具，避免一个带大量互斥可选字段的万能 schema。
 
-### Retrieval
+## 7. 存储与所有权
 
-`recall_project_lessons(query, paths=())` is a read-only tool. It scans current entries and ranks them deterministically:
+- `MemoryRepository` 属于 `capabilities/memory/`，由一个实例管理长期和当前项目两份文件。
+- 长期文件位于用户级 app data；项目文件复用 `ProjectIdentity` 与 `project_storage_dir(identity)`，不写入仓库。
+- 文件缺失表示该作用域为空，召回不创建文件。
+- 每次写入完整严格校验、写临时文件、flush/fsync 后 `os.replace`。
+- 非法 UTF-8、畸形 JSON、未知字段、重复 key 或越界内容直接报错；记住/忘记不得用空状态覆盖损坏文件。
+- 同一 scope、同一 kind、同一 key 做原子替换；definition 与 behavior 可以使用相同 key，因为它们表达不同契约。
+- `forget_memory(scope, kind, key)` 物理删除目标条目。它不改写已经包含旧召回结果的 append-only Session；历史会话删除是另一个需用户授权的操作。
+- 没有迁移、兼容读取或 fallback。未来契约变化另行评审。
 
-1. exact key or exact path match;
-2. number of distinct case-folded query terms found in key/content/paths;
-3. `key` ascending for a stable final tie-break.
+## 8. 召回
 
-Return at most five entries and cap the combined output at a fixed 2,000 characters. Include each entry's key, content, evidence, and relevant paths plus an omission marker when cropped. Empty query lists keys only; zero matches is a normal empty result.
+`recall_memory(query, paths=())` 一次检索两个 scope，并按四个象限分组返回。它只做有界、确定性扫描：
 
-There are no configurable weights, recency decay, use-count feedback loop, semantic calls, or implicit stale checks. The PromptLayer states: memories are historical evidence, current source wins, verify before acting, and call recall before repeating broad exploration in a fresh project task.
+1. key 或项目 path 精确匹配优先；
+2. query 中不同的 case-folded 词在 statement/trigger/instruction/key/path 中的命中数；
+3. scope 固定顺序、kind 固定顺序、key 升序作为稳定 tie-break。
 
-### Write and forget
+结果总数和总字符数使用固定上限；超限时返回明确 omission marker。空查询只列出各象限的 key，不展开正文。没有可配置权重、BM25、embedding、recency、use-count 写回或二次 LLM 调用。
 
-- `remember_project_lesson` requires a stable key, concise content, at least one evidence item, and optional repo-relative paths.
-- A new key adds one entry; the same key replaces it atomically. It never searches for semantic neighbors.
-- `remember_project_lesson` and `forget_project_lesson` use `ToolCapabilities.requires_confirmation=True`; `recall_project_lessons` is read-only and concurrency-safe.
-- They follow the existing permission modes exactly: `bypassPermissions` remains an intentional bypass rather than gaining a feature-specific hard gate.
-- The main model may propose a write after a verified task; there is no background LLM call or task-end hook.
-- One-time progress, active goals, pending steps, raw conversation summaries, secrets, transient failures, and unverified guesses are rejected by prompt contract and tool validation where mechanically possible.
+`MemoryPromptLayer` 只告诉模型：新任务在大范围探索前调用一次召回；当前证据优先；使用行为前检查 trigger；未命中是正常结果。它不包含或隐藏注入实际记忆内容。MVP 接受模型可能漏调工具的可观测风险；在有真实漏召回数据前，不为此扩大 ContextLayer 的用户文本权限或增加 turn hook。
 
-All three operations use the sole `ToolRuntime.execute` route, so current permission, secret, audit, error, and result semantics remain in force.
+## 9. 写入与遗忘
 
-## 7. Composition boundary
+- `remember_definition(scope, key, statement, evidence, paths=())` 明确写入定义。
+- `remember_behavior(scope, key, trigger, instruction, evidence, paths=())` 明确写入行为。
+- `forget_memory(scope, kind, key)` 明确删除一条记忆。
+- 三个 mutation 工具均设置 `requires_confirmation=True`；`recall_memory` 是只读、可并发工具。
+- 长期 scope 拒绝 `paths`；项目 scope 的 path 必须规范化为项目相对路径且不得越界。
+- 活跃模型只在事实或行为已被当前证据验证、且预期跨会话复用时提出写入。一次性进度、当前目标、原始会话摘要、秘密、瞬时失败、未验证猜测不允许写入。
+- 不自动从 Session、AGENTS、Skill 或 Trellis 抽取；不在任务结束时调用后台模型。
+- Memory 不自动修改 AGENTS，也不自动生成 Skill。将成熟行为正式化为二者是独立、显式、可评审的产品外动作。
 
-`FullProfile` selects a built-in `project_lessons` Capability beside Plan, Skill, and SubAgent. Composition constructs it from the existing cwd/project identity and registers its immutable `CapabilitySpec`.
+## 10. Composition 边界
 
-Use a new `_CAP_PROJECT_LESSONS` selection name if the current builder needs a branch. Do not revive the forbidden legacy `_CAP_MEMORY` symbol. CodingProfile and MinimalProfile remain unchanged; callers can still supply an explicitly constructed spec through `extension_specs` if they want the feature there.
+`FullProfile` 默认选择新的 Memory Capability；CodingProfile 与 MinimalProfile 不变，调用方仍可通过现有 `extension_specs` 显式添加能力。
 
-The capability contributes tools and a PromptLayer only. It does not contribute a `ContextLayer` or `SessionParticipant`, and no Runtime module changes.
+如 composition 需要内建选择名，使用不会恢复旧契约的新名字，例如 `_CAP_USER_PROJECT_MEMORY`。不得恢复 `_CAP_MEMORY`、`SessionMemoryCoordinator`、`MemoryQuerySink`、ProjectionLayer、Dream、Learning 或 provider-side memory query service。
 
-## 8. Error and safety matrix
+Capability 只贡献四个工具和一个 PromptLayer，不贡献 ContextLayer、SessionParticipant 或 Runtime owner。
 
-| Condition | Required result |
+## 11. 错误与安全矩阵
+
+| 条件 | 结果 |
 | --- | --- |
-| No lessons file | Recall returns empty; no file is created. |
-| Malformed/corrupt file | Clear tool error; remember/forget refuse to overwrite. |
-| Store belongs to another normalized root | Clear identity error; no fallback or cross-project read. |
-| Recall has no match | Empty result; agent continues with current-source exploration. |
-| Result exceeds budget | Deterministic truncation with omission marker. |
-| Duplicate remember key | Exact atomic replacement. |
-| Conflicting different key | Both remain visible; agent verifies source and explicitly forgets/updates. |
-| User rejects mutation confirmation | No file change; ordinary permission-denied result. |
-| Memory conflicts with current code | Current code wins; memory is updated or physically forgotten. |
-| Session is restored | Historical recall result remains in transcript; future recall reads the current lesson store. |
+| 两个文件都不存在 | 召回返回空，不创建文件。 |
+| 其中一个文件损坏 | 明确指出损坏 scope；拒绝覆盖；另一个 scope 不被修改。 |
+| 长期写入携带 paths | 参数错误，无文件变化。 |
+| 项目 path 越界 | 参数错误，无文件变化。 |
+| 空查询 | 只列四个象限的 key。 |
+| 没有匹配 | 返回正常空结果，继续检查当前上下文。 |
+| 超过预算 | 按稳定顺序截断并显示 omission marker。 |
+| 同 key、同 kind 写入 | 原子替换。 |
+| 不同记忆互相冲突 | 同时显示，检查当前证据后显式更新或删除。 |
+| 当前代码/AGENTS 与记忆冲突 | 当前证据胜出，记忆不能覆盖其行为。 |
+| 用户拒绝 mutation 确认 | 不修改文件，返回现有 permission-denied 结果。 |
+| 恢复历史 Session | transcript 中旧召回仍在；下一次 recall 读取当前 Memory store。 |
 
-## 9. Deliberately deferred additions
+## 12. 删除与延后
 
-Add complexity only after evidence proves the current mechanism fails:
+| 原设计元素 | 决策 | 理由 |
+| --- | --- | --- |
+| Repo/Coding/Preference/Procedure 四套平台 | 删除平台划分，保留内容语义 | scope × kind 更正交；不需要四套基础设施。 |
+| Markdown + JSONL + SQLite 三重存储 | 删除 | 两份作用域 JSON 已能满足当前规模和隔离需求。 |
+| FTS5/BM25/向量/加权评分 | 延后 | 先用可解释扫描；有实际召回失败再升级。 |
+| Task-start Hook / Agent Wrapper | 删除 | 模型已有 query 和工具；PromptLayer 足以形成可观测 MVP。 |
+| Task-end 后台 LLM | 删除 | 污染面大且产生第二写者；显式写入可审计。 |
+| 语义去重阈值 | 删除 | exact key 替换即可；相似不等于相同。 |
+| use_count / last_used_at | 删除 | 召回应只读，避免隐藏写入。 |
+| 定时衰减 / 周期 consolidation | 延后 | 只有测得噪声增长后才有需求。 |
+| 自动写 AGENTS / 自动生成 Skill | 删除 | 改变权威指令或能力包必须独立评审。 |
+| CLI/TUI viewer、配置权重、cron | 延后 | 四个模型工具是 MVP 控制面。 |
 
-- **SQLite FTS5**: only if measured corpus size/search latency or lexical miss rate makes an in-memory scan inadequate.
-- **Automatic extraction**: only if users consistently miss valuable lessons and a reviewed evaluation shows acceptable contamination rate.
-- **Automatic stale detection**: only if stale-memory incidents persist despite evidence display and current-source verification.
-- **Consolidation/decay jobs**: only if duplicate/noise growth is measured; prefer a one-shot explicit maintenance command before a scheduler.
-- **CLI/TUI viewer**: only if model-facing list/search/forget is insufficient for real management workflows.
-- **Semantic/vector retrieval, global preference store, multi-agent sharing, cloud sync**: separate product decisions, not MVP extensions.
+## 13. 回滚
 
-## 10. Rollback and compatibility
-
-- No legacy Memory data or API is migrated; none exists in the current product contract.
-- Project Knowledge wiring can be reverted independently without touching Session or lessons data.
-- Project Lessons can be removed by unregistering the Capability; the local `lessons.json` remains a recoverable user file and no Runtime schema changes are required.
-- Session JSONL, `CompactionEntry`, Supervisor checkpoints, Plan state, and existing ContextLayer behavior remain byte-for-byte compatible because this design does not edit their schemas or ownership.
+- 取消注册 Capability 即可停止新召回和写入，不改变 Session、Compaction、Checkpoint、Plan 或 Runtime schema。
+- 两份 JSON 是可恢复的用户数据；回滚代码不自动删除，删除需单独授权。
+- 新设计不迁移旧 Memory 数据，也不保留旧 API；当前产品没有需要兼容的生产契约。
