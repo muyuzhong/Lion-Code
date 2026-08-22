@@ -177,6 +177,25 @@ class PermissionMiddleware:
             )
         )
         if decision.action == "deny":
+            if decision.budget_exceeded:
+                # 预算外 + 无人值守：优雅停机。进度保存/恢复归 Supervisor
+                # 平面，此处只发结构化停机信号，不做 git commit
+                return ToolResult(
+                    content=(
+                        "Budget exceeded (unattended mode): this action needs a "
+                        "human decision and was NOT executed.\n"
+                        f"Trigger: {decision.message}\n"
+                        "The task is suspended. On resume, grant the action via "
+                        "settings rules or permission mode, then continue from "
+                        "the current workspace state."
+                    ),
+                    is_error=True,
+                    terminate=True,
+                    details={
+                        "budget_exceeded": True,
+                        "trigger": decision.message,
+                    },
+                )
             return ToolResult(
                 content=f"Action denied: {decision.message}",
                 is_error=True,

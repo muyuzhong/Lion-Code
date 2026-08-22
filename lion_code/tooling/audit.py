@@ -106,8 +106,14 @@ class ExecutionAuditLog:
         best_effort = result.details.get("egress_best_effort")
         fingerprint_hit = result.details.get("fingerprint_hit")
         blocked = result.details.get("egress_blocked")
+        budget_exceeded = result.details.get("budget_exceeded")
+        notes: list[str] = []
+        if budget_exceeded:
+            notes.append("budget_exceeded: graceful shutdown")
         result_value: AuditResult = (
-            "blocked" if blocked else ("failed" if result.is_error else "success")
+            "blocked"
+            if (blocked or budget_exceeded)
+            else ("failed" if result.is_error else "success")
         )
         self.append(
             ExecutionEvent(
@@ -125,6 +131,7 @@ class ExecutionAuditLog:
                     fingerprint_hit if isinstance(fingerprint_hit, bool) else None
                 ),
                 result=result_value,
+                notes=notes,
             )
         )
 
