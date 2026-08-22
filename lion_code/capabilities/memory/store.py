@@ -784,6 +784,13 @@ class MemoryStore:
         return validated is None or validated < cutoff
 
     @staticmethod
+    def _missing_paths(entry: MemoryEntry, project_root: Path) -> tuple[str, ...]:
+        """确定性存在性校验（设计 7.2）：只判断，不读内容不执行。"""
+        return tuple(
+            path for path in entry.paths if not (project_root / path).exists()
+        )
+
+    @staticmethod
     def _stale_candidates(
         entries: Sequence[MemoryEntry],
         project_root: Path | None,
@@ -794,9 +801,7 @@ class MemoryStore:
         for entry in entries:
             if entry.status != "active" or not entry.paths:
                 continue
-            missing = tuple(
-                path for path in entry.paths if not (project_root / path).exists()
-            )
+            missing = MemoryStore._missing_paths(entry, project_root)
             if missing and len(missing) == len(entry.paths):
                 candidates.append(
                     ReviewStaleCandidate(
@@ -875,9 +880,7 @@ class MemoryStore:
             if not entry.paths:
                 healthy.append(entry)
                 continue
-            missing = tuple(
-                path for path in entry.paths if not (project_root / path).exists()
-            )
+            missing = MemoryStore._missing_paths(entry, project_root)
             if missing and len(missing) == len(entry.paths):
                 candidates.append(
                     ReviewStaleCandidate(
