@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "Prompt/composition 与 Full product 契约，接线不得破坏现有边界"}
+{"file": ".trellis/tasks/08-22-memory-system-design-convergence/research/current-architecture-evidence.md", "reason": "AGENTS loader 存在但生产未接入的证据与锚点"}

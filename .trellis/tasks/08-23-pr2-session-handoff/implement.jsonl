@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "canonical Session/Compaction 契约与前端所有权"}
+{"file": ".trellis/spec/backend/four-layer-ownership.md", "reason": "handoff 在 application facade 显式协调，不得让 Memory/Runtime 拥有 Session"}
+{"file": ".trellis/tasks/08-22-memory-system-design-convergence/research/current-architecture-evidence.md", "reason": "Compaction 九段与 BranchSummaryEntry 缺口证据"}

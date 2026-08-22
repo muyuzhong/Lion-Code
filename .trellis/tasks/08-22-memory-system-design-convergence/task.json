@@ -18,7 +18,12 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [],
+  "children": [
+    "08-23-pr1-full-project-instructions",
+    "08-23-pr2-session-handoff",
+    "08-23-pr3-memory-store",
+    "08-23-pr4-auto-recall"
+  ],
   "parent": null,
   "relatedFiles": [],
   "notes": "",

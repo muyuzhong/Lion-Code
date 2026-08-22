@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/capability-spi.md", "reason": "Capability tool/prompt/context/resource seam 契约"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "本地持久化边界与事务/schema 约定"}
+{"file": ".trellis/spec/backend/four-layer-ownership.md", "reason": "Memory 保持 capability 私有，不泄漏到 Runtime/Supervisor"}
+{"file": ".trellis/spec/backend/tool-runtime-recovery.md", "reason": "ToolRuntime 唯一 execute 窄腰与确认/审计边界"}
+{"file": ".trellis/tasks/08-22-memory-system-design-convergence/research/current-architecture-evidence.md", "reason": "SQLite FTS5 可用性与旧 Memory 移除门禁证据"}

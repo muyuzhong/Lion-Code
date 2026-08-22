@@ -1,6 +1,6 @@
-# Implementation Plan（等待 handoff UX 决策）
+# Implementation Plan（handoff UX 已确认：显式 handoff_session，2026-08-23 批准启动）
 
-本计划未启动。用户确认 handoff UX、规划产物再次收敛并在后续消息明确批准后，才能运行 `task.py start`。
+计划已批准。按 child task 逐个实施：
 
 本范围包含四个可独立回滚的职责，不能放进一个超过项目阈值的大 PR。最终批准后应把本任务作为 parent，创建对应 child task，并在每个 child artifact 中写明以下依赖。
 
