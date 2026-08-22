@@ -218,6 +218,8 @@ export function useLionChat(sessionId?: string) {
     confirmRequest: state.confirmRequest,
     planApprovalRequest: state.planApprovalRequest,
     queue: state.queue,
+    runtimeNotice: state.runtimeNotice,
+    metrics: state.metrics,
     sendMessage,
     sendCommand,
     sendContinue,

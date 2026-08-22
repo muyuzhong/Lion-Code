@@ -436,6 +436,38 @@ export interface ChatQueueState {
 
 const emptyChatQueue: ChatQueueState = { steering: [], followUp: [] };
 
+// 运行状态条（单值，后到覆盖先到）：自动重试 / 上下文压缩的进行中提示。
+// 成功或完成事件清除；失败与流终止也清除——错误由 failStreaming 的消息卡片
+// 呈现，保留"重试中/压缩中"会与已终止的流矛盾且永不消失。
+export type RuntimeNotice =
+  | {
+      kind: "retry";
+      attempt: number;
+      maxAttempts: number;
+      delayMs: number;
+      errorMessage: string;
+    }
+  | { kind: "compaction"; reason: CompactionReason };
+
+// 本地打点指标（D11：无 per-request usage，只做耗时类）。
+// 协议事件不带服务端时间戳，llmMs / toolMs 以 reducer 收到事件的本地时钟近似。
+// llmStartMs / toolStartMs 是进行中的计时起点，仅供 reducer 配对，不参与展示。
+export interface ChatMetrics {
+  steps: number; // turn_start 计数：每个 LLM 调用轮计一步
+  llmMs: number; // assistant message_start→message_end 累计
+  toolMs: number; // tool_execution_start→end 累计（按 toolCallId 配对）
+  llmStartMs: number | null;
+  toolStartMs: Record<string, number>;
+}
+
+export const emptyChatMetrics: ChatMetrics = {
+  steps: 0,
+  llmMs: 0,
+  toolMs: 0,
+  llmStartMs: null,
+  toolStartMs: {},
+};
+
 export interface ChatProtocolState {
   messages: ChatMessage[];
   isStreaming: boolean;
@@ -444,6 +476,12 @@ export interface ChatProtocolState {
   confirmRequest: ConfirmRequest | null;
   planApprovalRequest: PlanApprovalRequest | null;
   queue: ChatQueueState;
+  runtimeNotice: RuntimeNotice | null;
+  metrics: ChatMetrics;
+  // 思考耗时（D12）的本地计时：thinking 块 start/end 在 reducer 配对，
+  // 累计值在 message_end 写入 ChatMessage.reasoningDuration；新消息开始时归零
+  thinkingStartMs: number | null;
+  reasoningElapsedMs: number;
 }
 
 export const initialChatProtocolState: ChatProtocolState = {
@@ -454,6 +492,10 @@ export const initialChatProtocolState: ChatProtocolState = {
   confirmRequest: null,
   planApprovalRequest: null,
   queue: emptyChatQueue,
+  runtimeNotice: null,
+  metrics: emptyChatMetrics,
+  thinkingStartMs: null,
+  reasoningElapsedMs: 0,
 };
 
 export type ChatProtocolAction =
@@ -480,6 +522,11 @@ export function reduceChatProtocol(
         planApprovalRequest: null,
         // 队列是服务端瞬态状态，不在 canonical history 内；重连/换会话后等下一次 queue_update 同步
         queue: emptyChatQueue,
+        // 本地打点与进行中提示同样不跨会话/重连累计
+        runtimeNotice: null,
+        metrics: emptyChatMetrics,
+        thinkingStartMs: null,
+        reasoningElapsedMs: 0,
       };
     case "append_user":
       return {
@@ -515,7 +562,7 @@ function reduceServerEvent(
       return { ...state, isStreaming: true };
     case "message_start":
       if (event.message.role === "assistant") {
-        return startAssistantMessage(state, event.message);
+        return startAssistantMessage(trackLlmStart(state), event.message);
       }
       if (event.message.role === "user") {
         return consumeQueuedUserMessage(state, event.message);
@@ -525,6 +572,9 @@ function reduceServerEvent(
       const delta = event.assistantMessageEvent;
       if (delta.type === "error") {
         return applyAssistantError(state, delta.error);
+      }
+      if (delta.type === "thinking_start" || delta.type === "thinking_end") {
+        return trackThinkingSpan(state, delta.type === "thinking_start");
       }
       if (delta.type !== "text_delta" && delta.type !== "thinking_delta") {
         return state;
@@ -538,19 +588,23 @@ function reduceServerEvent(
     }
     case "message_end":
       return event.message.role === "assistant"
-        ? finalizeAssistantMessage(state, event.message)
+        ? finalizeAssistantMessage(trackLlmEnd(state), event.message)
         : state;
     case "turn_failed":
       return event.message.role === "assistant"
         ? applyAssistantError(state, event.message)
         : failStreaming(state, "Agent turn failed.");
     case "tool_execution_start":
-      return updateTool(state, event.toolCallId, () => ({
-        id: event.toolCallId,
-        toolName: event.toolName,
-        args: event.args,
-        status: "running",
-      }));
+      return updateTool(
+        trackToolStart(state, event.toolCallId),
+        event.toolCallId,
+        () => ({
+          id: event.toolCallId,
+          toolName: event.toolName,
+          args: event.args,
+          status: "running",
+        }),
+      );
     case "tool_execution_update":
       return updateTool(state, event.toolCallId, (current) => ({
         ...current,
@@ -561,13 +615,17 @@ function reduceServerEvent(
         result: toolResultText(event.partialResult),
       }));
     case "tool_execution_end":
-      return updateTool(state, event.toolCallId, (current) => ({
-        ...current,
-        id: event.toolCallId,
-        toolName: event.toolName,
-        status: event.isError ? "error" : "completed",
-        result: toolResultText(event.result),
-      }));
+      return updateTool(
+        trackToolEnd(state, event.toolCallId),
+        event.toolCallId,
+        (current) => ({
+          ...current,
+          id: event.toolCallId,
+          toolName: event.toolName,
+          status: event.isError ? "error" : "completed",
+          result: toolResultText(event.result),
+        }),
+      );
     case "confirm_request":
       return {
         ...state,
@@ -587,25 +645,46 @@ function reduceServerEvent(
     case "server_error":
     case "protocol_error":
       return failStreaming(state, event.message);
+    // 压缩/重试的失败走 failStreaming（内部清除状态条）：错误由消息卡片呈现，
+    // 状态条只在事件流进行中有意义
     case "compaction_end":
       return event.errorMessage
         ? failStreaming(state, event.errorMessage)
-        : state;
+        : { ...state, runtimeNotice: null };
     case "auto_retry_end":
       return !event.success && event.finalError
         ? failStreaming(state, event.finalError)
-        : state;
+        : { ...state, runtimeNotice: null };
     case "cancelled":
     case "agent_settled":
       return finalizeStreaming(state);
-    case "agent_end":
+    case "auto_retry_start":
+      return {
+        ...state,
+        runtimeNotice: {
+          kind: "retry",
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          errorMessage: event.errorMessage,
+        },
+      };
+    case "compaction_start":
+    case "compaction_started":
+      return {
+        ...state,
+        runtimeNotice: { kind: "compaction", reason: event.reason },
+      };
+    case "compaction_completed":
+      // 阈值压缩只发核心级 started/completed（无应用级 compaction_end），
+      // 必须在此清除，否则状态条挂到会话结束
+      return { ...state, runtimeNotice: null };
+    // turn_start 计步：core loop 每个 LLM 调用轮发一次 turn_start
     case "turn_start":
+      return { ...state, metrics: stepMetrics(state.metrics) };
+    case "agent_end":
     case "turn_end":
     case "session_agent_end":
-    case "compaction_started":
-    case "compaction_completed":
-    case "compaction_start":
-    case "auto_retry_start":
     case "notice":
       return state;
   }
@@ -658,6 +737,83 @@ function userContentText(
         .join("");
 }
 
+// ─── 本地打点：协议事件无时间戳，以 reducer 收到时刻近似 ───
+
+// assistant message_start 无条件覆盖计时起点：上一条消息若经错误路径结束
+// （无 message_end），残留的旧起点会把间隔错误计入下一条消息
+function trackLlmStart(state: ChatProtocolState): ChatProtocolState {
+  return { ...state, metrics: { ...state.metrics, llmStartMs: Date.now() } };
+}
+
+function trackLlmEnd(state: ChatProtocolState): ChatProtocolState {
+  const { llmStartMs } = state.metrics;
+  if (llmStartMs === null) return state;
+  return {
+    ...state,
+    metrics: {
+      ...state.metrics,
+      llmMs: state.metrics.llmMs + (Date.now() - llmStartMs),
+      llmStartMs: null,
+    },
+  };
+}
+
+function trackToolStart(
+  state: ChatProtocolState,
+  toolCallId: string,
+): ChatProtocolState {
+  return {
+    ...state,
+    metrics: {
+      ...state.metrics,
+      toolStartMs: { ...state.metrics.toolStartMs, [toolCallId]: Date.now() },
+    },
+  };
+}
+
+// 乱序或缺失 start 的 end 事件不计时，避免负值/空指针
+function trackToolEnd(
+  state: ChatProtocolState,
+  toolCallId: string,
+): ChatProtocolState {
+  const started = state.metrics.toolStartMs[toolCallId];
+  if (started === undefined) return state;
+  const toolStartMs = { ...state.metrics.toolStartMs };
+  delete toolStartMs[toolCallId];
+  return {
+    ...state,
+    metrics: {
+      ...state.metrics,
+      toolMs: state.metrics.toolMs + (Date.now() - started),
+      toolStartMs,
+    },
+  };
+}
+
+function stepMetrics(metrics: ChatMetrics): ChatMetrics {
+  return { ...metrics, steps: metrics.steps + 1 };
+}
+
+// 思考块计时：同一消息内多个 thinking 块顺序累计，
+// message_end 时由 finalizeAssistantMessage 写入 reasoningDuration
+function trackThinkingSpan(
+  state: ChatProtocolState,
+  isStart: boolean,
+): ChatProtocolState {
+  if (isStart) {
+    return state.thinkingStartMs === null
+      ? { ...state, thinkingStartMs: Date.now() }
+      : state;
+  }
+  if (state.thinkingStartMs === null) return state;
+  return {
+    ...state,
+    thinkingStartMs: null,
+    reasoningElapsedMs:
+      state.reasoningElapsedMs + (Date.now() - state.thinkingStartMs),
+  };
+}
+
 function startAssistantMessage(
   state: ChatProtocolState,
   message: AssistantMessage,
@@ -695,6 +851,9 @@ function ensureAssistantMessage(
       currentAssistantId: assistantId,
       nextAssistantSequence: state.nextAssistantSequence + 1,
       isStreaming: true,
+      // 新消息开始：清空上一条消息遗留的思考计时
+      thinkingStartMs: null,
+      reasoningElapsedMs: 0,
       messages: [
         ...state.messages,
         {
@@ -736,6 +895,11 @@ function finalizeAssistantMessage(
     tools: mergeTools(message.tools ?? [], canonicalTools),
     error: terminalError,
     isStreaming: false,
+    // 本条消息累计的思考耗时（历史消息无此数据，保持缺省）
+    reasoningDuration:
+      next.reasoningElapsedMs > 0
+        ? next.reasoningElapsedMs
+        : message.reasoningDuration,
   }));
   return terminalError ? { ...updated, isStreaming: false } : updated;
 }
@@ -760,7 +924,13 @@ function failStreaming(
     error,
     isStreaming: false,
   }));
-  return { ...failed, isStreaming: false, currentAssistantId: null };
+  // 流失败即终止："重试中/压缩中"状态条不得在失败后继续显示
+  return {
+    ...failed,
+    isStreaming: false,
+    currentAssistantId: null,
+    runtimeNotice: null,
+  };
 }
 
 function finalizeStreaming(state: ChatProtocolState): ChatProtocolState {
@@ -774,6 +944,8 @@ function finalizeStreaming(state: ChatProtocolState): ChatProtocolState {
     messages,
     isStreaming: false,
     currentAssistantId: null,
+    // 兜底清除：正常链路由 end/completed 事件清除，此处防御事件丢失导致的挂死
+    runtimeNotice: null,
   };
 }
 
@@ -847,6 +1019,15 @@ export function toolResultText(result: AgentToolResult): string {
     .filter((block): block is TextContent => block.type === "text")
     .map((block) => block.text)
     .join("");
+}
+
+// 统计行 / 思考耗时共用的时长格式化：<60s 一位小数秒，否则整秒进位后的 m+s。
+// 以十分之一秒整数计数，避免 toFixed/round 在 59.95s+ 产出 "60.0s"/"1m60s"
+export function formatRunDuration(ms: number): string {
+  const tenths = Math.round(ms / 100);
+  if (tenths < 600) return `${(tenths / 10).toFixed(1)}s`;
+  const totalSeconds = Math.round(tenths / 10);
+  return `${Math.floor(totalSeconds / 60)}m${totalSeconds % 60}s`;
 }
 
 export function actionForInput(input: string): ClientAction | null {

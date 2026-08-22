@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ChevronDown, ChevronRight, Brain, Sparkles, Clock, Check } from "lucide-react";
+import { formatRunDuration } from "@/lib/chatProtocol";
 
 interface ReasoningViewProps {
   reasoning: string;
   isStreaming?: boolean;
+  // 本地打点的思考耗时（ms，D12）；历史消息无此数据时缺省
+  durationMs?: number;
 }
 
-export function ReasoningView({ reasoning, isStreaming }: ReasoningViewProps) {
+export function ReasoningView({ reasoning, isStreaming, durationMs }: ReasoningViewProps) {
   const [isOpen, setIsOpen] = useState<boolean>(true);
   const [seconds, setSeconds] = useState<number>(0);
   const timerRef = useRef<number | null>(null);
@@ -72,7 +75,13 @@ export function ReasoningView({ reasoning, isStreaming }: ReasoningViewProps) {
             </span>
           ) : (
             <span className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono">
-              ({reasoning.length} 字符)
+              {durationMs != null && (
+                <span className="mr-1.5 inline-flex items-center gap-1">
+                  <Clock className="size-3" />
+                  <span>思考 {formatRunDuration(durationMs)}</span>
+                </span>
+              )}
+              <span>({reasoning.length} 字符)</span>
             </span>
           )}
         </div>

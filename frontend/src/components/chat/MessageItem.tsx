@@ -95,6 +95,7 @@ export function MessageItem({ message }: MessageItemProps) {
           <ReasoningView
             reasoning={message.reasoning}
             isStreaming={message.isStreaming && !message.content}
+            durationMs={message.reasoningDuration}
           />
         )}
 

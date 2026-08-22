@@ -29,6 +29,8 @@ function ChatApp() {
     confirmRequest,
     planApprovalRequest,
     queue,
+    runtimeNotice,
+    metrics,
     sendMessage,
     sendFollowUp,
     sendSteer,
@@ -144,6 +146,8 @@ function ChatApp() {
           isStreaming={isStreaming}
           disabled={!isConnected}
           queueCount={queue.steering.length + queue.followUp.length}
+          runtimeNotice={runtimeNotice}
+          metrics={metrics}
           prefill={skillPrompt}
         />
 
