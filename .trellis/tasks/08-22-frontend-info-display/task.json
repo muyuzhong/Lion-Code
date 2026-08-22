@@ -3,7 +3,7 @@
   "name": "frontend-info-display",
   "title": "PR① 信息展示：Skills 浏览与会话信息量",
   "description": "Skills 浏览、会话列表信息量、permission_mode 徽标、DocumentTitle。对应设计 PR①，纯前端。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
