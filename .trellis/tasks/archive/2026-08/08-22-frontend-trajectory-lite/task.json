@@ -3,7 +3,7 @@
   "name": "frontend-trajectory-lite",
   "title": "PR⑤ Trajectory 简版轨迹面板",
   "description": "右侧滑出轨迹面板：历史+实时打点纵向时间线，工具卡片检查联动。对应设计 PR⑤，依赖 PR④。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "zhangcx",
   "assignee": "zhangcx",
   "createdAt": "2026-08-22",
-  "completedAt": null,
+  "completedAt": "2026-08-23",
   "branch": "frontend-trajectory-lite",
   "base_branch": "master",
   "worktree_path": null,
@@ -23,6 +23,7 @@
   "relatedFiles": [],
   "notes": "",
   "meta": {
-    "pr_url": "https://github.com/muyuzhong/Lion-Code/pull/87"
+    "pr_url": "https://github.com/muyuzhong/Lion-Code/pull/87",
+    "commit": "8a1eee3"
   }
 }
