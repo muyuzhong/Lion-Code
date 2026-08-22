@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { X, Settings, Key, Globe, Cpu, Check } from "lucide-react";
 import { ServerStatus } from "@/types/chat";
 import { configureProvider, setThinkingLevel } from "@/lib/api";
@@ -11,30 +11,46 @@ interface SettingsModalProps {
   onStatusUpdated: () => void;
 }
 
+function providerFromName(name: string | undefined): "openai" | "anthropic" {
+  return name === "anthropic" ? "anthropic" : "openai";
+}
+
 export function SettingsModal({ isOpen, onClose, status, onStatusUpdated }: SettingsModalProps) {
   const [provider, setProvider] = useState<"openai" | "anthropic">("openai");
-  const [model, setModel] = useState<string>(status?.model || "deepseek-chat");
+  const [model, setModel] = useState<string>("");
   const [apiKey, setApiKey] = useState<string>("");
   const [baseUrl, setBaseUrl] = useState<string>("");
-  const [thinking, setThinking] = useState<string>(status?.thinking_level || "off");
+  const [thinking, setThinking] = useState<string>("off");
   const [saving, setSaving] = useState(false);
+
+  // 打开或服务状态刷新时重置草稿；key/baseUrl 留空表示保留现有值。
+  useEffect(() => {
+    if (!isOpen || !status) return;
+    setProvider(providerFromName(status.provider_name));
+    setModel(status.model || "");
+    setApiKey("");
+    setBaseUrl("");
+    setThinking(status.thinking_level || "off");
+  }, [isOpen, status]);
 
   if (!isOpen) return null;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!status) return;
     setSaving(true);
     try {
-      if (apiKey.trim() || model.trim() || baseUrl.trim()) {
-        await configureProvider({
-          provider,
-          model: model.trim() || undefined,
-          api_key: apiKey.trim() || undefined,
-          base_url: baseUrl.trim() || undefined,
-        });
+      // 只提交有变化的字段，避免把未加载的默认值写回后端。
+      const payload: Parameters<typeof configureProvider>[0] = {};
+      if (provider !== providerFromName(status.provider_name)) payload.provider = provider;
+      if (model.trim() && model.trim() !== status.model) payload.model = model.trim();
+      if (apiKey.trim()) payload.api_key = apiKey.trim();
+      if (baseUrl.trim()) payload.base_url = baseUrl.trim();
+      if (Object.keys(payload).length > 0) {
+        await configureProvider(payload);
       }
 
-      if (thinking !== status?.thinking_level) {
+      if (thinking !== status.thinking_level) {
         await setThinkingLevel(thinking);
       }
 

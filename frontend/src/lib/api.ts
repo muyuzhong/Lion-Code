@@ -64,7 +64,15 @@ export async function configureProvider(params: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
   });
-  if (!res.ok) throw new Error("Failed to configure provider");
+  if (!res.ok) {
+    let detail = "Failed to configure provider";
+    try {
+      detail = (await res.json()).detail || detail;
+    } catch {
+      // 非 JSON 错误响应时保留默认信息
+    }
+    throw new Error(detail);
+  }
   return res.json();
 }
 
