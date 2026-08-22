@@ -1,213 +1,252 @@
-# Lion Memory — 收敛技术设计
+# Lion 内建 Memory — 平衡型技术设计（待确认 handoff UX）
 
-## 1. 决策
+## 1. 修订结论
 
-Lion 不需要四个记忆平台，也不应把四类内容删成两个平面。推荐模型是：
+上一版的四象限语义是对的，但实现过轻，漏掉了三个真实要求：
 
-```text
-一个 Memory Capability
-  ├─ scope = long_term     跨项目、用户级
-  │    ├─ kind = definition  记住“是什么”
-  │    └─ kind = behavior    记住“怎么做”
-  └─ scope = project       当前项目隔离
-       ├─ kind = definition  记住“这个项目是什么”
-       └─ kind = behavior    记住“在这个项目怎么做”
-```
+1. **任务连续性**：未完成任务需要跨 Session handoff，而不是被排除为“一次性进度”；
+2. **召回可靠性**：依赖模型主动调用 `recall_memory`，会重复 AGENTS “看得到但不执行”的问题；
+3. **治理能力**：纯 JSON + exact-key scan 无法很好处理相关性、过期、归档和修订链。
 
-四个象限是产品语义；一个 Capability、一个 repository 实现、同一组工具和两份作用域文件是工程实现。收敛的是基础设施数量，不是记忆能力。
+新的取舍是：Memory 直接内建 Lion，采用 SQLite/FTS5 和自动 prepared-context 召回，但不引入 embedding、后台 LLM、cron 或独立服务。
 
-## 2. 对上一版取舍的纠正
-
-上一版把 `AGENTS.md`、`.trellis/spec/` 和 Skill 合并成 “Project Knowledge”，只为历史经验增加 Project Lessons。这个选择优化了组件数量、污染风险和实现成本，但代价是：
-
-1. Trellis 被错误算进 Lion 产品边界；
-2. Skill 被错误当成行为记忆；
-3. AGENTS 被错误当成项目定义记忆；
-4. 长期定义和长期行为没有产品内承载者；
-5. 项目行为被压扁成单一 lesson 文本，失去触发条件与行动契约；
-6. Lion 的记忆能力依赖产品外机制才能完整。
-
-因此上一版不是合理的产品收敛。合理取舍是保留 `长期/项目 × 定义/行为` 四个语义象限，同时删除四套平台、重复运行时和自动维护链。
-
-## 3. 第一性原理
-
-### 3.1 记忆必须解决的最小问题
-
-一个新会话需要复用当前上下文没有携带、但用户明确希望跨会话保留的信息。信息只有两个正交维度：
-
-- **适用范围**：对所有项目都成立，还是只对当前项目成立；
-- **使用方式**：描述世界/用户/项目，还是规定遇到条件后如何行动。
-
-作用域决定隔离和存储位置，语义类型决定数据结构和召回后的使用方式。原设计的 Repo、Coding、Preference、Procedure 是内容标签，不能稳定地充当存储边界：一条 preference 可能是定义，也可能是行为；一条 procedure 也可能只适用于某个项目。
-
-### 3.2 四个象限
-
-| 作用域 | 定义：是什么 | 行为：怎么做 |
-| --- | --- | --- |
-| 长期 | 用户稳定偏好、工作环境、跨项目事实。例如“用户主要在 Windows/PowerShell 工作”。 | 跨项目协作与工程动作。例如“修改脏工作树时只暂存任务拥有的文件”。 |
-| 项目 | 当前仓库架构、所有权、决策、关键命令。例如“ToolRuntime 是唯一工具执行路径”。 | 当前项目触发式规则、已验证失败模式和回归动作。例如“修改 Kernel 后先运行架构门禁”。 |
-
-### 3.3 权威性
-
-Memory 是跨会话的历史上下文，不是最高优先级指令。发生冲突时按当前证据处理：
+## 2. 三条边界，而不是一个万能 Memory
 
 ```text
-当前系统/开发者/用户指令、当前源码与测试、当前 AGENTS
-    > Memory
+Lion Product
+├─ Project Instructions                 权威规则，不是 Memory
+│    └─ AGENTS / CLAUDE loader -> system prompt
+├─ Task Handoff                         临时工作连续性
+│    └─ canonical Session + Compaction + BranchSummaryEntry
+└─ Semantic Memory Capability           跨会话稳定知识/行为
+     ├─ long_term/project × definition/behavior
+     ├─ SQLite + FTS5
+     ├─ pinned + query-relevant prepared context
+     └─ remember / recall / review / manage tools
 ```
 
-记忆冲突后必须显式更新或删除，不能用“更新时间较新”“命中次数较多”或“向量更相似”自动判真。
+这是一个产品级“记忆体验”，但保持两个状态 owner：Session 拥有任务历史和 handoff；MemoryStore 只拥有稳定语义条目。这样既解决用户的连续性问题，又不复制 transcript。
 
-## 4. 非 Memory 边界
+## 3. 场景推导
 
-| 能力/数据 | 定位 | 与 Memory 的关系 |
-| --- | --- | --- |
-| AGENTS.md | 当前项目的权威 Agent 指令 | 可作为验证记忆的当前证据；不是 Memory store。 |
-| Skill | 可执行、可分发的能力和提示包 | 行为记忆可提示用户另行沉淀为 Skill，但不自动晋升，也不由 Memory 读取。 |
-| Trellis | 用户开发 Agent 时使用的外部流程管理工具 | 完全不进入 Lion Memory 的对象图、存储、检索或测试契约。 |
-| canonical Session | 当前会话事件与重放事实 | 记录召回工具结果；不是跨会话记忆源。 |
-| Compaction | 会话上下文有界投影 | 不读写 Memory store。 |
-| Supervisor Checkpoint | 长任务执行恢复 | 不包含记忆内容。 |
-| Plan | 当前任务状态 | 不镜像到 Memory。 |
+### 3.1 上下文不足后开新会话
 
-## 5. 目标架构
+当前 Compaction 已强制输出九个章节：Objective、Constraints、Decisions、Repository State、Findings、Failed Attempts、Completed Work、Remaining Work、Verification。它已经是合格的 handoff 载荷。
+
+缺口不是“再建一个 working-memory 数据库”，而是缺少产品动作：
 
 ```text
-FullProfile
-  -> MemoryCapability
-       -> MemoryPromptLayer       只说明何时召回及可信度，不注入记忆内容
-       -> recall_memory           只读；同时检索两个作用域
-       -> remember_definition     需确认
-       -> remember_behavior       需确认
-       -> forget_memory           需确认
-       -> MemoryRepository        一个具体实现，不设单实现 Protocol
-            -> ~/.lion-code/memory/long-term.json
-            -> ~/.lion-code/projects/<project-key>/memory.json
-
-四类工具调用 -> 现有 ToolRuntime -> 现有权限/审计/ToolResult
-召回结果 -> ordinary Session observation
+current canonical Session
+  -> 复用 ContextCompactor 生成九段有界摘要
+  -> 保留旧 Session
+  -> 创建新 Session
+  -> 追加 BranchSummaryEntry(summary, branch_root_id)
+  -> 新 Session 从摘要继续
 ```
 
-Memory 不进入 Agent Runtime、MetaAgent、Application/TUI facade、PlanRuntime、ContextRuntime 或 Session schema。`AgentComposition` 不暴露 repository 作为 service locator。
+不复制旧 raw messages，不把任务进度写入 semantic-memory SQLite。用户仍可 restore 旧 Session 查看完整历史。
 
-## 6. 数据契约
+待用户确认的 UX：推荐新增显式 `handoff_session` / “Continue in new session”，普通 `new_session` / clear 继续表示干净会话。自动对所有 new session 携带任务会让“彻底清空”变得含糊。
 
-两个文件使用同一文档结构；文件位置隐含 scope，条目不重复保存 scope：
+### 3.2 AGENTS 中的 CI 规则经常不执行
 
-```json
-{
-  "definitions": [
-    {
-      "key": "primary-shell",
-      "statement": "用户主要使用 Windows PowerShell。",
-      "evidence": ["用户明确说明"]
-    }
-  ],
-  "behaviors": [
-    {
-      "key": "dirty-worktree-staging",
-      "trigger": "工作树包含与当前任务无关的改动",
-      "instruction": "只暂存并提交当前任务拥有的路径。",
-      "evidence": ["用户明确说明"],
-      "paths": ["lion_code/"]
-    }
-  ]
-}
-```
+源码显示 loader 存在，但生产没有调用 `load_claude_md()`。因此第一根因是项目指令根本可能未进入 Full product prompt；这必须独立修复，不能用 Memory 掩盖。
 
-### Definition
+修复后有两种合理承载方式：
 
-- `key`：作用域内稳定、可读的唯一键；
-- `statement`：一个可验证的“是什么”陈述；
-- `evidence`：至少一条用户决定、当前源码、测试、命令结果或提交引用；
-- `paths`：仅项目记忆可选，用于限定相关项目路径。
+- 项目专属、权威规则继续只放 AGENTS；
+- 跨项目都适用的 PR 流程可记为 `long_term + behavior + pinned`，在每个 Provider 请求靠近当前上下文重复出现。
 
-### Behavior
+Memory 能显著提高行为显著性，但不能保证模型绝不违背自然语言。需要硬保证时，应把 “CI 未绿禁止 merge” 写成现有 pre-tool Hook/Permission 或专用 workflow gate；Memory 不做命令解释器。
 
-- `key`：作用域内稳定、可读的唯一键；
-- `trigger`：可以判断的适用条件；
-- `instruction`：条件成立时要执行的动作；
-- `evidence`：至少一条来源；
-- `paths`：仅项目记忆可选。
+## 4. Semantic Memory 模型
 
-MVP 不保存 `version`、时间戳、状态、置信度、使用次数、最后命中时间、归档副本、superseded 链或向量。定义和行为使用不同写入工具，避免一个带大量互斥可选字段的万能 schema。
+### 4.1 四象限保持不变
 
-## 7. 存储与所有权
-
-- `MemoryRepository` 属于 `capabilities/memory/`，由一个实例管理长期和当前项目两份文件。
-- 长期文件位于用户级 app data；项目文件复用 `ProjectIdentity` 与 `project_storage_dir(identity)`，不写入仓库。
-- 文件缺失表示该作用域为空，召回不创建文件。
-- 每次写入完整严格校验、写临时文件、flush/fsync 后 `os.replace`。
-- 非法 UTF-8、畸形 JSON、未知字段、重复 key 或越界内容直接报错；记住/忘记不得用空状态覆盖损坏文件。
-- 同一 scope、同一 kind、同一 key 做原子替换；definition 与 behavior 可以使用相同 key，因为它们表达不同契约。
-- `forget_memory(scope, kind, key)` 物理删除目标条目。它不改写已经包含旧召回结果的 append-only Session；历史会话删除是另一个需用户授权的操作。
-- 没有迁移、兼容读取或 fallback。未来契约变化另行评审。
-
-## 8. 召回
-
-`recall_memory(query, paths=())` 一次检索两个 scope，并按四个象限分组返回。它只做有界、确定性扫描：
-
-1. key 或项目 path 精确匹配优先；
-2. query 中不同的 case-folded 词在 statement/trigger/instruction/key/path 中的命中数；
-3. scope 固定顺序、kind 固定顺序、key 升序作为稳定 tie-break。
-
-结果总数和总字符数使用固定上限；超限时返回明确 omission marker。空查询只列出各象限的 key，不展开正文。没有可配置权重、BM25、embedding、recency、use-count 写回或二次 LLM 调用。
-
-`MemoryPromptLayer` 只告诉模型：新任务在大范围探索前调用一次召回；当前证据优先；使用行为前检查 trigger；未命中是正常结果。它不包含或隐藏注入实际记忆内容。MVP 接受模型可能漏调工具的可观测风险；在有真实漏召回数据前，不为此扩大 ContextLayer 的用户文本权限或增加 turn hook。
-
-## 9. 写入与遗忘
-
-- `remember_definition(scope, key, statement, evidence, paths=())` 明确写入定义。
-- `remember_behavior(scope, key, trigger, instruction, evidence, paths=())` 明确写入行为。
-- `forget_memory(scope, kind, key)` 明确删除一条记忆。
-- 三个 mutation 工具均设置 `requires_confirmation=True`；`recall_memory` 是只读、可并发工具。
-- 长期 scope 拒绝 `paths`；项目 scope 的 path 必须规范化为项目相对路径且不得越界。
-- 活跃模型只在事实或行为已被当前证据验证、且预期跨会话复用时提出写入。一次性进度、当前目标、原始会话摘要、秘密、瞬时失败、未验证猜测不允许写入。
-- 不自动从 Session、AGENTS、Skill 或 Trellis 抽取；不在任务结束时调用后台模型。
-- Memory 不自动修改 AGENTS，也不自动生成 Skill。将成熟行为正式化为二者是独立、显式、可评审的产品外动作。
-
-## 10. Composition 边界
-
-`FullProfile` 默认选择新的 Memory Capability；CodingProfile 与 MinimalProfile 不变，调用方仍可通过现有 `extension_specs` 显式添加能力。
-
-如 composition 需要内建选择名，使用不会恢复旧契约的新名字，例如 `_CAP_USER_PROJECT_MEMORY`。不得恢复 `_CAP_MEMORY`、`SessionMemoryCoordinator`、`MemoryQuerySink`、ProjectionLayer、Dream、Learning 或 provider-side memory query service。
-
-Capability 只贡献四个工具和一个 PromptLayer，不贡献 ContextLayer、SessionParticipant 或 Runtime owner。
-
-## 11. 错误与安全矩阵
-
-| 条件 | 结果 |
-| --- | --- |
-| 两个文件都不存在 | 召回返回空，不创建文件。 |
-| 其中一个文件损坏 | 明确指出损坏 scope；拒绝覆盖；另一个 scope 不被修改。 |
-| 长期写入携带 paths | 参数错误，无文件变化。 |
-| 项目 path 越界 | 参数错误，无文件变化。 |
-| 空查询 | 只列四个象限的 key。 |
-| 没有匹配 | 返回正常空结果，继续检查当前上下文。 |
-| 超过预算 | 按稳定顺序截断并显示 omission marker。 |
-| 同 key、同 kind 写入 | 原子替换。 |
-| 不同记忆互相冲突 | 同时显示，检查当前证据后显式更新或删除。 |
-| 当前代码/AGENTS 与记忆冲突 | 当前证据胜出，记忆不能覆盖其行为。 |
-| 用户拒绝 mutation 确认 | 不修改文件，返回现有 permission-denied 结果。 |
-| 恢复历史 Session | transcript 中旧召回仍在；下一次 recall 读取当前 Memory store。 |
-
-## 12. 删除与延后
-
-| 原设计元素 | 决策 | 理由 |
+| scope | definition | behavior |
 | --- | --- | --- |
-| Repo/Coding/Preference/Procedure 四套平台 | 删除平台划分，保留内容语义 | scope × kind 更正交；不需要四套基础设施。 |
-| Markdown + JSONL + SQLite 三重存储 | 删除 | 两份作用域 JSON 已能满足当前规模和隔离需求。 |
-| FTS5/BM25/向量/加权评分 | 延后 | 先用可解释扫描；有实际召回失败再升级。 |
-| Task-start Hook / Agent Wrapper | 删除 | 模型已有 query 和工具；PromptLayer 足以形成可观测 MVP。 |
-| Task-end 后台 LLM | 删除 | 污染面大且产生第二写者；显式写入可审计。 |
-| 语义去重阈值 | 删除 | exact key 替换即可；相似不等于相同。 |
-| use_count / last_used_at | 删除 | 召回应只读，避免隐藏写入。 |
-| 定时衰减 / 周期 consolidation | 延后 | 只有测得噪声增长后才有需求。 |
-| 自动写 AGENTS / 自动生成 Skill | 删除 | 改变权威指令或能力包必须独立评审。 |
-| CLI/TUI viewer、配置权重、cron | 延后 | 四个模型工具是 MVP 控制面。 |
+| long_term | 用户环境、稳定偏好、跨项目事实 | 跨项目协作和工程流程 |
+| project | 架构、所有权、决策、项目事实 | 项目特定规则、失败模式、验证关卡 |
 
-## 13. 回滚
+### 4.2 统一条目
 
-- 取消注册 Capability 即可停止新召回和写入，不改变 Session、Compaction、Checkpoint、Plan 或 Runtime schema。
-- 两份 JSON 是可恢复的用户数据；回滚代码不自动删除，删除需单独授权。
-- 新设计不迁移旧 Memory 数据，也不保留旧 API；当前产品没有需要兼容的生产契约。
+数据库使用一张 current/revision table，通过 CHECK 约束保证 definition 与 behavior 契约：
+
+```text
+MemoryEntry
+- id: integer primary key
+- scope: long_term | project
+- project_key: nullable; project 必填，long_term 必须为空
+- kind: definition | behavior
+- stable_key: scope + project_key + kind 内可读键
+- content: definition statement 或 behavior instruction
+- trigger: behavior 必填；definition 必须为空
+- recall_mode: pinned | relevant
+- status: active | stale | archived
+- evidence_json: 非空字符串列表
+- paths_json: project 可选；long_term 必须为空
+- source_session_id: 可选
+- created_at / updated_at / validated_at
+- supersedes_id: 可选，指向被本 revision 替代的旧 revision
+- archived_reason: stale/archive 时记录原因
+```
+
+修正同一 stable key 时创建新 active revision，并把旧 revision 置为 archived；不按时间戳自动选择事实。FTS 只索引 active/stale 可管理内容，自动召回只选 active。
+
+不保存置信度、embedding、任意 metadata blob、use-count 排序权重或模型生成的语义分数。
+
+## 5. 存储
+
+```text
+~/.lion-code/memory.sqlite3
+```
+
+一个数据库容纳 long-term 和所有 project，通过 `project_key` 硬隔离，不为每个 scope 建一套 repository。
+
+建议表：
+
+- `memory_entries`：条目 revision 与生命周期；
+- `memory_fts`：FTS5 虚拟表，索引 stable_key、content、trigger、paths；
+- `memory_meta`：唯一 schema version 和 maintenance metadata。
+
+SQLite 使用事务、foreign key、busy timeout 和 WAL；schema 不匹配或 integrity check 失败时 fail closed。当前实现只接受准确的 v1 schema，不提供旧 Memory migration、兼容读取、fallback 或静默重建。
+
+选择 SQLite 的理由不是条目数量，而是当前需求已经要求：FTS 相关性、事务修订、状态过滤、归档恢复和 review 查询。继续使用 JSON 会在应用层重写一个更差的数据库。
+
+## 6. 自动召回
+
+### 6.1 新的窄投影 seam
+
+现有 ContextLayer 看不到 user query，普通 PromptLayer 又无法做相关召回。增加一个新的 `QueryContextLayer`：
+
+```text
+render(query: str, view: ContextView) -> str
+```
+
+- ContextManager 从当前 prepared messages 取最新 user query；
+- 输出只进入本次 prepared provider context，不写 canonical Session；
+- 本地同步 SQLite 查询，不调用 Provider；
+- 同一 provider tool loop 使用同一个 latest user query，FTS 查询保持确定性；个人规模下不为此增加缓存失效协议；
+- 不恢复旧 `TurnParticipant.before_turn`、ProjectionLayer 或 provider-side query service。
+
+CapabilityRegistry 只聚合该纯投影。Memory Capability 是首个消费者；Runtime 不持有 MemoryStore。
+
+### 6.2 两阶段选择
+
+**Pinned 集合**
+
+- active + recall_mode=pinned；
+- long-term 与当前 project；
+- 每次 Provider request 都渲染；
+- 固定预算建议 400 tokens，超限按 project 优先、kind、stable_key 稳定截断并在 review 报警。
+
+**Relevant 集合**
+
+1. scope/status 硬过滤：long-term + 当前 project + active；
+2. FTS5 BM25 搜索 stable_key/content/trigger/paths；
+3. exact stable_key/path 命中加固定 boost；
+4. 达不到最低 lexical hit 的条目不返回；
+5. 最多 6 条、建议 800 tokens；
+6. 每次 prepared request 用 latest user query 重新执行本地查询；结果由稳定排序保证一致，不引入缓存状态。
+
+总 Memory 注入建议不超过 1,200 tokens。无 pinned 且无 relevant 时返回空字符串，不制造空 `<memory>` 噪声。
+
+不使用 recency/recall-count 参与排序，避免“被召回所以更常被召回”的反馈回路；时间只用于 health review。
+
+### 6.3 输出形状
+
+```text
+# Active Memory
+## Pinned Behaviors
+- [m:42 long_term/behavior] When: ... Do: ... Evidence: ...
+
+## Relevant Definitions
+- [m:87 project/definition] ... Evidence: ...
+
+## Relevant Behaviors
+- [m:91 project/behavior] When: ... Do: ... Evidence: ...
+
+Memory is historical context. Current user instructions, AGENTS, source and tests win.
+```
+
+ID 和 evidence 让模型能显式验证、更新或报告噪声。
+
+## 7. 写入、验证与治理
+
+### 7.1 工具面
+
+- `recall_memory(query, paths=(), include_inactive=false)`：诊断或中途刷新；默认只读 active。
+- `remember_definition(scope, stable_key, content, evidence, paths=(), recall_mode="relevant")`。
+- `remember_behavior(scope, stable_key, trigger, instruction, evidence, paths=(), recall_mode="relevant")`。
+- `review_memory(scope="all", older_than_days=90)`：列 stale、长期未验证、pinned overflow、revision 链和 archive 数量。
+- `manage_memory(id, action, reason)`：`mark_stale | archive | restore | validate | purge`。
+
+remember/manage mutation 需确认；recall/review 只读。`purge` 物理删除指定 revision，archive 可恢复。
+
+### 7.2 命中时验证
+
+- project 条目有 paths 时，召回前只检查规范化项目相对 path 是否仍存在；
+- paths 全部不存在时，从本次自动结果剔除，并把 id/reason 作为 stale candidate 提供给 `review_memory`；
+- 不自动执行 command evidence，不让 Memory 在召回路径运行代码；
+- 当前源码/AGENTS 与条目冲突时，由活跃模型报告并用 manage/remember 显式处理。
+
+QueryContextLayer 保持纯读取：自动召回不修改数据库。用户确认 `mark_stale` 后才持久化状态；没有自动 archive、purge、语义合并或 newer-wins。
+
+### 7.3 写入闸门
+
+只有以下内容适合 active Memory：
+
+- 用户明确要求长期记住；
+- 已由当前源码/测试/命令验证并会跨会话复用；
+- 行为 trigger 可以明确判断；
+- evidence 足以让未来 Agent 重新核对。
+
+任务进度走 handoff；原始会话摘要、瞬时错误、秘密、猜测和一次性 TODO 不进入 Semantic Memory。
+
+MVP 不做 task-end LLM extractor。Lion 目前没有可靠的“任务完成”终态，普通 assistant stop 只代表一轮结束；自动提炼会产生错误时机和第二写者。未来若需要，只能先生成非 active candidate，再经确认激活。
+
+## 8. AGENTS、Memory 与强制策略
+
+| 内容 | 正确 owner | 可靠性机制 |
+| --- | --- | --- |
+| 当前项目必须遵守的规则 | AGENTS | 默认 Full system prompt 实际加载 |
+| 跨项目、需高显著性的个人行为 | long-term pinned behavior | 每个 Provider request prepared injection |
+| 与当前问题相关的历史经验 | relevant semantic memory | 每个 user turn FTS5 选择性召回 |
+| 必须绝对禁止/保证的动作 | Hook / Permission / workflow gate | ToolRuntime 执行前硬判定 |
+
+这四者可以协作，但不能互相冒充。
+
+## 9. 组合与所有权
+
+- FullProfile 默认启用 Semantic Memory；Coding/Minimal 保持不变，仍可通过 `extension_specs` 显式添加。
+- Memory Capability 贡献 tools、普通 PromptLayer（可信度说明）、QueryContextLayer 和必要资源关闭，不贡献 Runtime owner。
+- MemoryStore 只由 Capability 内部 tool/query adapters 持有；AgentComposition 不公开 repository。
+- TaskHandoff 是 application/facade 对 SessionRuntime + ContextRuntime 的显式协调，不由 MemoryStore 写 Session。
+- Supervisor Checkpoint 继续只保存执行控制字段，不保存 handoff 或 semantic memory。
+
+## 10. 风险与取舍
+
+| 选择 | 得到 | 代价/控制 |
+| --- | --- | --- |
+| SQLite + FTS5 | 相关检索、事务、生命周期治理 | 比 JSON 多 schema/索引代码；标准库内置且有针对性测试。 |
+| 每 user turn 自动 recall | 不依赖模型主动调用 | 可能增加少量噪声；用硬过滤、阈值、top-k、预算和空结果抑制。 |
+| pinned 每次注入 | 关键行为更显著 | pinned 过多会稀释注意力；设 400-token 上限并在 review 报警。 |
+| handoff 新 Session | 用户无需重写任务提示 | 摘要仍可能遗漏；保留旧 Session，可恢复核对。 |
+| stale/archived/revision | 可治理、可恢复、可追溯 | 状态模型更重；每个状态对应真实清理需求。 |
+| 不做 embeddings/后台 LLM | 本地、低运维、污染面小 | 语义改写召回较弱；先用 coding 领域更适合的 FTS/path 证据验证。 |
+
+## 11. 明确不做
+
+- 独立 Memory 服务、MCP server、向量数据库、embedding 模型、知识图谱；
+- Markdown + JSONL + SQLite 三重主存；
+- cron、自动衰减、自动归档、周期 LLM consolidation；
+- 自动把 AGENTS/Session/Skill/Trellis 内容复制进数据库；
+- 通过自然语言 Memory 拦截 shell/merge；
+- 恢复旧 Memory Host、Coordinator、QuerySink、Dream、Learning 对象图。
+
+## 12. 回滚
+
+- Project Instructions 接线、Task Handoff、Memory Store/Tools、Automatic Recall 分 PR，可分别回滚。
+- 回滚 Semantic Memory 只取消 FullProfile 注册并保留 `memory.sqlite3`；删除用户数据需另行授权。
+- 回滚 Handoff 不改变旧 Session 读取；已写入的 `BranchSummaryEntry` 仍由现有 canonical replay 支持。
+- Session、Compaction、Checkpoint 和 Plan schema 不因 Semantic Memory 改变。

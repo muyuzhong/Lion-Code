@@ -1,4 +1,4 @@
-{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Preserve current Capability, Runtime, Session, Composition, Supervisor, and Interface ownership boundaries."}
-{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Preserve the single canonical session writer, prepared-context contract, profile composition, and removed legacy Memory boundary."}
-{"file":".trellis/spec/backend/database-guidelines.md","reason":"Keep Session JSONL semantics separate from the two scope-owned Memory snapshots and preserve strict atomic persistence."}
-{"file":".trellis/tasks/08-22-memory-system-design-convergence/research/current-architecture-evidence.md","reason":"Use the verified project identity, capability seams, product boundary correction, and legacy-removal evidence."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Keep Semantic Memory capability-owned, coordinate Task Handoff explicitly at the application facade, and prevent Runtime or Supervisor ownership leakage."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Preserve the canonical Session writer, nine-section Compaction contract, prepared-only query projection, profile composition, and removed legacy Memory boundary."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Keep Session JSONL separate from the SQLite Semantic Memory source of truth and define strict transaction, schema, FTS, revision, archive, and purge behavior."}
+{"file":".trellis/tasks/08-22-memory-system-design-convergence/research/current-architecture-evidence.md","reason":"Use verified AGENTS loader, Session handoff, Capability projection, ToolRuntime, SQLite FTS5, and legacy-removal evidence."}
