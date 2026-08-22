@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -176,6 +177,126 @@ def test_list_and_resume_sessions() -> None:
     res_new = client.post("/api/sessions/new")
     assert res_new.status_code == 200
     assert ("new", None) in backend.session_operations
+
+
+def test_list_sessions_zero_match_returns_empty() -> None:
+    backend = FakeCodingSessionBackend(
+        cwd=Path("/workspace"),
+        model="gpt-4o",
+        provider_name="openai",
+        sessions=[
+            {
+                "id": "sess-other",
+                "startTime": "2026-08-21T10:00:00",
+                "messageCount": 4,
+                "cwd": str(Path("/other")),
+            }
+        ],
+    )
+    session = LionCodingSession(backend=backend, terminal_output=False)
+    client = _build_client(session)
+
+    res = client.get("/api/sessions")
+
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+def test_list_and_resume_legacy_session_without_cwd() -> None:
+    backend = FakeCodingSessionBackend(
+        cwd=Path("/workspace"),
+        model="gpt-4o",
+        provider_name="openai",
+        sessions=[
+            {
+                "id": "sess-legacy",
+                "startTime": "2026-08-21T10:00:00",
+                "messageCount": 4,
+                "cwd": None,
+            }
+        ],
+    )
+    session = LionCodingSession(backend=backend, terminal_output=False)
+    client = _build_client(session)
+
+    listed = client.get("/api/sessions").json()
+    assert [s["id"] for s in listed] == ["sess-legacy"]
+
+    res_resume = client.post("/api/sessions/resume", json={"session_id": "sess-legacy"})
+    assert res_resume.status_code == 200
+
+
+def test_list_sessions_matches_case_insensitive_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 模拟 Windows 的 normcase（小写化）语义，保证测试在 Linux CI 上同样成立
+    monkeypatch.setattr(os.path, "normcase", lambda s: s.lower())
+
+    backend = FakeCodingSessionBackend(
+        cwd=Path("/Workspace"),
+        model="gpt-4o",
+        provider_name="openai",
+        sessions=[
+            {
+                "id": "sess-case",
+                "startTime": "2026-08-21T10:00:00",
+                "messageCount": 4,
+                "cwd": str(Path("/WORKSPACE")),
+            }
+        ],
+    )
+    session = LionCodingSession(backend=backend, terminal_output=False)
+    client = _build_client(session)
+
+    res = client.get("/api/sessions")
+
+    assert res.status_code == 200
+    assert [s["id"] for s in res.json()] == ["sess-case"]
+
+
+def test_list_sessions_resolve_failure_falls_back_to_normcase_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = FakeCodingSessionBackend(
+        cwd=Path("/Workspace"),
+        model="gpt-4o",
+        provider_name="openai",
+        sessions=[
+            {
+                "id": "sess-text",
+                "startTime": "2026-08-21T10:00:00",
+                "messageCount": 4,
+                "cwd": str(Path("/Other-Workspace")),
+            }
+        ],
+    )
+    session = LionCodingSession(backend=backend, terminal_output=False)
+    client = _build_client(session)
+
+    def _broken_resolve(self: Path) -> Path:
+        raise OSError("resolve unavailable")
+
+    monkeypatch.setattr(Path, "resolve", _broken_resolve)
+
+    res = client.get("/api/sessions")
+
+    # resolve 异常只退化为规范化文本比较，不回退为全量 sessions
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+def test_resume_rejects_cross_workspace_and_unknown_ids() -> None:
+    session, backend = _build_test_session()
+    client = _build_client(session)
+
+    cross = client.post("/api/sessions/resume", json={"session_id": "sess-2"})
+    unknown = client.post("/api/sessions/resume", json={"session_id": "sess-404"})
+
+    assert cross.status_code == 404
+    assert unknown.status_code == 404
+    assert cross.json() == unknown.json()
+    assert ("resume", "sess-2") not in backend.session_operations
+    assert ("resume", "sess-404") not in backend.session_operations
 
 
 def test_get_messages() -> None:
