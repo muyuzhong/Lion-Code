@@ -3,7 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from lion_code.project_identity import ProjectIdentity
-from lion_code.prompt import PromptComposer, load_project_context_files
+from lion_code.prompt import (
+    PromptComposer,
+    build_dynamic_system_context,
+    load_project_context_files,
+)
 
 
 class _Layer:
@@ -44,6 +48,46 @@ def test_project_context_loads_root_to_cwd_with_agents_precedence(tmp_path) -> N
         "child agents",
     ]
     assert "outside agents" not in {item.content for item in files}
+
+
+def test_project_context_skips_blank_files(tmp_path) -> None:
+    root = tmp_path / "repo"
+    child = root / "packages" / "api"
+    child.mkdir(parents=True)
+    (root / "CLAUDE.md").write_text("   \n\t\n")
+    (root / "AGENTS.md").write_text("")
+    (child / "AGENTS.md").write_text("child agents")
+    identity = ProjectIdentity(root=root.resolve(), key="project", is_git=True)
+
+    files = load_project_context_files(cwd=child, identity=identity)
+
+    assert [item.content for item in files] == ["child agents"]
+
+
+def test_dynamic_system_context_appends_project_instructions(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "CLAUDE.md").write_text("claude rule")
+    (tmp_path / "AGENTS.md").write_text("agents rule")
+
+    dynamic = build_dynamic_system_context(deferred_tool_names=[])
+
+    assert "# Environment" in dynamic
+    # 项目指令追加在环境信息之后；同目录 CLAUDE 先于 AGENTS。
+    assert dynamic.index("# Project Instructions") > dynamic.index("# Environment")
+    assert dynamic.index("claude rule") < dynamic.index("agents rule")
+
+
+def test_dynamic_system_context_omits_instructions_without_files(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    dynamic = build_dynamic_system_context(deferred_tool_names=[])
+
+    assert "# Environment" in dynamic
+    assert "# Project Instructions" not in dynamic
 
 
 def test_prompt_composer_orders_base_dynamic_and_non_empty_layers() -> None:

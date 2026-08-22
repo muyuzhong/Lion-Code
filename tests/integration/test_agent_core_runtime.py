@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -540,6 +542,52 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             fake.received_systems,
             [f"{stable_base}\n\ninitial", f"{stable_base}\n\nplan-prompt"],
+        )
+
+    async def test_default_full_product_system_prompt_contains_project_instructions(
+        self,
+    ) -> None:
+        """默认 Full 产品的动态尾部加载 root-to-cwd 项目指令并送入 Provider。"""
+        project_dir = Path(self._temp_dir.name) / "project"
+        nested = project_dir / "packages" / "api"
+        nested.mkdir(parents=True)
+        # 项目根由 Git worktree 决定，root-to-cwd 链需要真实 git 仓库。
+        subprocess.run(
+            ["git", "init", str(project_dir)], capture_output=True, check=True
+        )
+        (project_dir / "CLAUDE.md").write_text(
+            "claude: keep diffs small", encoding="utf-8"
+        )
+        (nested / "AGENTS.md").write_text("agents: run local gates", encoding="utf-8")
+        original_cwd = Path.cwd()
+        os.chdir(nested)
+        try:
+            registry = ToolRegistry()
+            fake = FakeProvider([_stop_event("ok")])
+            with patch(
+                "lion_code.composition.full_product.create_provider",
+                return_value=fake,
+            ):
+                backend = build_full_coding_backend(
+                    api_base="https://example.test/v1",
+                    api_key="test-key",
+                    tool_registry=registry,
+                    session_repository=self._session_repository,
+                    terminal_output=False,
+                )
+
+            await backend.chat("hello")
+        finally:
+            os.chdir(original_cwd)
+
+        system = fake.received_systems[0]
+        self.assertIn("# Project Instructions", system)
+        self.assertIn("claude: keep diffs small", system)
+        self.assertIn("agents: run local gates", system)
+        # root-to-cwd：父目录指令先于子目录指令。
+        self.assertLess(
+            system.index("claude: keep diffs small"),
+            system.index("agents: run local gates"),
         )
 
     async def test_dynamic_tools_refetched_per_turn(self) -> None:

@@ -213,7 +213,8 @@ def load_project_context_files(
     """按项目根到当前目录加载 CLAUDE.md 与 AGENTS.md。
 
     同一目录中 AGENTS.md 位于 CLAUDE.md 之后，子目录也位于父目录之后，
-    因此后出现的更具体规则拥有更高优先级。
+    因此后出现的更具体规则拥有更高优先级。空白文件跳过：没有规则的
+    文件不贡献任何内容。
     """
 
     current_cwd = (cwd or Path.cwd()).resolve()
@@ -238,19 +239,16 @@ def load_project_context_files(
             if not path.is_file():
                 continue
             try:
-                files.append(
-                    ProjectContextFile(
-                        path=str(path),
-                        content=_resolve_includes(path.read_text(), directory),
-                    )
-                )
+                content = _resolve_includes(path.read_text(), directory)
             except Exception:
-                pass
+                continue
+            if content.strip():
+                files.append(ProjectContextFile(path=str(path), content=content))
     return tuple(files)
 
 
 def load_claude_md() -> str:
-    """兼容入口：返回当前项目的 CLAUDE.md、AGENTS.md 与局部 rules。"""
+    """聚合当前项目的 CLAUDE.md、AGENTS.md 与局部 rules，供动态提示尾部追加。"""
 
     parts = [
         f"## {Path(item.path).name}\n{item.content}"
@@ -292,7 +290,7 @@ def get_git_context() -> str:
 
 # ─── 前缀缓存的静态/动态边界 ─────────────────────────────────
 # 静态模板在用户和会话之间完全一致，适合作为 cache_control 前缀；环境、Git
-# 和 Skill 会随项目变化，因此放在动态尾部。项目指令不进入 canonical Session。
+# 和项目指令会随项目变化，因此放在动态尾部。项目指令不进入 canonical Session。
 
 
 def build_static_system_prompt() -> str:
@@ -305,8 +303,10 @@ def build_dynamic_system_context(
 ) -> str:
     """返回会话内稳定、但随机器和项目变化的未缓存上下文。
 
-    只包含核心环境与 Git 信息；Skill/Agent 等 Feature 说明由对应 PromptLayer
-    贡献，不进入基础 MetaAgent Prompt。
+    包含核心环境、Git 信息与 root-to-cwd 项目指令（CLAUDE.md/AGENTS.md/
+    局部 rules）；项目指令只在尾部追加，不覆盖静态模板与用户指令。
+    Skill/Agent 等 Feature 说明由对应 PromptLayer 贡献，不进入基础
+    MetaAgent Prompt。
     """
     plat = f"{platform.system()} {platform.machine()}"
     shell = (
@@ -333,7 +333,7 @@ def build_dynamic_system_context(
         f"Working directory: {Path.cwd()}\n"
         f"Platform: {plat}\n"
         f"Shell: {shell}"
-        f"{git_context}{deferred_section}"
+        f"{git_context}{deferred_section}{load_claude_md()}"
     )
 
 

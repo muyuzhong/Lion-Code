@@ -98,6 +98,15 @@ Profiles select the graph:
 - `FullProfile`: Coding tools plus AgentState/GitStatus, Plan/SubAgent/default
   Skill, and supplied extension specs, still behind MetaAgent.
 
+The default dynamic prompt tail (`build_dynamic_system_context`) appends
+root-to-cwd project instructions (CLAUDE.md/AGENTS.md plus local `.claude/rules`,
+via `load_project_context_files`/`load_claude_md`) after the environment and Git
+sections: same-directory AGENTS.md follows CLAUDE.md, subdirectories follow
+parents, blank files are skipped. Instructions are additive only — they never
+replace the static template or user/developer instructions and never enter
+canonical session history. A Profile with a custom `system_prompt` keeps the
+existing replacement semantics: no dynamic tail and no project instructions.
+
 `command_backend` is a `ToolBindings` entry (defaulting to the local backend);
 confirm callbacks, renderer factories, and print callbacks are
 `InteractionBindings` entries. Neither pollutes any Profile.
