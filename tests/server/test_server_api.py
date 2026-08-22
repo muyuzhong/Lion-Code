@@ -6,12 +6,12 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from lion_code import config as lion_config
 from lion_code.application.session import LionCodingSession
 from lion_code.core.events import (
     AgentEndEvent,
@@ -22,6 +22,7 @@ from lion_code.core.events import (
 )
 from lion_code.core.messages import AssistantMessage, TextContent
 from lion_code.core.provider_events import TextDeltaEvent
+from lion_code.server import app as server_app_module
 from lion_code.server.app import create_app, run_server
 from lion_code.server.bridge import SessionWebsocketBridge
 
@@ -98,6 +99,12 @@ def _build_test_session() -> tuple[LionCodingSession, FakeCodingSessionBackend]:
         cwd=Path("/workspace"),
         model="gpt-4o",
         provider_name="openai",
+        provider_config_data={
+            "use_openai": True,
+            "model": "gpt-4o",
+            "api_key": "sk-old",
+            "base_url": "https://api.test/v1",
+        },
         sessions=[
             {
                 "id": "sess-1",
@@ -185,8 +192,8 @@ def test_get_messages() -> None:
     assert msgs[0]["content"] == "Hello!"
 
 
-def test_configure_provider_and_thinking() -> None:
-    session, backend = _build_test_session()
+def test_set_thinking_level() -> None:
+    session, _ = _build_test_session()
     client = _build_client(session)
 
     # 切换 thinking
@@ -194,19 +201,126 @@ def test_configure_provider_and_thinking() -> None:
     assert res_think.status_code == 200
     assert res_think.json()["thinking_level"] == "high"
 
-    # 配置模型
-    with patch("lion_code.server.app.save_api_config") as save_config:
-        res_cfg = client.post(
-            "/api/config/provider",
-            json={
-                "model": "claude-3-5-sonnet",
-                "api_key": "sk-test",
-                "provider": "anthropic",
-            },
-        )
-    assert res_cfg.status_code == 200
-    assert len(backend.provider_configure_calls) == 1
-    save_config.assert_called_once()
+
+@pytest.fixture
+def isolated_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """把凭证持久化与 known_models 全部指向 tmp_path，并守护真实配置不变。"""
+    real_config = Path.home() / ".lion-code" / "config.json"
+
+    def _snapshot() -> tuple[bytes, float | None]:
+        try:
+            return real_config.read_bytes(), real_config.stat().st_mtime_ns
+        except OSError:
+            return b"", None
+
+    before = _snapshot()
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr(lion_config, "CONFIG_PATH", config_path)
+    yield config_path
+    assert _snapshot() == before, "测试不得改动真实 ~/.lion-code/config.json"
+
+
+def test_configure_provider_model_only_keeps_credentials(
+    isolated_config: Path,
+) -> None:
+    session, backend = _build_test_session()
+    client = _build_client(session)
+
+    res = client.post("/api/config/provider", json={"model": "gpt-4o-mini"})
+
+    assert res.status_code == 200
+    assert res.json()["model"] == "gpt-4o-mini"
+    # Runtime 收到合并后的完整配置，同 Provider 更新保留现有 key/base URL
+    assert backend.provider_configure_calls == [
+        {
+            "model": "gpt-4o-mini",
+            "api_key": "sk-old",
+            "use_openai": True,
+            "api_base": "https://api.test/v1",
+        }
+    ]
+    saved = json.loads(isolated_config.read_text(encoding="utf-8"))
+    assert saved["model"] == "gpt-4o-mini"
+    assert saved["api_key"] == "sk-old"
+    assert saved["provider"] == "openai"
+    assert saved["base_url"] == "https://api.test/v1"
+
+
+def test_configure_provider_same_provider_with_empty_key_succeeds(
+    isolated_config: Path,
+) -> None:
+    session, _ = _build_test_session()
+    client = _build_client(session)
+
+    res = client.post(
+        "/api/config/provider",
+        json={"model": "gpt-4o-mini", "api_key": ""},
+    )
+
+    assert res.status_code == 200
+    assert json.loads(isolated_config.read_text(encoding="utf-8"))["api_key"] == "sk-old"
+
+
+def test_configure_provider_switch_without_credentials_rejected(
+    isolated_config: Path,
+) -> None:
+    session, backend = _build_test_session()
+    backend.provider_config_data = {
+        "use_openai": False,
+        "model": "claude-3-5-sonnet",
+        "api_key": "",
+        "base_url": "",
+    }
+    client = _build_client(session)
+
+    res = client.post("/api/config/provider", json={"provider": "openai"})
+
+    assert res.status_code == 400
+    assert backend.provider_configure_calls == []
+    assert not isolated_config.exists()
+
+
+def test_configure_provider_runtime_failure_leaves_both_sides_unchanged(
+    isolated_config: Path,
+) -> None:
+    session, backend = _build_test_session()
+    client = _build_client(session)
+
+    def _fail(**kwargs: Any) -> None:
+        raise RuntimeError("provider build failed")
+
+    backend.configure_provider = _fail  # type: ignore[method-assign]
+
+    res = client.post("/api/config/provider", json={"model": "gpt-4o-mini"})
+
+    assert res.status_code == 400
+    assert not isolated_config.exists()
+
+
+def test_configure_provider_disk_failure_rolls_back_runtime(
+    isolated_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, backend = _build_test_session()
+    client = _build_client(session)
+
+    def _fail_save(**kwargs: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(server_app_module, "save_api_config", _fail_save)
+
+    res = client.post("/api/config/provider", json={"model": "gpt-4o-mini"})
+
+    assert res.status_code == 500
+    # 第一次尝试新配置，写盘失败后补偿回滚到旧快照
+    assert backend.provider_configure_calls[0]["model"] == "gpt-4o-mini"
+    assert backend.provider_configure_calls[-1] == {
+        "model": "gpt-4o",
+        "api_key": "sk-old",
+        "use_openai": True,
+        "api_base": "https://api.test/v1",
+    }
+    assert backend.provider_config_data["model"] == "gpt-4o"
 
 
 def test_protected_rest_requires_exact_local_access() -> None:

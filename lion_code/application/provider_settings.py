@@ -7,7 +7,6 @@ picker 的候选来自「用过即记住」——每次配置/切换模型时追
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
 from lion_code import config as _config
@@ -62,5 +61,4 @@ def remember_model(*, provider: str, model: str) -> None:
     ]
     known.insert(0, {"provider": provider, "model": model})
     config["known_models"] = known[:_MAX_KNOWN_MODELS]
-    _config.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _config.CONFIG_PATH.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    _config.write_config(config)

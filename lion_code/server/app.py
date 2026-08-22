@@ -288,32 +288,70 @@ def create_app(
         if session.is_running:
             raise HTTPException(status_code=400, detail="会话运行中，无法修改配置")
 
-        agent_kwargs: dict[str, Any] = {}
-        config_kwargs: dict[str, Any] = {}
+        # 局部请求先与当前快照合并成完整目标配置；空字段一律保留现有值。
+        snapshot = session.get_provider_config()
+        current_use_openai = bool(snapshot.get("use_openai"))
+        current_model = str(snapshot.get("model") or session.model)
+        current_api_key = str(snapshot.get("api_key") or "")
+        current_base_url = str(snapshot.get("base_url") or "")
 
-        if body.model:
-            agent_kwargs["model"] = body.model
-            config_kwargs["model"] = body.model
+        use_openai = (
+            body.provider == "openai" if body.provider else current_use_openai
+        )
+        target_model = body.model or current_model
+        target_api_key = body.api_key or current_api_key
+        target_base_url = body.base_url or current_base_url
 
-        if body.api_key:
-            agent_kwargs["api_key"] = body.api_key
-            config_kwargs["api_key"] = body.api_key
+        # 切换 Provider 时校验目标凭证；缺失直接拒绝，不动 Runtime 与磁盘。
+        provider_switched = body.provider is not None and use_openai != current_use_openai
+        if provider_switched:
+            if not target_api_key or (use_openai and not target_base_url):
+                raise HTTPException(
+                    status_code=400,
+                    detail="切换 Provider 需要目标凭证（API key 及 base URL）",
+                )
 
-        if body.provider:
-            use_openai = body.provider == "openai"
-            agent_kwargs["use_openai"] = use_openai
-            config_kwargs["provider"] = body.provider
-            if use_openai and body.base_url:
-                agent_kwargs["api_base"] = body.base_url
-                config_kwargs["base_url"] = body.base_url
-            elif not use_openai and body.base_url:
-                agent_kwargs["anthropic_base_url"] = body.base_url
-                config_kwargs["base_url"] = body.base_url
+        agent_kwargs: dict[str, Any] = {
+            "model": target_model,
+            "api_key": target_api_key,
+            "use_openai": use_openai,
+        }
+        if target_base_url:
+            base_url_key = "api_base" if use_openai else "anthropic_base_url"
+            agent_kwargs[base_url_key] = target_base_url
 
-        if agent_kwargs:
+        def _rollback_kwargs() -> dict[str, Any]:
+            rollback: dict[str, Any] = {
+                "model": current_model,
+                "api_key": current_api_key,
+                "use_openai": current_use_openai,
+            }
+            if current_base_url:
+                rollback[
+                    "api_base" if current_use_openai else "anthropic_base_url"
+                ] = current_base_url
+            return rollback
+
+        try:
             session.configure_provider(**agent_kwargs)
-        if config_kwargs:
-            save_api_config(**config_kwargs)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400, detail=f"Provider 配置失败: {exc}"
+            ) from exc
+
+        try:
+            save_api_config(
+                provider="openai" if use_openai else "anthropic",
+                model=target_model,
+                api_key=target_api_key,
+                base_url=target_base_url,
+            )
+        except Exception as exc:
+            # 写盘失败必须补偿：Runtime 回滚到旧快照，两侧保持一致。
+            session.configure_provider(**_rollback_kwargs())
+            raise HTTPException(
+                status_code=500, detail="配置写入失败，已回滚到原配置"
+            ) from exc
 
         return {
             "success": True,
