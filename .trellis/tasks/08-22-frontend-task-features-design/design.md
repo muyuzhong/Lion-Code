@@ -25,6 +25,16 @@ Round 2：
 - D9 agent 结果卡片深度：头部（`agent · type · description` + 状态）+ 结果
   Markdown 渲染；prompt 沿用 ToolView 现有入参折叠区，不加专属折叠区。
 
+Round 3（对照 deepseek-harness）：
+
+- D10 Trajectory 分期：简版进 P1（独立 PR⑤）；完整版记为 P2-10 候选，
+  待简版验证真实需求再立项。
+- D11 运行统计行：做。本地打点的耗时类指标（无 per-request usage），
+  随 PR③ 交付。
+- D12 零后端小件全收：bash ANSI 终端卡片（PR④）、DocumentTitle（PR①）、
+  reasoningDuration 思考耗时显示（PR③）。
+- D13 P2 候选池（C4）只留档不立项，落地后按真实需求再议。
+
 ---
 
 ## P0-1 Skills 浏览
@@ -115,6 +125,8 @@ react-syntax-highlighter（Prism）原生支持 `diff` 语言，零新依赖。
   含 `@@ ... @@` hunk——是则用 `<SyntaxHighlighter language="diff">` 渲染
   （增行绿、删行红），否则回退纯文本。
 - 创建/写入类工具保持现有纯文本预览（其结果非 diff 形态）。
+- bash / 命令类工具（D12）：结果含 ANSI 转义序列时渲染为终端风格卡片
+  （黑底等宽 + 颜色），实现优先复用现有依赖能力，必要时引入成熟 ANSI 渲染库。
 
 **不做**：多 hunk 合并视图、行内语法高亮叠加、跳转编辑器。
 
@@ -179,54 +191,97 @@ id / startTime / messageCount / cwd，无标题；无删除接口。
 
 ---
 
-## 补充候选（对照 deepseek-harness，grilling Round 3 输入）
+## P1-7 Trajectory 轨迹视图（简版，D10）
 
-证据：`research/deepseek-harness-frontend-inventory.md`（含数据面差异表）。
-候选尚未定案，定案后并入对应分层并更新 PR 计划。
+**现状**：Lion 无任何执行轨迹呈现；会话 entry 自带服务端时间戳
+（`core/session/entries.py:29-33`），但事件流无时间戳、无 request 级元数据。
+对照 deepseek-harness 的 Trajectory 插件（`research/deepseek-harness-frontend-inventory.md`）。
 
-- **C1 Trajectory 轨迹视图**：deepseek 的独立 Tab——事件账本 + Network 式时间线 +
-  行内 inspector。Lion 数据面差异：会话 entry 已带服务端时间戳（消息级历史可行），
-  但无 request 级元数据（usage/retry/prompt diff/TTFT）。分期：
-  - 简版（P1 可行）：右侧滑出面板；数据 = 实时 WS 事件（前端本地打时间戳）+
-    `/api/messages` 历史（消息级、服务端时间戳）；呈现 = 纵向时间线
-    （用户/助手/工具/压缩/重试行，耗时条），点行展开详情；Chat 工具卡片加
-    "检查"入口跳转定位。
-  - 完整版（P2-10 候选）：后端持久化细粒度事件 + 分页 + request inspection
-    （system prompt/usage/retry/prompt diff）。
-- **C2 运行统计行**：composer 上方一行——turn 步数、LLM 累计耗时、工具累计耗时
-  （前端本地打点近似，无 per-request usage，降级为耗时类指标；`reasoningDuration`
-  字段已存在未用）。P1 可行。
-- **C3 零后端小件**（纯前端）：
-  - bash 工具结果 ANSI 终端卡片（成熟库 ansi 渲染，或按现有依赖能力实现）；
-  - 会话标题写入浏览器标签页（DocumentTitle 模式）；
-  - `reasoningDuration` 在 ReasoningView 显示思考耗时。
-- **C4 P2 候选池**（记录不立项，落地前另立任务）：
-  - `@` 文件候选菜单（需后端文件列表 API）；
-  - TodoPanel 任务清单（需后端 todo 能力，Lion 无）；
-  - ContextMeter 上下文压力条（需当前 prompt token 数）；
-  - 图片附件上传（需 WS 协议扩展，WireMessage 已支持 image block 但无上传通道）；
-  - 消息级反馈 / fork 分叉（需后端）；
-  - 三栏 DetailsPanel 布局（重构成本高，现有 ToolView 展开已覆盖详情需求）。
+**设计**（零后端，前端本地数据）：
+
+- 入口：Header 增加"轨迹"按钮，打开**右侧滑出面板**（Sheet，不做三栏布局重构）。
+- 数据源两段拼合：
+  - 历史：`/api/messages` + 会话 entry 时间戳（消息级：用户/助手/工具结果，
+    含状态与耗时推导）；
+  - 实时：WS 事件流前端本地打点（`performance.now()`），覆盖流式期间的事件。
+- 呈现：纵向时间线——每行 = 事件类型图标 + 摘要 + 耗时条（相对行宽比例）；
+  行类型：用户消息 / 助手消息 / 工具调用（含状态色）/ 压缩 / 自动重试；
+  点行展开详情（入参出参复用现有折叠渲染）。
+- 联动：ToolView 卡片增加"检查"入口，打开轨迹面板并滚动定位到该调用
+  （对应 deepseek 的 inspectCall 模式）。
+
+**不做**（完整版归 P2-10）：后端事件持久化与分页、request inspection
+（system prompt / usage / retry / prompt diff）、Network 式横向时间线交互
+（拖选/缩放）、TTFT 与解码速率。
+
+---
+
+## P1-8 运行统计行（D11）
+
+**现状**：`ChatMessage.reasoningDuration` 字段存在但 UI 未用；事件无时间戳、
+无 per-request usage。deepseek 的 StatsLine 有 turns/steps/LLM 耗时/工具耗时/
+TTFT/解码速率，Lion 数据面只支持耗时类。
+
+**设计**：
+
+- ChatInput 上方（状态条同行区域）显示：当前会话累计——turn 步数、
+  LLM 耗时（message_start→message_end 累计）、工具耗时
+  （tool_execution_start→end 累计）；本地打点，`ChatProtocolState` 增加
+  `metrics` 字段由 reducer 累计。
+- ReasoningView 折叠头显示 `reasoningDuration`（已有字段）格式化的思考耗时。
+
+**不做**：TTFT、解码速率、token 速率（需后端 usage 事件，归 P2 候选池）。
+
+---
+
+## P2-10 Trajectory 完整版（需后端，D10 记录不立项）
+
+**接口形态（立项时细化）**：后端持久化细粒度执行事件（含 request 级
+usage / retry / prompt 变更）+ 分页拉取 API；前端在 P1-7 面板上增加
+Network 式横向时间线与 request inspector。
+
+**边界问题**：事件存储体积与保留策略；与现有 entry JSONL 的关系
+（扩展 entry 类型 vs 独立流）；分页窗口语义。
+
+**触发条件**：P1-7 简版落地且用户实际使用后确认需要历史细粒度回溯。
+
+---
+
+## P2 候选池（D13：留档不立项）
+
+以下均需后端配合或大重构，仅记录防止丢失：
+
+- `@` 文件候选菜单（需后端文件列表 API）；
+- TodoPanel 任务清单（需后端 todo 能力，Lion 无）；
+- ContextMeter 上下文压力条（需当前 prompt token 数）；
+- 图片附件上传（需 WS 协议扩展；WireMessage 已支持 image block 但无上传通道）；
+- 消息级反馈 / fork 分叉（需后端）；
+- 三栏 DetailsPanel 布局（重构成本高，ToolView 展开已覆盖详情需求）。
 
 ## 测试策略（D6）
 
 - 每个 PR 在 `frontend` 跑 `npm test`（vitest）：
+  - PR①：`api.ts` 的 `fetchSkills`（协议契约级）。
   - PR②：`chatProtocol.test.ts` 扩展 `queue_update` reducer 行为、user 角色
     `message_start` 的入流转换。
-  - PR③：`runtimeNotice` 相关 reducer 用例。
-  - PR①：`api.ts` 的 `fetchSkills`（协议契约级）。
+  - PR③：`runtimeNotice` 与 `metrics` 累计相关 reducer 用例。
+  - PR④：diff / ANSI 检测函数的纯函数单测。
+  - PR⑤：轨迹事件折叠器（历史 + 实时打点合并）的纯函数单测。
 - UI 组件渲染测试不强制（项目无先例，不引入维护成本）。
 - 全部 PR 交付需跑 `python scripts/build_frontend.py` 更新随包 dist
   （服务端启动强校验 index.html，app.py:460-464）。
 
-## PR 拆分计划（D3：按职责聚合为 4 个前端 PR + 3 个后端任务）
+## PR 拆分计划（D3 + D10~D12：5 个前端 PR + 后端任务）
 
 | PR | 内容 | 触碰面 | 回滚点 |
 | --- | --- | --- | --- |
-| ① 信息展示 | P0-1 Skills 浏览 + P0-4 列表信息量 + permission_mode 徽标 | Sidebar / Header / api.ts | 纯展示，revert 即消失 |
-| ② 运行中交互 | follow_up 排队 + steer 显式按钮 + 队列呈现 | ChatInput / chatProtocol / useLionChat / App | revert 后回到"流式只可取消" |
-| ③ 运行状态提示 | auto_retry / compaction 状态条 | ChatInput / chatProtocol | 纯提示，revert 即消失 |
-| ④ ToolView 增强 | P1-5 diff 高亮 + P1-6 agent 结果卡片 | ToolView | 非 edit / agent 工具不受影响 |
+| ① 信息展示 | P0-1 Skills 浏览 + P0-4 列表信息量 + permission_mode 徽标 + DocumentTitle | Sidebar / Header / api.ts / App | 纯展示，revert 即消失 |
+| ② 运行中交互 | follow_up 排队 + steer 显式按钮 + 队列呈现（D7/D8） | ChatInput / chatProtocol / useLionChat / App | revert 后回到"流式只可取消" |
+| ③ 运行状态提示 | auto_retry / compaction 状态条 + 统计行 + reasoningDuration（P0-3 + P1-8） | ChatInput / ReasoningView / chatProtocol | 纯提示，revert 即消失 |
+| ④ ToolView 增强 | P1-5 diff 高亮 + bash ANSI 卡片 + P1-6 agent 结果卡片 | ToolView | 非 edit/bash/agent 工具不受影响 |
+| ⑤ Trajectory 简版 | P1-7 右侧滑出轨迹面板 + 工具卡片"检查"联动 | 新组件 / Header / ToolView | 独立面板，revert 即消失 |
 
-- ①②③ 互不触碰同一状态可并行；④ 独立，内部先 diff 高亮后结果卡片。
-- P2-7 / P2-8 / P2-9 各自另立任务：先评审后端接口契约，再拆前后端 PR。
+- ①②③ 互不触碰同一状态可并行；④ 独立，内部顺序：diff → ANSI → agent 卡片；
+  ⑤ 依赖 ④ 的 ToolView 改动落位后基于其加"检查"入口，排最后。
+- P2-7 / P2-8 / P2-9 / P2-10 各自另立任务：先评审后端接口契约，再拆前后端 PR；
+  P2 候选池（D13）不立项。
