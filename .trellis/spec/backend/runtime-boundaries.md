@@ -379,6 +379,28 @@ WebSocket protocols: lion-code, lion-code-capability.<token>
 - REST validates Host, any supplied Origin, and Bearer capability at the Server
   entry point. WebSocket validates Host, required Origin, and both offered
   subprotocol values before `accept()` and before binding interaction callbacks.
+- After transport validation, an app-scoped identity lease is acquired before
+  `accept()` and callback binding. A second connection closes with 1008 without
+  changing the first connection's callbacks; only the matching owner may release
+  the lease.
+- Browser actions are one strict, alias-only Pydantic discriminated union with
+  `extra="forbid"`. Snake-case fields, coercions such as `"false"`, unknown
+  actions, invalid approval choices, and extra fields emit `protocol_error` and
+  do not resolve a pending interaction future.
+- The accepted bridge exclusively owns pending confirmation/Plan futures, the
+  active run task, and notice tasks. Cancel denies pending interactions before
+  cancelling the Session. Disconnect performs deny -> Session cancel -> collect
+  run/notice tasks -> unbind, and the close operation is idempotent.
+- Server events serialize only canonical camelCase Application/Core models. The
+  browser decodes `unknown` once at the protocol boundary before reduction; it
+  has no snake-case fallback. Tool results join by `toolCallId`, terminal errors
+  stop streaming, and final assistant messages replace provisional content.
+- Every successful socket open reloads `/api/messages`; only the latest history
+  request may replace state, and replacement discards all provisional transcript
+  and approval state. The Web layer does not retain an event replay buffer.
+- Input maps `/continue` and `/compact` to their typed actions and other slash
+  text to `command`. Plan mode uses that command path. `steer` and `follow_up`
+  remain typed senders without adding a second queue UI.
 - `--no-browser` is health-probe-only: it does not construct or disclose a
   capability URL and does not add an anonymous bootstrap path.
 - Server authentication remains interface-owned. `LionCodingSession`, Core,
@@ -392,6 +414,12 @@ WebSocket protocols: lion-code, lion-code-capability.<token>
 | Foreign Origin or non-loopback Host on protected REST | HTTP 403 before session access |
 | Foreign CORS preflight | No `Access-Control-Allow-Origin` grant |
 | Missing/incorrect WS token, missing/foreign Origin, or wrong Host | Close 1008 before accept/callback binding |
+| A valid second WS connection while one owner is active | Close 1008; preserve the first callback owner |
+| Invalid/coerced/snake-case WS action | Emit `protocol_error`; leave pending futures unresolved |
+| Cancel while approval is pending | Deny the approval, cancel the Session, and leave no hidden future |
+| WS disconnect during a run or notice send | Collect all bridge-owned tasks, unbind callbacks, then release the lease |
+| Malformed or snake-case server event in the browser | Reject at the decoder and expose a terminal protocol error |
+| Reconnect history responses complete out of order | Apply only the newest canonical `/api/messages` response |
 | Invalid capability passed to `create_app` | `ValueError` before route construction |
 | `--no-browser` startup | Loopback server and public health only; no browser thread or capability URL |
 
@@ -416,6 +444,14 @@ WebSocket protocols: lion-code, lion-code-capability.<token>
 - Frontend capability tests assert fragment import/cleanup, current-tab storage,
   Bearer injection, and the two WebSocket subprotocol values. TypeScript build
   must cover all transport call sites.
+- Bridge tests assert alias-only strict actions, approval cancellation, duplicate
+  prompt rejection, second-owner rejection/release, idempotent disconnect, and a
+  run waiting behind a blocked notice send. Compact success notices come from the
+  Session owner and must not be duplicated by the bridge.
+- Frontend protocol tests assert canonical camelCase decoding, parallel tool
+  correlation/result text/error state, terminal provider/server/protocol errors,
+  final-message reconciliation, latest-request reconnect replacement, and typed
+  Plan/continue/compact/steer/follow-up actions.
 - Server tests must mock config persistence and browser effects; the real user
   API configuration file must remain byte-for-byte unchanged.
 

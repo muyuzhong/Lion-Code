@@ -75,6 +75,24 @@ class MockWebSocket:
         self.closed = True
 
 
+class BlockingMockWebSocket(MockWebSocket):
+    """保持一次发送挂起，用于验证断线会回收 notice task。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.send_started = asyncio.Event()
+        self.send_cancelled = False
+
+    async def send_text(self, text: str) -> None:
+        self.sent_texts.append(text)
+        self.send_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.send_cancelled = True
+            raise
+
+
 def _build_test_session() -> tuple[LionCodingSession, FakeCodingSessionBackend]:
     backend = FakeCodingSessionBackend(
         cwd=Path("/workspace"),
@@ -309,6 +327,9 @@ def test_websocket_chat_streaming(origin: str) -> None:
         assert "message_end" in types
         assert "session_agent_end" in types
         assert "agent_settled" in types
+        update = next(e for e in received_events if e.get("type") == "message_update")
+        assert "assistantMessageEvent" in update
+        assert "assistant_message_event" not in update
 
 
 @pytest.mark.parametrize(
@@ -342,6 +363,75 @@ def test_websocket_rejects_untrusted_handshakes(
     assert denial.value.code == 1008
     assert _CAPABILITY not in str(denial.value)
     assert _WRONG_CAPABILITY not in str(denial.value)
+
+
+def test_websocket_rejects_second_owner_without_disturbing_first() -> None:
+    session, backend = _build_test_session()
+    client = _build_client(session)
+    connection: dict[str, Any] = {
+        "subprotocols": _websocket_protocols(),
+        "headers": {"Origin": _APP_ORIGIN},
+    }
+
+    with client.websocket_connect(_WS_URL, **connection) as first:
+        first_confirm = backend.confirm_fn
+        assert first_confirm is not None
+
+        with pytest.raises(WebSocketDisconnect) as denial:
+            with client.websocket_connect(_WS_URL, **connection):
+                pass
+
+        assert denial.value.code == 1008
+        assert backend.confirm_fn is first_confirm
+        first.send_text("not-json")
+        assert first.receive_json() == {
+            "type": "protocol_error",
+            "message": "客户端消息不符合 WebSocket action 契约",
+        }
+
+    with client.websocket_connect(_WS_URL, **connection) as replacement:
+        assert backend.confirm_fn is not None
+        assert backend.confirm_fn is not first_confirm
+        replacement.send_text("not-json")
+        assert replacement.receive_json()["type"] == "protocol_error"
+
+
+def test_websocket_plan_continue_and_compact_actions_end_to_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, backend = _build_test_session()
+    client = _build_client(session)
+
+    with client.websocket_connect(
+        _WS_URL,
+        subprotocols=_websocket_protocols(),
+        headers={"Origin": _APP_ORIGIN},
+    ) as websocket:
+        websocket.send_json({"action": "command", "command": "/plan"})
+        assert websocket.receive_json() == {
+            "type": "notice",
+            "text": "Plan mode toggled.",
+            "role": "info",
+        }
+        assert backend.plan_mode is True
+
+        async def compact_with_canonical_notice() -> None:
+            backend.session_operations.append(("compact", None))
+            assert backend.notice_fn is not None
+            backend.notice_fn("Conversation compacted.", "info")
+
+        monkeypatch.setattr(backend, "compact", compact_with_canonical_notice)
+        websocket.send_json({"action": "compact"})
+        assert websocket.receive_json() == {
+            "type": "notice",
+            "text": "Conversation compacted.",
+            "role": "info",
+        }
+        assert ("compact", None) in backend.session_operations
+
+        websocket.send_json({"action": "continue"})
+        assert websocket.receive_json()["type"] == "agent_settled"
+        assert backend.continue_calls == 1
 
 
 def test_run_server_uses_loopback_and_fragment_capability(monkeypatch) -> None:
@@ -439,19 +529,19 @@ async def test_websocket_confirm_approval_flow() -> None:
     assert len(ws.sent_texts) == 1
     data = json.loads(ws.sent_texts[0])
     assert data.get("type") == "confirm_request"
-    req_id = data.get("request_id")
+    req_id = data.get("requestId")
     assert "rm -rf" in data.get("message", "")
 
     # 3. 模拟前端回复 confirm_response
     await bridge.handle_inbound_data(
-        {"action": "confirm_response", "request_id": req_id, "approved": True}
+        {"action": "confirm_response", "requestId": req_id, "approved": True}
     )
 
     # 4. 验证 confirm_fn 返回 True
     result = await confirm_task
     assert result is True
 
-    bridge.unbind_callbacks()
+    await bridge.aclose()
 
 
 async def test_websocket_plan_approval_flow() -> None:
@@ -467,14 +557,14 @@ async def test_websocket_plan_approval_flow() -> None:
     assert len(ws.sent_texts) == 1
     data = json.loads(ws.sent_texts[0])
     assert data.get("type") == "plan_approval_request"
-    req_id = data.get("request_id")
+    req_id = data.get("requestId")
     assert "Step A" in data.get("plan", "")
 
     # 前端选择 execute
     await bridge.handle_inbound_data(
         {
             "action": "plan_approval_response",
-            "request_id": req_id,
+            "requestId": req_id,
             "choice": "execute",
             "feedback": None,
         }
@@ -483,4 +573,160 @@ async def test_websocket_plan_approval_flow() -> None:
     result = await plan_task
     assert result == {"choice": "execute", "feedback": None}
 
-    bridge.unbind_callbacks()
+    await bridge.aclose()
+
+
+async def test_websocket_strict_actions_do_not_coerce_approval_values() -> None:
+    session, backend = _build_test_session()
+    websocket = MockWebSocket()
+    bridge = SessionWebsocketBridge(session, websocket)  # type: ignore[arg-type]
+    bridge.bind_callbacks()
+
+    assert backend.confirm_fn is not None
+    confirm_task = asyncio.create_task(backend.confirm_fn("Approve?"))
+    await asyncio.sleep(0)
+    request_id = json.loads(websocket.sent_texts[0])["requestId"]
+
+    await bridge.handle_inbound_data(
+        {
+            "action": "confirm_response",
+            "requestId": request_id,
+            "approved": "false",
+        }
+    )
+
+    assert confirm_task.done() is False
+    assert json.loads(websocket.sent_texts[-1])["type"] == "protocol_error"
+
+    await bridge.handle_inbound_data(
+        {
+            "action": "confirm_response",
+            "request_id": request_id,
+            "approved": False,
+        }
+    )
+
+    assert confirm_task.done() is False
+    assert json.loads(websocket.sent_texts[-1])["type"] == "protocol_error"
+
+    await bridge.handle_inbound_data(
+        {
+            "action": "confirm_response",
+            "requestId": request_id,
+            "approved": False,
+        }
+    )
+    assert await confirm_task is False
+    await bridge.aclose()
+
+
+async def test_websocket_strict_actions_reject_invalid_plan_choice_and_extra_fields() -> (
+    None
+):
+    session, backend = _build_test_session()
+    websocket = MockWebSocket()
+    bridge = SessionWebsocketBridge(session, websocket)  # type: ignore[arg-type]
+    bridge.bind_callbacks()
+
+    assert backend.plan_approval_fn is not None
+    approval_task = asyncio.create_task(backend.plan_approval_fn("Plan"))
+    await asyncio.sleep(0)
+    request_id = json.loads(websocket.sent_texts[0])["requestId"]
+
+    await bridge.handle_inbound_data(
+        {
+            "action": "plan_approval_response",
+            "requestId": request_id,
+            "choice": "ship-it",
+        }
+    )
+    await bridge.handle_inbound_data({"action": "cancel", "unexpected": True})
+
+    assert approval_task.done() is False
+    assert [json.loads(item)["type"] for item in websocket.sent_texts[-2:]] == [
+        "protocol_error",
+        "protocol_error",
+    ]
+
+    await bridge.aclose()
+    assert await approval_task == {"choice": "keep-planning"}
+
+
+async def test_websocket_cancel_denies_pending_approval() -> None:
+    session, backend = _build_test_session()
+    websocket = MockWebSocket()
+    bridge = SessionWebsocketBridge(session, websocket)  # type: ignore[arg-type]
+    bridge.bind_callbacks()
+
+    assert backend.confirm_fn is not None
+    confirm_task = asyncio.create_task(backend.confirm_fn("Approve?"))
+    await asyncio.sleep(0)
+
+    await bridge.handle_inbound_data({"action": "cancel"})
+
+    assert await confirm_task is False
+    assert backend.cancel_calls == 1
+    await bridge.aclose()
+
+
+async def test_websocket_close_cancels_run_denies_pending_and_unbinds_once() -> None:
+    session, backend = _build_test_session()
+    backend.wait_for_cancel = True
+    websocket = MockWebSocket()
+    bridge = SessionWebsocketBridge(session, websocket)  # type: ignore[arg-type]
+    bridge.bind_callbacks()
+
+    await bridge.handle_inbound_data({"action": "prompt", "prompt": "work"})
+    await bridge.handle_inbound_data({"action": "prompt", "prompt": "duplicate"})
+    assert json.loads(websocket.sent_texts[-1])["type"] == "protocol_error"
+    await asyncio.wait_for(backend.prompt_started.wait(), timeout=1)
+    assert backend.confirm_fn is not None
+    confirm_task = asyncio.create_task(backend.confirm_fn("Approve?"))
+    await asyncio.sleep(0)
+
+    await asyncio.wait_for(bridge.aclose(), timeout=1)
+    await bridge.aclose()
+
+    assert await confirm_task is False
+    assert backend.cancel_calls == 1
+    assert backend.prompt_calls == 1
+    assert session.is_running is False
+    assert backend.confirm_fn is None
+    assert backend.plan_approval_fn is None
+    assert backend.notice_fn is None
+
+
+async def test_websocket_close_cancels_pending_notice_task() -> None:
+    session, backend = _build_test_session()
+    websocket = BlockingMockWebSocket()
+    bridge = SessionWebsocketBridge(session, websocket)  # type: ignore[arg-type]
+    bridge.bind_callbacks()
+
+    assert backend.notice_fn is not None
+    backend.notice_fn("notice", "info")
+    await asyncio.wait_for(websocket.send_started.wait(), timeout=1)
+
+    await asyncio.wait_for(bridge.aclose(), timeout=1)
+
+    assert websocket.send_cancelled is True
+    assert backend.notice_fn is None
+
+
+async def test_websocket_close_unblocks_run_waiting_behind_notice_send() -> None:
+    session, backend = _build_test_session()
+    backend.wait_for_cancel = True
+    websocket = BlockingMockWebSocket()
+    bridge = SessionWebsocketBridge(session, websocket)  # type: ignore[arg-type]
+    bridge.bind_callbacks()
+
+    assert backend.notice_fn is not None
+    backend.notice_fn("notice", "info")
+    await asyncio.wait_for(websocket.send_started.wait(), timeout=1)
+    await bridge.handle_inbound_data({"action": "prompt", "prompt": "work"})
+    await asyncio.wait_for(backend.prompt_started.wait(), timeout=1)
+
+    await asyncio.wait_for(bridge.aclose(), timeout=1)
+
+    assert websocket.send_cancelled is True
+    assert backend.cancel_calls == 1
+    assert session.is_running is False

@@ -32,7 +32,7 @@ export function ConfirmBanner({ request, onRespond }: ConfirmBannerProps) {
         <div className="mt-3 flex items-center justify-end gap-2 border-t border-zinc-800 pt-3">
           <button
             type="button"
-            onClick={() => onRespond(request.request_id, false)}
+            onClick={() => onRespond(request.requestId, false)}
             className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 transition"
           >
             <X className="size-3.5" />
@@ -40,7 +40,7 @@ export function ConfirmBanner({ request, onRespond }: ConfirmBannerProps) {
           </button>
           <button
             type="button"
-            onClick={() => onRespond(request.request_id, true)}
+            onClick={() => onRespond(request.requestId, true)}
             className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-3.5 py-1.5 text-xs font-medium text-black hover:bg-amber-400 transition shadow-xs"
           >
             <Check className="size-3.5" />
@@ -104,7 +104,7 @@ export function PlanApprovalModal({ request, onRespond }: PlanApprovalModalProps
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 border-t border-zinc-800 bg-zinc-950/50 p-4">
           <button
             type="button"
-            onClick={() => onRespond(request.request_id, "clear-and-execute", feedback)}
+            onClick={() => onRespond(request.requestId, "clear-and-execute", feedback)}
             className="flex flex-col items-center justify-center gap-1 rounded-xl bg-zinc-100 px-3 py-2.5 text-center text-zinc-950 transition hover:bg-zinc-200 shadow-xs"
           >
             <Play className="size-4" />
@@ -114,7 +114,7 @@ export function PlanApprovalModal({ request, onRespond }: PlanApprovalModalProps
 
           <button
             type="button"
-            onClick={() => onRespond(request.request_id, "execute", feedback)}
+            onClick={() => onRespond(request.requestId, "execute", feedback)}
             className="flex flex-col items-center justify-center gap-1 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-center transition hover:bg-zinc-800 text-zinc-200"
           >
             <Play className="size-4 text-emerald-400" />
@@ -124,7 +124,7 @@ export function PlanApprovalModal({ request, onRespond }: PlanApprovalModalProps
 
           <button
             type="button"
-            onClick={() => onRespond(request.request_id, "manual-execute", feedback)}
+            onClick={() => onRespond(request.requestId, "manual-execute", feedback)}
             className="flex flex-col items-center justify-center gap-1 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-center transition hover:bg-zinc-800 text-zinc-200"
           >
             <Wrench className="size-4 text-blue-400" />
@@ -134,7 +134,7 @@ export function PlanApprovalModal({ request, onRespond }: PlanApprovalModalProps
 
           <button
             type="button"
-            onClick={() => onRespond(request.request_id, "keep-planning", feedback)}
+            onClick={() => onRespond(request.requestId, "keep-planning", feedback)}
             className="flex flex-col items-center justify-center gap-1 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-center transition hover:bg-zinc-800 text-zinc-200"
           >
             <RefreshCw className="size-4 text-amber-400" />

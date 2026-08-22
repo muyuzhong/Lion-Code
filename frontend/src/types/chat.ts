@@ -1,7 +1,7 @@
 export interface ToolCallItem {
   id: string;
   toolName: string;
-  args?: any;
+  args?: Record<string, unknown> | string;
   status: "running" | "completed" | "error";
   result?: string;
   expanded?: boolean;
@@ -14,8 +14,9 @@ export interface ChatMessage {
   reasoning?: string;
   reasoningDuration?: number;
   tools?: ToolCallItem[];
+  error?: string;
   isStreaming?: boolean;
-  createdAt: string;
+  createdAt?: string | null;
 }
 
 export interface ServerStatus {
@@ -45,11 +46,11 @@ export interface ModelChoice {
 }
 
 export interface ConfirmRequest {
-  request_id: string;
+  requestId: string;
   message: string;
 }
 
 export interface PlanApprovalRequest {
-  request_id: string;
+  requestId: string;
   plan: string;
 }

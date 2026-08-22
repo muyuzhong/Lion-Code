@@ -17,12 +17,12 @@ LionCodingSession 建立唯一、可关闭、可恢复的浏览器连接所有�
 
 ## Acceptance Criteria
 
-- [ ] 字符串 false 与非法 choice/action 不进入审批/Plan callback。
-- [ ] parallel tool 结果按 toolCallId 对应，isError 正确呈现，结果显示文本内容。
-- [ ] Server/provider/protocol error 结束 streaming 并可见。
-- [ ] 第二连接被拒绝且不改变第一个 owner；断线后无 pending future/background task。
-- [ ] 重连 transcript 等于 canonical `/api/messages`。
-- [ ] Plan 按钮实际走 command contract；continue/compact 有端到端测试。
+- [x] 字符串 false 与非法 choice/action 不进入审批/Plan callback。
+- [x] parallel tool 结果按 toolCallId 对应，isError 正确呈现，结果显示文本内容。
+- [x] Server/provider/protocol error 结束 streaming 并可见。
+- [x] 第二连接被拒绝且不改变第一个 owner；断线后无 pending future/background task。
+- [x] 重连 transcript 等于 canonical `/api/messages`。
+- [x] Plan 按钮实际走 command contract；continue/compact 有端到端测试。
 
 ## Dependency
 

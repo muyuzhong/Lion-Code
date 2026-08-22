@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import secrets
 import threading
@@ -28,7 +27,7 @@ from lion_code.application.session import LionCodingSession
 from lion_code.config import save_api_config
 from lion_code.core.messages import AssistantMessage, ToolResultMessage, UserMessage
 
-from .bridge import SessionWebsocketBridge
+from .bridge import SessionWebsocketBridge, WebsocketConnectionLease
 from .models import (
     ChatMessageDTO,
     ModelChoiceItem,
@@ -136,6 +135,7 @@ def create_app(
         allow_methods=["GET", "POST"],
         allow_headers=["Authorization", "Content-Type"],
     )
+    websocket_lease = WebsocketConnectionLease()
 
     # ─── REST 接口 ───────────────────────────────────────────────
 
@@ -224,6 +224,7 @@ def create_app(
                         content=m.text,
                         reasoning=m.thinking_text or None,
                         tools=tools_dto,
+                        error=m.error_message,
                         createdAt=None,
                     )
                 )
@@ -353,24 +354,22 @@ def create_app(
             await websocket.close(code=1008)
             return
 
-        await websocket.accept(subprotocol=_WEBSOCKET_PROTOCOL)
         bridge = SessionWebsocketBridge(session, websocket)
-        bridge.bind_callbacks()
+        if not websocket_lease.acquire(bridge):
+            await websocket.close(code=1008)
+            return
 
         try:
+            await websocket.accept(subprotocol=_WEBSOCKET_PROTOCOL)
+            bridge.bind_callbacks()
             while True:
                 message_text = await websocket.receive_text()
-                try:
-                    data = json.loads(message_text)
-                except Exception:
-                    continue
-
-                if isinstance(data, dict):
-                    await bridge.handle_inbound_data(data)
+                await bridge.handle_inbound_text(message_text)
         except (WebSocketDisconnect, ConnectionResetError):
             pass
         finally:
-            bridge.unbind_callbacks()
+            await bridge.aclose()
+            websocket_lease.release(bridge)
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.close()
 
