@@ -370,6 +370,7 @@ def test_meta_agent_public_surface_is_feature_neutral() -> None:
         "continue_",
         "cycle_thinking_level",
         "follow_up",
+        "handoff_session",
         "is_running",
         "messages",
         "model",
@@ -396,7 +397,7 @@ def test_meta_agent_public_surface_is_feature_neutral() -> None:
         "autonom",
         "dream",
         "goal",
-        "handoff",
+        # "handoff" 不在禁止面：PR2 起显式会话移交是通用 session 生命周期操作。
         "learn",
         "memory",
         "plan",
@@ -405,3 +406,4 @@ def test_meta_agent_public_surface_is_feature_neutral() -> None:
         "supervisor",
     )
     assert not any(marker in name.casefold() for name in public for marker in forbidden)
+    assert "handoff_session" in public

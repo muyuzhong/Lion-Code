@@ -8,6 +8,7 @@ from pathlib import Path
 from lion_code.core.events import AgentEvent, MessageEndEvent
 from lion_code.core.messages import AgentMessage
 from lion_code.core.session import (
+    BranchSummaryEntry,
     CompactionEntry,
     JsonlSessionStorage,
     MessageEntry,
@@ -113,6 +114,24 @@ class SessionRecorder:
             entries = await self.storage.read_all()
             state = SessionState.from_entries(entries)
             self._context_entry_ids = list(state.context_entry_ids)
+            return entry
+
+    async def record_branch_summary(
+        self,
+        *,
+        summary: str,
+        branch_root_id: str | None = None,
+    ) -> BranchSummaryEntry:
+        """记录从旧 Session 分支出的九段摘要；replay 时作为新 Session 首条上下文。"""
+        async with self._lock:
+            await self._initialize_unlocked()
+            entry = BranchSummaryEntry(
+                parent_id=self._parent_id,
+                summary=summary,
+                branch_root_id=branch_root_id,
+            )
+            await self._append_unlocked(entry)
+            self._context_entry_ids.append(entry.id)
             return entry
 
     async def context_entry_ids(self) -> tuple[str, ...]:

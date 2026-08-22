@@ -147,6 +147,18 @@ class MetaAgent:
             thinking_level=view.thinking_level,
         )
 
+    async def handoff_session(self) -> None:
+        """显式跨 Owner 编排：压缩旧 Session → 新 Session → 首条 BranchSummary。
+
+        普通 ``new_session`` 保持干净会话语义；本操作把当前任务以九段有界
+        摘要带入新 Session，旧 Session append-only 历史保持可恢复。
+        """
+        view = self._provider_controller.view
+        await self._agent_runtime.handoff_session(
+            model=view.model,
+            thinking_level=view.thinking_level,
+        )
+
     async def _restore_core_session(self, session_id: str) -> bool:
         """显式跨 Owner 编排：load → restore_configuration → AgentRuntime.restore。"""
         state = await self._session.load(session_id)

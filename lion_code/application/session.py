@@ -202,6 +202,10 @@ class LionCodingSession:
     async def new_session(self) -> None:
         await self._backend.new_session()
 
+    async def handoff_session(self) -> None:
+        """携带当前任务九段摘要新建会话；旧会话历史保持可恢复。"""
+        await self._backend.handoff_session()
+
     # ─── 压缩 / 用量 ─────────────────────────────────────────
 
     async def compact(self) -> None:

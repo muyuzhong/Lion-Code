@@ -318,6 +318,21 @@ def create_app(
         await session.new_session()
         return {"success": True, "session_id": session.session_id}
 
+    @api.post("/sessions/handoff")
+    async def handoff_session() -> dict[str, Any]:
+        """携带当前任务九段摘要新建会话；失败保持旧会话并返回错误信息。"""
+        if session.is_running:
+            raise HTTPException(
+                status_code=400, detail="会话正在运行中，无法移交会话"
+            )
+        try:
+            await session.handoff_session()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail=f"会话移交失败，旧会话保持不变：{exc}"
+            ) from exc
+        return {"success": True, "session_id": session.session_id}
+
     @api.get("/models", response_model=list[ModelChoiceItem])
     async def get_models() -> list[ModelChoiceItem]:
         return [

@@ -88,7 +88,7 @@ async def _dispatch_repl_command(
 
     if not result.handled:
         print_info(
-            "未知命令 — 可用: /model /clear /plan /cost /compact "
+            "未知命令 — 可用: /model /clear /handoff /plan /cost /compact "
             "/skills /thinking /resume /quit"
         )
         return False
@@ -97,6 +97,11 @@ async def _dispatch_repl_command(
         return True
     if result.new_session_requested:
         await backend.clear_history()
+    elif result.handoff_requested:
+        try:
+            await backend.handoff_session()
+        except Exception as e:
+            print_error(str(e))
     elif result.plan_toggle_requested:
         print_info(f"Plan mode: {backend.toggle_plan_mode()}")
     elif result.cost_requested:
@@ -245,6 +250,7 @@ Options:
 
 REPL commands:
   /clear              Clear conversation history
+  /handoff            Start a new session carrying the current task summary
   /plan               Toggle plan mode (read-only <-> normal)
   /cost               Show token usage and cost
   /compact            Manually compact conversation
