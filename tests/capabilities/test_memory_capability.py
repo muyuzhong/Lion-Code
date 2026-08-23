@@ -10,8 +10,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from lion_code.capabilities.memory import MemoryStore, create_memory_capability
+from lion_code.capabilities.memory import (
+    MemorySchemaError,
+    MemoryStore,
+    create_memory_capability,
+)
+from lion_code.context import ContextManager, ContextRuntimeState, ContextView
 from lion_code.context.estimator import estimate_text_tokens
+from lion_code.core import UserMessage
 from lion_code.core.cancellation import CancellationToken
 from lion_code.permission_state import PermissionController, PermissionState
 from lion_code.runtime.session_identity import SessionIdentityState
@@ -140,8 +146,7 @@ class MemoryCapabilityTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("typed evidence", policy)
         self.assertIn("never store secrets", policy)
         self.assertIn("always override Memory", policy)
-        self.assertIsNone(self.spec.context_layer)
-        self.assertIsNone(self.spec.query_context_layer)
+        self.assertIsNotNone(self.spec.context_layer)
 
     async def test_task_tool_zero_one_many_and_lifecycle(self) -> None:
         empty = await self.execute("recall_tasks", {})
@@ -257,10 +262,14 @@ class MemoryCapabilityTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_needs_review_is_reported_and_excluded_from_recall(self) -> None:
         await self.remember_definition(paths=["missing.py"])
+        await self.execute("set_memory_pinned", {"id": 1, "pinned": True})
         review = await self.execute("review_memory", {"view": "needs_review"})
         self.assertIn("missing path: missing.py", review.content)
         recall = await self.execute("recall_memory", {"query": "ci-policy"})
         self.assertIn("No active, reviewed", recall.content)
+        layer = self.spec.context_layer
+        assert layer is not None
+        self.assertEqual(layer.render(ContextView.from_messages([])), "")
 
         conn = sqlite3.connect(self.db_path)
         old = datetime.now(UTC) - timedelta(days=91)
@@ -272,6 +281,7 @@ class MemoryCapabilityTest(unittest.IsolatedAsyncioTestCase):
         conn.close()
         review = await self.execute("review_memory", {"view": "needs_review"})
         self.assertIn("validation older than 90 days", review.content)
+        self.assertEqual(layer.render(ContextView.from_messages([])), "")
 
     async def test_pin_and_purge_use_confirmation_but_ordinary_mutations_do_not(
         self,
@@ -349,6 +359,53 @@ class MemoryCapabilityTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("m:1 a-large", review.content)
         self.assertNotIn("m:2 b-small", review.content)
+        layer = self.spec.context_layer
+        assert layer is not None
+        rendered = layer.render(ContextView.from_messages([]))
+        self.assertNotIn("a-large", rendered)
+        self.assertIn("b-small", rendered)
+        self.assertIn("current user instructions, AGENTS, source, and tests", rendered)
+        self.assertLessEqual(estimate_text_tokens(rendered), 512)
+
+    async def test_pinned_budget_includes_header_and_authority_notice(self) -> None:
+        await self.remember_definition(content="x" * 1880)
+        await self.execute("set_memory_pinned", {"id": 1, "pinned": True})
+
+        layer = self.spec.context_layer
+        assert layer is not None
+        rendered = layer.render(ContextView.from_messages([]))
+
+        self.assertEqual(rendered, "")
+        review = await self.execute(
+            "review_memory", {"view": "pinned_overflow", "target": "semantic"}
+        )
+        self.assertIn("m:1 ci-policy", review.content)
+
+    async def test_pinned_layer_is_lazy_empty_and_prepared_only(self) -> None:
+        layer = self.spec.context_layer
+        assert layer is not None
+        self.assertFalse(self.db_path.exists())
+        source = [UserMessage(content="canonical")]
+        manager = ContextManager(context_layers=lambda: (layer,))
+        state = ContextRuntimeState(
+            effective_window_tokens=1_000,
+            last_prompt_tokens=10,
+        )
+
+        empty = manager.prepare(source, state)
+
+        self.assertTrue(self.db_path.exists())
+        self.assertEqual(empty.messages, tuple(source))
+        await self.remember_definition()
+        await self.execute("set_memory_pinned", {"id": 1, "pinned": True})
+
+        prepared = manager.prepare(source, state)
+
+        self.assertEqual(len(source), 1)
+        self.assertEqual(source[0].text, "canonical")
+        self.assertEqual(len(prepared.messages), 2)
+        self.assertIn("# Pinned Memory", prepared.messages[-1].text)
+        self.assertIn("ci-policy", prepared.messages[-1].text)
 
     async def test_invalid_tool_arguments_return_structured_errors(self) -> None:
         missing_evidence = await self.remember_definition(evidence_type="guess")
@@ -372,6 +429,19 @@ class MemoryCapabilityTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_error)
         self.assertIn(str(self.db_path), result.content)
         self.assertIn("schema version mismatch", result.content)
+
+    def test_pinned_render_surfaces_schema_failure(self) -> None:
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("CREATE TABLE foreign_data (value TEXT)")
+        conn.execute("PRAGMA user_version = 99")
+        conn.commit()
+        conn.close()
+        layer = self.spec.context_layer
+        assert layer is not None
+
+        with self.assertRaises(MemorySchemaError) as raised:
+            layer.render(ContextView.from_messages([]))
+        self.assertIn(str(self.db_path), str(raised.exception))
 
 
 if __name__ == "__main__":

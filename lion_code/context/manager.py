@@ -41,29 +41,7 @@ class _ContextLayer(Protocol):
     def render(self, view: ContextView) -> str: ...
 
 
-class _QueryContextLayer(Protocol):
-    """需要最新 user query 的 prepared-context 投影回调边界。"""
-
-    @property
-    def layer_id(self) -> str: ...
-
-    def render(self, query: str, view: ContextView) -> str: ...
-
-
 ContextLayerCallback = Callable[[], Sequence[_ContextLayer]]
-QueryContextLayerCallback = Callable[[], Sequence[_QueryContextLayer]]
-
-
-def _latest_user_query(messages: Sequence[AgentMessage]) -> str:
-    """取最新 user message 文本作为查询输入；无 user message 时为空串。
-
-    同一 provider tool loop 内 canonical messages 不变，因此该值保持
-    稳定；新的 user turn（含 steering）自然产生新查询。
-    """
-    for message in reversed(messages):
-        if isinstance(message, UserMessage):
-            return message.text
-    return ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,12 +60,10 @@ class ContextManager:
         *,
         is_snippable_tool: IsSnippableTool | None = None,
         context_layers: ContextLayerCallback | None = None,
-        query_context_layers: QueryContextLayerCallback | None = None,
     ) -> None:
         self.policy = policy or ContextPolicy()
         self._is_snippable_tool = is_snippable_tool or (lambda _name: False)
         self._context_layers = context_layers or (lambda: ())
-        self._query_context_layers = query_context_layers or (lambda: ())
 
     def prepare(
         self,
@@ -133,8 +109,7 @@ class ContextManager:
         compaction_required: bool,
     ) -> None:
         layers = tuple(self._context_layers())
-        query_layers = tuple(self._query_context_layers())
-        if not layers and not query_layers:
+        if not layers:
             return
 
         view = ContextView.from_messages(
@@ -142,11 +117,7 @@ class ContextManager:
             state=state,
             compaction_required=compaction_required,
         )
-        query = _latest_user_query(source_messages)
         fragments = [(layer.layer_id, layer.render(view)) for layer in layers]
-        fragments += [
-            (layer.layer_id, layer.render(query, view)) for layer in query_layers
-        ]
         rendered = [
             fragment.strip()
             for _layer_id, fragment in sorted(fragments, key=lambda item: item[0])

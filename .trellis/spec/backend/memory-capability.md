@@ -7,9 +7,9 @@ stable semantic knowledge. Memory is a Capability-private component, not a
 Session history, repository index, AGENTS copy, Trellis adapter, or enforcement
 hook.
 
-The current contract covers the canonical SQLite store, explicit tools, and
-static MemoryPolicy. Prepared pinned projection has a separate delivery gate;
-automatic query-aware recall is not part of phase one.
+The current contract covers the canonical SQLite store, explicit tools, static
+MemoryPolicy, and an ordinary prepared-only ContextLayer for reviewed pinned
+entries. Automatic query-aware recall is not part of phase one.
 
 ## 2. Signatures
 
@@ -72,6 +72,13 @@ purge_memory            irreversible mutation, confirmation required
 - Explicit semantic recall is bounded exact-key or literal matching and excludes
   archived or needs-review entries. Phase one has no FTS table, BM25, revision
   graph, recall counter, or query-aware context layer.
+- The ordinary pinned ContextLayer includes at most eight whole reviewed
+  entries, including its heading and authority-priority notice, within 512
+  estimated tokens. An oversized entry is skipped rather than blocking later
+  entries; no eligible entry means no injected block. Its output states that
+  current user instructions, AGENTS, source, and tests take priority, remains
+  request-local, and never reaches canonical history, JSONL, CompactionEntry,
+  or compactor input.
 - Updating an active stable key changes the same row. A pinned semantic row must
   be confirmed-unpinned first. Archive clears `pinned`; restore never restores
   it. Validate requires new typed evidence.
@@ -84,6 +91,7 @@ purge_memory            irreversible mutation, confirmation required
 | Condition | Required result |
 | --- | --- |
 | Constructor only | No directory or database file is created |
+| First pinned render | Lazily opens/validates the database; schema errors fail explicitly |
 | Fresh concurrent first open | One canonical schema is committed; all callers continue |
 | Unknown `user_version`, extra/missing table or column, corrupt file | `MemorySchemaError` including the database path; original file is preserved |
 | Unknown evidence type, empty reference, invalid kind/trigger, unsafe path | `MemoryValidationError`; no row is written |
@@ -110,11 +118,12 @@ purge_memory            irreversible mutation, confirmation required
   conflicts, typed evidence, and dynamic review exclusion.
 - `tests/capabilities/test_memory_capability.py` asserts the exact nine-tool
   surface, ToolCapabilities, MemoryPolicy, structured failures, task result
-  bounds, archived views, validate evidence, and pin/purge confirmation.
+  bounds, archived views, validate evidence, pin/purge confirmation, and pinned
+  prepared-only projection bounds.
 - `tests/architecture/test_memory_capability_boundaries.py` asserts FullProfile
   construction is lazy, Runtime owners cannot reach `MemoryStore`, the Memory
-  package imports no Provider/Runtime owner, and no query-aware Memory layer is
-  registered.
+  package imports no Provider/Runtime owner, and Memory registers only the
+  ordinary ContextLayer slot.
 - Composition, PromptLayer, legacy-removal, and all architecture tests remain
   green after any schema or tool change.
 

@@ -137,7 +137,6 @@ def test_minimal_graph_only_contains_caller_tools(tmp_path, monkeypatch) -> None
         "caller_b",
     }
     assert composition.capabilities.registry.tool_sources == ()
-    assert composition.capabilities.registry.query_context_layers == ()
     assert composition.capabilities.plan is None
     assert composition.capabilities.subagent_factory is None
     assert composition.capabilities.subagent_executor is None
@@ -197,7 +196,6 @@ def test_coding_graph_never_composes_full_capabilities(tmp_path, monkeypatch):
         )
 
     assert composition.capabilities.registry.tool_sources == ()
-    assert composition.capabilities.registry.query_context_layers == ()
     assert composition.capabilities.skill_runtime is None
     assert composition.capabilities.subagent_executor is None
     assert composition.capabilities.subagent_factory is None
@@ -282,7 +280,9 @@ def test_full_graph_contains_plan_subagent_skill_memory_and_extensions(
         )
 
     assert len(composition.capabilities.registry.tool_sources) == 4
-    assert composition.capabilities.registry.query_context_layers == ()
+    assert "memory" in {
+        layer.layer_id for layer in composition.capabilities.registry.context_layers
+    }
     tool_names = {tool.name for tool in composition.tooling.registry.all_tools()}
     assert {
         "remember_task",
@@ -347,7 +347,6 @@ def test_full_graph_memory_removed_by_same_name_extension_spec(tmp_path, monkeyp
         )
 
     assert len(composition.capabilities.registry.tool_sources) == 3
-    assert composition.capabilities.registry.query_context_layers == ()
     tool_names = {tool.name for tool in composition.tooling.registry.all_tools()}
     assert not tool_names & {
         "remember_task",

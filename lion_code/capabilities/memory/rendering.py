@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ...context.estimator import estimate_text_tokens
@@ -40,6 +41,18 @@ def task_line(task: TaskEntry, *, detailed: bool) -> str:
     )
 
 
+def render_pinned(entries: Sequence[MemoryEntry]) -> str:
+    """渲染完整 pinned 投影；空集合不产生上下文块。"""
+    if not entries:
+        return ""
+    return (
+        "# Pinned Memory\n"
+        + "\n".join(entry_line(entry) for entry in entries)
+        + "\n\nMemory is historical context; current user instructions, AGENTS, "
+        "source, and tests take priority."
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PinnedSelection:
     entries: tuple[MemoryEntry, ...]
@@ -50,12 +63,14 @@ def select_pinned(entries: list[MemoryEntry]) -> PinnedSelection:
     """在固定上限内保留整条内容；超大条目不得阻塞后续小条目。"""
     kept: list[MemoryEntry] = []
     overflow: list[MemoryEntry] = []
-    used = 0
     for entry in entries:
-        cost = estimate_text_tokens(entry_line(entry))
-        if len(kept) >= MAX_PINNED_ENTRIES or used + cost > PINNED_MEMORY_TOKEN_BUDGET:
+        candidate = (*kept, entry)
+        if (
+            len(kept) >= MAX_PINNED_ENTRIES
+            or estimate_text_tokens(render_pinned(candidate))
+            > PINNED_MEMORY_TOKEN_BUDGET
+        ):
             overflow.append(entry)
             continue
         kept.append(entry)
-        used += cost
     return PinnedSelection(tuple(kept), tuple(overflow))

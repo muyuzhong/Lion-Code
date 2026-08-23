@@ -7,10 +7,11 @@ from pathlib import Path
 
 from ...context.estimator import APPROXIMATE_CHARS_PER_TOKEN, estimate_text_tokens
 from ...context.projector import budget_text
+from ...context.types import ContextView
 from ...tooling.context import ToolContext
 from ...tooling.types import JSONValue, LionTool, ToolCapabilities, ToolResult
 from ..types import CapabilitySpec
-from .rendering import entry_line, select_pinned, task_line
+from .rendering import entry_line, render_pinned, select_pinned, task_line
 from .store import (
     EVIDENCE_TYPES,
     MAX_MEMORY_RESULTS,
@@ -154,6 +155,21 @@ class MemoryPolicyPromptLayer:
 - Update a task only when it is created, its objective or next action changes, a significant milestone is reached, or it is completed or reopened.
 - Store semantic memory only when it remains useful across sessions, cannot be cheaply reconstructed from an authoritative source, and has typed evidence; never store secrets, guesses, transient state, or repository maps.
 - Current user instructions, AGENTS, current source, tests, and Git evidence always override Memory."""
+
+
+class _PinnedMemoryContextLayer:
+    """把已复核的 pinned 语义记忆投影到单次 prepared context。"""
+
+    layer_id = "memory"
+
+    def __init__(self, store: MemoryStore, *, project_root: Path | None) -> None:
+        self._store = store
+        self._project_root = project_root
+
+    def render(self, view: ContextView) -> str:
+        del view
+        selection = select_pinned(self._store.pinned(project_root=self._project_root))
+        return render_pinned(selection.entries)
 
 
 class _MemoryToolSource:
@@ -654,4 +670,8 @@ def create_memory_capability(
         name="memory",
         tool_sources=(_MemoryToolSource(store, project_root=project_root),),
         prompt_layers=(MemoryPolicyPromptLayer(),),
+        context_layer=_PinnedMemoryContextLayer(
+            store,
+            project_root=project_root,
+        ),
     )
