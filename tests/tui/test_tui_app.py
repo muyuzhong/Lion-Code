@@ -375,11 +375,17 @@ async def test_compaction_summary_participates_in_result_visibility(
         app._refresh_transcript()
         await pilot.pause()
         transcript = app._transcript()
-        widget = transcript._item_widgets[id(item)]
+        updated = []
+        original_update = transcript.update_item
 
-        await transcript.update_tool_results_visibility(app.state)
+        async def record_update(updated_item, **kwargs):
+            updated.append(updated_item)
+            return await original_update(updated_item, **kwargs)
 
-    assert transcript._item_widgets[id(item)] is widget
+        with patch.object(transcript, "update_item", record_update):
+            await transcript.update_tool_results_visibility(app.state)
+
+    assert updated == [item]
 
 
 @pytest.mark.asyncio
