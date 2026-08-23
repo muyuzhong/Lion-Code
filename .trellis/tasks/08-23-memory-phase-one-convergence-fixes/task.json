@@ -1,0 +1,30 @@
+{
+  "id": "memory-phase-one-convergence-fixes",
+  "name": "memory-phase-one-convergence-fixes",
+  "title": "收敛一期记忆系统实现",
+  "description": "依据最终设计 6c9fddd 与验收报告修正 Memory 产品契约，拆分为存储工具、上下文切换与离线原型三个可独立验收交付。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": "memory",
+  "package": null,
+  "priority": "P1",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-23",
+  "completedAt": null,
+  "branch": "muyuzhong/memory-phase-one-convergence-fixes",
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-23-memory-store-task-ledger-fix",
+    "08-23-memory-context-boundary-fix",
+    "08-23-memory-lexical-recall-prototype"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

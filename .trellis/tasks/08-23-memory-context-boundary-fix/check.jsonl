@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Verify Session and prepared-context ownership."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Verify removed SPI leaves no forbidden edge."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Run final package checks."}
+{"file":".trellis/tasks/archive/2026-08/08-22-memory-system-design-convergence/prd.md","reason":"Acceptance source of truth."}
+{"file":".trellis/tasks/08-23-memory-system-acceptance-review/research/acceptance-report.md","reason":"Verify context findings are closed."}
