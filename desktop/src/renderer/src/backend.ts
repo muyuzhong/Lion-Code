@@ -23,6 +23,36 @@ export interface BackendBootstrap {
   cancelReconnect(id: number): void;
 }
 
+export interface ServerStatus {
+  session_id: string;
+  model: string;
+  provider_name: string;
+  permission_mode: string;
+  api_configured: boolean;
+  cwd: string;
+  thinking_level: string;
+  available_thinking_levels: string[];
+  input_tokens: number;
+  output_tokens: number;
+  is_running: boolean;
+}
+
+export interface SessionSummary {
+  id: string;
+  startTime: string | null;
+  messageCount: number;
+  cwd: string | null;
+}
+
+export interface ModelChoice { provider_name: string; model: string }
+export interface SkillSummary { name: string; description: string | null }
+export interface ProviderConfiguration {
+  provider?: "openai" | "anthropic";
+  model?: string;
+  api_key?: string;
+  base_url?: string;
+}
+
 export function browserBackendBootstrap(endpoint: BackendEndpoint): BackendBootstrap {
   return {
     endpoint,
@@ -53,6 +83,59 @@ export class LionRestClient {
       body: JSON.stringify({ session_id: sessionId }),
     });
     if (!response.ok) throw new Error(await responseDetail(response, "切换会话失败"));
+  }
+
+  async fetchStatus(): Promise<ServerStatus> {
+    return this.readJson("/api/status", isServerStatus, "状态不符合 REST 契约");
+  }
+
+  async fetchSessions(): Promise<SessionSummary[]> {
+    return this.readArray("/api/sessions", isSessionSummary, "会话列表不符合 REST 契约");
+  }
+
+  async fetchModels(): Promise<ModelChoice[]> {
+    return this.readArray("/api/models", isModelChoice, "模型列表不符合 REST 契约");
+  }
+
+  async fetchSkills(): Promise<SkillSummary[]> {
+    return this.readArray("/api/skills", isSkillSummary, "Skill 列表不符合 REST 契约");
+  }
+
+  async newSession(): Promise<void> {
+    await this.postJson("/api/sessions/new", {});
+  }
+
+  async configureProvider(configuration: ProviderConfiguration): Promise<void> {
+    await this.postJson("/api/config/provider", configuration);
+  }
+
+  async setThinkingLevel(level: string): Promise<void> {
+    await this.postJson("/api/thinking", { level });
+  }
+
+  private async readJson<T>(path: string, guard: (value: unknown) => value is T, invalid: string): Promise<T> {
+    const response = await this.authorizedFetch(path);
+    if (!response.ok) throw new Error(await responseDetail(response, `请求失败 (${response.status})`));
+    const value: unknown = await response.json();
+    if (!guard(value)) throw new Error(invalid);
+    return value;
+  }
+
+  private async readArray<T>(path: string, guard: (value: unknown) => value is T, invalid: string): Promise<T[]> {
+    const response = await this.authorizedFetch(path);
+    if (!response.ok) throw new Error(await responseDetail(response, `请求失败 (${response.status})`));
+    const value: unknown = await response.json();
+    if (!Array.isArray(value) || !value.every(guard)) throw new Error(invalid);
+    return value;
+  }
+
+  private async postJson(path: string, body: object): Promise<void> {
+    const response = await this.authorizedFetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(await responseDetail(response, `请求失败 (${response.status})`));
   }
 
   private authorizedFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -138,6 +221,38 @@ function isChatMessage(value: unknown): value is ChatMessage {
 
 function isToolCall(value: unknown): boolean {
   return isRecord(value) && typeof value.id === "string" && typeof value.toolName === "string" && (value.status === "running" || value.status === "completed" || value.status === "error") && (value.args === undefined || typeof value.args === "string" || isRecord(value.args)) && (value.result === undefined || value.result === null || typeof value.result === "string");
+}
+
+function isServerStatus(value: unknown): value is ServerStatus {
+  return isRecord(value)
+    && typeof value.session_id === "string"
+    && typeof value.model === "string"
+    && typeof value.provider_name === "string"
+    && typeof value.permission_mode === "string"
+    && typeof value.api_configured === "boolean"
+    && typeof value.cwd === "string"
+    && typeof value.thinking_level === "string"
+    && Array.isArray(value.available_thinking_levels)
+    && value.available_thinking_levels.every((level) => typeof level === "string")
+    && typeof value.input_tokens === "number"
+    && typeof value.output_tokens === "number"
+    && typeof value.is_running === "boolean";
+}
+
+function isSessionSummary(value: unknown): value is SessionSummary {
+  return isRecord(value)
+    && typeof value.id === "string"
+    && (value.startTime === null || typeof value.startTime === "string")
+    && typeof value.messageCount === "number"
+    && (value.cwd === null || typeof value.cwd === "string");
+}
+
+function isModelChoice(value: unknown): value is ModelChoice {
+  return isRecord(value) && typeof value.provider_name === "string" && typeof value.model === "string";
+}
+
+function isSkillSummary(value: unknown): value is SkillSummary {
+  return isRecord(value) && typeof value.name === "string" && (value.description === null || typeof value.description === "string");
 }
 
 async function responseDetail(response: Response, fallback: string): Promise<string> {
