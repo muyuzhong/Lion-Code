@@ -4,4 +4,6 @@ dist/
 playwright-report/
 test-results/
 sidecar/
+release/
+release-*/
 *.tsbuildinfo

@@ -231,7 +231,7 @@
         "lion_code/providers/thinking.py:113:unused variable 'provider_kind':100",
         "tests/benchmarks/test_external_anchor.py:65:unused variable 'output_dir':100",
         "tests/test_agent_run.py:68:unsatisfiable 'if' condition:100",
-        "lion_code/__main__.py:168:unused variable 'sig':100"
+        "lion_code/__main__.py:179:unused variable 'sig':100"
       ]
     }
   },

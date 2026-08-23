@@ -24,7 +24,7 @@ from lion_code.core.events import (
 from lion_code.core.messages import AssistantMessage, TextContent
 from lion_code.core.provider_events import TextDeltaEvent
 from lion_code.server import app as server_app_module
-from lion_code.server.app import create_app, run_server
+from lion_code.server.app import create_app
 from lion_code.server.bridge import SessionWebsocketBridge
 
 try:
@@ -177,6 +177,7 @@ def test_list_and_resume_sessions() -> None:
     res_new = client.post("/api/sessions/new")
     assert res_new.status_code == 200
     assert ("new", None) in backend.session_operations
+
 
 def test_list_sessions_zero_match_returns_empty() -> None:
     backend = FakeCodingSessionBackend(
@@ -378,7 +379,9 @@ def test_configure_provider_same_provider_with_empty_key_succeeds(
     )
 
     assert res.status_code == 200
-    assert json.loads(isolated_config.read_text(encoding="utf-8"))["api_key"] == "sk-old"
+    assert (
+        json.loads(isolated_config.read_text(encoding="utf-8"))["api_key"] == "sk-old"
+    )
 
 
 def test_configure_provider_switch_without_credentials_rejected(
@@ -668,84 +671,6 @@ def test_websocket_plan_continue_and_compact_actions_end_to_end(
         assert backend.continue_calls == 1
 
 
-def test_run_server_uses_loopback_and_fragment_capability(monkeypatch) -> None:
-    test_session, _ = _build_test_session()
-    opened_urls: list[str] = []
-    app_calls: list[tuple[str, int]] = []
-    server_calls: list[dict[str, Any]] = []
-
-    class ImmediateThread:
-        def __init__(self, *, target, daemon: bool) -> None:
-            assert daemon is True
-            self._target = target
-
-        def start(self) -> None:
-            self._target()
-
-    def fake_create_app(
-        session: LionCodingSession,
-        *,
-        capability: str,
-        port: int,
-    ) -> object:
-        assert session is test_session
-        app_calls.append((capability, port))
-        return object()
-
-    monkeypatch.setattr(
-        "lion_code.server.app.generate_capability", lambda: _CAPABILITY
-    )
-    monkeypatch.setattr("lion_code.server.app.create_app", fake_create_app)
-    monkeypatch.setattr("lion_code.server.app.threading.Thread", ImmediateThread)
-    monkeypatch.setattr("lion_code.server.app.time.sleep", lambda _seconds: None)
-    monkeypatch.setattr("lion_code.server.app.webbrowser.open", opened_urls.append)
-    monkeypatch.setattr(
-        "uvicorn.run",
-        lambda _app, **kwargs: server_calls.append(kwargs),
-    )
-
-    run_server(test_session, port=8123, open_browser=True)
-
-    assert app_calls == [(_CAPABILITY, 8123)]
-    assert server_calls == [{"host": "127.0.0.1", "port": 8123, "log_level": "info"}]
-    assert opened_urls == [f"http://127.0.0.1:8123/#capability={_CAPABILITY}"]
-    assert "?" not in opened_urls[0]
-
-
-def test_run_server_headless_does_not_deliver_capability(monkeypatch) -> None:
-    test_session, _ = _build_test_session()
-    opened_urls: list[str] = []
-    thread_targets: list[object] = []
-    server_calls: list[dict[str, Any]] = []
-
-    monkeypatch.setattr(
-        "lion_code.server.app.generate_capability", lambda: _CAPABILITY
-    )
-    monkeypatch.setattr(
-        "lion_code.server.app.create_app",
-        lambda **_kwargs: object(),
-    )
-    monkeypatch.setattr(
-        "lion_code.server.app._browser_url",
-        lambda *_args: pytest.fail("headless 启动不应构造 capability URL"),
-    )
-    monkeypatch.setattr(
-        "lion_code.server.app.threading.Thread",
-        lambda **kwargs: thread_targets.append(kwargs),
-    )
-    monkeypatch.setattr("lion_code.server.app.webbrowser.open", opened_urls.append)
-    monkeypatch.setattr(
-        "uvicorn.run",
-        lambda _app, **kwargs: server_calls.append(kwargs),
-    )
-
-    run_server(test_session, port=8123, open_browser=False)
-
-    assert opened_urls == []
-    assert thread_targets == []
-    assert server_calls == [{"host": "127.0.0.1", "port": 8123, "log_level": "info"}]
-
-
 async def test_websocket_confirm_approval_flow() -> None:
     session, backend = _build_test_session()
     ws = MockWebSocket()
@@ -966,46 +891,9 @@ async def test_websocket_close_unblocks_run_waiting_behind_notice_send() -> None
     assert session.is_running is False
 
 
-# ─── 服务生命周期与静态发布 ────────────────────────────────────
-
-
-def _make_static_dir(tmp_path: Path) -> Path:
-    static = tmp_path / "static"
-    (static / "assets").mkdir(parents=True)
-    (static / "index.html").write_text("<html>lion</html>", encoding="utf-8")
-    (static / "assets" / "app.CAfEf00.js").write_text("console.log(1)", encoding="utf-8")
-    return static
-
-
-def test_create_app_without_static_assets_fails(tmp_path: Path) -> None:
-    session, _ = _build_test_session()
-
-    with pytest.raises(RuntimeError, match="前端静态产物缺失"):
-        create_app(session, capability=_CAPABILITY, static_dir=tmp_path / "missing")
-
-
-def test_static_index_and_hashed_assets_served(tmp_path: Path) -> None:
-    session, _ = _build_test_session()
-    client = TestClient(
-        create_app(
-            session, capability=_CAPABILITY, static_dir=_make_static_dir(tmp_path)
-        ),
-        base_url=_APP_ORIGIN,
-    )
-
-    index = client.get("/")
-    asset = client.get("/assets/app.CAfEf00.js")
-
-    assert index.status_code == 200
-    assert "lion" in index.text
-    assert asset.status_code == 200
-
-
-def test_lifespan_shutdown_closes_session_exactly_once(tmp_path: Path) -> None:
+def test_lifespan_shutdown_closes_session_exactly_once() -> None:
     session, backend = _build_test_session()
-    app = create_app(
-        session, capability=_CAPABILITY, static_dir=_make_static_dir(tmp_path)
-    )
+    app = create_app(session, capability=_CAPABILITY)
 
     with TestClient(app, base_url=_APP_ORIGIN) as client:
         assert client.get("/api/health").status_code == 200

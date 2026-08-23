@@ -11,18 +11,34 @@ import { Streamdown } from "streamdown";
 import { useEffect, useRef, useState } from "react";
 import { formatRunDuration } from "../../shared/chat";
 import { useLionRuntime } from "./assistantRuntime";
+import { parseAnsiToSpans, pickResultFormat } from "./toolPresentation";
 
 const MarkdownText: TextMessagePartComponent = ({ text }) => <Streamdown>{text}</Streamdown>;
 const Reasoning: ReasoningMessagePartComponent = ({ text }) => (
   <details className="reasoning"><summary><span className="state-glyph thinking" aria-hidden="true" /> 推理过程</summary><pre>{text}</pre></details>
 );
-const Tool: ToolCallMessagePartComponent = ({ toolCallId, toolName, args, result, isError }) => (
-  <details className={`tool ${isError ? "tool-error" : ""}`} data-tool-call-id={toolCallId}>
-    <summary><span className={`state-glyph ${result === undefined ? "running" : isError ? "error" : "complete"}`} aria-hidden="true" /> {toolName}<small>{result === undefined ? "运行中" : isError ? "失败" : "完成"}</small></summary>
-    <pre>{JSON.stringify(args, null, 2)}</pre>
-    {result === undefined ? null : <pre>{typeof result === "string" ? result : JSON.stringify(result, null, 2)}</pre>}
-  </details>
-);
+const Tool: ToolCallMessagePartComponent = ({ toolCallId, toolName, args, result, isError }) => {
+  const text = result === undefined ? null : typeof result === "string" ? result : JSON.stringify(result, null, 2);
+  const agentDetail = toolName === "agent" && args && typeof args === "object"
+    ? [Reflect.get(args, "type"), Reflect.get(args, "description")].filter((value): value is string => typeof value === "string").join(" · ")
+    : "";
+  return (
+    <details className={`tool ${isError ? "tool-error" : ""}`} data-tool-call-id={toolCallId}>
+      <summary><span className={`state-glyph ${result === undefined ? "running" : isError ? "error" : "complete"}`} aria-hidden="true" /> {toolName}{agentDetail ? ` · ${agentDetail}` : ""}<small>{result === undefined ? "运行中" : isError ? "失败" : "完成"}</small></summary>
+      <pre>{JSON.stringify(args, null, 2)}</pre>
+      {text === null ? null : <ToolResult toolName={toolName} text={text} isError={isError ?? false} />}
+    </details>
+  );
+};
+
+function ToolResult({ toolName, text, isError }: { toolName: string; text: string; isError: boolean }) {
+  if (isError) return <pre>{text}</pre>;
+  const format = pickResultFormat(toolName, text);
+  if (format === "markdown") return <div className="tool-markdown"><Streamdown>{text}</Streamdown></div>;
+  if (format === "ansi") return <pre className="terminal-result">{parseAnsiToSpans(text).map((span, index) => <span key={index} style={{ color: span.fg, backgroundColor: span.bg, fontWeight: span.bold ? 700 : undefined, fontStyle: span.italic ? "italic" : undefined, textDecoration: span.underline ? "underline" : undefined }}>{span.text}</span>)}</pre>;
+  if (format === "diff") return <pre className="diff-result">{text.split("\n").map((line, index) => <span className={line.startsWith("+") ? "diff-add" : line.startsWith("-") ? "diff-remove" : line.startsWith("@@") ? "diff-hunk" : ""} key={index}>{line}{"\n"}</span>)}</pre>;
+  return <pre>{text}</pre>;
+}
 const partComponents = { Text: MarkdownText, Reasoning, tools: { Fallback: Tool } };
 
 function UserMessage() {

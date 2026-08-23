@@ -81,7 +81,7 @@ class _StdoutHarness:
 
 def _build_client(session: LionCodingSession, *, origin: str) -> TestClient:
     return TestClient(
-        create_app(session, capability=_CAPABILITY, serve_static=False),
+        create_app(session, capability=_CAPABILITY),
         base_url="http://127.0.0.1:8000",
         headers={"Authorization": f"Bearer {_CAPABILITY}", "Origin": origin},
     )
@@ -380,9 +380,7 @@ class TestApiOnlyApp:
 
     def test_health_stays_public_without_capability(self):
         client = TestClient(
-            create_app(
-                _build_test_session(), capability=_CAPABILITY, serve_static=False
-            ),
+            create_app(_build_test_session(), capability=_CAPABILITY),
             base_url="http://127.0.0.1:8000",
         )
 

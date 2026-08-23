@@ -135,3 +135,54 @@ jobs:
           python -m coverage json -o coverage.json
           python scripts/check_quality_baseline.py coverage coverage.json --diff-file changed-lines.diff --baseline "$QUALITY_BASELINE"
           python -m coverage report --include="lion_code/*"
+
+  desktop-windows:
+    name: Desktop Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Python 3.12.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.13"
+          cache: pip
+
+      - name: 设置 Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: 安装 Python 与桌面依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+          npm --prefix desktop ci
+
+      - name: 桌面单测、类型与构建
+        run: |
+          npm --prefix desktop test
+          npm --prefix desktop run typecheck
+          npm --prefix desktop run build
+
+      - name: Electron 主链路 E2E
+        working-directory: desktop
+        run: npx playwright test --workers=1
+
+      - name: Windows x64 NSIS 打包
+        run: npm --prefix desktop run package:win
+
+      - name: 安装态 sidecar 生命周期烟测
+        env:
+          LION_PACKAGED_APP: ${{ github.workspace }}\desktop\release\win-unpacked\Lion.exe
+        run: npm --prefix desktop run test:packaged
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: lion-desktop-windows-x64
+          path: desktop/release/Lion-*-x64.exe
+          if-no-files-found: error
