@@ -29,7 +29,6 @@ class FakeCodingSessionBackend:
     prompt_scripts: list[list[AgentEvent]] = field(default_factory=list)
     continue_scripts: list[list[AgentEvent]] = field(default_factory=list)
     compact_result: bool = True
-    handoff_error: Exception | None = None
     wait_for_cancel: bool = False
     sessions: list[dict[str, Any]] = field(default_factory=list)
     session_id: str = "fake-session"
@@ -136,11 +135,6 @@ class FakeCodingSessionBackend:
 
     async def new_session(self) -> None:
         self.session_operations.append(("new", None))
-
-    async def handoff_session(self) -> None:
-        if self.handoff_error is not None:
-            raise self.handoff_error
-        self.session_operations.append(("handoff", None))
 
     async def compact(self) -> None:
         self.session_operations.append(("compact", None))

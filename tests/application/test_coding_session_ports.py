@@ -160,7 +160,6 @@ class LionCodingSessionPortTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await session.resume("s1"))
         self.assertTrue(await session.restore_latest())
         await session.new_session()
-        await session.handoff_session()
         await session.compact()
         session.configure_provider(model="new-model")
         self.assertEqual(session.model, "new-model")
@@ -171,7 +170,7 @@ class LionCodingSessionPortTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [operation[0] for operation in backend.session_operations],
-            ["list", "resume", "restore_latest", "new", "handoff", "compact"],
+            ["list", "resume", "restore_latest", "new", "compact"],
         )
         self.assertTrue(backend.closed)
 
