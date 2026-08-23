@@ -1702,3 +1702,25 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 54: 收敛 Memory Store 与 Task Ledger
+
+**Date**: 2026-08-23
+**Task**: 收敛 Memory Store 与 Task Ledger
+**Branch**: `muyuzhong/memory-phase-one-convergence-fixes`
+
+### Summary
+
+完成一期 canonical 两表、Task Ledger、九个显式工具、typed evidence、动态 review、确认边界与 lazy DB；删除生产 FTS/revision/stale 和 Memory auto-recall，并通过 95 项定向与 142 项架构测试。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `acc7b9d` | (see git log) |
+| `1de0292` | (see git log) |
+
+### Status
+
+[OK] **Completed**

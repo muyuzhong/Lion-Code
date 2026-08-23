@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 53
+- **Total Sessions**: 54
 - **Last Active**: 2026-08-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1704 | Active |
+| `journal-1.md` | ~1726 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 54 | 2026-08-23 | 收敛 Memory Store 与 Task Ledger | `acc7b9d`, `1de0292` | `muyuzhong/memory-phase-one-convergence-fixes` |
 | 53 | 2026-08-23 | 记忆系统 PR1-PR4 全链交付：项目指令接线、Session handoff、SQLite 语义记忆、自动召回 | `ee10c13`, `d6be834`, `5a4b318`, `ddb0c20` | `master` |
 | 52 | 2026-08-23 | 前端任务功能实施收官：5 PR 合入与集成审查通过 | `8a1eee3` | `master` |
 | 51 | 2026-08-22 | 前端任务功能补充设计（grilling 三轮收敛） | `f133566`, `f1fb52a`, `ed2bdb6`, `11c1ac9`, `f04a5de` | `master` |
