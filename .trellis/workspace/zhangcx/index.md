@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 55
+- **Total Sessions**: 56
 - **Last Active**: 2026-08-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1750 | Active |
+| `journal-1.md` | ~1771 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 56 | 2026-08-23 | 完成 Memory 离线 lexical 召回原型 | `43c77db` | `muyuzhong/memory-lexical-recall-prototype` |
 | 55 | 2026-08-23 | 收敛 Memory 上下文与会话边界 | `503b870`, `fc72859`, `b61ac77`, `cc9b4d8` | `muyuzhong/memory-context-boundary-fix` |
 | 54 | 2026-08-23 | 收敛 Memory Store 与 Task Ledger | `acc7b9d`, `1de0292` | `muyuzhong/memory-phase-one-convergence-fixes` |
 | 53 | 2026-08-23 | 记忆系统 PR1-PR4 全链交付：项目指令接线、Session handoff、SQLite 语义记忆、自动召回 | `ee10c13`, `d6be834`, `5a4b318`, `ddb0c20` | `master` |

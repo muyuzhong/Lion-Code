@@ -1748,3 +1748,24 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 56: 完成 Memory 离线 lexical 召回原型
+
+**Date**: 2026-08-23
+**Task**: 完成 Memory 离线 lexical 召回原型
+**Branch**: `muyuzhong/memory-lexical-recall-prototype`
+
+### Summary
+
+以固定人工夹具和临时 SQLite 比较 literal、unicode61、trigram；三种策略均满足噪声与项目隔离要求，FTS 策略达到二期重新规划水位；固化两字中文 trigram 限制和 query 只作为数据的回归测试，结论不授权二期实现。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `43c77db` | (see git log) |
+
+### Status
+
+[OK] **Completed**
