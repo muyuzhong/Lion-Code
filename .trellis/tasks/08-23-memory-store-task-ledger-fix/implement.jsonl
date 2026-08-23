@@ -9,3 +9,4 @@
 {"file":".trellis/tasks/archive/2026-08/08-22-memory-system-design-convergence/prd.md","reason":"Final approved product contract."}
 {"file":".trellis/tasks/archive/2026-08/08-22-memory-system-design-convergence/design.md","reason":"Final approved schema and tool design."}
 {"file":".trellis/tasks/08-23-memory-system-acceptance-review/research/acceptance-report.md","reason":"Current P1/P2 reproduction evidence."}
+{"file": ".trellis/spec/backend/memory-capability.md", "reason": "Canonical Memory store and tool contract."}

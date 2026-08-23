@@ -1,9 +1,9 @@
 # Persistence Guidelines
 
-> Lion Code does not use a relational database, ORM, SQL query layer, or
-> database-migration tool.  Its durable runtime state is local, append-only JSONL
-> session storage.  Treat this as a persistence contract, not as an invitation to
-> introduce database conventions that are absent from the repository.
+> Lion's canonical Session state is local, append-only JSONL. The Memory
+> Capability is the single narrow SQLite exception and is specified in
+> [Memory Capability](./memory-capability.md). Lion has no ORM, shared SQL query
+> layer, or database-migration framework.
 
 ## Current storage model
 
@@ -65,9 +65,10 @@ await recorder.record_message(message)
   `<safe-session-id>.json`.
 - Session entries use the canonical Core/Pi-compatible wire shape serialized by
   `entry_to_json_line()`, not ad-hoc dictionaries or a second provider history.
-- There are no SQL table/column/index naming rules and no Alembic-style migration
-  workflow.  Do not add ORM models or database migrations to change the existing
-  local-session format; make an explicit persistence design change instead.
+- There is no Alembic-style migration workflow. Do not add ORM models or database
+  migrations to change the existing local-session format. Memory accepts one
+  canonical schema version and fails closed on any other shape; do not infer a
+  repository-wide SQL abstraction from that capability-private store.
 
 ## Common mistakes to avoid
 

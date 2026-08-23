@@ -4,3 +4,4 @@
 {"file":".trellis/spec/backend/quality-guidelines.md","reason":"Run required checks."}
 {"file":".trellis/tasks/archive/2026-08/08-22-memory-system-design-convergence/prd.md","reason":"Acceptance source of truth."}
 {"file":".trellis/tasks/08-23-memory-system-acceptance-review/research/acceptance-report.md","reason":"Ensure every owned finding is closed."}
+{"file": ".trellis/spec/backend/memory-capability.md", "reason": "Verify canonical Memory store and tool contract."}

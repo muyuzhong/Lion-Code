@@ -29,5 +29,5 @@
 
 ## Out of Scope
 
-- Pinned ContextLayer、FullProfile 接线和 Session handoff 删除，由下一 child 负责。
+- 普通 Pinned ContextLayer、通用 QueryContext SPI 和 Session handoff 删除，由下一 child 负责；本 child 已移除 Memory 专属 auto-recall layer 以保持独立可验证。
 - 离线 tokenizer 实验和任何生产自动 relevant recall。
