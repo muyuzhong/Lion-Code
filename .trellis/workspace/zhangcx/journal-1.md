@@ -1678,3 +1678,27 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 53: 记忆系统 PR1-PR4 全链交付：项目指令接线、Session handoff、SQLite 语义记忆、自动召回
+
+**Date**: 2026-08-23
+**Task**: 记忆系统 PR1-PR4 全链交付：项目指令接线、Session handoff、SQLite 语义记忆、自动召回
+**Branch**: `master`
+
+### Summary
+
+批准并执行记忆系统设计收敛计划：落定 handoff 显式操作决策，创建并实施 4 个 child task。PR1(#89) 修复默认 Full 产品未加载 AGENTS/CLAUDE 的根因（接线 build_dynamic_system_context，补空文件跳过与异常路径测试）；PR2(#90) 显式 Session handoff（复用九段 Compaction、BranchSummaryEntry 唯一 writer、三组失败原子性回滚、/handoff 入口）；PR3(#92) SQLite+FTS5 MemoryStore 与五个治理工具（schema v1 fail-closed、revision supersede、scope×kind 四象限 CHECK、注入实测安全的检索流水线、mutation 全 confirmation）；PR4(#93) QueryContextLayer 窄投影自动召回（pinned 400/relevant 800/总 1200 token 硬预算、防串扰真实 FTS 专测、FullProfile 默认集成、测试隔离真实 home DB）。全程 implement/check 双子代理流水线，每 PR 独立 CI 绿后合并；收口验证定向 363 + 全量 1036 passed；任务树归档于 #91/#94。经验：changed-lines 覆盖率门禁要求异常分支也有测试；检查代理的修复提交前必须复跑 ruff format。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ee10c13` | (see git log) |
+| `d6be834` | (see git log) |
+| `5a4b318` | (see git log) |
+| `ddb0c20` | (see git log) |
+
+### Status
+
+[OK] **Completed**
