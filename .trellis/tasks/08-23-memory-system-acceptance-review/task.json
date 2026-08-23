@@ -3,7 +3,7 @@
   "name": "memory-system-acceptance-review",
   "title": "验收记忆系统实现",
   "description": "只读审查已合并的 Lion Memory 实现，对照最终设计、架构边界、测试与运行时行为输出分级 findings。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "zhangcx",
   "assignee": "zhangcx",
   "createdAt": "2026-08-23",
-  "completedAt": null,
+  "completedAt": "2026-08-23",
   "branch": null,
   "base_branch": "master",
   "worktree_path": null,
@@ -20,7 +20,9 @@
   "subtasks": [],
   "children": [],
   "parent": null,
-  "relatedFiles": [],
+  "relatedFiles": [
+    ".trellis/tasks/08-23-memory-system-acceptance-review/research/acceptance-report.md"
+  ],
   "notes": "",
   "meta": {}
 }
