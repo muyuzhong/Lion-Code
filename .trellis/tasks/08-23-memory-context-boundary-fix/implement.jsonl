@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Session, context and Capability ownership."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Cross-layer removal constraints."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required tests and checks."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace all removed callers and projections."}
+{"file":".trellis/tasks/archive/2026-08/08-22-memory-system-design-convergence/design.md","reason":"Approved ordinary ContextLayer and no-handoff design."}
+{"file":".trellis/tasks/08-23-memory-system-acceptance-review/research/acceptance-report.md","reason":"Recall, budget and eager-open reproductions."}

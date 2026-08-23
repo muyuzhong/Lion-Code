@@ -1,0 +1,11 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend guideline index and package boundary."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Persistence, fail-closed and migration constraints."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Tool and storage failure contracts."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Capability, PromptLayer and ToolRuntime ownership."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Memory must stay Capability-private."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Tests and local quality gate."}
+{"file":".trellis/spec/guides/index.md","reason":"Shared pre-development checklist."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Store-to-tool-to-prompt data-flow review."}
+{"file":".trellis/tasks/archive/2026-08/08-22-memory-system-design-convergence/prd.md","reason":"Final approved product contract."}
+{"file":".trellis/tasks/archive/2026-08/08-22-memory-system-design-convergence/design.md","reason":"Final approved schema and tool design."}
+{"file":".trellis/tasks/08-23-memory-system-acceptance-review/research/acceptance-report.md","reason":"Current P1/P2 reproduction evidence."}
