@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Update frontend validation and delivery expectations when the old Web product is removed."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Keep the API-only Server and Electron host in the Interfaces boundary."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Run full Python checks and update documentation truthfully."}
+{"file":".trellis/tasks/08-23-electron-desktop-reconstruction/research/open-source-stack.md","reason":"Apply selected PyInstaller/electron-builder packaging and license decisions."}

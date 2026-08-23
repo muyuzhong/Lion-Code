@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Keep the desktop host outside Kernel, Runtime, Capability and Provider ownership."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Model expected sidecar failures at the owning process boundary without hiding orchestration bugs."}
+{"file":".trellis/spec/backend/secret-boundary.md","reason":"Prevent the process capability and stderr diagnostics from leaking into persistent or model-visible channels."}
+{"file":".trellis/tasks/08-23-electron-desktop-reconstruction/research/open-source-stack.md","reason":"Follow the selected Electron security, protocol and sidecar packaging decisions."}

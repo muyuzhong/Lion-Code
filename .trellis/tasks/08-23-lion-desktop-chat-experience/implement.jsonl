@@ -1,0 +1,5 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Follow frontend dependency, test and build conventions."}
+{"file":".trellis/spec/frontend/chat-queue-contract.md","reason":"Render and control queued steer/follow-up messages without changing queue ownership."}
+{"file":".trellis/spec/frontend/runtime-events-contract.md","reason":"Present streaming, retry, compaction and reasoning states truthfully."}
+{"file":".trellis/spec/frontend/toolview-display-contract.md","reason":"Preserve tool identity, diff and ANSI display rules in the new tool card."}
+{"file":".trellis/tasks/08-23-electron-desktop-reconstruction/research/open-source-stack.md","reason":"Use the selected assistant-ui, Streamdown and primitive component stack without adding duplicate frameworks."}

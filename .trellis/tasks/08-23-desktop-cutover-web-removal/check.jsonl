@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Check all obsolete Web build requirements and references are intentionally replaced."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Run full repository quality and packaging verification."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Verify final imports and state owners after Web removal."}
+{"file":".trellis/tasks/08-23-electron-desktop-reconstruction/research/open-source-stack.md","reason":"Audit packaged resources and third-party license constraints."}

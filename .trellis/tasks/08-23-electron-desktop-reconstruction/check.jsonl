@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Verify frontend protocol tests and build requirements."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply repository-wide Python quality and test expectations."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Check no desktop state or imports leak into Runtime ownership."}
+{"file":".trellis/tasks/08-23-electron-desktop-reconstruction/research/open-source-stack.md","reason":"Check implementation matches selected licenses, security and packaging decisions."}
