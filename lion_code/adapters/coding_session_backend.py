@@ -143,9 +143,6 @@ class CodingSessionBackendAdapter:
     async def new_session(self) -> None:
         await self._agent.new_session()
 
-    async def handoff_session(self) -> None:
-        await self._agent.handoff_session()
-
     async def compact(self) -> None:
         await self._agent.compact()
 
