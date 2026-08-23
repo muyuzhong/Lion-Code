@@ -803,7 +803,6 @@ def _build_tooling_graph(
         middleware,
     )
     context_layers = capability_registry.context_layers
-    query_context_layers = capability_registry.query_context_layers
     context_manager = foundation.bindings.session.context_manager
     if context_manager is None:
         context_manager = ContextManager(
@@ -813,7 +812,6 @@ def _build_tooling_graph(
             # 只捕获构造完成后的不可变层快照，避免 ContextRuntime 反向持有
             # CapabilityRegistry；动态状态由各 Layer 在 render 时读取。
             context_layers=lambda: context_layers,
-            query_context_layers=lambda: query_context_layers,
         )
     return _ToolingGraph(
         prompt_composer=prompt_composer,

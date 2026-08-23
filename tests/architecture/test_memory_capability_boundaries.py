@@ -94,11 +94,15 @@ def test_memory_package_stays_local_no_provider_or_runtime_imports() -> None:
         assert not roots & FORBIDDEN_MEMORY_IMPORT_ROOTS, path
 
 
-def test_full_memory_construction_is_lazy_and_has_no_query_recall(tmp_path) -> None:
+def test_full_memory_construction_is_lazy_and_uses_ordinary_context_layer(
+    tmp_path,
+) -> None:
     composition, db_path = _full_composition(tmp_path)
 
     assert not db_path.exists()
-    assert composition.capabilities.registry.query_context_layers == ()
+    assert "memory" in {
+        layer.layer_id for layer in composition.capabilities.registry.context_layers
+    }
     tools = {tool.name for tool in composition.tooling.registry.all_tools()}
     assert {"remember_task", "recall_tasks", "recall_memory"} <= tools
     assert "# Memory Policy" in composition.tooling.prompt_composer.get_system()

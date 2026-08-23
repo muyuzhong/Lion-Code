@@ -67,21 +67,6 @@ class ContextLayer(Protocol):
     def render(self, view: ContextView) -> str: ...
 
 
-class QueryContextLayer(Protocol):
-    """按最新 user query 渲染 prepared-only 查询投影。
-
-    与 ``ContextLayer`` 同属 prepared-context 尾部临时投影，但输入多一个
-    由 ContextManager 从当前 prepared messages 提取的最新 user query：
-    用于本地确定性检索（如 semantic memory 自动召回），不得调用
-    Provider、不得写 canonical history 或任何持久化状态。
-    """
-
-    @property
-    def layer_id(self) -> str: ...
-
-    def render(self, query: str, view: ContextView) -> str: ...
-
-
 class SessionParticipant(Protocol):
     """Participates in session lifecycle transitions.
 
@@ -124,10 +109,6 @@ class CapabilitySpec:
     context_layer:
         An optional per-request context projection.  Its rendered output is
         transient and never enters canonical history or session persistence.
-    query_context_layer:
-        An optional query-aware per-request projection.  Same transient
-        contract as ``context_layer``, additionally receiving the latest
-        user query from the prepared messages.
     """
 
     name: str
@@ -136,7 +117,6 @@ class CapabilitySpec:
     session_participants: tuple[SessionParticipant, ...] = ()
     resources: tuple[AsyncCloseable, ...] = ()
     context_layer: ContextLayer | None = None
-    query_context_layer: QueryContextLayer | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tool_sources", tuple(self.tool_sources))

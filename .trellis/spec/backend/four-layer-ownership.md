@@ -9,7 +9,7 @@ boundaries, not historical implementation or future Memory design.
 | --- | --- | --- |
 | Kernel | `core/`, `context/`, `tooling/`, `providers/`, `session_runtime/`, `permission_state.py`, `usage.py` | Product capabilities, Agent Runtime state, frontend state, project feature stores |
 | Agent Runtime | `runtime/` (`agent.py`, `conversation.py`, `session.py`, `context.py`, `execution.py`, `session_identity.py`, `provider.py`) | Profile selection, a second history, service locator, deleted legacy graph, Composition/Application deps |
-| Capability | `capabilities/` and its cohesive feature packages | Provider/session ownership, Product Adapter, Application/TUI, Memory/Dream/Learning replacements |
+| Capability | `capabilities/` and its cohesive feature packages | Provider/session ownership, Product Adapter, Application/TUI, legacy Memory/Dream/Learning object graphs |
 | Composition | `composition/`, `meta_agent.py` | Frontend behavior, Supervisor policy, retained runtime container, feature API leakage |
 | Interfaces | `__init__.py`, `__main__.py`, `adapters/`, `application/`, `tui/` | Direct Kernel/Agent Runtime ownership, duplicate persistence, public legacy feature facade |
 | Supervisor | `supervisor.py` | Agent content, usage, permissions, tools, Profile internals, canonical session writes |
@@ -49,9 +49,9 @@ They meet only in `build_agent_composition`.
 `extension_specs` are supplied. `CodingProfile` adds Coding tools and Coding
 Harness policy plus AgentState/GitStatus ContextLayers. `FullProfile` adds
 those layers together with Plan, SubAgent, Skill, and the capability-owned
-Semantic Memory capability (governance tools plus a `QueryContextLayer`
-prepared-only auto-recall projection). Caller `extension_specs` are orthogonal
-to the Product preset: every Profile forwards them into the
+Semantic Memory capability (explicit tools plus an ordinary prepared-only
+ContextLayer for reviewed pinned entries). Caller `extension_specs` are
+orthogonal to the Product preset: every Profile forwards them into the
 CapabilityRegistry, and a same-name spec removes or replaces the built-in
 Semantic Memory selection. Every Profile produces a feature-neutral
 `MetaAgent`; capability services remain private to the graph. No Profile
@@ -82,10 +82,9 @@ PR9 removed the old project Memory package and coordinator, Dream modules and
 adapter, Learning runtime, Memory-only provider text query, Memory file-write
 hook, project Memory facade/application ports, and the Memory-only per-request
 capability projection slot. The generic ContextLayer slot is intentionally
-retained for ephemeral prepared-context projections, and PR4 added the
-QueryContextLayer slot for query-aware projections (Semantic Memory
-auto-recall) under the same prepared-only contract; no compatibility alias or
-placeholder remains.
+retained for ephemeral prepared-context projections. Query-aware projection is
+not part of the SPI; Semantic Memory uses the ordinary slot only for pinned
+entries, with no compatibility alias or placeholder.
 
 The Supervisor consumes only the public Agent event/result/session contracts.
 Goal lifecycle, scheduler, retry/recovery and execution-control checkpoints are
@@ -103,7 +102,6 @@ Other architecture tests cover import direction
 (`_boundaries.py` + import-linter; Kernel keeps zero Agent Runtime imports),
 composition profiles, zero-extension, capability lifecycle, session persistence,
 provider ownership, application ports, ContextLayer transientness, Semantic
-Memory auto-recall unreachability (`test_memory_auto_recall.py`), and
-TUI/Runtime direction. The runtime ownership test also checks that Composition
-passes a completed ContextLayer snapshot without a reverse
-ContextManager-to-CapabilityRegistry edge.
+Memory lazy pinned projection, and TUI/Runtime direction. The runtime ownership
+test also checks that Composition passes a completed ContextLayer snapshot
+without a reverse ContextManager-to-CapabilityRegistry edge.
