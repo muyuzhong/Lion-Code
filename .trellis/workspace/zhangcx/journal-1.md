@@ -1834,3 +1834,25 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 60: 完成 Lion 桌面聊天体验
+
+**Date**: 2026-08-24
+**Task**: 完成 Lion 桌面聊天体验
+**Branch**: `muyuzhong/lion-desktop-chat-experience`
+
+### Summary
+
+完成工作区与会话导航、assistant-ui 聊天界面、Provider/Thinking 首配、深浅主题、安全审批以及桌面视觉和 E2E 验收。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1eab764` | (see git log) |
+| `d32a996` | (see git log) |
+
+### Status
+
+[OK] **Completed**

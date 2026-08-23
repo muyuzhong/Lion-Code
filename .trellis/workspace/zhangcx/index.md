@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 59
-- **Last Active**: 2026-08-23
+- **Total Sessions**: 60
+- **Last Active**: 2026-08-24
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1836 | Active |
+| `journal-1.md` | ~1858 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 60 | 2026-08-24 | 完成 Lion 桌面聊天体验 | `1eab764`, `d32a996` | `muyuzhong/lion-desktop-chat-experience` |
 | 59 | 2026-08-23 | 完成 assistant-ui 协议适配 | `9eeb8fe`, `b2e2834` | `muyuzhong/assistant-ui-protocol-adapter` |
 | 58 | 2026-08-23 | 完成 Electron 宿主与 Python sidecar | `57b5b02`, `8acc7d0` | `muyuzhong/electron-host-sidecar` |
 | 57 | 2026-08-23 | 完成一期 Memory 收敛与验收 | `da3e70e` | `muyuzhong/memory-phase-one-finalize` |
