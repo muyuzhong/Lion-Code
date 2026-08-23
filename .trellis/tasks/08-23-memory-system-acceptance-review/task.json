@@ -3,7 +3,7 @@
   "name": "memory-system-acceptance-review",
   "title": "验收记忆系统实现",
   "description": "只读审查已合并的 Lion Memory 实现，对照最终设计、架构边界、测试与运行时行为输出分级 findings。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
