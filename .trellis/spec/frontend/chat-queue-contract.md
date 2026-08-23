@@ -10,7 +10,7 @@
 ## 2. Signatures
 
 - 协议事件：`queue_update`，负载 `{ queue: { steering: string[]; followUp: string[] } }`
-  （定义 `frontend/src/lib/chatProtocol.ts` 事件表；后端构造 `lion_code/application/session.py` `queue_update_event`）
+  （定义 `desktop/src/shared/chat.ts` 事件表；后端构造 `lion_code/application/session.py` `queue_update_event`）
 - 前端状态：`ChatProtocolState.queue: { steering: string[]; followUp: string[] }`（初始两项皆空）
 
 ## 3. Contracts（后端发射时序——非直觉部分）
@@ -36,7 +36,7 @@
 
 ## 5. Tests Required
 
-`frontend/src/lib/chatProtocol.test.ts` 必须维持以下断言点：
+`desktop/tests/renderer/chatProtocol.test.ts` 必须维持以下断言点：
 
 1. queue_update 全量替换（旧条目消失，证明非 append）
 2. user `message_start` 入流转正（string 与 blocks 两种 content 形态）
@@ -50,4 +50,4 @@
 本地队列（与服务端快照竞争，重连后漂移）。
 
 **Correct**：入队信任 `queue_update` 快照；出队信任 user `message_start` 的本地文本匹配
-（`frontend/src/lib/chatProtocol.ts` `consumeQueuedUserMessage`，2026-08-22 位于 :618-648）。
+（`desktop/src/shared/chat.ts` `consumeQueuedUserMessage`）。

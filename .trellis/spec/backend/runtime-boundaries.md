@@ -358,13 +358,13 @@ unknown-command behavior.
 The TUI imports application contracts only. The REPL may render terminal output
 but must not own session persistence or a second command dispatcher.
 
-## Local Web access boundary
+## Desktop sidecar access boundary
 
 ### 1. Scope / Trigger
 
-This contract applies to the FastAPI/React interface started by the CLI Web
-mode. It keeps a browser-only loopback control plane without adding account,
-TLS, reverse-proxy, or persistent-token state to Application or Runtime.
+This contract applies to the API-only FastAPI process managed by Electron Main.
+It keeps a loopback desktop control plane without adding account, TLS,
+reverse-proxy, static-site, or persistent-token state to Application or Runtime.
 
 ### 2. Signatures
 
@@ -376,34 +376,27 @@ def create_app(
     port: int = 8000,
 ) -> FastAPI: ...
 
-def run_server(
-    session: LionCodingSession,
-    port: int = 8000,
-    open_browser: bool = True,
-) -> None: ...
 ```
 
-The CLI exposes `--web`, `--port`, and `--no-browser`; it has no host override.
-The browser transport contract is:
+The CLI has no Web startup flags. Electron starts `lion-code-sidecar` with a
+workspace and receives the endpoint through the strict stdout ready record. The
+Renderer transport contract is:
 
 ```text
-startup URL fragment: #capability=<URL-safe process token>
 REST: Authorization: Bearer <token>
 WebSocket protocols: lion-code, lion-code-capability.<token>
 ```
 
 ### 3. Contracts
 
-- Uvicorn and the Vite development server bind only `127.0.0.1`. Production
-  Host must equal the selected loopback host/port; the only additional allowed
-  Origin is the fixed Vite loopback Origin.
-- `run_server` generates one in-memory capability per process. It is never
-  printed, persisted, placed in a query string, included in error text, or
-  negotiated back as the selected WebSocket subprotocol.
-- The browser imports the fragment into current-tab `sessionStorage` and
-  immediately removes the fragment from visible history. REST and WebSocket
-  clients read the same stored capability.
-- Static assets and `/api/health` are public. Status, messages, sessions,
+- The sidecar binds only `127.0.0.1` on an OS-selected port. Production Host
+  must equal that loopback host/port; allowed Origins are the fixed desktop
+  `lion://app` Origin and the development Vite loopback Origin.
+- The sidecar generates one in-memory capability per process and returns it only
+  in the stdout ready record consumed by Electron Main. It is never placed in
+  argv, a URL, storage, ordinary logs, or negotiated back as the selected
+  WebSocket subprotocol.
+- Only `/api/health` is public. Status, messages, sessions,
   provider/model settings, skills, thinking, and Agent controls require the
   capability. FastAPI OpenAPI/docs routes remain disabled.
 - REST validates Host, any supplied Origin, and Bearer capability at the Server
@@ -422,7 +415,7 @@ WebSocket protocols: lion-code, lion-code-capability.<token>
   cancelling the Session. Disconnect performs deny -> Session cancel -> collect
   run/notice tasks -> unbind, and the close operation is idempotent.
 - Server events serialize only canonical camelCase Application/Core models. The
-  browser decodes `unknown` once at the protocol boundary before reduction; it
+  Renderer decodes `unknown` once at the protocol boundary before reduction; it
   has no snake-case fallback. Tool results join by `toolCallId`, terminal errors
   stop streaming, and final assistant messages replace provisional content.
 - Every successful socket open reloads `/api/messages`; only the latest history
@@ -431,8 +424,6 @@ WebSocket protocols: lion-code, lion-code-capability.<token>
 - Input maps `/continue` and `/compact` to their typed actions and other slash
   text to `command`. Plan mode uses that command path. `steer` and `follow_up`
   remain typed senders without adding a second queue UI.
-- `--no-browser` is health-probe-only: it does not construct or disclose a
-  capability URL and does not add an anonymous bootstrap path.
 - Server authentication remains interface-owned. `LionCodingSession`, Core,
   Runtime, session JSONL, and provider state do not retain the capability.
 
@@ -448,42 +439,41 @@ WebSocket protocols: lion-code, lion-code-capability.<token>
 | Invalid/coerced/snake-case WS action | Emit `protocol_error`; leave pending futures unresolved |
 | Cancel while approval is pending | Deny the approval, cancel the Session, and leave no hidden future |
 | WS disconnect during a run or notice send | Collect all bridge-owned tasks, unbind callbacks, then release the lease |
-| Malformed or snake-case server event in the browser | Reject at the decoder and expose a terminal protocol error |
+| Malformed or snake-case server event in the Renderer | Reject at the decoder and expose a terminal protocol error |
 | Reconnect history responses complete out of order | Apply only the newest canonical `/api/messages` response |
 | Invalid capability passed to `create_app` | `ValueError` before route construction |
-| `--no-browser` startup | Loopback server and public health only; no browser thread or capability URL |
+| GET `/` | HTTP 404; the API app never mounts static content |
 
 ### 5. Good / Base / Bad Cases
 
-- Good: the CLI opens `http://127.0.0.1:<port>/#capability=...`; the React entry
-  imports and erases the fragment, then authenticated REST and WebSocket calls
-  succeed from that exact Origin.
-- Base: a Vite page supplied an explicit valid fragment and reaches the backend
-  through the fixed loopback proxy while preserving the Vite Origin.
+- Good: Electron Main receives the ready record, checks the child identity, and
+  passes the endpoint once through the typed Preload bridge; authenticated REST
+  and WebSocket calls then succeed from `lion://app`.
+- Base: the development Renderer reaches the same API from the fixed Vite
+  Origin; no static content is served by Python.
 - Bad: restore `allow_origins=["*"]`, accept a WebSocket before validation, add
-  `--host 0.0.0.0`, put the token in `?token=`, print it for headless use, or
-  cache it in Application/Runtime/session persistence.
+  a CLI Web entry, place the token in a URL/storage, or cache it in
+  Application/Runtime/session persistence.
 
 ### 6. Tests Required
 
 - `tests/server/test_server_api.py` asserts the REST/CORS/WS Host-Origin-token
-  matrix, pre-accept WS denial, disabled docs, fragment-only browser URL, fixed
-  uvicorn host, and headless non-disclosure.
-- `tests/test_cli.py` rejects `--host` and preserves the documented `--port` and
-  headless `--no-browser` surface.
-- Frontend capability tests assert fragment import/cleanup, current-tab storage,
-  Bearer injection, and the two WebSocket subprotocol values. TypeScript build
-  must cover all transport call sites.
+  matrix, pre-accept WS denial, disabled docs, and API-only root.
+- `tests/test_cli.py` rejects the removed `--web`, `--port`, and `--no-browser`
+  options and keeps them absent from help.
+- Desktop tests assert in-memory endpoint delivery, Bearer injection, and the
+  two WebSocket subprotocol values. TypeScript build covers all transport call
+  sites.
 - Bridge tests assert alias-only strict actions, approval cancellation, duplicate
   prompt rejection, second-owner rejection/release, idempotent disconnect, and a
   run waiting behind a blocked notice send. Compact success notices come from the
   Session owner and must not be duplicated by the bridge.
-- Frontend protocol tests assert canonical camelCase decoding, parallel tool
+- Desktop protocol tests assert canonical camelCase decoding, parallel tool
   correlation/result text/error state, terminal provider/server/protocol errors,
   final-message reconciliation, latest-request reconnect replacement, and typed
   Plan/continue/compact/steer/follow-up actions.
-- Server tests must mock config persistence and browser effects; the real user
-  API configuration file must remain byte-for-byte unchanged.
+- Server tests must mock config persistence; the real user API configuration
+  file must remain byte-for-byte unchanged.
 
 ### 7. Wrong vs Correct
 
