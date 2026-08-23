@@ -145,15 +145,9 @@ class _StubReplAgent:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.fail_compact = False
-        self.fail_handoff = False
 
     async def clear_history(self) -> None:
         self.calls.append("clear_history")
-
-    async def handoff_session(self) -> None:
-        self.calls.append("handoff_session")
-        if self.fail_handoff:
-            raise RuntimeError("handoff failed")
 
     async def compact(self) -> None:
         self.calls.append("compact")
@@ -201,7 +195,6 @@ async def test_repl_dispatch_exit_returns_true() -> None:
     ("result", "expected_calls", "expected_out"),
     [
         (_result(new_session_requested=True), ["clear_history"], ""),
-        (_result(handoff_requested=True), ["handoff_session"], ""),
         (_result(plan_toggle_requested=True), ["toggle_plan_mode"], "Plan mode: full"),
         (_result(cost_requested=True), ["show_cost"], ""),
         (_result(compact_summary=""), ["compact"], ""),
@@ -233,17 +226,6 @@ async def test_repl_dispatch_compact_error_is_printed(capsys) -> None:
 
     assert exited is False
     assert "compact failed" in capsys.readouterr().out
-
-
-@pytest.mark.asyncio
-async def test_repl_dispatch_handoff_error_is_printed(capsys) -> None:
-    agent = _StubReplAgent()
-    agent.fail_handoff = True
-
-    exited = await _dispatch_repl_command(agent, _result(handoff_requested=True))
-
-    assert exited is False
-    assert "handoff failed" in capsys.readouterr().out
 
 
 @pytest.mark.asyncio

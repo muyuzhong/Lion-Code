@@ -1184,7 +1184,7 @@ class LionTuiApp(App):
     def _dispatch(self, result: CommandResult) -> None:
         if not result.handled:
             self._notice(
-                "未知命令 — 可用: /model /clear /handoff /plan /cost /compact "
+                "未知命令 — 可用: /model /clear /plan /cost /compact "
                 "/theme /thinking /quit /skills"
             )
             return
@@ -1192,8 +1192,6 @@ class LionTuiApp(App):
             self.exit()
         elif result.new_session_requested:
             self.run_worker(self._new_session(), exclusive=True, group="chat")
-        elif result.handoff_requested:
-            self.run_worker(self._handoff_session(), exclusive=True, group="chat")
         elif result.plan_toggle_requested:
             self.session.toggle_plan_mode()
             self._set_subtitle()
@@ -1236,16 +1234,6 @@ class LionTuiApp(App):
         await self.session.new_session()
         self.state.clear()
         self._refresh_transcript()
-        await self._reload_sessions()
-
-    async def _handoff_session(self) -> None:
-        """携带任务摘要新建会话；失败时保留旧会话并提示错误。"""
-        try:
-            await self.session.handoff_session()
-        except Exception as error:
-            self._notice(f"Error: {error}", role="error")
-            return
-        self._load_transcript_from_session()
         await self._reload_sessions()
 
     async def _compact(self) -> None:

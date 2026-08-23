@@ -361,6 +361,34 @@ async def test_tool_loop_renders_tool_item(app_factory) -> None:
 
 
 @pytest.mark.asyncio
+async def test_compaction_summary_participates_in_result_visibility(
+    app_factory,
+) -> None:
+    app = app_factory([])
+    async with app.run_test() as pilot:
+        app.state.add_item(
+            "compaction_summary",
+            "Compaction summary",
+            tool_result_text="bounded summary",
+        )
+        item = app.state.items[-1]
+        app._refresh_transcript()
+        await pilot.pause()
+        transcript = app._transcript()
+        updated = []
+        original_update = transcript.update_item
+
+        async def record_update(updated_item, **kwargs):
+            updated.append(updated_item)
+            return await original_update(updated_item, **kwargs)
+
+        with patch.object(transcript, "update_item", record_update):
+            await transcript.update_tool_results_visibility(app.state)
+
+    assert updated == [item]
+
+
+@pytest.mark.asyncio
 async def test_cost_and_unknown_commands(app_factory) -> None:
     app = app_factory([])
     async with app.run_test() as pilot:
@@ -610,56 +638,6 @@ async def test_sessions_sidebar_lists_new_entry(app_factory) -> None:
         lv = app.query_one("#sessions", ListView)
         names = [item.name for item in lv.children]
     assert "__new__" in names
-
-
-@pytest.mark.asyncio
-async def test_handoff_command_carries_summary_into_new_session(app_factory) -> None:
-    from lion_code.context import SUMMARY_HEADINGS
-
-    nine_heading_summary = "\n\n".join(
-        f"{heading}\ncarried state" for heading in SUMMARY_HEADINGS
-    )
-    app = app_factory([_stop_event("working"), _stop_event(nine_heading_summary)])
-    async with app.run_test() as pilot:
-        await _submit(app, pilot, "fix the bug")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        old_session_id = app.session.session_id
-        assert len(app.state.items) >= 2
-
-        await _submit(app, pilot, "/handoff")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-
-    assert app.session.session_id != old_session_id
-    assert len(app.session.messages) == 1
-    assert "summary of a branch" in app.session.messages[0].text
-    # transcript 从新会话重载：分支摘要以可展开条目呈现，旧对话不残留。
-    branch_items = [item for item in app.state.items if item.role == "branch_summary"]
-    assert len(branch_items) == 1
-    assert "carried state" in (branch_items[0].tool_result_text or "")
-    assert not [
-        item for item in app.state.items if item.role in ("user", "assistant", "tool")
-    ]
-
-
-@pytest.mark.asyncio
-async def test_handoff_failure_keeps_transcript_and_notifies_error(app_factory) -> None:
-    app = app_factory([])
-    async with app.run_test() as pilot:
-        await pilot.pause()
-
-        async def failing_handoff() -> None:
-            raise RuntimeError("compaction failed")
-
-        with patch.object(app.session, "handoff_session", failing_handoff):
-            await app._handoff_session()
-            await pilot.pause()
-
-    assert any(
-        item.role == "error" and "compaction failed" in item.text
-        for item in app.state.items
-    )
 
 
 @pytest.mark.asyncio

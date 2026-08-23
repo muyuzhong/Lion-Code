@@ -496,7 +496,6 @@ lion-code --repl                                       # 纯文本 REPL
 | `/task` | 查看当前项目的目标、活动任务与下一步 |
 | `/task switch <内容>` | 切换活动任务，并把旧任务保留为待继续事项 |
 | `/task done` | 结束活动任务，保留完成摘要并准备受限长期候选 |
-| `/handoff` | 生成并保存下一 Session 可继续的交接摘要 |
 | `/skills` | 查看可用 Skill |
 | `/<skill-name>` | 调用一个用户可执行 Skill |
 | `exit` / `quit` | 退出程序 |
