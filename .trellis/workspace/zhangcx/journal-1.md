@@ -1724,3 +1724,27 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 55: 收敛 Memory 上下文与会话边界
+
+**Date**: 2026-08-23
+**Task**: 收敛 Memory 上下文与会话边界
+**Branch**: `muyuzhong/memory-context-boundary-fix`
+
+### Summary
+
+将一期 pinned 记忆改为普通 lazy ContextLayer，删除 QueryContext SPI 与 Session handoff/BranchSummary 全链；修复完整投影预算和 SQLite 并发首次开库竞争。全量 pytest 929 passed、3 skipped、10 subtests，静态与架构门禁通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `503b870` | (see git log) |
+| `fc72859` | (see git log) |
+| `b61ac77` | (see git log) |
+| `cc9b4d8` | (see git log) |
+
+### Status
+
+[OK] **Completed**
