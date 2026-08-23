@@ -186,15 +186,6 @@ class TuiState:
             self.add_item("custom", content, custom_type=custom_type, details=details)
             return
 
-        branch_summary = _parse_branch_summary_message(content)
-        if branch_summary is not None:
-            self.add_item(
-                "branch_summary",
-                "Branch summary (Ctrl+O to expand)",
-                tool_result_text=branch_summary,
-            )
-            return
-
         compaction_summary = _parse_compaction_summary_message(content)
         if compaction_summary is not None:
             self.add_item(
@@ -345,16 +336,6 @@ class TuiState:
             if _normalized_path(skill.path) == read_path:
                 return skill.name
         return None
-
-
-def _parse_branch_summary_message(content: str) -> str | None:
-    prefix = (
-        "The following is a summary of a branch that this conversation came back from:\n<summary>\n"
-    )
-    suffix = "\n</summary>"
-    if content.startswith(prefix) and content.endswith(suffix):
-        return content.removeprefix(prefix).removesuffix(suffix)
-    return None
 
 
 def _parse_compaction_summary_message(content: str) -> str | None:

@@ -42,7 +42,6 @@
     "thinking": { "border": "#6b7280", "body": "#4b5563" },
     "skill": { "border": "#7c3aed", "body": "#4c1d95" },
     "custom": { "border": "#0f766e", "body": "#111827" },
-    "branch_summary": { "border": "#9333ea", "body": "#581c87" },
     "compaction_summary": { "border": "#9333ea", "body": "#581c87" }
   }
 }

@@ -94,7 +94,6 @@ TranscriptRole = Literal[
     "thinking",
     "skill",
     "custom",
-    "branch_summary",
     "compaction_summary",
 ]
 TRANSCRIPT_ROLES: tuple[str, ...] = get_args(TranscriptRole)

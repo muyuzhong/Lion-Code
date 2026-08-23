@@ -877,7 +877,7 @@ class TranscriptView(VerticalScroll):
         self._render_state = state
         self._render_theme = theme
         for item in state.items[self._window_start : self._window_end]:
-            if item.role not in {"tool", "skill", "branch_summary", "compaction_summary"}:
+            if item.role not in {"tool", "skill", "compaction_summary"}:
                 continue
             expanded = state.show_tool_results or item.always_show_tool_result
             await self.update_item(
@@ -1301,7 +1301,7 @@ def _transcript_item_markdown(
     visible_text = _visible_chat_text(
         item, show_tool_results=show_tool_results, invocation=invocation
     )
-    if item.role in {"assistant", "thinking", "status", "branch_summary", "compaction_summary"}:
+    if item.role in {"assistant", "thinking", "status", "compaction_summary"}:
         return visible_text
     return _plain_markdown(visible_text)
 
@@ -1386,10 +1386,6 @@ def _visible_chat_text(
     show_tool_results: bool,
     invocation: str | None = None,
 ) -> str:
-    if item.role == "branch_summary":
-        if show_tool_results and item.tool_result_text:
-            return f"**Branch Summary**\n\n{item.tool_result_text}"
-        return item.text
     if item.role == "compaction_summary":
         if show_tool_results and item.tool_result_text:
             return f"**Compaction Summary**\n\n{item.tool_result_text}"

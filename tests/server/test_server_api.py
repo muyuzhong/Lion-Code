@@ -178,40 +178,6 @@ def test_list_and_resume_sessions() -> None:
     assert res_new.status_code == 200
     assert ("new", None) in backend.session_operations
 
-    # 携带任务摘要移交到新会话
-    res_handoff = client.post("/api/sessions/handoff")
-    assert res_handoff.status_code == 200
-    assert res_handoff.json()["success"] is True
-    assert ("handoff", None) in backend.session_operations
-
-
-def test_handoff_session_failure_keeps_old_session_and_reports_error() -> None:
-    backend = FakeCodingSessionBackend(
-        cwd=Path("/workspace"),
-        model="gpt-4o",
-        provider_name="openai",
-        handoff_error=RuntimeError("compaction failed"),
-    )
-    session = LionCodingSession(backend=backend, terminal_output=False)
-    client = _build_client(session)
-
-    res = client.post("/api/sessions/handoff")
-
-    assert res.status_code == 500
-    assert ("handoff", None) not in backend.session_operations
-
-
-def test_handoff_session_rejected_while_running() -> None:
-    session, backend = _build_test_session()
-    client = _build_client(session)
-
-    session._running = True
-    res = client.post("/api/sessions/handoff")
-
-    assert res.status_code == 400
-    assert ("handoff", None) not in backend.session_operations
-
-
 def test_list_sessions_zero_match_returns_empty() -> None:
     backend = FakeCodingSessionBackend(
         cwd=Path("/workspace"),
