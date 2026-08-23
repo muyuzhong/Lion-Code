@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from time import monotonic, sleep
 from typing import Literal
 
 MemoryScope = Literal["long_term", "project"]
@@ -372,13 +373,25 @@ class MemoryStore:
                     conn.execute("ROLLBACK")
                 raise
         self._verify_schema(conn)
-        journal = conn.execute("PRAGMA journal_mode").fetchone()
-        if journal is None or str(journal[0]).casefold() != "wal":
-            changed = conn.execute("PRAGMA journal_mode = WAL").fetchone()
-            if changed is None or str(changed[0]).casefold() != "wal":
+        self._ensure_wal(conn)
+
+    def _ensure_wal(self, conn: sqlite3.Connection) -> None:
+        deadline = monotonic() + BUSY_TIMEOUT_MS / 1000
+        while True:
+            try:
+                journal = conn.execute("PRAGMA journal_mode").fetchone()
+                if journal is not None and str(journal[0]).casefold() == "wal":
+                    return
+                changed = conn.execute("PRAGMA journal_mode = WAL").fetchone()
+                if changed is not None and str(changed[0]).casefold() == "wal":
+                    return
                 raise MemorySchemaError(
                     f"memory database {self._db_path} could not enable WAL mode"
                 )
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).casefold() or monotonic() >= deadline:
+                    raise
+                sleep(0.05)
 
     @staticmethod
     def _schema_snapshot(conn: sqlite3.Connection) -> tuple[int, set[str]]:
