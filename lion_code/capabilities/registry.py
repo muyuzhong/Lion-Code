@@ -19,6 +19,7 @@ from .types import (
     CapabilitySpec,
     ContextLayer,
     PromptLayer,
+    QueryContextLayer,
     SessionParticipant,
     ToolSource,
 )
@@ -104,6 +105,15 @@ class CapabilityRegistry:
             spec.context_layer
             for spec in self._specs.values()
             if spec.context_layer is not None
+        )
+
+    @property
+    def query_context_layers(self) -> tuple[QueryContextLayer, ...]:
+        """All non-empty query-aware context layers in registration order."""
+        return tuple(
+            spec.query_context_layer
+            for spec in self._specs.values()
+            if spec.query_context_layer is not None
         )
 
     # -- lifecycle -----------------------------------------------------

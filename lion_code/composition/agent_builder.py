@@ -35,6 +35,11 @@ from ..capabilities import (
 )
 from ..capabilities.agent_state import create_agent_state_capability
 from ..capabilities.git_status import create_git_status_capability
+from ..capabilities.memory import (
+    MemoryStore,
+    create_memory_capability,
+    default_memory_db_path,
+)
 from ..capabilities.plan.capability import create_plan_capability
 from ..capabilities.plan.runtime import PlanRuntime, PlanState
 from ..capabilities.skill.capability import create_skill_capability
@@ -52,6 +57,7 @@ from ..context import (
 from ..hooks import load_pre_tool_use_hooks
 from ..observers import TerminalRenderer
 from ..permission_state import PermissionController, PermissionState
+from ..project_identity import resolve_project_identity
 from ..prompt import (
     PromptComposer,
     build_dynamic_system_context,
@@ -124,6 +130,7 @@ from .profiles import (
 _CAP_SKILL = "skill"
 _CAP_SUBAGENT = "subagent"
 _CAP_PLAN = "plan"
+_CAP_SEMANTIC_MEMORY = "memory"
 
 
 @dataclass(slots=True)
@@ -423,7 +430,7 @@ def _normalize_profile(profile: Profile) -> _ProfileSelection:
     if isinstance(profile, FullProfile):
         return _ProfileSelection(
             capabilities=frozenset(
-                {_CAP_SKILL, _CAP_SUBAGENT, _CAP_PLAN},
+                {_CAP_SKILL, _CAP_SUBAGENT, _CAP_PLAN, _CAP_SEMANTIC_MEMORY},
             ),
             builtin_tools=True,
             caller_tools=profile.extra_tools,
@@ -633,6 +640,19 @@ def _build_capability_graph(
         capability_registry.register(create_subagent_capability(subagent_executor))
     if _CAP_PLAN in capabilities and foundation.plan is not None:
         capability_registry.register(create_plan_capability(foundation.plan))
+    # 同名 extension spec 显式覆盖内置 memory：默认 Full 含 memory，
+    # 调用方传 name="memory" 的空 spec 即可移除，或换成自己的实现。
+    extension_names = {spec.name for spec in selection.extension_specs}
+    if _CAP_SEMANTIC_MEMORY in capabilities and _CAP_SEMANTIC_MEMORY not in (
+        extension_names
+    ):
+        identity = resolve_project_identity(foundation.cwd)
+        capability_registry.register(
+            create_memory_capability(
+                MemoryStore(default_memory_db_path(), project_key=identity.key),
+                project_root=identity.root,
+            )
+        )
     for spec in selection.extension_specs:
         capability_registry.register(spec)
     _install_capability_tools(foundation, capability_registry)
@@ -783,6 +803,7 @@ def _build_tooling_graph(
         middleware,
     )
     context_layers = capability_registry.context_layers
+    query_context_layers = capability_registry.query_context_layers
     context_manager = foundation.bindings.session.context_manager
     if context_manager is None:
         context_manager = ContextManager(
@@ -792,6 +813,7 @@ def _build_tooling_graph(
             # 只捕获构造完成后的不可变层快照，避免 ContextRuntime 反向持有
             # CapabilityRegistry；动态状态由各 Layer 在 render 时读取。
             context_layers=lambda: context_layers,
+            query_context_layers=lambda: query_context_layers,
         )
     return _ToolingGraph(
         prompt_composer=prompt_composer,

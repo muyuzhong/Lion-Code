@@ -13,6 +13,7 @@ from .types import (
     CapabilitySpec,
     ContextLayer,
     PromptLayer,
+    QueryContextLayer,
     SessionParticipant,
     ToolSource,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "ContextLayer",
     "DuplicateCapabilityError",
     "PromptLayer",
+    "QueryContextLayer",
     "SessionParticipant",
     "ToolSource",
 ]

@@ -156,7 +156,7 @@ class TestAgentCompositionWithCapabilities:
         assert "exit_plan_mode" in tool_names
 
     def test_agent_has_capability_registry_with_builtin_capabilities(self) -> None:
-        """Agent should register skill, subagent and plan capabilities."""
+        """Agent should register skill, subagent, plan and memory capabilities."""
 
         agent = build_full_agent_harness(
             api_key="test-key",
@@ -164,7 +164,7 @@ class TestAgentCompositionWithCapabilities:
         )
 
         sources = agent.composition.capabilities.registry.tool_sources  # noqa: SLF001
-        assert len(sources) == 3
+        assert len(sources) == 4
 
     def test_session_participant_runs_after_new_identity_transition(self) -> None:
         """Session callbacks observe the new identity before Core is reset."""

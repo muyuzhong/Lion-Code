@@ -22,6 +22,11 @@ class ContextLayer(Protocol):
     def layer_id(self) -> str: ...
     def render(self, view: ContextView) -> str: ...
 
+class QueryContextLayer(Protocol):
+    @property
+    def layer_id(self) -> str: ...
+    def render(self, query: str, view: ContextView) -> str: ...
+
 class SessionParticipant(Protocol):
     async def on_new_session(self) -> None: ...
     async def on_restore_session(self) -> None: ...
@@ -34,12 +39,14 @@ class CapabilitySpec:
     session_participants: tuple[SessionParticipant, ...] = ()
     resources: tuple[AsyncCloseable, ...] = ()
     context_layer: ContextLayer | None = None
+    query_context_layer: QueryContextLayer | None = None
 ```
 
 CapabilityRegistry aggregates the slots above in registration order, including
-non-None context_layer values, and closes resources in reverse registration
-order. It is an aggregation mechanism, not a service locator,
-dependency-injection container, provider owner, or mutable runtime-state store.
+non-None context_layer and query_context_layer values, and closes resources in
+reverse registration order. It is an aggregation mechanism, not a service
+locator, dependency-injection container, provider owner, or mutable
+runtime-state store.
 
 CapabilityRuntime dispatches session lifecycle methods and close. Generic
 context preparation and compaction remain owned by ContextManager and
@@ -127,11 +134,14 @@ while the Kernel remains generic.
 5. Context layers are projections only: they do not write canonical messages,
    JSONL, compaction entries, or mutable counters.
 6. The built-in graph contains AgentState/GitStatus for Coding and Full
-   profiles, Plan/SubAgent/Skill where the selected Profile requires them, and
-   no Memory, Dream, or Learning capability.
+   profiles, Plan/SubAgent/Skill where the selected Profile requires them,
+   and the capability-owned Semantic Memory tool/query layer for FullProfile.
+   No Dream or Learning capability exists.
 7. The zero-extension registry is valid. FullProfile must also remain runnable
-   when any one of Plan, Skill, SubAgent, or a third-party `CapabilitySpec` is
-   omitted; Kernel and Harness do not branch on a capability name.
+   when any one of Plan, Skill, SubAgent, Semantic Memory, or a third-party
+   `CapabilitySpec` is omitted; Kernel and Harness do not branch on a
+   capability name. A same-name `extension_specs` entry removes or replaces
+   the built-in Semantic Memory capability.
 
 ## Retained built-ins
 
@@ -143,9 +153,14 @@ while the Kernel remains generic.
 - `SubagentCapability` contributes the `agent` tool and delegates child usage,
   status, errors, and closure to `SubagentExecutor`.
 - `SkillCapability` contributes the Skill tool and uses the same child executor.
+- `MemoryQueryContextLayer` (capability-owned Semantic Memory) renders pinned
+  and query-relevant memory entries into the prepared-context tail. It performs
+  local synchronous SQLite reads only; its output never enters canonical
+  history, JSONL, or compaction input, and the MemoryStore stays private to
+  the capability's tool/query adapters.
 
 Future capabilities may add the existing generic slots or closeable resources,
 but must not add a second history store, writer, or context projection path.
-The legacy-removal guard rejects only the deleted architecture and explicitly
-does not reserve the generic name `MemoryCapability`; a new Memory system is a
-separate design task and is not specified here.
+The legacy-removal guard rejects only the deleted architecture; the retained
+Semantic Memory capability lives under `capabilities/memory/` with the
+canonical `core/session/memory.py` compaction-entry module unchanged.

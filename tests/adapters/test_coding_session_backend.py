@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from full_agent import isolated_memory_db
+
 from lion_code.adapters.coding_session_backend import CodingSessionBackendAdapter
 from lion_code.application.ports import CodingSessionBackend
 from lion_code.composition.full_product import build_full_coding_backend
@@ -15,7 +17,12 @@ from lion_code.session_runtime import SessionRepository
 
 
 def _backend(tmp_path: Path, **kwargs) -> CodingSessionBackendAdapter:
-    with patch("lion_code.composition.full_product.create_provider") as create:
+    # unittest 风格测试无 conftest fixture：隔离默认 memory DB，避免
+    # 在真实 ~/.lion-code 创建/读取 MemoryStore。
+    with (
+        isolated_memory_db(),
+        patch("lion_code.composition.full_product.create_provider") as create,
+    ):
         create.return_value = _FakeProvider()
         backend = build_full_coding_backend(
             api_key="test-key",
@@ -32,9 +39,12 @@ class _FakeProvider:
 
 class TestComposition(unittest.TestCase):
     def test_adapter_implements_protocol_structurally(self):
-        with patch(
-            "lion_code.composition.full_product.create_provider",
-            return_value=_FakeProvider(),
+        with (
+            isolated_memory_db(),
+            patch(
+                "lion_code.composition.full_product.create_provider",
+                return_value=_FakeProvider(),
+            ),
         ):
             backend = build_full_coding_backend(
                 api_key="test-key", terminal_output=False

@@ -1,9 +1,9 @@
-"""Memory Capability：把 ``MemoryStore`` 绑定为治理工具面。
+"""Memory Capability：把 ``MemoryStore`` 绑定为治理工具面与自动召回投影。
 
 工具契约（设计文档 7.1 节）：remember/manage 是 mutation，标记
 ``requires_confirmation`` 走 ToolRuntime 的 Permission 确认路径；
-recall/review 只读。本 PR 不贡献 ContextLayer/PromptLayer（自动召回
-属 PR4），MemoryStore 保持 Capability 私有。
+recall/review 只读。PR4 起另贡献 ``QueryContextLayer``（pinned/relevant
+自动召回，prepared-only），``MemoryStore`` 保持 Capability 私有。
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from ...context.estimator import estimate_text_tokens
 from ...tooling.context import ToolContext
 from ...tooling.types import JSONValue, LionTool, ToolCapabilities, ToolResult
 from ..types import CapabilitySpec
+from .query_layer import MemoryQueryContextLayer
+from .rendering import entry_line as _entry_line
 from .store import (
     DEFAULT_REVIEW_OLDER_THAN_DAYS,
     DEFAULT_TOKEN_BUDGET,
@@ -126,21 +128,6 @@ def _candidate_json(candidate: ReviewStaleCandidate) -> dict[str, JSONValue]:
         "stable_key": candidate.stable_key,
         "missing_paths": list(candidate.missing_paths),
     }
-
-
-def _entry_line(entry: MemoryEntry) -> str:
-    """按设计 6.3 的行形状渲染：id + 象限 + 内容 + evidence。"""
-    if entry.kind == "behavior":
-        # behavior 的 trigger 非空由 schema CHECK 保证
-        body = f"When: {entry.trigger} Do: {entry.content}"
-    else:
-        body = entry.content
-    suffix = f" Evidence: {'; '.join(entry.evidence)}"
-    if entry.paths:
-        suffix += f" Paths: {', '.join(entry.paths)}"
-    if entry.status != "active":
-        suffix += f" [{entry.status}]"
-    return f"- [m:{entry.id} {entry.display_path()}] {entry.stable_key}: {body}{suffix}"
 
 
 def _error(exc: Exception) -> ToolResult:
@@ -652,12 +639,14 @@ def create_memory_capability(
     *,
     project_root: Path | None = None,
 ) -> CapabilitySpec:
-    """返回提供 memory 治理工具的 Capability。
+    """返回提供 memory 治理工具与自动召回投影的 Capability。
 
     ``project_root`` 用于命中条目的确定性 path 存在性校验；为 None 时
-    跳过校验（不产生 stale candidate）。
+    跳过校验（不产生 stale candidate）。工具与 QueryContextLayer 绑定
+    同一个 ``MemoryStore``，存储保持 Capability 私有。
     """
     return CapabilitySpec(
         name="memory",
         tool_sources=(_MemoryToolSource(store, project_root=project_root),),
+        query_context_layer=MemoryQueryContextLayer(store, project_root=project_root),
     )
