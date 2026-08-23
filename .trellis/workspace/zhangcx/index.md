@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 57
+- **Total Sessions**: 58
 - **Last Active**: 2026-08-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1792 | Active |
+| `journal-1.md` | ~1814 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 58 | 2026-08-23 | 完成 Electron 宿主与 Python sidecar | `57b5b02`, `8acc7d0` | `muyuzhong/electron-host-sidecar` |
 | 57 | 2026-08-23 | 完成一期 Memory 收敛与验收 | `da3e70e` | `muyuzhong/memory-phase-one-finalize` |
 | 56 | 2026-08-23 | 完成 Memory 离线 lexical 召回原型 | `43c77db` | `muyuzhong/memory-lexical-recall-prototype` |
 | 55 | 2026-08-23 | 收敛 Memory 上下文与会话边界 | `503b870`, `fc72859`, `b61ac77`, `cc9b4d8` | `muyuzhong/memory-context-boundary-fix` |
