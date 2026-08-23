@@ -23,8 +23,7 @@
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
-    "tests/main/**/*.ts",
-    "tests/preload/**/*.ts",
+    "tests/**/*.ts",
     "e2e/**/*.ts"
   ]
 }

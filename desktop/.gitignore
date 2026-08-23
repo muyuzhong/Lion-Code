@@ -3,4 +3,5 @@ out/
 dist/
 playwright-report/
 test-results/
+sidecar/
 *.tsbuildinfo

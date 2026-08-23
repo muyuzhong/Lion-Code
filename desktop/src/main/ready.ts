@@ -28,6 +28,10 @@ export function parseReadyLine(line: string): ReadyParseResult {
     return { ok: false, code: "invalid_ready", reason: "记录不是对象" };
   }
   const record = parsed as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  if (keys.join(",") !== "capability,port,type,version") {
+    return { ok: false, code: "invalid_ready", reason: "字段集合非法" };
+  }
   if (record.type !== "ready" || record.version !== 1) {
     return { ok: false, code: "invalid_ready", reason: "协议类型或版本不支持" };
   }

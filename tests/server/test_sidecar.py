@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 from lion_code.application.session import LionCodingSession
 from lion_code.server.app import create_app
-from lion_code.server.sidecar import format_ready_record
+from lion_code.sidecar import format_ready_record
 
 try:
     from application.fakes import FakeCodingSessionBackend
@@ -63,8 +63,7 @@ class _StdoutHarness:
                     # 进程已退出，可安全读取全部 stderr。
                     stderr_tail = self.process.stderr.read()[-2000:]
                 raise AssertionError(
-                    "sidecar 提前退出: "
-                    + stderr_tail.decode("utf-8", errors="replace")
+                    "sidecar 提前退出: " + stderr_tail.decode("utf-8", errors="replace")
                 )
             time.sleep(0.2)
         raise AssertionError("等待 ready 记录超时")
@@ -105,10 +104,34 @@ class TestFormatReadyRecord:
             "capability": _CAPABILITY,
         }
 
+    def test_shutdown_control_sets_server_exit_flag(self):
+        from lion_code.sidecar import _listen_for_shutdown
+
+        server = type("Server", (), {"should_exit": False})()
+        _listen_for_shutdown(io.StringIO("shutdown\n"), server)
+
+        assert server.should_exit is True
+
 
 class TestParseArgs:
+    def test_state_home_applies_before_config_import(self, tmp_path, monkeypatch):
+        import importlib
+
+        from lion_code import sidecar
+
+        state_home = tmp_path / "state"
+        monkeypatch.setenv("LION_SIDECAR_STATE_HOME", str(state_home))
+        monkeypatch.setenv("HOME", os.environ.get("HOME", ""))
+        monkeypatch.setenv("USERPROFILE", os.environ.get("USERPROFILE", ""))
+        monkeypatch.delitem(sys.modules, "lion_code.config", raising=False)
+
+        sidecar._apply_state_home()
+        config = importlib.import_module("lion_code.config")
+
+        assert config.CONFIG_PATH == state_home / ".lion-code" / "config.json"
+
     def test_workspace_is_required(self):
-        from lion_code.server.sidecar import _parse_args
+        from lion_code.sidecar import _parse_args
 
         with pytest.raises(SystemExit) as excinfo:
             _parse_args([])
@@ -116,7 +139,7 @@ class TestParseArgs:
         assert excinfo.value.code == 2
 
     def test_missing_workspace_directory_fails_fast(self, tmp_path, capsys):
-        from lion_code.server.sidecar import run
+        from lion_code.sidecar import run
 
         args = argparse.Namespace(workspace=tmp_path / "missing")
         exit_code = run(args, protocol_out=io.StringIO())
@@ -135,7 +158,9 @@ class TestApiOnlyApp:
 
     def test_health_stays_public_without_capability(self):
         client = TestClient(
-            create_app(_build_test_session(), capability=_CAPABILITY, serve_static=False),
+            create_app(
+                _build_test_session(), capability=_CAPABILITY, serve_static=False
+            ),
             base_url="http://127.0.0.1:8000",
         )
 
@@ -164,9 +189,7 @@ class TestApiOnlyApp:
             # 未注册消息类型由 bridge 忽略；连接保持打开即通过。
 
     def test_unknown_origin_rejected_for_api(self):
-        client = _build_client(
-            _build_test_session(), origin="https://attacker.example"
-        )
+        client = _build_client(_build_test_session(), origin="https://attacker.example")
 
         response = client.get("/api/status")
 
@@ -197,12 +220,13 @@ class TestSidecarProcess:
             [
                 sys.executable,
                 "-m",
-                "lion_code.server.sidecar",
+                "lion_code.sidecar",
                 "--workspace",
                 str(workspace),
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE,
             cwd=str(repo_root),
             env=env,
         )
@@ -246,3 +270,12 @@ class TestSidecarProcess:
         # ready 之后 stdout 不再有输出（含访问日志）；诊断全部走 stderr。
         time.sleep(1.0)
         assert len(sidecar.lines()) == 1
+
+    def test_shutdown_command_exits_cleanly(self, sidecar):
+        sidecar.wait_ready(timeout_seconds=60)
+        assert sidecar.process.stdin is not None
+
+        sidecar.process.stdin.write(b"shutdown\n")
+        sidecar.process.stdin.flush()
+
+        assert sidecar.process.wait(timeout=10) == 0

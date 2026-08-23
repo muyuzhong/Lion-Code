@@ -11,7 +11,7 @@ boundaries, not historical implementation or future Memory design.
 | Agent Runtime | `runtime/` (`agent.py`, `conversation.py`, `session.py`, `context.py`, `execution.py`, `session_identity.py`, `provider.py`) | Profile selection, a second history, service locator, deleted legacy graph, Composition/Application deps |
 | Capability | `capabilities/` and its cohesive feature packages | Provider/session ownership, Product Adapter, Application/TUI, legacy Memory/Dream/Learning object graphs |
 | Composition | `composition/`, `meta_agent.py` | Frontend behavior, Supervisor policy, retained runtime container, feature API leakage |
-| Interfaces | `__init__.py`, `__main__.py`, `adapters/`, `application/`, `tui/` | Direct Kernel/Agent Runtime ownership, duplicate persistence, public legacy feature facade |
+| Interfaces | `__init__.py`, `__main__.py`, `sidecar.py`, `adapters/`, `application/`, `tui/` | Direct Kernel/Agent Runtime ownership, duplicate persistence, public legacy feature facade |
 | Supervisor | `supervisor.py` | Agent content, usage, permissions, tools, Profile internals, canonical session writes |
 
 `CapabilityRegistry` aggregates immutable contributions and closeable resources;

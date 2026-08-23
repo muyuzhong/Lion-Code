@@ -12,7 +12,7 @@ export default defineConfig({
   projects: [
     {
       name: "bootstrap",
-      testMatch: /bootstrap\.spec\.ts/,
+      testMatch: /bootstrap.*\.spec\.ts/,
     },
     {
       name: "sidecar-real",

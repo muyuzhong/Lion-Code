@@ -1,8 +1,6 @@
 /** Python sidecar 子进程生命周期：启动、ready 协议、退出与有界关闭。 */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { EventEmitter } from "node:events";
-
 import type { BackendEndpoint, BootstrapState } from "../shared/types";
 import { failureFrom, parseReadyLine, sanitizeDiagnosticText, tailText } from "./ready";
 
@@ -18,6 +16,7 @@ export interface SidecarControllerOptions {
 
 const DEFAULT_READY_TIMEOUT_MS = 60_000;
 const DEFAULT_STDERR_TAIL_CHARS = 4000;
+const MAX_CAPABILITY_CHARS = 128;
 
 /**
  * 单 sidecar 句柄的所有者。
@@ -37,9 +36,10 @@ export class SidecarController {
   private knownSecrets: string[] = [];
   private readyTimer: NodeJS.Timeout | null = null;
   private exitWaiters: Array<() => void> = [];
+  private operation: Promise<void> = Promise.resolve();
 
   constructor(options: SidecarControllerOptions = {}) {
-    this.spawnFn = options.spawnFn ?? ((command, args) => spawn(command, args));
+    this.spawnFn = options.spawnFn ?? ((command, args) => spawn(command, args, { windowsHide: true }));
     this.readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
     this.stderrTailChars = options.stderrTailChars ?? DEFAULT_STDERR_TAIL_CHARS;
   }
@@ -58,9 +58,31 @@ export class SidecarController {
     return this.state.phase === "ready" ? this.state.endpoint : null;
   }
 
+  /** 仅供宿主完成退出清理后复位，避免 before-quit 重入。 */
+  resetToIdle(): void {
+    this.child = null;
+    this.transition({ phase: "idle" });
+  }
+
+  /** 在进程创建前记录宿主侧的结构化失败。 */
+  async setFailure(
+    workspacePath: string,
+    code: "workspace_invalid" | "sidecar_assets_missing",
+    message: string,
+  ): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.child !== null) await this.stopOwned();
+      this.transition({ phase: "failed", workspacePath, failure: failureFrom(code, message) });
+    });
+  }
+
   async start(workspacePath: string, command: string, args: string[]): Promise<void> {
+    return this.enqueue(() => this.startOwned(workspacePath, command, args));
+  }
+
+  private async startOwned(workspacePath: string, command: string, args: string[]): Promise<void> {
     if (this.child !== null) {
-      await this.stop();
+      await this.stopOwned();
     }
     this.reset();
     this.transition({ phase: "starting", workspacePath });
@@ -94,6 +116,7 @@ export class SidecarController {
       }
     });
     child.on("exit", (code, signal) => {
+      if (this.child === child) this.child = null;
       this.clearReadyTimer();
       this.resolveExitWaiters();
       if (this.state.phase === "starting") {
@@ -126,7 +149,11 @@ export class SidecarController {
     if (child.stderr !== null) {
       child.stderr.setEncoding("utf-8");
       child.stderr.on("data", (chunk: string) => {
-        this.stderrBuffer = tailText(this.stderrBuffer + chunk, this.stderrTailChars);
+        // 多保留一个最大 token 长度，保证最终截断点前的完整 capability 可被净化。
+        this.stderrBuffer = tailText(
+          this.stderrBuffer + chunk,
+          this.stderrTailChars + MAX_CAPABILITY_CHARS,
+        );
       });
     }
 
@@ -151,18 +178,32 @@ export class SidecarController {
    * resolve 时子进程已退出（或从未启动）。
    */
   async stop(graceTimeoutMs = 5000): Promise<void> {
+    return this.enqueue(() => this.stopOwned(graceTimeoutMs));
+  }
+
+  private async stopOwned(graceTimeoutMs = 5000): Promise<void> {
     this.clearReadyTimer();
     const child = this.child;
     if (child === null) {
       return;
     }
     const exited = this.waitForExit();
-    this.killChild();
+    if (this.state.phase === "ready" && child.stdin?.writable) {
+      child.stdin.write("shutdown\n");
+    } else {
+      this.killChild();
+    }
     const timeout = setTimeout(() => {
       this.killChild("SIGKILL");
     }, graceTimeoutMs);
     await exited;
     clearTimeout(timeout);
+  }
+
+  private enqueue(operation: () => Promise<void>): Promise<void> {
+    const next = this.operation.then(operation, operation);
+    this.operation = next.catch(() => undefined);
+    return next;
   }
 
   private waitForExit(): Promise<void> {

@@ -102,6 +102,7 @@ BOUNDARIES: tuple[Boundary, ...] = (
                 "observers",
                 "tui",
                 "server",
+                "sidecar",
                 "permission_state",
                 "usage",
                 "session_runtime",
@@ -130,6 +131,7 @@ BOUNDARIES: tuple[Boundary, ...] = (
                 "tooling",
                 "tui",
                 "server",
+                "sidecar",
                 "usage",
             }
         ),
@@ -144,6 +146,7 @@ BOUNDARIES: tuple[Boundary, ...] = (
                 "supervisor",
                 "tui",
                 "server",
+                "sidecar",
             }
         ),
         allow_indirect=True,
@@ -157,6 +160,7 @@ BOUNDARIES: tuple[Boundary, ...] = (
                 "supervisor",
                 "tui",
                 "server",
+                "sidecar",
             }
         ),
     ),
@@ -168,7 +172,7 @@ BOUNDARIES: tuple[Boundary, ...] = (
     Boundary(
         contract_name="Application 不依赖 TUI",
         source_package="lion_code.application",
-        forbidden=frozenset({"tui", "server"}),
+        forbidden=frozenset({"tui", "server", "sidecar"}),
     ),
     Boundary(
         contract_name="TUI 只经 Application/Core 接触运行时",
@@ -208,6 +212,7 @@ BOUNDARIES: tuple[Boundary, ...] = (
                 "application",
                 "tui",
                 "server",
+                "sidecar",
             }
         ),
     ),

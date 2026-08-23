@@ -1,4 +1,4 @@
-"""桌面 sidecar 进程入口：API-only FastAPI + 动态 loopback 端口 + stdout ready 协议。"""
+"""桌面 sidecar 接口入口：API-only FastAPI + 动态 loopback 端口 + stdout ready 协议。"""
 
 from __future__ import annotations
 
@@ -9,11 +9,10 @@ import json
 import os
 import socket
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import TextIO
-
-from lion_code.config import resolve_api_credentials
 
 _READY_TIMEOUT_SECONDS = 15.0
 
@@ -45,6 +44,7 @@ def build_session(workspace: Path):
     os.chdir(workspace)
     from lion_code.application.session import LionCodingSession
     from lion_code.composition.full_product import build_full_coding_backend
+    from lion_code.config import resolve_api_credentials
 
     creds = resolve_api_credentials(allow_placeholder=True)
     use_openai = bool(creds["use_openai"])
@@ -57,6 +57,14 @@ def build_session(workspace: Path):
     return LionCodingSession(backend=backend, terminal_output=False)
 
 
+def _apply_state_home() -> None:
+    state_home = os.environ.get("LION_SIDECAR_STATE_HOME")
+    if state_home:
+        # 必须早于任何 server/composition/config import，避免模块常量绑定旧 HOME。
+        os.environ["HOME"] = state_home
+        os.environ["USERPROFILE"] = state_home
+
+
 async def _serve_until_ready(
     server,
     sock: socket.socket,
@@ -64,6 +72,7 @@ async def _serve_until_ready(
     port: int,
     capability: str,
     protocol_out: TextIO | None = None,
+    control_in: TextIO | None = None,
 ) -> None:
     """启动 uvicorn，端口绑定成功后输出 ready 记录并阻塞至服务退出。"""
     serve_task = asyncio.create_task(server.serve(sockets=[sock]))
@@ -85,16 +94,30 @@ async def _serve_until_ready(
     out = sys.stdout if protocol_out is None else protocol_out
     out.write(format_ready_record(port=port, capability=capability) + "\n")
     out.flush()
+    source = sys.stdin if control_in is None else control_in
+    threading.Thread(
+        target=_listen_for_shutdown,
+        args=(source, server),
+        daemon=True,
+        name="lion-sidecar-control",
+    ).start()
     await serve_task
 
 
+def _listen_for_shutdown(source: TextIO, server) -> None:
+    """父进程通过 stdin 单行命令请求优雅关闭；EOF 不改变服务状态。"""
+    if source.readline().strip() == "shutdown":
+        server.should_exit = True
+
+
 def run(args: argparse.Namespace, protocol_out: TextIO | None = None) -> int:
+    _apply_state_home()
     workspace = args.workspace
     if not workspace.is_dir():
         print(f"sidecar: 工作区不存在: {workspace}", file=sys.stderr)
         return 2
 
-    from .app import create_app, generate_capability
+    from .server.app import create_app, generate_capability
 
     try:
         session = build_session(workspace)
@@ -144,4 +167,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

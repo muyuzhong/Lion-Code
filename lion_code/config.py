@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 CONFIG_PATH = Path.home() / ".lion-code" / "config.json"
 
@@ -103,4 +104,3 @@ def resolve_api_credentials(
         "use_openai": use_openai,
         "model": model,
     }
-
