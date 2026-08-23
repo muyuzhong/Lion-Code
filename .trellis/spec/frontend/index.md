@@ -7,12 +7,14 @@
 - [chat-queue-contract.md](chat-queue-contract.md) — 聊天队列事件契约：queue_update 快照语义与消费出队规则（跨层契约，改队列相关代码必读）
 - [runtime-events-contract.md](runtime-events-contract.md) — 运行时事件契约：重试/压缩两层事件架构、状态条生命周期、耗时统计边界（改 runtimeNotice/metrics/轨迹面板必读）
 - [toolview-display-contract.md](toolview-display-contract.md) — ToolView 展示契约：diff hunk 跨层格式依赖、agent 精确判定、分类耦合与 ANSI 解析边界
+- [desktop-assistant-runtime-contract.md](desktop-assistant-runtime-contract.md) — 桌面 REST/WS 到 assistant-ui 的单一 Runtime、重连隔离与 fail-closed 契约
 
 ## Pre-Development Checklist
 
 - [ ] 读任务 PRD 引用的归档设计终稿（`.trellis/tasks/archive/2026-08/08-22-frontend-task-features-design/design.md`）的对应 PR 段落与"不做"边界
 - [ ] 改队列相关代码前读 [chat-queue-contract.md](chat-queue-contract.md)；改状态条/统计/思考耗时前读 [runtime-events-contract.md](runtime-events-contract.md)
 - [ ] 协议层（chatProtocol.ts）改动必须配套 chatProtocol.test.ts 契约级单测
+- [ ] 桌面聊天协议或 transport 改动前读 [desktop-assistant-runtime-contract.md](desktop-assistant-runtime-contract.md)，并覆盖 history、重连、审批和严格解码
 - [ ] 不新增依赖前先确认现有依赖（lucide-react 图标、既有工具函数）无法满足
 
 ## Quality Check
