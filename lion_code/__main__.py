@@ -13,7 +13,7 @@ from .application.commands import CommandResult
 from .application.session import LionCodingSession
 from .capabilities.skill.discovery import discover_skills
 from .composition.full_product import build_full_coding_backend
-from .config import load_api_config
+from .config import resolve_api_credentials
 from .permission_state import PermissionMode
 from .ui import (
     print_error,
@@ -264,39 +264,13 @@ Examples:
 
     permission_mode = _resolve_permission_mode(args)
     model = args.model or os.environ.get("LION_CODE_MODEL", "claude-opus-4-6")
-    api_base = args.api_base
 
-    # 显式参数优先于环境变量；API Key 的类型同时决定使用哪种协议后端。
-    resolved_api_base = api_base
-    resolved_api_key: str | None = None
-    resolved_use_openai = bool(api_base)
-
-    if os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENAI_BASE_URL"):
-        resolved_api_key = os.environ["OPENAI_API_KEY"]
-        resolved_api_base = resolved_api_base or os.environ.get("OPENAI_BASE_URL")
-        resolved_use_openai = True
-    elif os.environ.get("ANTHROPIC_API_KEY"):
-        resolved_api_key = os.environ["ANTHROPIC_API_KEY"]
-        resolved_api_base = resolved_api_base or os.environ.get("ANTHROPIC_BASE_URL")
-        resolved_use_openai = False
-    elif os.environ.get("OPENAI_API_KEY"):
-        resolved_api_key = os.environ["OPENAI_API_KEY"]
-        resolved_api_base = resolved_api_base or os.environ.get("OPENAI_BASE_URL")
-        resolved_use_openai = True
-
-    if not resolved_api_key and api_base:
-        resolved_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-        resolved_use_openai = True
-
-    # 三级回退：CLI 参数 > 环境变量 > /model 保存的配置。
-    if not resolved_api_key:
-        saved = load_api_config()
-        if saved.get("api_key"):
-            resolved_api_key = saved["api_key"]
-            resolved_use_openai = saved.get("provider") == "openai"
-            resolved_api_base = saved.get("base_url") or None
-            if not args.model and saved.get("model"):
-                model = saved["model"]
+    creds = resolve_api_credentials()
+    resolved_api_key = creds["api_key"]
+    resolved_api_base = args.api_base or creds["api_base"]
+    resolved_use_openai = bool(args.api_base) or creds["use_openai"]
+    if not args.model and creds["model"]:
+        model = creds["model"]
 
     prompt = " ".join(args.prompt) if args.prompt else None
     use_web = args.web
