@@ -130,10 +130,10 @@ async def test_example_capability_needs_only_spec_registration_and_tests(
             bindings=bindings,
         )
 
-    assert len(composition.capabilities.registry.prompt_layers) == 2
-    assert (
-        "example capability prompt" in composition.tooling.prompt_composer.get_system()
-    )
+    assert len(composition.capabilities.registry.prompt_layers) == 3
+    system = composition.tooling.prompt_composer.get_system()
+    assert "# Memory Policy" in system
+    assert "example capability prompt" in system
     await composition.capabilities.runtime.on_new_session()
     assert participant.new_sessions == 1
     await composition.capabilities.runtime.close()

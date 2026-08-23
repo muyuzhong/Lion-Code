@@ -282,17 +282,21 @@ def test_full_graph_contains_plan_subagent_skill_memory_and_extensions(
         )
 
     assert len(composition.capabilities.registry.tool_sources) == 4
-    assert len(composition.capabilities.registry.query_context_layers) == 1
+    assert composition.capabilities.registry.query_context_layers == ()
     tool_names = {tool.name for tool in composition.tooling.registry.all_tools()}
     assert {
+        "remember_task",
+        "recall_tasks",
         "recall_memory",
         "remember_definition",
         "remember_behavior",
         "review_memory",
         "manage_memory",
+        "set_memory_pinned",
+        "purge_memory",
     } <= tool_names
-    assert memory_db.exists()
-    assert len(composition.capabilities.registry.prompt_layers) == 2
+    assert not memory_db.exists()
+    assert len(composition.capabilities.registry.prompt_layers) == 3
     assert composition.capabilities.plan is not None
     assert composition.capabilities.subagent_factory is not None
     assert composition.capabilities.skill_runtime is not None
@@ -300,6 +304,7 @@ def test_full_graph_contains_plan_subagent_skill_memory_and_extensions(
     assert isinstance(composition.tooling.permission_policy, PermissionPolicy)
     system = composition.tooling.prompt_composer.get_system()
     assert build_static_system_prompt() in system
+    assert "# Memory Policy" in system
     assert "example extension prompt layer" in system
     assert "# Environment" in system
 
@@ -345,57 +350,17 @@ def test_full_graph_memory_removed_by_same_name_extension_spec(tmp_path, monkeyp
     assert composition.capabilities.registry.query_context_layers == ()
     tool_names = {tool.name for tool in composition.tooling.registry.all_tools()}
     assert not tool_names & {
+        "remember_task",
+        "recall_tasks",
         "recall_memory",
         "remember_definition",
         "remember_behavior",
         "review_memory",
         "manage_memory",
+        "set_memory_pinned",
+        "purge_memory",
     }
     assert not memory_db.exists()
-
-
-def test_full_profile_prepared_context_includes_memory_projection(
-    tmp_path, monkeypatch
-):
-    """Full 组合的 prepared context 自动召回：有命中注入投影，无命中零噪声。"""
-    from lion_code.capabilities.memory import MemoryStore
-    from lion_code.core import UserMessage
-
-    monkeypatch.chdir(tmp_path)
-    memory_db = _hermetic_memory(monkeypatch, tmp_path)
-    store = MemoryStore(memory_db, project_key="test-project")
-    store.remember(
-        kind="definition",
-        scope="project",
-        stable_key="db-paths",
-        content="database paths live in config/db.py",
-        evidence=["config/db.py"],
-    )
-    with patch(
-        "lion_code.composition.agent_builder.create_provider",
-        return_value=_fake_provider(),
-    ):
-        composition = build_agent_composition(
-            FullProfile(),
-            config=AgentConfig(api_key="test-key", terminal_output=False),
-            bindings=RuntimeBindings(
-                session=SessionBindings(session_repository=_repo(tmp_path))
-            ),
-        )
-
-    context_runtime = composition.runtime.context
-    state = context_runtime.runtime_state()
-    manager = context_runtime.context_manager
-    hit = manager.prepare(
-        [UserMessage(content="where do the database paths live?")], state
-    )
-    assert "# Active Memory" in hit.messages[-1].text
-    assert "[m:1 test-project/definition] db-paths" in hit.messages[-1].text
-
-    miss = manager.prepare(
-        [UserMessage(content="unrelated frontend styling question")], state
-    )
-    assert all("Active Memory" not in m.text for m in miss.messages)
 
 
 def _composition_with_provider(profile, tmp_path, monkeypatch):

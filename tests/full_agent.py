@@ -52,9 +52,8 @@ def _provider_factory(**kwargs):
 
 
 # 进程级共享的 memory DB 隔离目录：FullProfile 组合默认在
-# ``~/.lion-code/memory.sqlite3`` 构造 MemoryStore，测试必须指到临时路径，
-# 否则会创建/读取开发者真实 home 库（真实 pinned 条目会串入断言，
-# schema 版本漂移会让全部 Full 组合测试 fail closed）。
+# ``~/.lion-code/memory.sqlite3`` 绑定 MemoryStore。构造保持 lazy，但测试若
+# 调用 Memory 工具，仍必须避免读写开发者真实 home 库。
 _MEMORY_DB_DIR: TemporaryDirectory | None = None
 
 

@@ -1,13 +1,4 @@
-"""PR4 自动召回的架构不可达门禁。
-
-证明（对照 PRD 验收标准）：
-1. Runtime 各 owner 不持有 ``MemoryStore``（CapabilityRegistry 只聚合投影，
-   存储只由 Capability 内部 tool/query adapter 持有）；
-2. memory capability 包不依赖 providers/runtime——自动召回是本地同步
-   SQLite 查询，不存在第二次 LLM/Provider 调用路径；
-3. 自动召回输出只进本次 prepared provider context：不写 canonical
-   ConversationRuntime messages，也不写 Session JSONL。
-"""
+"""一期 Memory Capability 的所有权与延迟副作用门禁。"""
 
 from __future__ import annotations
 
@@ -24,13 +15,11 @@ from lion_code.composition import (
     SessionBindings,
     build_agent_composition,
 )
-from lion_code.core import UserMessage
 from lion_code.project_identity import ProjectIdentity
 from lion_code.session_runtime import SessionRepository
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MEMORY_PACKAGE = REPOSITORY_ROOT / "lion_code" / "capabilities" / "memory"
-# Runtime 层禁止依赖的根（providers/runtime）
 FORBIDDEN_MEMORY_IMPORT_ROOTS = frozenset({"providers", "runtime"})
 
 
@@ -40,22 +29,12 @@ def _import_roots(tree: ast.Module) -> frozenset[str]:
         if isinstance(node, ast.ImportFrom) and node.module:
             roots.add(node.module.split(".")[0])
         elif isinstance(node, ast.Import):
-            for alias in node.names:
-                roots.add(alias.name.split(".")[0])
+            roots.update(alias.name.split(".")[0] for alias in node.names)
     return frozenset(roots)
 
 
-def _full_composition(tmp_path: Path) -> tuple[object, MemoryStore]:
-    """构造 hermetic 的 Full 组合：DB 与 project identity 都指向临时目录。"""
+def _full_composition(tmp_path: Path) -> tuple[object, Path]:
     db_path = tmp_path / "memory.sqlite3"
-    store = MemoryStore(db_path, project_key="test-project")
-    store.remember(
-        kind="definition",
-        scope="project",
-        stable_key="db-paths",
-        content="database paths live in config/db.py",
-        evidence=["config/db.py"],
-    )
     provider = Mock()
     provider.aclose = AsyncMock()
     with (
@@ -63,11 +42,7 @@ def _full_composition(tmp_path: Path) -> tuple[object, MemoryStore]:
             "lion_code.composition.agent_builder.create_provider",
             return_value=provider,
         ),
-        patch.object(
-            agent_builder,
-            "default_memory_db_path",
-            lambda: db_path,
-        ),
+        patch.object(agent_builder, "default_memory_db_path", lambda: db_path),
         patch.object(
             agent_builder,
             "resolve_project_identity",
@@ -85,7 +60,7 @@ def _full_composition(tmp_path: Path) -> tuple[object, MemoryStore]:
                 )
             ),
         )
-    return composition, store
+    return composition, db_path
 
 
 def _iter_values(owner: object):
@@ -96,7 +71,7 @@ def _iter_values(owner: object):
 
 
 def test_runtime_owners_do_not_hold_memory_store(tmp_path) -> None:
-    composition, _store = _full_composition(tmp_path)
+    composition, _db_path = _full_composition(tmp_path)
     runtime = composition.runtime
 
     for owner in (
@@ -113,29 +88,17 @@ def test_runtime_owners_do_not_hold_memory_store(tmp_path) -> None:
 
 def test_memory_package_stays_local_no_provider_or_runtime_imports() -> None:
     for path in sorted(MEMORY_PACKAGE.glob("*.py")):
-        assert (
-            not _import_roots(
-                ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            )
-            & FORBIDDEN_MEMORY_IMPORT_ROOTS
-        ), path
+        roots = _import_roots(
+            ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        )
+        assert not roots & FORBIDDEN_MEMORY_IMPORT_ROOTS, path
 
 
-def test_auto_recall_is_prepared_only_not_canonical_or_jsonl(tmp_path) -> None:
-    import asyncio
+def test_full_memory_construction_is_lazy_and_has_no_query_recall(tmp_path) -> None:
+    composition, db_path = _full_composition(tmp_path)
 
-    composition, _store = _full_composition(tmp_path)
-    context_runtime = composition.runtime.context
-    conversation = composition.runtime.conversation
-
-    canonical = [UserMessage(content="where do the database paths live?")]
-    conversation.harness.replace_messages(list(canonical))
-    prepared = asyncio.run(
-        context_runtime.prepare_context(list(conversation.harness.messages))
-    )
-
-    assert "# Active Memory" in prepared[-1].text
-    # 不写 canonical ConversationRuntime messages，不产生任何 Session JSONL
-    assert all("Active Memory" not in m.text for m in conversation.harness.messages)
-    assert conversation.harness.messages[0] is canonical[0]
-    assert list((tmp_path / "sessions").glob("*.jsonl")) == []
+    assert not db_path.exists()
+    assert composition.capabilities.registry.query_context_layers == ()
+    tools = {tool.name for tool in composition.tooling.registry.all_tools()}
+    assert {"remember_task", "recall_tasks", "recall_memory"} <= tools
+    assert "# Memory Policy" in composition.tooling.prompt_composer.get_system()

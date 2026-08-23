@@ -1,9 +1,8 @@
 """测试根 conftest：隔离默认 memory DB，防止触碰开发者真实 ``~/.lion-code``。
 
-FullProfile 组合会在 ``default_memory_db_path()``（真实 home）构造
-MemoryStore：测试若不隔离，会在真实 home 创建库文件、把开发者真实的
-long_term pinned 条目注入 prepared context 断言，且未来 schema 版本升级
-会让全部 Full 组合测试 fail closed。pytest 由此 fixture 统一隔离；
+FullProfile 组合会把 MemoryStore 绑定到 ``default_memory_db_path()``；构造
+本身不打开数据库，但调用 Memory 工具时仍需隔离开发者真实 home 库。
+pytest 由此 fixture 统一隔离；
 ``unittest discover`` 本地路径由 ``tests/full_agent.py`` 的
 ``isolated_memory_db`` 与 adapters 测试内的同一 helper 覆盖。
 """
