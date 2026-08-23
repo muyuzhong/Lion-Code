@@ -74,6 +74,18 @@ class _FakeContextLayer:
         return self._id
 
 
+class _FakeQueryContextLayer:
+    def __init__(self, layer_id: str) -> None:
+        self._id = layer_id
+
+    @property
+    def layer_id(self) -> str:
+        return self._id
+
+    def render(self, _query: str, _view: ContextView) -> str:
+        return self._id
+
+
 class _FakeSessionParticipant:
     """Minimal SessionParticipant that records hook calls."""
 
@@ -126,6 +138,16 @@ class TestRegistration:
         )
 
         assert registry.context_layers == (layer,)
+
+    def test_query_context_layer_slot_is_optional_and_aggregated(self) -> None:
+        layer = _FakeQueryContextLayer("memory")
+        registry = CapabilityRegistry()
+        registry.register(CapabilitySpec(name="plain"))
+        registry.register(
+            CapabilitySpec(name="queryable", query_context_layer=layer),
+        )
+
+        assert registry.query_context_layers == (layer,)
 
     def test_register_multiple_capabilities(self) -> None:
         registry = CapabilityRegistry()
@@ -248,6 +270,7 @@ class TestAggregation:
         assert registry.tool_sources == ()
         assert registry.prompt_layers == ()
         assert registry.context_layers == ()
+        assert registry.query_context_layers == ()
         assert registry.session_participants == ()
         assert registry.resources == ()
 

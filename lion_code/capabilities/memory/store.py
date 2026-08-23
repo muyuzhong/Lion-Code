@@ -41,6 +41,8 @@ MIN_LEXICAL_HITS = 1
 DEFAULT_TOP_K = 6
 DEFAULT_TOKEN_BUDGET = 800
 PINNED_TOKEN_BUDGET = 400
+# 自动召回总注入上限：pinned 与 relevant 预算之和（设计 6.2）
+TOTAL_TOKEN_BUDGET = 1200
 DEFAULT_REVIEW_OLDER_THAN_DAYS = 90
 
 SCOPES: tuple[str, ...] = ("long_term", "project")
@@ -733,6 +735,22 @@ class MemoryStore:
             for term in terms
             if re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text, re.IGNORECASE)
         )
+
+    # ------------------------------------------------------------------
+    # 自动召回输入：pinned 集合与 relevant 检索
+    # ------------------------------------------------------------------
+
+    def pinned(self) -> list[MemoryEntry]:
+        """long_term + 当前 project 的全部 active pinned 条目（id 升序）。
+
+        供 QueryContextLayer 每次 prepared request 渲染；截断策略由调用方
+        决定，本方法只做 scope/status 硬过滤。
+        """
+        return [
+            entry
+            for entry in self._visible_entries("all")
+            if entry.status == "active" and entry.recall_mode == "pinned"
+        ]
 
     # ------------------------------------------------------------------
     # Review：治理视图

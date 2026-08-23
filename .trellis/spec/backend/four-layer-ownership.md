@@ -48,12 +48,16 @@ They meet only in `build_agent_composition`.
 `MinimalProfile` constructs an empty CapabilityRegistry unless caller
 `extension_specs` are supplied. `CodingProfile` adds Coding tools and Coding
 Harness policy plus AgentState/GitStatus ContextLayers. `FullProfile` adds
-those layers together with Plan, SubAgent, and Skill built-in Capabilities.
-Caller `extension_specs` are orthogonal to the Product preset: every Profile
-forwards them into the CapabilityRegistry. Every Profile produces a
-feature-neutral `MetaAgent`; capability services remain private to the graph.
-No Profile creates or names a Memory, Dream, Learning, Null, Deprecated, Legacy,
-or fallback object.
+those layers together with Plan, SubAgent, Skill, and the capability-owned
+Semantic Memory capability (governance tools plus a `QueryContextLayer`
+prepared-only auto-recall projection). Caller `extension_specs` are orthogonal
+to the Product preset: every Profile forwards them into the
+CapabilityRegistry, and a same-name spec removes or replaces the built-in
+Semantic Memory selection. Every Profile produces a feature-neutral
+`MetaAgent`; capability services remain private to the graph. No Profile
+creates or names a Dream, Learning, Null, Deprecated, Legacy, or fallback
+object; the Semantic Memory store is constructed inside the Composition
+Root's capability branch and never exposed on `AgentComposition`.
 
 ## Canonical session ownership
 
@@ -78,7 +82,9 @@ PR9 removed the old project Memory package and coordinator, Dream modules and
 adapter, Learning runtime, Memory-only provider text query, Memory file-write
 hook, project Memory facade/application ports, and the Memory-only per-request
 capability projection slot. The generic ContextLayer slot is intentionally
-retained for ephemeral prepared-context projections; no compatibility alias or
+retained for ephemeral prepared-context projections, and PR4 added the
+QueryContextLayer slot for query-aware projections (Semantic Memory
+auto-recall) under the same prepared-only contract; no compatibility alias or
 placeholder remains.
 
 The Supervisor consumes only the public Agent event/result/session contracts.
@@ -96,7 +102,8 @@ future Capability-owned Memory shape and the canonical `core/session/memory.py`.
 Other architecture tests cover import direction
 (`_boundaries.py` + import-linter; Kernel keeps zero Agent Runtime imports),
 composition profiles, zero-extension, capability lifecycle, session persistence,
-provider ownership, application ports, ContextLayer transientness, and
+provider ownership, application ports, ContextLayer transientness, Semantic
+Memory auto-recall unreachability (`test_memory_auto_recall.py`), and
 TUI/Runtime direction. The runtime ownership test also checks that Composition
 passes a completed ContextLayer snapshot without a reverse
 ContextManager-to-CapabilityRegistry edge.

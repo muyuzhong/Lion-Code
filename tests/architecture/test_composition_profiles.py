@@ -137,6 +137,7 @@ def test_minimal_graph_only_contains_caller_tools(tmp_path, monkeypatch) -> None
         "caller_b",
     }
     assert composition.capabilities.registry.tool_sources == ()
+    assert composition.capabilities.registry.query_context_layers == ()
     assert composition.capabilities.plan is None
     assert composition.capabilities.subagent_factory is None
     assert composition.capabilities.subagent_executor is None
@@ -196,6 +197,7 @@ def test_coding_graph_never_composes_full_capabilities(tmp_path, monkeypatch):
         )
 
     assert composition.capabilities.registry.tool_sources == ()
+    assert composition.capabilities.registry.query_context_layers == ()
     assert composition.capabilities.skill_runtime is None
     assert composition.capabilities.subagent_executor is None
     assert composition.capabilities.subagent_factory is None
@@ -252,7 +254,9 @@ class _ExamplePromptLayer:
         return "example extension prompt layer"
 
 
-def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkeypatch):
+def test_full_graph_contains_plan_subagent_skill_memory_and_extensions(
+    tmp_path, monkeypatch
+):
     from lion_code.capabilities.types import CapabilitySpec
 
     monkeypatch.chdir(tmp_path)
@@ -266,6 +270,7 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
         session=SessionBindings(session_repository=_repo(tmp_path)),
         tool=ToolBindings(command_backend=backend),
     )
+    memory_db = _hermetic_memory(monkeypatch, tmp_path)
     with patch(
         "lion_code.composition.agent_builder.create_provider",
         return_value=_fake_provider(),
@@ -276,7 +281,17 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
             bindings=bindings,
         )
 
-    assert len(composition.capabilities.registry.tool_sources) == 3
+    assert len(composition.capabilities.registry.tool_sources) == 4
+    assert len(composition.capabilities.registry.query_context_layers) == 1
+    tool_names = {tool.name for tool in composition.tooling.registry.all_tools()}
+    assert {
+        "recall_memory",
+        "remember_definition",
+        "remember_behavior",
+        "review_memory",
+        "manage_memory",
+    } <= tool_names
+    assert memory_db.exists()
     assert len(composition.capabilities.registry.prompt_layers) == 2
     assert composition.capabilities.plan is not None
     assert composition.capabilities.subagent_factory is not None
@@ -287,6 +302,100 @@ def test_full_graph_contains_plan_subagent_skill_and_extensions(tmp_path, monkey
     assert build_static_system_prompt() in system
     assert "example extension prompt layer" in system
     assert "# Environment" in system
+
+
+def _hermetic_memory(monkeypatch, tmp_path) -> Path:
+    """把内置 memory Capability 的默认 DB 与 project identity 指到临时目录。"""
+    from lion_code.project_identity import ProjectIdentity
+
+    db_path = tmp_path / "memory.sqlite3"
+    monkeypatch.setattr(
+        "lion_code.composition.agent_builder.default_memory_db_path",
+        lambda: db_path,
+    )
+    monkeypatch.setattr(
+        "lion_code.composition.agent_builder.resolve_project_identity",
+        lambda cwd=None: ProjectIdentity(
+            root=Path(cwd or tmp_path), key="test-project", is_git=False
+        ),
+    )
+    return db_path
+
+
+def test_full_graph_memory_removed_by_same_name_extension_spec(tmp_path, monkeypatch):
+    """默认 Full 含 memory；同名空 extension spec 显式移除内置组合。"""
+    from lion_code.capabilities.types import CapabilitySpec
+
+    monkeypatch.chdir(tmp_path)
+    memory_db = _hermetic_memory(monkeypatch, tmp_path)
+    profile = FullProfile(extension_specs=(CapabilitySpec(name="memory"),))
+    with patch(
+        "lion_code.composition.agent_builder.create_provider",
+        return_value=_fake_provider(),
+    ):
+        composition = build_agent_composition(
+            profile,
+            config=AgentConfig(api_key="test-key", terminal_output=False),
+            bindings=RuntimeBindings(
+                session=SessionBindings(session_repository=_repo(tmp_path))
+            ),
+        )
+
+    assert len(composition.capabilities.registry.tool_sources) == 3
+    assert composition.capabilities.registry.query_context_layers == ()
+    tool_names = {tool.name for tool in composition.tooling.registry.all_tools()}
+    assert not tool_names & {
+        "recall_memory",
+        "remember_definition",
+        "remember_behavior",
+        "review_memory",
+        "manage_memory",
+    }
+    assert not memory_db.exists()
+
+
+def test_full_profile_prepared_context_includes_memory_projection(
+    tmp_path, monkeypatch
+):
+    """Full 组合的 prepared context 自动召回：有命中注入投影，无命中零噪声。"""
+    from lion_code.capabilities.memory import MemoryStore
+    from lion_code.core import UserMessage
+
+    monkeypatch.chdir(tmp_path)
+    memory_db = _hermetic_memory(monkeypatch, tmp_path)
+    store = MemoryStore(memory_db, project_key="test-project")
+    store.remember(
+        kind="definition",
+        scope="project",
+        stable_key="db-paths",
+        content="database paths live in config/db.py",
+        evidence=["config/db.py"],
+    )
+    with patch(
+        "lion_code.composition.agent_builder.create_provider",
+        return_value=_fake_provider(),
+    ):
+        composition = build_agent_composition(
+            FullProfile(),
+            config=AgentConfig(api_key="test-key", terminal_output=False),
+            bindings=RuntimeBindings(
+                session=SessionBindings(session_repository=_repo(tmp_path))
+            ),
+        )
+
+    context_runtime = composition.runtime.context
+    state = context_runtime.runtime_state()
+    manager = context_runtime.context_manager
+    hit = manager.prepare(
+        [UserMessage(content="where do the database paths live?")], state
+    )
+    assert "# Active Memory" in hit.messages[-1].text
+    assert "[m:1 test-project/definition] db-paths" in hit.messages[-1].text
+
+    miss = manager.prepare(
+        [UserMessage(content="unrelated frontend styling question")], state
+    )
+    assert all("Active Memory" not in m.text for m in miss.messages)
 
 
 def _composition_with_provider(profile, tmp_path, monkeypatch):

@@ -11,7 +11,13 @@ seam 语义一致。
 
 from __future__ import annotations
 
+import atexit
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from lion_code.composition import (
     AgentConfig,
@@ -43,6 +49,37 @@ from lion_code.ui import (
 
 def _provider_factory(**kwargs):
     return create_provider(**kwargs)
+
+
+# 进程级共享的 memory DB 隔离目录：FullProfile 组合默认在
+# ``~/.lion-code/memory.sqlite3`` 构造 MemoryStore，测试必须指到临时路径，
+# 否则会创建/读取开发者真实 home 库（真实 pinned 条目会串入断言，
+# schema 版本漂移会让全部 Full 组合测试 fail closed）。
+_MEMORY_DB_DIR: TemporaryDirectory | None = None
+
+
+def _isolated_memory_db_path() -> Path:
+    global _MEMORY_DB_DIR
+    if _MEMORY_DB_DIR is None:
+        _MEMORY_DB_DIR = TemporaryDirectory(prefix="lion-test-memory-")
+        atexit.register(_MEMORY_DB_DIR.cleanup)
+    return Path(_MEMORY_DB_DIR.name) / "memory.sqlite3"
+
+
+@contextmanager
+def isolated_memory_db() -> Iterator[None]:
+    """在上下文期内把内置 memory Capability 的默认 DB 指到测试临时路径。
+
+    供 ``unittest`` 风格测试（无 conftest 自动 fixture）复用；pytest 运行
+    由 ``tests/conftest.py`` 的 session 级 fixture 统一隔离，本上下文叠加
+    无害。
+    """
+
+    with patch(
+        "lion_code.composition.agent_builder.default_memory_db_path",
+        _isolated_memory_db_path,
+    ):
+        yield
 
 
 def _print_info(message: str) -> None:
@@ -98,43 +135,44 @@ def build_full_agent_harness(
     tool_registry: ToolRegistry | None = None,
     model_limits_resolver=None,
 ) -> FullAgentHarness:
-    composition = build_agent_composition(
-        FullProfile(system_prompt=custom_system_prompt),
-        config=AgentConfig(
-            permission_mode=permission_mode,
-            model=model,
-            api_base=api_base,
-            anthropic_base_url=anthropic_base_url,
-            api_key=api_key,
-            thinking=thinking,
-            max_cost_usd=max_cost_usd,
-            max_turns=max_turns,
-            is_sub_agent=is_sub_agent,
-            terminal_output=terminal_output,
-        ),
-        bindings=RuntimeBindings(
-            provider=ProviderBindings(
-                provider_factory=_provider_factory,
-                model_limits_resolver=model_limits_resolver,
+    with isolated_memory_db():
+        composition = build_agent_composition(
+            FullProfile(system_prompt=custom_system_prompt),
+            config=AgentConfig(
+                permission_mode=permission_mode,
+                model=model,
+                api_base=api_base,
+                anthropic_base_url=anthropic_base_url,
+                api_key=api_key,
+                thinking=thinking,
+                max_cost_usd=max_cost_usd,
+                max_turns=max_turns,
+                is_sub_agent=is_sub_agent,
+                terminal_output=terminal_output,
             ),
-            session=SessionBindings(
-                session_repository=session_repository,
+            bindings=RuntimeBindings(
+                provider=ProviderBindings(
+                    provider_factory=_provider_factory,
+                    model_limits_resolver=model_limits_resolver,
+                ),
+                session=SessionBindings(
+                    session_repository=session_repository,
+                ),
+                tool=ToolBindings(
+                    tool_registry=tool_registry,
+                    pre_tool_use_hooks_loader=load_pre_tool_use_hooks,
+                ),
+                interaction=InteractionBindings(
+                    dynamic_system_context_builder=_dynamic_context_builder,
+                    terminal_renderer_factory=_terminal_renderer_factory,
+                    print_info=_print_info,
+                    print_error=_print_error,
+                    print_confirmation=_print_confirmation,
+                    print_sub_agent_start=_print_subagent_start,
+                    print_sub_agent_end=_print_subagent_end,
+                ),
             ),
-            tool=ToolBindings(
-                tool_registry=tool_registry,
-                pre_tool_use_hooks_loader=load_pre_tool_use_hooks,
-            ),
-            interaction=InteractionBindings(
-                dynamic_system_context_builder=_dynamic_context_builder,
-                terminal_renderer_factory=_terminal_renderer_factory,
-                print_info=_print_info,
-                print_error=_print_error,
-                print_confirmation=_print_confirmation,
-                print_sub_agent_start=_print_subagent_start,
-                print_sub_agent_end=_print_subagent_end,
-            ),
-        ),
-    )
+        )
     runtime = composition.runtime
     agent = MetaAgent(
         agent_runtime=runtime.agent,

@@ -96,7 +96,11 @@ Profiles select the graph:
 - `CodingProfile`: MetaAgent plus Coding tools and Coding Harness policy,
   AgentState/GitStatus ContextLayers, and supplied extension specs.
 - `FullProfile`: Coding tools plus AgentState/GitStatus, Plan/SubAgent/default
-  Skill, and supplied extension specs, still behind MetaAgent.
+  Skill, the capability-owned Semantic Memory capability (tools plus the
+  QueryContextLayer auto-recall projection at `~/.lion-code/memory.sqlite3`),
+  and supplied extension specs. A same-name `extension_specs` entry removes or
+  replaces the built-in Semantic Memory selection. Everything stays behind
+  MetaAgent.
 
 The default dynamic prompt tail (`build_dynamic_system_context`) appends
 root-to-cwd project instructions (CLAUDE.md/AGENTS.md plus local `.claude/rules`,
@@ -111,8 +115,10 @@ existing replacement semantics: no dynamic tail and no project instructions.
 confirm callbacks, renderer factories, and print callbacks are
 `InteractionBindings` entries. Neither pollutes any Profile.
 
-No profile creates a Memory, Dream, Learning, Null, Deprecated, Legacy, or
-fallback object.
+No profile creates a Dream, Learning, Null, Deprecated, Legacy, or fallback
+object. The Semantic Memory store is created by the Composition Root inside
+the capability branch for FullProfile only; Profiles never carry store,
+repository, or provider objects.
 
 ## State ownership
 
@@ -317,6 +323,18 @@ failures. GitStatusLayer renders the dirty-file count, at most three paths, and
 an omitted count. Layer output size therefore stays constant as history and the
 dirty-file set grow. Layers are sorted by layer_id; non-empty fragments are
 wrapped into one role=user message at the prepared-context tail.
+
+The same path renders CapabilitySpec.query_context_layer values
+(`render(query, view)`), where `query` is the text of the latest user message
+in the prepared messages (empty when no user message exists). Within one
+provider tool loop the canonical messages do not change, so the query — and
+any deterministic local retrieval driven by it — stays stable; a new user turn
+(including steering) refreshes it. Query layers join the same sorted
+`<agent-state>` fragment merge and blank-dropping rule as context layers.
+Query layers must not call the Provider or write canonical messages, session
+JSONL, or any persistent store; the Memory layer performs only local
+synchronous SQLite reads and returns an empty string when nothing is
+recallable (no empty noise block is injected).
 
 The state message is request-local:
 
