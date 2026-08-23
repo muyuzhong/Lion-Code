@@ -155,50 +155,6 @@ class TestSessionRecorder(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(state.context_entry_ids[-1], recent.id)
             self.assertEqual(len(state.entries), 7)
 
-    async def test_branch_summary_is_first_context_entry_and_traceable(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            storage = JsonlSessionStorage(Path(tmp) / "s1.jsonl")
-            recorder = SessionRecorder(
-                session_id="s1",
-                model="m1",
-                thinking_level="disabled",
-                cwd=Path(tmp),
-                storage=storage,
-            )
-
-            entry = await recorder.record_branch_summary(
-                summary="# Objective\ncarry the task",
-                branch_root_id="old-root",
-            )
-            follow_up = await recorder.record_message(UserMessage(content="next step"))
-
-            entries = await storage.read_all()
-            state = SessionState.from_entries(entries)
-            self.assertEqual(
-                [entry.type for entry in entries],
-                [
-                    "session_info",
-                    "model_change",
-                    "thinking_level_change",
-                    "branch_summary",
-                    "message",
-                ],
-            )
-            branch = entries[3]
-            self.assertEqual(branch.branch_root_id, "old-root")
-            self.assertEqual(branch.id, entry.id)
-            # replay：BranchSummary 是新会话首条上下文消息，且保持可追溯链。
-            self.assertEqual(len(state.messages), 2)
-            self.assertIn("carry the task", state.messages[0].text)
-            self.assertIn("summary of a branch", state.messages[0].text)
-            self.assertEqual(state.messages[1].text, "next step")
-            self.assertEqual(
-                list(state.context_entry_ids), [entry.id, follow_up.id]
-            )
-            self.assertEqual(
-                list(await recorder.context_entry_ids()), [entry.id, follow_up.id]
-            )
-
     async def test_interrupted_tool_repair_is_persisted_through_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             storage = JsonlSessionStorage(Path(tmp) / "s1.jsonl")

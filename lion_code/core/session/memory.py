@@ -7,7 +7,6 @@ from typing import Final, cast
 
 from lion_code.core.messages import AgentMessage, UserMessage
 from lion_code.core.session.entries import (
-    BranchSummaryEntry,
     CompactionEntry,
     CustomEntry,
     SessionEntry,
@@ -84,17 +83,6 @@ class SessionState:
                 case "compaction":
                     compaction_entries.append(entry)
                     message_rows = _apply_compaction(message_rows, entry)
-                case "branch_summary":
-                    message_rows.append(
-                        (
-                            entry.id,
-                            UserMessage(
-                                content=_format_branch_summary(entry),
-                                timestamp=int(entry.timestamp * 1000),
-                            ),
-                        )
-                    )
-
         return cls(
             messages=tuple(message for _entry_id, message in message_rows),
             model=model,
@@ -147,10 +135,3 @@ def _apply_compaction(
 
 def _format_compaction_summary(summary: str) -> str:
     return f"Previous conversation summary:\n{summary}"
-
-
-def _format_branch_summary(entry: BranchSummaryEntry) -> str:
-    return (
-        "The following is a summary of a branch that this conversation came back from:\n"
-        f"<summary>\n{entry.summary}\n</summary>"
-    )

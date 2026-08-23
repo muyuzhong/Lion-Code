@@ -1,8 +1,9 @@
 # Runtime and Layer Boundaries
 
 This contract describes the current runtime. The repository has one canonical
-Core history and one JSONL session writer. Project Memory, Dream, and Learning
-are removed; this document must not describe replacement objects or adapters.
+Core history and one JSONL session writer. The legacy project Memory, Dream,
+and Learning object graphs are removed; this document must not describe
+replacement objects or adapters for them.
 
 ## Physical layers
 
@@ -96,11 +97,11 @@ Profiles select the graph:
 - `CodingProfile`: MetaAgent plus Coding tools and Coding Harness policy,
   AgentState/GitStatus ContextLayers, and supplied extension specs.
 - `FullProfile`: Coding tools plus AgentState/GitStatus, Plan/SubAgent/default
-  Skill, the capability-owned Semantic Memory capability (tools plus the
-  QueryContextLayer auto-recall projection at `~/.lion-code/memory.sqlite3`),
-  and supplied extension specs. A same-name `extension_specs` entry removes or
-  replaces the built-in Semantic Memory selection. Everything stays behind
-  MetaAgent.
+  Skill, the capability-owned Semantic Memory capability (explicit tools plus
+  an ordinary ContextLayer for reviewed pinned entries, backed lazily by
+  `~/.lion-code/memory.sqlite3`), and supplied extension specs. A same-name
+  `extension_specs` entry removes or replaces the built-in Semantic Memory
+  selection. Everything stays behind MetaAgent.
 
 The default dynamic prompt tail (`build_dynamic_system_context`) appends
 root-to-cwd project instructions (CLAUDE.md/AGENTS.md plus local `.claude/rules`,
@@ -183,17 +184,11 @@ Core messages/events
 the explicit facade orchestration above; SessionRuntime never calls back into
 the ProviderController.
 
-Explicit session handoff (`handoff_session`) is orchestrated the same way as
-new/restore: AgentRuntime first reuses the ContextRuntime compaction contract
-(same `ContextCompactor` and nine fixed headings, no second prompt) to
-summarize the whole old canonical context, then switches to a fresh Session
-whose first context entry is a `BranchSummaryEntry(branch_root_id=<old
-session id>)` written through the SessionRuntime `record_branch_summary`
-narrow port. Old JSONL stays append-only; raw old messages are never copied.
-Any failure before or during the switch rolls identity, active context, and
-usage back to the old session and deletes the half-initialized new JSONL.
-Plain `new_session` keeps its clean-session semantics and never carries the
-old task over.
+`new_session` always starts with clean canonical history. Cross-session task
+continuity comes from the project Task Ledger and an explicit `recall_tasks`
+tool call; Session compaction summaries are never copied into a new Session or
+stored as project Memory. There is no handoff command, branch-summary entry, or
+second session-transition path.
 
 `lion_code/core/session/memory.py` remains the JSONL compaction-entry module.
 Its name is historical session terminology, not a project Memory subsystem.
@@ -324,17 +319,13 @@ an omitted count. Layer output size therefore stays constant as history and the
 dirty-file set grow. Layers are sorted by layer_id; non-empty fragments are
 wrapped into one role=user message at the prepared-context tail.
 
-The same path renders CapabilitySpec.query_context_layer values
-(`render(query, view)`), where `query` is the text of the latest user message
-in the prepared messages (empty when no user message exists). Within one
-provider tool loop the canonical messages do not change, so the query — and
-any deterministic local retrieval driven by it — stays stable; a new user turn
-(including steering) refreshes it. Query layers join the same sorted
-`<agent-state>` fragment merge and blank-dropping rule as context layers.
-Query layers must not call the Provider or write canonical messages, session
-JSONL, or any persistent store; the Memory layer performs only local
-synchronous SQLite reads and returns an empty string when nothing is
-recallable (no empty noise block is injected).
+The Semantic Memory layer uses this ordinary path to read reviewed pinned
+entries only. It performs a local synchronous SQLite read, retains at most
+eight whole entries within 512 estimated tokens, skips an oversized entry so
+later small entries can still fit, and returns an empty string when nothing is
+eligible. It does not inspect the latest user query, call the Provider, write
+canonical messages or session JSONL, or mutate the store. The database remains
+unopened until this render or a Memory tool performs the first operation.
 
 The state message is request-local:
 

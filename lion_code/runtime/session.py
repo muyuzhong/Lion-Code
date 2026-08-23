@@ -138,7 +138,7 @@ class SessionRuntime:
         finally:
             await self._capabilities.close()
 
-    # ─── 压缩 / 分支 Entry 记录（AgentRuntime 编排调用）────────
+    # ─── 压缩 Entry 记录（AgentRuntime 编排调用）───────────────
 
     async def record_compaction(
         self,
@@ -151,20 +151,6 @@ class SessionRuntime:
         await self._recorder.record_compaction(
             summary=summary,
             replaces_entry_ids=replaces_entry_ids,
-        )
-
-    async def record_branch_summary(
-        self,
-        *,
-        summary: str,
-        branch_root_id: str | None,
-    ) -> None:
-        """把旧 Session 的九段摘要写入当前（新建）Session 首条 Entry。"""
-        if self._recorder is None:
-            raise RuntimeError("No session recorder for branch summary")
-        await self._recorder.record_branch_summary(
-            summary=summary,
-            branch_root_id=branch_root_id,
         )
 
     async def context_entry_ids(self) -> tuple[str, ...]:

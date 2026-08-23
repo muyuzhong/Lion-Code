@@ -212,7 +212,7 @@ class AgentRuntime:
         elif self._last_stop_reason is None:
             self._last_stop_reason = "completed"
 
-    # ─── 会话操作：new / handoff / restore / compact ──────────
+    # ─── 会话操作：new / restore / compact ───────────────────
 
     async def new_session(self, *, model: str, thinking_level: str) -> None:
         """结束当前会话并创建新 Session；旧 append-only 历史保持可恢复。"""
@@ -224,76 +224,6 @@ class AgentRuntime:
         await self.ensure_ready()
         self.reset_session_usage()
         self._identity._emit_notice("Conversation cleared.")
-
-    async def handoff_session(self, *, model: str, thinking_level: str) -> None:
-        """把当前会话压缩为九段摘要并带入新 Session。
-
-        时序：先复用 ContextRuntime 的既有 compaction 契约生成并校验摘要，
-        成功后才切换到新 Session 写入 BranchSummaryEntry（首条上下文）。
-        任何一步失败都回滚到旧 Session：身份、活跃上下文、用量全部还原，
-        半初始化的新 Session 文件被删除，旧 JSONL 全程 append-only 不动。
-        """
-
-        if self._session.recorder is None or self._context.context_compactor is None:
-            raise RuntimeError("Session handoff requires a recorder and a compactor")
-        await self.ensure_ready()
-        messages = self._conversation.messages
-        if not messages:
-            raise RuntimeError("Session handoff requires messages to carry over")
-        entry_ids = await self._session.context_entry_ids()
-        if len(entry_ids) != len(messages):
-            raise RuntimeError("Session context does not match active Harness messages")
-
-        old_state = await self._session.load(self._session.state.id)
-        if old_state is None:
-            raise RuntimeError("Current session could not be loaded for handoff")
-        summary = await self._context.summarize(messages)
-
-        new_session_id: str | None = None
-        try:
-            await self._session.new_session(model=model, thinking_level=thinking_level)
-            new_session_id = self._session.state.id
-            await self._session.record_branch_summary(
-                summary=summary,
-                branch_root_id=old_state.session_id,
-            )
-            state = await self._session.load(new_session_id)
-            if state is None:
-                raise RuntimeError("Session disappeared after handoff")
-            self._context.on_session_reset()
-            await self._conversation.replace_active_context(state.messages)
-            self.reset_observers()
-            await self.ensure_ready()
-            self.reset_session_usage()
-        except BaseException:
-            failed_session_id = new_session_id
-            if (
-                failed_session_id is None
-                and self._session.state.id != old_state.session_id
-            ):
-                # new_session 内部失败时身份可能已切换但局部变量尚未捕获。
-                failed_session_id = self._session.state.id
-            if failed_session_id is not None:
-                await self._rollback_failed_handoff(old_state, failed_session_id)
-            raise
-        self._identity._emit_notice(
-            f"Conversation handed off from session {old_state.session_id}."
-        )
-
-    async def _rollback_failed_handoff(
-        self,
-        old_state: SessionRestoreState,
-        failed_session_id: str,
-    ) -> None:
-        """handoff 中途失败：以旧 Session 为准，并清理半初始化的新 Session 文件。
-
-        清理放 finally：回滚激活自身失败或被再次取消时，半初始化文件也不残留。
-        """
-
-        try:
-            await self._activate_session(old_state)
-        finally:
-            self._session.repository.delete(failed_session_id)
 
     async def restore(self, state: SessionRestoreState) -> bool:
         """回放恢复快照到唯一活跃上下文；配置恢复由上层 facade 先行完成。"""

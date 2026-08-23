@@ -44,7 +44,6 @@ from lion_code.core.messages import (
     message_text,
 )
 from lion_code.core.session import (
-    BranchSummaryEntry,
     CompactionEntry,
     CustomEntry,
     JsonlSessionStorage,

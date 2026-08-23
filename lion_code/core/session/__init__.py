@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from lion_code.core.session.entries import (
     BaseSessionEntry,
-    BranchSummaryEntry,
     CompactionEntry,
     CustomEntry,
     LabelEntry,
@@ -27,7 +26,6 @@ from lion_code.core.session.tree import SessionTreeError, entries_by_id, path_to
 
 __all__ = [
     "BaseSessionEntry",
-    "BranchSummaryEntry",
     "CompactionEntry",
     "CustomEntry",
     "JsonlSessionStorage",
