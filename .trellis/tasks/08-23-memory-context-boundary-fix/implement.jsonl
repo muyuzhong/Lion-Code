@@ -4,3 +4,4 @@
 {"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace all removed callers and projections."}
 {"file":".trellis/tasks/archive/2026-08/08-22-memory-system-design-convergence/design.md","reason":"Approved ordinary ContextLayer and no-handoff design."}
 {"file":".trellis/tasks/08-23-memory-system-acceptance-review/research/acceptance-report.md","reason":"Recall, budget and eager-open reproductions."}
+{"file": ".trellis/spec/backend/memory-capability.md", "reason": "Existing phase-one store/tool contract that pinned context must consume."}

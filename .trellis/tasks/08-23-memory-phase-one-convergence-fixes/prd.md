@@ -15,7 +15,7 @@
 ## Delivery Boundary
 
 - `08-23-memory-store-task-ledger-fix`：canonical schema、Task Ledger、显式工具、MemoryPolicy 与治理契约。
-- `08-23-memory-context-boundary-fix`：普通 pinned ContextLayer、lazy composition，并删除 handoff/query-aware 自动召回。
+- `08-23-memory-context-boundary-fix`：普通 pinned ContextLayer，并删除通用 QueryContext SPI 与 handoff；Memory 专属 auto-recall 和 eager composition 已在前一 child 收敛。
 - `08-23-memory-lexical-recall-prototype`：独立离线实验，不接生产数据库。
 
 三个 child 独立验收和提交，按上述顺序交付；父任务只做最终集成验收。
