@@ -15,11 +15,13 @@
     "package:win": "python ../scripts/build_desktop_sidecar.py && npm run build && electron-builder --win --x64"
   },
   "engines": {
-    "node": ">=20"
+    "node": "^22 || ^24 || >=26"
   },
   "dependencies": {
+    "@assistant-ui/react": "0.15.16",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "streamdown": "2.5.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0",
@@ -38,10 +40,26 @@
   "build": {
     "appId": "dev.lion.desktop",
     "productName": "Lion",
-    "files": ["out/**"],
-    "extraResources": [
-      { "from": "sidecar/lion-sidecar", "to": "sidecar", "filter": ["**/*"] }
+    "files": [
+      "out/**",
+      "THIRD_PARTY_NOTICES.md",
+      "node_modules/@assistant-ui/react/LICENSE",
+      "node_modules/streamdown/LICENSE"
     ],
-    "win": { "target": ["nsis"], "artifactName": "Lion-${version}-${arch}.${ext}" }
+    "extraResources": [
+      {
+        "from": "sidecar/lion-sidecar",
+        "to": "sidecar",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "Lion-${version}-${arch}.${ext}"
+    }
   }
 }
