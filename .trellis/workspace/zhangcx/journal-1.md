@@ -1856,3 +1856,26 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 61: 完成桌面切换与 Web 删除
+
+**Date**: 2026-08-24
+**Task**: 完成桌面切换与 Web 删除
+**Branch**: `muyuzhong/desktop-cutover-web-removal`
+
+### Summary
+
+完成 Windows x64 PyInstaller 与 NSIS 发布链、安装态资源和 sidecar 生命周期烟测，切换 FastAPI 为 API-only，并删除旧 Web 产品入口、静态包和交付脚本。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f9659c5` | (see git log) |
+| `06a3b3f` | (see git log) |
+| `f4d4aaa` | (see git log) |
+
+### Status
+
+[OK] **Completed**
