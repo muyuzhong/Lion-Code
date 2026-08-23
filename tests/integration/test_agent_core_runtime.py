@@ -525,7 +525,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             [_tooluse_event(), _stop_event("done")], registry
         )
         agent.composition.tooling.prompt_composer.set_dynamic_context("initial")
-        stable_base = agent.composition.tooling.prompt_composer.stable_base_prompt
+        initial_system = agent.composition.tooling.prompt_composer.get_system()
 
         mutated = {"done": False}
 
@@ -541,7 +541,10 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             fake.received_systems,
-            [f"{stable_base}\n\ninitial", f"{stable_base}\n\nplan-prompt"],
+            [
+                initial_system,
+                agent.composition.tooling.prompt_composer.get_system(),
+            ],
         )
 
     async def test_default_full_product_system_prompt_contains_project_instructions(

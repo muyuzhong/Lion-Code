@@ -18,7 +18,7 @@ from lion_code.session_runtime import SessionRepository
 
 def _backend(tmp_path: Path, **kwargs) -> CodingSessionBackendAdapter:
     # unittest 风格测试无 conftest fixture：隔离默认 memory DB，避免
-    # 在真实 ~/.lion-code 创建/读取 MemoryStore。
+    # Memory 工具访问真实 ~/.lion-code 数据库。
     with (
         isolated_memory_db(),
         patch("lion_code.composition.full_product.create_provider") as create,
