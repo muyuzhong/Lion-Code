@@ -3,7 +3,7 @@
   "name": "desktop-cutover-web-removal",
   "title": "桌面切换与 Web 删除",
   "description": "完成 Windows 桌面切换，删除旧 Web 产品入口、静态托管和旧 UI。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
