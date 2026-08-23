@@ -24,11 +24,11 @@
 
 ## Acceptance Criteria
 
-- [ ] 验收报告的 2 个 P1 与 6 个 P2 finding 均有对应 child 和回归测试。
-- [ ] 产品只有 Task Ledger 与四象限 Semantic Memory 两种记录模型。
-- [ ] 一期没有 Session handoff、query-aware SPI、生产 FTS、revision/stale 状态或后台提炼。
-- [ ] FullProfile 保持 Memory 能力，但构造阶段不创建数据库。
-- [ ] 三个 child 分别通过定向验证，最终通过完整 Trellis check 与 CI 门禁。
+- [x] 验收报告的 2 个 P1 与 6 个 P2 finding 均有对应 child 和回归测试。
+- [x] 产品只有 Task Ledger 与四象限 Semantic Memory 两种记录模型。
+- [x] 一期没有 Session handoff、query-aware SPI、生产 FTS、revision/stale 状态或后台提炼。
+- [x] FullProfile 保持 Memory 能力，但构造阶段不创建数据库。
+- [x] 三个 child 分别通过定向验证，最终通过完整 Trellis check 与 CI 门禁。
 
 ## Out of Scope
 

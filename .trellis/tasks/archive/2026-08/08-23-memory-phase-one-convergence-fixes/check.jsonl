@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/memory-capability.md","reason":"复核 Task Ledger、Semantic Memory、pinned ContextLayer 与 deferred 边界。"}
+{"file":".trellis/tasks/08-23-memory-system-acceptance-review/research/acceptance-report.md","reason":"逐项验证验收 finding 已由 child 关闭。"}
+{"file":".trellis/tasks/archive/2026-08/08-22-memory-system-design-convergence/prd.md","reason":"最终确认的一期需求与二期 go/no-go 边界。"}
