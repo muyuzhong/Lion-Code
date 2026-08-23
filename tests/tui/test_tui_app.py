@@ -361,6 +361,28 @@ async def test_tool_loop_renders_tool_item(app_factory) -> None:
 
 
 @pytest.mark.asyncio
+async def test_compaction_summary_participates_in_result_visibility(
+    app_factory,
+) -> None:
+    app = app_factory([])
+    async with app.run_test() as pilot:
+        app.state.add_item(
+            "compaction_summary",
+            "Compaction summary",
+            tool_result_text="bounded summary",
+        )
+        item = app.state.items[-1]
+        app._refresh_transcript()
+        await pilot.pause()
+        transcript = app._transcript()
+        widget = transcript._item_widgets[id(item)]
+
+        await transcript.update_tool_results_visibility(app.state)
+
+    assert transcript._item_widgets[id(item)] is widget
+
+
+@pytest.mark.asyncio
 async def test_cost_and_unknown_commands(app_factory) -> None:
     app = app_factory([])
     async with app.run_test() as pilot:
