@@ -1,0 +1,8 @@
+{"file":".trellis/tasks/08-23-memory-system-acceptance-review/prd.md","reason":"逐条确认审查覆盖和只读 acceptance。"}
+{"file":".trellis/tasks/08-23-memory-system-acceptance-review/design.md","reason":"复核 finding 严重级别、证据质量和假阳性控制。"}
+{"file":".trellis/tasks/08-23-memory-system-acceptance-review/research/review-baseline.md","reason":"检查 contract matrix 使用正确的最新设计与 master SHA。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"复核 Store→Capability→Context→Provider 及 Session handoff 的读写流。"}
+{"file":".trellis/spec/backend/capability-spi.md","reason":"检查新 QueryContextLayer 与工具贡献没有恢复服务定位器或反向依赖。"}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"检查 MemoryStore 可达图和状态所有权。"}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"检查 transient context、Session、Compaction 与 FullProfile 契约。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查定向测试的真实性、错误路径与最终 dirty-worktree 证据。"}
