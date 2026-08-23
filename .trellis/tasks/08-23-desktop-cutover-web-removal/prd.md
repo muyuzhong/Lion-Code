@@ -24,14 +24,14 @@
 
 ## Acceptance Criteria
 
-- [ ] 在无 Python/Node 开发环境的干净 Windows 10/11 x64 机器上可安装并启动。
-- [ ] 安装态能选择 workspace、配置 Provider、完成流式对话、审批、会话恢复和正常退出。
-- [ ] 安装目录包含预期 sidecar 资源且不包含 Python 源码、旧 Web 静态包或开发依赖。
-- [ ] 关闭/卸载前应用退出不遗留 sidecar 进程。
-- [ ] `lion-code --web` 及 Web-only 参数明确不存在，不提供兼容提示层。
-- [ ] FastAPI 不再 mount `/` 静态站点，wheel/sdist 不再包含 `server/static`。
-- [ ] 仓库不存在旧 `frontend/`、`build_frontend.py`、`verify_web_delivery.py` 或孤儿 bundle 引用。
-- [ ] Python 全套质量门禁、desktop 测试/build/E2E 和安装态烟测通过。
+- [x] 在无 Python/Node 开发环境的干净 Windows 10/11 x64 机器上可安装并启动。
+- [x] 安装态能选择 workspace、配置 Provider、完成流式对话、审批、会话恢复和正常退出。
+- [x] 安装目录包含预期 sidecar 资源且不包含 Python 源码、旧 Web 静态包或开发依赖。
+- [x] 关闭/卸载前应用退出不遗留 sidecar 进程。
+- [x] `lion-code --web` 及 Web-only 参数明确不存在，不提供兼容提示层。
+- [x] FastAPI 不再 mount `/` 静态站点，wheel/sdist 不再包含 `server/static`。
+- [x] 仓库不存在旧 `frontend/`、`build_frontend.py`、`verify_web_delivery.py` 或孤儿 bundle 引用。
+- [x] Python 全套质量门禁、desktop 测试/build/E2E 和安装态烟测通过。
 
 ## Out of Scope
 
