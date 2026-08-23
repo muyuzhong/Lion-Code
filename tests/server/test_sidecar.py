@@ -114,21 +114,25 @@ class TestFormatReadyRecord:
 
 
 class TestParseArgs:
-    def test_state_home_applies_before_config_import(self, tmp_path, monkeypatch):
-        import importlib
-
-        from lion_code import sidecar
-
+    def test_state_home_applies_before_config_import(self, tmp_path):
         state_home = tmp_path / "state"
-        monkeypatch.setenv("LION_SIDECAR_STATE_HOME", str(state_home))
-        monkeypatch.setenv("HOME", os.environ.get("HOME", ""))
-        monkeypatch.setenv("USERPROFILE", os.environ.get("USERPROFILE", ""))
-        monkeypatch.delitem(sys.modules, "lion_code.config", raising=False)
+        repo_root = Path(__file__).resolve().parents[2]
+        probe = (
+            "from lion_code.sidecar import _apply_state_home\n"
+            "_apply_state_home()\n"
+            "from lion_code.config import CONFIG_PATH\n"
+            "print(CONFIG_PATH)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=repo_root,
+            env={**os.environ, "LION_SIDECAR_STATE_HOME": str(state_home)},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
 
-        sidecar._apply_state_home()
-        config = importlib.import_module("lion_code.config")
-
-        assert config.CONFIG_PATH == state_home / ".lion-code" / "config.json"
+        assert Path(result.stdout.strip()) == state_home / ".lion-code" / "config.json"
 
     def test_workspace_is_required(self):
         from lion_code.sidecar import _parse_args
