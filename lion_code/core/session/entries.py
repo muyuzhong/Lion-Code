@@ -61,14 +61,6 @@ class CompactionEntry(BaseSessionEntry):
     replaces_entry_ids: list[str] = Field(default_factory=list)
 
 
-class BranchSummaryEntry(BaseSessionEntry):
-    """A future branch summary entry."""
-
-    type: Literal["branch_summary"] = "branch_summary"
-    summary: str
-    branch_root_id: str | None = None
-
-
 class LabelEntry(BaseSessionEntry):
     """A human-readable session label entry."""
 
@@ -105,7 +97,6 @@ type SessionEntry = Annotated[
     | ModelChangeEntry
     | ThinkingLevelChangeEntry
     | CompactionEntry
-    | BranchSummaryEntry
     | LabelEntry
     | LeafEntry
     | SessionInfoEntry

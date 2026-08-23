@@ -23,14 +23,6 @@ class SessionRepository:
     def exists(self, session_id: str) -> bool:
         return self.storage_for(session_id).path.exists()
 
-    def delete(self, session_id: str) -> None:
-        """删除 Session 文件；仅用于清理本进程刚创建、未生效的失败 Session。
-
-        append-only 契约约束的是已生效会话的历史 Entry；这里删除的是
-        handoff 回滚中从未激活过的全新文件，不触碰任何已生效历史。
-        """
-        self.storage_for(session_id).path.unlink(missing_ok=True)
-
     async def load(self, session_id: str) -> SessionState | None:
         entries = await self.storage_for(session_id).read_all()
         if not entries:

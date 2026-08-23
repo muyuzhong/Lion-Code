@@ -15,12 +15,12 @@
 
 ## Acceptance Criteria
 
-- [ ] 过期或任一路径失效的 pinned 条目不注入。
-- [ ] 大条目排第一时，后续可容纳小条目仍会注入。
-- [ ] 无条目时不渲染空块，输出保持稳定排序和固定预算。
-- [ ] 构造 FullProfile 不创建数据库；首次 prepare 才显式访问。
-- [ ] Session/Runtime/Application 不再暴露 handoff，Compaction 九段协议保持。
-- [ ] 产品没有 query-aware Memory layer、FTS/relevant 自动召回或 recall 写回。
+- [x] 过期或任一路径失效的 pinned 条目不注入。
+- [x] 大条目排第一时，后续可容纳小条目仍会注入。
+- [x] 无条目时不渲染空块，输出保持稳定排序和固定预算。
+- [x] 构造 FullProfile 不创建数据库；首次 prepare 才显式访问。
+- [x] Session/Runtime/Application 不再暴露 handoff，Compaction 九段协议保持。
+- [x] 产品没有 query-aware Memory layer、FTS/relevant 自动召回或 recall 写回。
 
 ## Dependency
 

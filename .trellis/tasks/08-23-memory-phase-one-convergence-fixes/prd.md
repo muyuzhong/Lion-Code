@@ -6,11 +6,13 @@
 
 ## Source of Truth
 
-1. `.trellis/tasks/archive/2026-08/08-22-memory-system-design-convergence/`；
+1. 用户最终确认的 `6c9fddd` 一期边界，已收敛进三个 child PRD 与
+   `.trellis/spec/backend/memory-capability.md`；
 2. `.trellis/tasks/08-23-memory-system-acceptance-review/research/acceptance-report.md`；
 3. 当前源码与架构规范。
 
-发生冲突时，以第一项的产品边界为准；验收报告只描述当前偏差。
+发生冲突时，以第一项的产品边界为准；验收报告只描述实现偏差。旧归档任务描述的是
+被否决的 handoff/query-aware 方案，不再作为本任务输入。
 
 ## Delivery Boundary
 
