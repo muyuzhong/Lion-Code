@@ -50,6 +50,9 @@ remain Python-owned and are refreshed from REST after writes.
   Composer 阴影。
 - REST metadata uses the existing strict response fields. A malformed status, session,
   model, or Skill response is an explicit metadata error, never a permissive cast.
+- Provider writes await only the canonical Python-owned write. Auxiliary metadata refresh
+  runs independently after a successful write, so a slow or unavailable metadata endpoint
+  cannot leave the settings save pending; refresh failures still update `metadataError`.
 - Provider forms never populate or reveal the stored API key. An empty key preserves the
   current credential through the server's partial-update contract.
 - `api_configured=false` opens the first-run Provider surface once. Closing it is allowed;
@@ -70,6 +73,7 @@ remain Python-owned and are refreshed from REST after writes.
 | Condition | Renderer behavior |
 | --- | --- |
 | metadata response is non-2xx or invalid | keep chat transport usable and show a diagnostic metadata error |
+| Provider write succeeds while metadata refresh is pending | resolve the write and close the settings surface; keep the later metadata result diagnostic |
 | Provider/Thinking write fails | keep settings open and show the server detail |
 | active run | disable Session, Provider, and Thinking mutations |
 | `api_configured=false` | open first-run settings without exposing a credential value |
@@ -98,7 +102,9 @@ remain Python-owned and are refreshed from REST after writes.
 ## 6. Tests Required
 
 - Vitest: strict metadata decoding, metadata actions, relative-time boundaries, and the
-  existing protocol/runtime suite.
+  existing protocol/runtime suite; assert that a successful Provider write resolves while
+  an auxiliary metadata request remains pending, and that sidecar assistant errors project
+  as incomplete assistant messages.
 - Electron Playwright: REST history to streamed response, 1280x720 and 2560x1440 overflow
   checks, both themes, screenshots for the desktop chat state, and a Composer bounding-box
   assertion proving the short-transcript layout remains bottom-reachable. The desktop chrome

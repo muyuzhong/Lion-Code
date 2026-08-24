@@ -16,7 +16,7 @@ class FakeSocket implements WebSocketPort {
   close() { this.readyState = 3; this.onclose?.(); }
 }
 
-function harness(history: unknown[] = []) {
+function harness(history: unknown[] = [], options: { apiConfigured?: boolean; blockMetadataPath?: string } = {}) {
   const sockets: FakeSocket[] = [];
   const requests: Array<{ url: string; authorization: string | null; body: string | null }> = [];
   let reconnect: (() => void) | null = null;
@@ -26,8 +26,11 @@ function harness(history: unknown[] = []) {
       const url = String(input);
       const headers = new Headers(init?.headers);
       requests.push({ url, authorization: headers.get("Authorization"), body: typeof init?.body === "string" ? init.body : null });
+      if (options.blockMetadataPath && url.endsWith(options.blockMetadataPath)) {
+        return new Promise<Response>(() => {});
+      }
       const payload = url.endsWith("/api/messages") ? history
-        : url.endsWith("/api/status") ? { session_id: "s1", model: "model-a", provider_name: "anthropic", permission_mode: "default", api_configured: true, cwd: "C:/work", thinking_level: "medium", available_thinking_levels: ["off", "medium"], input_tokens: 12, output_tokens: 4, is_running: false }
+        : url.endsWith("/api/status") ? { session_id: "s1", model: "model-a", provider_name: "anthropic", permission_mode: "default", api_configured: options.apiConfigured ?? true, cwd: "C:/work", thinking_level: "medium", available_thinking_levels: ["off", "medium"], input_tokens: 12, output_tokens: 4, is_running: false }
           : url.endsWith("/api/sessions") ? [{ id: "s1", label: null, startTime: null, messageCount: 2, cwd: "C:/work" }]
             : url.endsWith("/api/models") ? [{ provider_name: "anthropic", model: "model-a" }]
               : url.endsWith("/api/skills") ? [{ name: "review", description: "Review changes" }]
@@ -92,6 +95,31 @@ describe("Lion assistant runtime adapter", () => {
     expect(await adapter.setThinkingLevel("medium")).toBe(true);
     expect(h.requests.find((request) => request.url.endsWith("/api/config/provider"))?.body).toBe(JSON.stringify({ provider: "anthropic", model: "model-a", api_key: "secret" }));
     expect(h.requests.find((request) => request.url.endsWith("/api/thinking"))?.body).toBe(JSON.stringify({ level: "medium" }));
+  });
+
+  it("does not block a successful Provider write on a hanging metadata request", async () => {
+    const h = harness([], { blockMetadataPath: "/api/skills" });
+    const adapter = new LionAssistantRuntimeAdapter(h.bootstrap);
+    await adapter.start();
+
+    await expect(adapter.configureProvider({ provider: "anthropic", model: "model-a" })).resolves.toBe(true);
+    expect(h.requests.some((request) => request.url.endsWith("/api/config/provider"))).toBe(true);
+  });
+
+  it("projects an unconfigured API error received from the sidecar", async () => {
+    const h = harness([], { apiConfigured: false });
+    const adapter = new LionAssistantRuntimeAdapter(h.bootstrap);
+    await adapter.start();
+    h.sockets[0].open();
+    const errorMessage = "API 未配置：请在设置面板中配置 Provider 与模型。";
+    const message = { role: "assistant" as const, content: [{ type: "text" as const, text: errorMessage }], stopReason: "error" as const, errorMessage };
+
+    h.sockets[0].receive({ type: "message_start", message });
+    h.sockets[0].receive({ type: "message_end", message });
+
+    const visible = adapter.getSnapshot().protocol.messages.at(-1);
+    expect(visible).toMatchObject({ content: errorMessage, error: errorMessage, isStreaming: false });
+    expect(projectLionMessage(visible!).status).toMatchObject({ type: "incomplete", reason: "error", error: errorMessage });
   });
 
   it("renames a Python-owned session and refreshes canonical metadata", async () => {

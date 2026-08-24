@@ -142,7 +142,8 @@ export class LionAssistantRuntimeAdapter {
   async configureProvider(configuration: ProviderConfiguration): Promise<boolean> {
     try {
       await this.rest.configureProvider(configuration);
-      await this.refreshMetadata();
+      // Provider 写入已由 Python 确认；辅助 metadata 不得阻塞设置面板收敛。
+      void this.refreshMetadata();
       return true;
     } catch (error) {
       this.setMetadataError(errorMessage(error));
