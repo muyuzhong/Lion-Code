@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "SessionRuntime 拥有 recorder 生命周期；惰性初始化与 ensure_on_disk 例外需遵守该边界。"}
+{"file": "lion_code/config.py", "reason": "resolve_api_credentials 的 env/config 优先级缺陷根因与修复点。"}
+{"file": "lion_code/session_runtime/recorder.py", "reason": "_initialize_unlocked 无条件写初始 Entry 是空会话落盘根因；惰性初始化实现处。"}

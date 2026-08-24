@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from full_agent import build_full_agent_harness, execute_tool
+from integration.test_agent_core_runtime import _stop_event
 
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.types import ToolResult
@@ -143,16 +144,24 @@ class TestAgentBuiltinRuntime(unittest.IsolatedAsyncioTestCase):
                 "lion_code.capabilities.plan.runtime.PlanRuntime._generate_file_path",
                 return_value=plan_path,
             ) as generate_path:
-                agent = self._agent(
-                    session_repository=session_repository,
-                    terminal_output=False,
-                )
-                agent.composition.capabilities.plan.toggle()
-                await agent.composition.runtime.agent.ensure_ready()
-                session_id = agent.agent.session_id
-                plan = agent.composition.capabilities.plan
+                from core.fakes import FakeProvider
 
-                self.assertTrue(await agent.agent.restore(session_id))
+                fake = FakeProvider([_stop_event("done")])
+                with patch(
+                    "full_agent.create_provider",
+                    return_value=fake,
+                ):
+                    agent = self._agent(
+                        session_repository=session_repository,
+                        terminal_output=False,
+                    )
+                    agent.composition.capabilities.plan.toggle()
+                    # 首条消息让会话落盘（R3：零消息会话不在磁盘上，无法 restore）。
+                    await agent.agent.chat("seed")
+                    session_id = agent.agent.session_id
+                    plan = agent.composition.capabilities.plan
+
+                    self.assertTrue(await agent.agent.restore(session_id))
 
             self.assertEqual(generate_path.call_count, 1)
             self.assertIs(agent.composition.capabilities.plan, plan)

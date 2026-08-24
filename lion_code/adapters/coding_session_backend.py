@@ -168,7 +168,9 @@ class CodingSessionBackendAdapter:
             cwd=Path(str(metadata.get("cwd") or self._cwd)),
             storage=self._session_repository.storage_for(session_id),
         )
-        await recorder.initialize()
+        # 迁移是显式保留历史会话：即使没有消息也必须落盘初始元数据，
+        # 保证 JSONL 存在且不再重复枚举 legacy 文件（区别于新建会话的惰性落盘）。
+        await recorder.ensure_on_disk()
         for message in legacy_session_messages(legacy):
             await recorder.record_message(message)
 

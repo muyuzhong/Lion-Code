@@ -145,6 +145,54 @@ class TestSessionRecorder(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(entries[1].parent_id, "info")
 
+    async def test_initialize_does_not_create_file_for_new_session(self) -> None:
+        """全新会话初始化不落盘；首条消息才创建 JSONL（R3 回归）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "s-new.jsonl"
+            storage = JsonlSessionStorage(path)
+            recorder = SessionRecorder(
+                session_id="s-new",
+                model="m1",
+                thinking_level="disabled",
+                cwd=Path(tmp),
+                storage=storage,
+            )
+
+            await recorder.initialize()
+            self.assertFalse(path.exists())
+
+            # 配置变更在未落盘会话上不产生仅配置的空文件。
+            await recorder.record_model_change("m2")
+            await recorder.record_thinking_level_change("high")
+            self.assertFalse(path.exists())
+
+            # 首条消息触发初始三行 + 消息本身落盘。
+            await recorder.record_message(UserMessage(content="hello"))
+            self.assertTrue(path.exists())
+            state = SessionState.from_entries(await storage.read_all())
+            self.assertEqual(state.model, "m2")
+            self.assertEqual(state.thinking_level, "high")
+            self.assertEqual(len(state.messages), 1)
+
+    async def test_ensure_on_disk_persists_empty_session(self) -> None:
+        """显式落盘路径（legacy 迁移）即使零消息也创建文件（R3 例外）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "s-migrated.jsonl"
+            storage = JsonlSessionStorage(path)
+            recorder = SessionRecorder(
+                session_id="s-migrated",
+                model="m1",
+                thinking_level="disabled",
+                cwd=Path(tmp),
+                storage=storage,
+            )
+
+            await recorder.ensure_on_disk()
+            self.assertTrue(path.exists())
+            state = SessionState.from_entries(await storage.read_all())
+            self.assertEqual(state.model, "m1")
+            self.assertEqual(len(state.messages), 0)
+
     async def test_compaction_changes_replay_but_retains_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             storage = JsonlSessionStorage(Path(tmp) / "s1.jsonl")

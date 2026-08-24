@@ -201,7 +201,9 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
         await agent.agent.close()
 
         self.assertEqual(first.final_text, "previous")
-        self.assertEqual(second.final_text, "")
+        # R2：未配置凭证时不再静默返回，注入含 API 未配置说明的 error 消息。
+        self.assertIn("API 未配置", second.final_text)
+        self.assertNotEqual(second.final_text, "previous")
 
     async def test_run_once_does_not_reuse_previous_assistant_text(self) -> None:
         agent = self._agent(FakeProvider([_stop_event("previous")]))
@@ -212,7 +214,9 @@ class TestAgentRun(unittest.IsolatedAsyncioTestCase):
         await agent.agent.close()
 
         self.assertEqual(first["text"], "previous")
-        self.assertEqual(second["text"], "")
+        # 同 test_run：未配置时返回可见的错误说明，而非空文本。
+        self.assertIn("API 未配置", second["text"])
+        self.assertNotEqual(second["text"], "previous")
 
     async def test_timeout_cancels_core_provider_wait(self) -> None:
         agent = self._agent(_HangingProvider([]))
