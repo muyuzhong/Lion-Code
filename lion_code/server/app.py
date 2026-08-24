@@ -1,14 +1,10 @@
-"""FastAPI Web 服务端实现。"""
+"""Electron sidecar 使用的 API 与 WebSocket 服务端。"""
 
 from __future__ import annotations
 
-import importlib.resources
 import os
 import re
 import secrets
-import threading
-import time
-import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -23,7 +19,6 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
 from lion_code.application.session import LionCodingSession
@@ -102,32 +97,17 @@ def generate_capability() -> str:
     return secrets.token_urlsafe(32)
 
 
-def _default_static_dir() -> Path:
-    """以 package resource 定位随包发布的前端产物目录。"""
-    resource = importlib.resources.files("lion_code.server") / "static"
-    return Path(str(resource))
-
-
-def _browser_url(port: int, capability: str) -> str:
-    return f"{_http_origin(port)}/#capability={capability}"
-
-
 def create_app(
     session: LionCodingSession,
     *,
     capability: str,
     port: int = 8000,
-    static_dir: Path | None = None,
-    serve_static: bool = True,
 ) -> FastAPI:
-    """创建仅接受本机 capability 客户端的应用。
+    """创建仅接受本机 capability 客户端的 API-only 应用。
 
-    静态页面与健康检查保持公开，其余 REST/WS 控制面共享传入的进程内
-    capability。函数不持久化或输出该值；格式不符合 URL-safe token 契约时抛出
-    ``ValueError``。``serve_static=False`` 供桌面 sidecar 使用：不挂载静态
-    前端，只暴露 API；此时不要求静态产物存在。前端静态产物缺失时抛出
-    ``RuntimeError``，不提供 API-only fallback。进程关闭时按「活动连接 →
-    Session」顺序各关闭一次。
+    健康检查保持公开，其余 REST/WS 控制面共享传入的进程内 capability。
+    函数不持久化或输出该值；格式不符合 URL-safe token 契约时抛出
+    ``ValueError``。进程关闭时按「活动连接 → Session」顺序各关闭一次。
     """
     if _CAPABILITY_PATTERN.fullmatch(capability) is None:
         raise ValueError("capability 必须是 URL-safe token")
@@ -154,8 +134,8 @@ def create_app(
     expected_host = _expected_host(port)
     allowed_origins = frozenset((app_origin, _VITE_ORIGIN, _DESKTOP_ORIGIN))
     app = FastAPI(
-        title="Lion Code Web API",
-        description="Lion Code 编码 Agent 的 Web 与 WebSocket 服务端",
+        title="Lion Code Desktop API",
+        description="Lion Code 桌面 sidecar 的 REST 与 WebSocket 控制面",
         version="1.0.0",
         openapi_url=None,
         docs_url=None,
@@ -342,15 +322,15 @@ def create_app(
         current_api_key = str(snapshot.get("api_key") or "")
         current_base_url = str(snapshot.get("base_url") or "")
 
-        use_openai = (
-            body.provider == "openai" if body.provider else current_use_openai
-        )
+        use_openai = body.provider == "openai" if body.provider else current_use_openai
         target_model = body.model or current_model
         target_api_key = body.api_key or current_api_key
         target_base_url = body.base_url or current_base_url
 
         # 切换 Provider 时校验目标凭证；缺失直接拒绝，不动 Runtime 与磁盘。
-        provider_switched = body.provider is not None and use_openai != current_use_openai
+        provider_switched = (
+            body.provider is not None and use_openai != current_use_openai
+        )
         if provider_switched:
             if not target_api_key or (use_openai and not target_base_url):
                 raise HTTPException(
@@ -374,9 +354,9 @@ def create_app(
                 "use_openai": current_use_openai,
             }
             if current_base_url:
-                rollback[
-                    "api_base" if current_use_openai else "anthropic_base_url"
-                ] = current_base_url
+                rollback["api_base" if current_use_openai else "anthropic_base_url"] = (
+                    current_base_url
+                )
             return rollback
 
         try:
@@ -458,46 +438,4 @@ def create_app(
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.close()
 
-    # ─── 静态前端页面（package resource，缺失即启动失败）──────────
-    if serve_static:
-        static_root = (
-            static_dir if static_dir is not None else _default_static_dir()
-        )
-        if not (static_root / "index.html").is_file():
-            raise RuntimeError(
-                f"前端静态产物缺失: {static_root}。先运行 python scripts/build_frontend.py"
-                " 重建后再启动 Web 服务。"
-            )
-        app.mount(
-            "/", StaticFiles(directory=str(static_root), html=True), name="frontend"
-        )
-
     return app
-
-
-def run_server(
-    session: LionCodingSession,
-    port: int = 8000,
-    open_browser: bool = True,
-) -> None:
-    """在固定 loopback 地址阻塞运行服务，并生成一次性进程 capability。
-
-    ``open_browser`` 启用时会启动后台线程，用仅在 fragment 中携带 capability
-    的 URL 打开默认浏览器。禁用时不交付 capability，也不提供匿名 bootstrap；
-    headless 客户端只能使用公开 health，不能访问控制面。服务停止前该函数不会返回。
-    """
-    import uvicorn
-
-    capability = generate_capability()
-    app = create_app(session=session, capability=capability, port=port)
-
-    if open_browser:
-        url = _browser_url(port, capability)
-
-        def _open() -> None:
-            time.sleep(0.6)
-            webbrowser.open(url)
-
-        threading.Thread(target=_open, daemon=True).start()
-
-    uvicorn.run(app, host=_LOOPBACK_HOST, port=port, log_level="info")

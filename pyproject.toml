@@ -32,6 +32,7 @@ dev = [
     "vulture==2.16",
     "import-linter==2.11",
     "pyinstaller==6.16.0",
+    "build==1.4.0",
 ]
 
 [project.scripts]
@@ -39,10 +40,6 @@ lion-code = "lion_code.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["lion_code*"]
-
-# 前端 Vite 构建产物随包发布；rebuild 唯一入口: python scripts/build_frontend.py
-[tool.setuptools.package-data]
-"lion_code.server" = ["static/**/*"]
 
 # ===========================================================================
 # 质量基线工具配置（2026-08-01 建立，基线模式）

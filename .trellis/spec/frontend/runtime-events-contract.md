@@ -39,7 +39,7 @@ reasoningDuration（思考耗时）、轨迹面板中的重试/压缩事件呈�
 
 ## 4. Tests Required
 
-`frontend/src/lib/chatProtocol.test.ts` 维持断言点：runtimeNotice 生命周期
+`desktop/tests/renderer/chatProtocol.test.ts` 维持断言点：runtimeNotice 生命周期
 （设置/覆盖/成功清除/失败清除/终态兜底清除）、metrics 累计与重置、
 孤儿事件不计时（孤儿 `tool_execution_end`、`message_start` 无 end）、
 `formatRunDuration` 进位边界（`119_700→"2m0s"`、`59_999→"1m0s"`）。

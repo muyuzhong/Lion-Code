@@ -135,7 +135,6 @@ def run(args: argparse.Namespace, protocol_out: TextIO | None = None) -> int:
             session=session,
             capability=capability,
             port=port,
-            serve_static=False,
         )
     except Exception:
         sock.close()

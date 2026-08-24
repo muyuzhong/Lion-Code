@@ -29,7 +29,8 @@ DesktopBridge.getBackendEndpoint() -> Promise<BackendEndpoint | null>
 Packaged Windows builds run `python scripts/build_desktop_sidecar.py`, which
 uses `scripts/lion-sidecar.spec` to create
 `desktop/sidecar/lion-sidecar/lion-sidecar.exe`. `electron-builder` copies the
-contents of that onedir folder to `resources/sidecar/`.
+contents of that onedir folder to `resources/sidecar/`. The FastAPI app is an
+API-only adapter; it must not locate, mount, or fall back to a browser frontend.
 
 ## 3. Contracts
 
@@ -90,7 +91,13 @@ forbidden because a split token suffix would no longer match exact redaction.
   fake-sidecar switch/reap behavior, no session storage credential, and an
   explicit real Python sidecar project.
 - Packaging smoke: build PyInstaller onedir, start its executable, parse ready,
-  send shutdown, and verify the Electron unpacked resources path.
+  probe an authenticated REST route, send shutdown, and build wheel from the
+  freshly produced sdist so stale build directories cannot hide Web assets.
+- Electron package verification: reject Python source, old Web assets, and known
+  development dependencies from both `resources/sidecar` and `app.asar`.
+- Packaged Playwright: clear source-side Python discovery, force an invalid
+  `LION_PYTHON`, connect a workspace through the bundled executable, then prove
+  the owned sidecar is gone after Electron exits.
 - Architecture: runtime-boundary AST/import-linter tests must treat top-level
   `sidecar` as an Interfaces module and keep Server away from Composition.
 

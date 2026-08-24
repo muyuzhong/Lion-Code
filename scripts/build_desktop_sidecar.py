@@ -33,9 +33,9 @@ def main() -> int:
         return result.returncode
     executable = _DIST_PATH / "lion-sidecar" / "lion-sidecar.exe"
     if not executable.is_file():
-        print(f"sidecar 构建产物缺失: {executable}", file=sys.stderr)
+        print(f"sidecar build artifact missing: {executable}", file=sys.stderr)
         return 1
-    print(f"sidecar 构建完成: {executable}")
+    print(f"sidecar build complete: {executable}")
     return 0
 
 

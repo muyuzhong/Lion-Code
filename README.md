@@ -31,7 +31,7 @@ Lion Code 就是我对这些问题的回答。它是一个**可读、可验证�
 ## 架构
 
 ```
-Interfaces (CLI / TUI / Application / package API)
+Interfaces (CLI / TUI / Electron sidecar / Application / package API)
     ↓
 Composition / Profile
     ↓
@@ -414,6 +414,8 @@ Lion-Code/
 │   │   ├── widgets.py          # Transcript、工具卡片、Markdown 渲染
 │   │   ├── themes.py           # 内置 + 自定义主题加载
 │   │   └── autocomplete.py     # 路径/命令/Skill 补全引擎
+│   ├── server/                 # Electron 使用的 API-only REST/WS 适配器
+│   ├── sidecar.py              # Electron 托管的 Python 进程入口
 │   ├── hooks.py                # PreToolUse 命令 Hook (~23 KB)
 │   ├── session_runtime/        # JSONL 记录、旧 JSON 迁移、Repository
 │   ├── supervisor.py           # Agent 外部 goal/retry/scheduler/checkpoint 平面
@@ -431,7 +433,12 @@ Lion-Code/
 │       ├── verifier.py         # 结构化通过/失败判定
 │       ├── regression.py       # 基线对比与退化检测
 │       └── external_anchor.py  # SWE-bench 集成
-├── tests/                      # 718 条测试
+├── desktop/                    # Windows x64 Electron 桌面客户端
+│   ├── src/main/               # 窗口、workspace、sidecar 与 IPC owner
+│   ├── src/preload/            # 受限 DesktopBridge
+│   ├── src/renderer/           # assistant-ui 聊天与 Lion design system
+│   └── e2e/                    # Electron Playwright 主链路
+├── tests/                      # Python 测试
 │   ├── core/                   # Core Runtime 单元测试
 │   ├── context/                # 上下文管理测试
 │   ├── integration/            # 集成测试
@@ -570,22 +577,30 @@ python -m compileall -q lion_code tests
 python benchmarks/context_management/formal_benchmark.py
 ```
 
-## Web 前端发布
+## Windows 桌面开发与发布
 
-前端 Vite 构建产物直接写入 `lion_code/server/static`（package data），随
-wheel/sdist 发布；运行时以 package resource 定位，产物缺失时 Web 服务启动
-明确失败。前端源码改动后的唯一 rebuild 命令：
+Electron 是唯一 GUI 产品入口。Main 选择工作区并管理 API-only Python sidecar；
+Renderer 通过 `lion://app` 加载，以 REST/WS 使用 Python canonical Session。
+Renderer 禁用 Node integration，Preload 只暴露固定的 `DesktopBridge`。
 
-```bash
-python scripts/build_frontend.py   # 内部执行 npm --prefix frontend run build
+开发环境需要 Python 3.12、Node.js 22/24（推荐 24）和 Windows 10/11 x64：
+
+```powershell
+cd desktop
+npm ci
+npm run dev
 ```
 
-构建产物入库，差异随 git 提交可审计。发布物验证（wheel 静态内容 + 安装态
-smoke）：
+构建未签名 NSIS 测试安装包：
 
-```bash
-python scripts/verify_web_delivery.py
+```powershell
+cd desktop
+npm run package:win
 ```
+
+该命令依次生成 PyInstaller `onedir` sidecar、验证版本/资源/许可证布局、构建
+Electron Renderer，并输出 `desktop/release/Lion-<version>-x64.exe`。安装态从
+`resources/sidecar/lion-sidecar.exe` 启动，不依赖系统 Python、Node 或源码目录。
 
 ---
 

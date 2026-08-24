@@ -1,6 +1,6 @@
 {
   "name": "lion-desktop",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Lion 桌面客户端（Electron 宿主 + Python sidecar）",
   "type": "module",
@@ -11,8 +11,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:e2e": "electron-vite build && playwright test",
+    "test:packaged": "playwright test --project=packaged --workers=1",
     "preview": "electron-vite preview",
-    "package:win": "python ../scripts/build_desktop_sidecar.py && npm run build && electron-builder --win --x64"
+    "verify:delivery": "python ../scripts/verify_desktop_delivery.py",
+    "verify:package": "node scripts/verify-package.mjs",
+    "package:win": "python ../scripts/build_desktop_sidecar.py && npm run verify:delivery && npm run build && electron-builder --win --x64 && npm run verify:package"
   },
   "engines": {
     "node": "^22 || ^24 || >=26"
@@ -24,6 +27,7 @@
     "streamdown": "2.5.0"
   },
   "devDependencies": {
+    "@electron/asar": "^3.4.1",
     "@playwright/test": "^1.62.0",
     "@types/node": "^22.13.0",
     "@types/react": "^19.0.0",
@@ -40,11 +44,19 @@
   "build": {
     "appId": "dev.lion.desktop",
     "productName": "Lion",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "out/**",
       "THIRD_PARTY_NOTICES.md",
       "node_modules/@assistant-ui/react/LICENSE",
-      "node_modules/streamdown/LICENSE"
+      "node_modules/streamdown/LICENSE",
+      "node_modules/react/LICENSE",
+      "node_modules/react-dom/LICENSE",
+      "node_modules/electron/LICENSE",
+      "!node_modules/**/*.py"
     ],
     "extraResources": [
       {
@@ -60,6 +72,11 @@
         "nsis"
       ],
       "artifactName": "Lion-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
     }
   }
 }

@@ -160,6 +160,14 @@ button.recent small { color: var(--ink-muted); font-size: var(--text-xs); }
 .reasoning summary, .tool summary { display: flex; align-items: center; gap: var(--space-2); cursor: pointer; color: var(--ink); font-size: var(--text-sm); }
 .tool summary small { margin-left: auto; color: var(--ink-muted); }
 .reasoning pre, .tool pre { margin-bottom: 0; color: var(--ink-muted); white-space: pre-wrap; }
+.tool-markdown { margin-top: var(--space-3); color: var(--ink); }
+.terminal-result { padding: var(--space-3); border-radius: var(--radius-sm); color: oklch(90% .01 250) !important; background: oklch(17% .015 250); }
+.diff-result span { display: block; margin: 0 calc(var(--space-3) * -1); padding: 0 var(--space-3); }
+.diff-result .diff-add { color: oklch(48% .12 145); background: oklch(92% .035 145); }
+.diff-result .diff-remove { color: oklch(50% .15 28); background: oklch(92% .035 28); }
+.diff-result .diff-hunk { color: var(--accent-strong); background: var(--accent-soft); }
+:root[data-theme="dark"] .diff-result .diff-add { color: oklch(78% .1 145); background: oklch(25% .035 145); }
+:root[data-theme="dark"] .diff-result .diff-remove { color: oklch(78% .12 28); background: oklch(25% .04 28); }
 .state-glyph { width: .5rem; height: .5rem; border-radius: 50%; background: var(--line-strong); }.state-glyph.running, .state-glyph.thinking { background: var(--accent); animation: pulse 1.4s infinite; }.state-glyph.complete { background: var(--success); }.state-glyph.error { background: var(--danger); }
 .empty-thread { width: min(44rem, 100%); margin: clamp(4rem, 16vh, 10rem) auto 0; }
 .empty-thread h2 { max-width: 16ch; margin: var(--space-4) 0; font: 500 clamp(2rem, 4vw, 3.75rem)/1.05 var(--font-display); letter-spacing: -.035em; }
