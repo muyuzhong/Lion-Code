@@ -35,6 +35,8 @@ from lion_code.core import AssistantMessage, TextContent, ToolCall
 from lion_code.core.events import (
     AgentEndEvent,
     AgentStartEvent,
+    MessageEndEvent,
+    MessageStartEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
@@ -248,6 +250,20 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 role == "error" and "API 未配置" in message for message, role in notices
             )
         )
+        # 未配置时不静默：事件流必须包含一条可见的 error assistant 消息，
+        # 使桌面/REST 前端不依赖 notice 也能呈现明确失败（R2 回归）。
+        err_events = [
+            event
+            for event in events
+            if isinstance(event, (MessageStartEvent, MessageEndEvent))
+            and event.message.role == "assistant"
+            and event.message.stop_reason == "error"
+        ]
+        self.assertEqual(len(err_events), 2)
+        message = err_events[0].message
+        self.assertIn("API 未配置", message.error_message or "")
+        self.assertIn("API 未配置", message.text)
+        self.assertEqual(session.messages[-1].role, "assistant")
         self.assertIsInstance(events[-1], AgentSettledEvent)
 
     # ─── 文本闭环与事件次序 ──────────────────────────────────

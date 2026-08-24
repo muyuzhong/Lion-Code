@@ -14,8 +14,13 @@ import time
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from ..core.events import CompactionCompletedEvent, CompactionStartedEvent
-from ..core.messages import AssistantMessage, UserMessage
+from ..core.events import (
+    CompactionCompletedEvent,
+    CompactionStartedEvent,
+    MessageEndEvent,
+    MessageStartEvent,
+)
+from ..core.messages import AssistantMessage, TextContent, UserMessage
 from ..observers import TerminalRenderer, UsageObserver
 from ..usage import BudgetPolicy, UsageLedger
 from .context import ContextRuntime
@@ -330,11 +335,22 @@ class AgentRuntime:
         self._execution.begin()
         self._last_stop_reason = None
         if not self._identity.api_configured:
-            self._identity._emit_notice(
+            # 未配置凭证不再静默返回：向订阅者产出一条含说明的 error 消息，
+            # 让桌面/REST 前端看到明确的失败反馈（而不只是被忽略的 notice）。
+            error_message = (
                 "API 未配置：设置 ANTHROPIC_API_KEY / OPENAI_API_KEY(+OPENAI_BASE_URL)，"
-                "或在 TUI 中用 /model 配置。",
-                role="error",
+                "或在设置面板中配置 Provider 与模型。"
             )
+            message = AssistantMessage(
+                model=self._conversation.model,
+                content=[TextContent(text=error_message)],
+                stop_reason="error",
+                error_message=error_message,
+            )
+            await self._conversation.emit(MessageStartEvent(message=message))
+            self._conversation.harness.append_message(message)
+            await self._conversation.emit(MessageEndEvent(message=message))
+            self._identity._emit_notice(error_message, role="error")
             return
         await self.ensure_ready()
         if self._execution.cancelled:
