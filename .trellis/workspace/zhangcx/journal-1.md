@@ -1901,3 +1901,24 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 63: 修复桌面客户端 API 错误提示与配置保存卡住
+
+**Date**: 2026-08-25
+**Task**: 修复桌面客户端 API 错误提示与配置保存卡住
+**Branch**: `master`
+
+### Summary
+
+修复 Provider 保存同步等待辅助 metadata 导致设置按钮卡住的问题；补充未配置 API 的 assistant-ui 错误投影、挂起 metadata 回归测试及桌面规范。Desktop 51 项、typecheck/build、chat-protocol E2E 和 Python 相关回归通过；全量 Python 的历史 corpus gold patch hash 失败为既有基线噪声。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d243ef82` | (see git log) |
+
+### Status
+
+[OK] **Completed**
