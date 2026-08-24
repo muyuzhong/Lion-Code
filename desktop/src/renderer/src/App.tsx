@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
-import type { BootstrapState } from "../../shared/types";
+import { useEffect, useMemo, useState } from "react";
+import type { BackendEndpoint, BootstrapState } from "../../shared/types";
+import { LionRuntimeProvider } from "./assistantRuntime";
+import { browserBackendBootstrap } from "./backend";
+import { ChatThread } from "./ChatThread";
 
 export function App() {
   const [state, setState] = useState<BootstrapState>({ phase: "idle" });
@@ -16,6 +19,8 @@ export function App() {
   };
   const connect = async (path: string) => window.lionDesktop.connectWorkspace(path);
 
+  if (state.phase === "ready") return <ReadyChat endpoint={state.endpoint} />;
+
   return <main>
     <p className="eyebrow">LION DESKTOP</p>
     <h1>{headline(state)}</h1>
@@ -27,6 +32,14 @@ export function App() {
     </div>
     {recent.length > 0 && state.phase === "idle" ? <section><h2>最近工作区</h2>{recent.map((path) => <button className="recent" key={path} onClick={() => void connect(path)}>{path}</button>)}</section> : null}
   </main>;
+}
+
+function ReadyChat({ endpoint }: { endpoint: BackendEndpoint }) {
+  const bootstrap = useMemo(() => browserBackendBootstrap(endpoint), [endpoint.baseUrl, endpoint.capability]);
+  return <>
+    <LionRuntimeProvider bootstrap={bootstrap}><ChatThread /></LionRuntimeProvider>
+    <button className="disconnect-floating" onClick={() => void window.lionDesktop.disconnect()}>断开工作区</button>
+  </>;
 }
 
 function headline(state: BootstrapState): string {

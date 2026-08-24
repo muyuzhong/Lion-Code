@@ -1812,3 +1812,25 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 59: 完成 assistant-ui 协议适配
+
+**Date**: 2026-08-23
+**Task**: 完成 assistant-ui 协议适配
+**Branch**: `muyuzhong/assistant-ui-protocol-adapter`
+
+### Summary
+
+建立桌面端单一 assistant-ui Runtime，完成严格 REST/WS 协议投影、重连与 fail-closed 契约、动作映射、测试和规格同步。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9eeb8fe` | (see git log) |
+| `b2e2834` | (see git log) |
+
+### Status
+
+[OK] **Completed**

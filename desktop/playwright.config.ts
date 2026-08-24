@@ -18,5 +18,9 @@ export default defineConfig({
       name: "sidecar-real",
       testMatch: /sidecar-real\.spec\.ts/,
     },
+    {
+      name: "chat-protocol",
+      testMatch: /chat-protocol\.spec\.ts/,
+    },
   ],
 });

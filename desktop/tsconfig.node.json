@@ -25,5 +25,6 @@
     "src/shared/**/*.ts",
     "tests/**/*.ts",
     "e2e/**/*.ts"
-  ]
+  ],
+  "exclude": ["tests/renderer/**/*.ts", "tests/renderer/**/*.tsx"]
 }
