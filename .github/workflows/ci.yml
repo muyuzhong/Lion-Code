@@ -143,10 +143,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 设置 Python 3.12.13
+      - name: 设置 Python 3.12.10
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12.13"
+          python-version: "3.12.10"
           cache: pip
 
       - name: 设置 Node.js 24
