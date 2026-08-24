@@ -48,6 +48,7 @@ class CodingSessionBackendAdapter:
         notices: NoticeController,
         status_sink: SubagentStatusSink,
         terminal_output_sink: Callable[[bool], None],
+        session_renamer: Callable[[str, str], Awaitable[bool]],
         session_repository: SessionRepository,
         cwd: Path,
     ) -> None:
@@ -57,6 +58,7 @@ class CodingSessionBackendAdapter:
         self._notices = notices
         self._status_sink = status_sink
         self._terminal_output_sink = terminal_output_sink
+        self._session_renamer = session_renamer
         self._session_repository = session_repository
         self._cwd = cwd
 
@@ -126,6 +128,9 @@ class CodingSessionBackendAdapter:
             return False
         await self._migrate_legacy_core_session(session_id, legacy)
         return await self._agent.restore(session_id)
+
+    async def rename_session(self, session_id: str, label: str) -> bool:
+        return await self._session_renamer(session_id, label)
 
     async def restore_latest(self) -> bool:
         sessions = await self.list_sessions()

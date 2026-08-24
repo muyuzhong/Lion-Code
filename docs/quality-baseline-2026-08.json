@@ -211,7 +211,7 @@
         "F"
       ],
       "fingerprints": [
-        "lion_code/application/session.py:321:LionCodingSession._drive:D:28",
+        "lion_code/application/session.py:324:LionCodingSession._drive:D:28",
         "lion_code/core/loop.py:68:run_agent_loop:F:44",
         "lion_code/core/session/jsonl.py:59:_migrate_message:D:24",
         "lion_code/providers/anthropic.py:154:_AnthropicStreamParser.feed:D:24",

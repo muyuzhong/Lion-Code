@@ -30,6 +30,7 @@ from .models import (
     ChatMessageDTO,
     ModelChoiceItem,
     ProviderConfigRequest,
+    RenameSessionRequest,
     ResumeSessionRequest,
     ServerStatusResponse,
     SessionSummaryItem,
@@ -273,6 +274,7 @@ def create_app(
         return [
             SessionSummaryItem(
                 id=str(m.get("id", "")),
+                label=m.get("label"),
                 startTime=m.get("startTime"),
                 messageCount=m.get("messageCount", 0),
                 cwd=m.get("cwd"),
@@ -302,6 +304,20 @@ def create_app(
             )
         await session.new_session()
         return {"success": True, "session_id": session.session_id}
+
+    @api.post("/sessions/rename")
+    async def rename_session(body: RenameSessionRequest) -> dict[str, Any]:
+        if session.is_running:
+            raise HTTPException(status_code=400, detail="会话正在运行中，无法重命名")
+        eligible_ids = {str(m.get("id", "")) for m in await _eligible_sessions()}
+        if body.session_id not in eligible_ids:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        label = body.label.strip()
+        if not label:
+            raise HTTPException(status_code=422, detail="会话名称不能为空")
+        if not await session.rename_session(body.session_id, label):
+            raise HTTPException(status_code=404, detail="会话不存在")
+        return {"success": True, "session_id": body.session_id, "label": label}
 
     @api.get("/models", response_model=list[ModelChoiceItem])
     async def get_models() -> list[ModelChoiceItem]:

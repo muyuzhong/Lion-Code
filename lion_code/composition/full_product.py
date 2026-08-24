@@ -126,6 +126,7 @@ def build_full_coding_backend(
         notices=composition.interaction.notices,
         status_sink=composition.interaction.status_sink,
         terminal_output_sink=runtime.agent.set_terminal_output,
+        session_renamer=runtime.session.rename_session,
         session_repository=runtime.session.repository,
         cwd=Path(composition.tooling.context.cwd),
     )

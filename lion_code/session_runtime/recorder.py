@@ -10,6 +10,7 @@ from lion_code.core.messages import AgentMessage
 from lion_code.core.session import (
     CompactionEntry,
     JsonlSessionStorage,
+    LabelEntry,
     MessageEntry,
     ModelChangeEntry,
     SessionEntry,
@@ -62,6 +63,18 @@ class SessionRecorder:
             entry = MessageEntry(parent_id=self._parent_id, message=message)
             await self._append_unlocked(entry)
             self._context_entry_ids.append(entry.id)
+            return entry
+
+    async def record_label(self, label: str) -> LabelEntry | None:
+        """追加会话标题，并避免重复写入相同标题。"""
+        async with self._lock:
+            await self._initialize_unlocked()
+            entries = await self.storage.read_all()
+            state = SessionState.from_entries(entries)
+            if state.label == label:
+                return None
+            entry = LabelEntry(parent_id=self._parent_id, label=label)
+            await self._append_unlocked(entry)
             return entry
 
     async def record_model_change(self, model: str) -> ModelChangeEntry | None:

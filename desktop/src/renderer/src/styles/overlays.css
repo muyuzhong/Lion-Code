@@ -1,0 +1,15 @@
+dialog { color: var(--ds-text-primary); }
+dialog::backdrop { background: #0009; }
+.approval, .settings-panel { position: fixed; inset: 50% auto auto 50%; width: min(520px, calc(100vw - 32px)); max-height: min(82vh, 700px); overflow: auto; margin: 0; padding: 18px; translate: -50% -50%; border: 1px solid var(--ds-border-strong); border-radius: var(--radius-lg); color: var(--ds-text-primary); background: var(--ds-bg-elevated); box-shadow: 0 16px 48px #0008; }
+.approval > header, .settings-panel header { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: start; gap: 11px; }
+.approval-icon, .settings-icon { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--ds-text-secondary); background: var(--ds-bg-tertiary); }
+.approval h2, .settings-panel h2 { margin: 2px 0 0; font-size: 17px; font-weight: 520; }
+.approval > p { margin: 18px 0 0; padding: 12px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); color: var(--ds-text-secondary); background: var(--ds-bg-secondary); line-height: 1.55; }
+.approval-actions, .settings-panel footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin-top: 18px; }
+.approval pre { max-height: 300px; overflow: auto; margin: 18px 0 0; padding: 12px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); color: var(--ds-text-secondary); background: var(--ds-bg-inset); font: 11px/1.55 var(--font-mono); white-space: pre-wrap; }
+.settings-panel form { display: grid; gap: 13px; }
+.settings-panel label { display: grid; gap: 5px; color: var(--ds-text-secondary); font-size: 12px; font-weight: 500; }
+.settings-panel input, .settings-panel select { width: 100%; min-height: 36px; padding: 7px 9px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); color: var(--ds-text-primary); background: var(--ds-bg-secondary); }
+.dialog-close { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--ds-text-muted); }
+.dialog-close:hover { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
+.form-error { margin: 0; padding: 9px 10px; border-radius: var(--radius-sm); color: var(--ds-error); background: color-mix(in oklab, var(--ds-error) 10%, transparent); font-size: 12px; }

@@ -151,6 +151,7 @@ class SkillItem(BaseModel):
 
 class SessionSummaryItem(BaseModel):
     id: str
+    label: str | None = None
     startTime: str | None = None
     messageCount: int = 0
     cwd: str | None = None
@@ -158,6 +159,11 @@ class SessionSummaryItem(BaseModel):
 
 class ResumeSessionRequest(BaseModel):
     session_id: str
+
+
+class RenameSessionRequest(BaseModel):
+    session_id: str
+    label: str = Field(min_length=1, max_length=80)
 
 
 class ToolCallDTO(BaseModel):

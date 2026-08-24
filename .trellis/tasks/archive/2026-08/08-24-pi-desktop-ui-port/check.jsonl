@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/desktop-chat-experience.md","reason":"Verify theme, accessibility, settings and viewport acceptance behavior."}
+{"file":".trellis/spec/frontend/desktop-assistant-runtime-contract.md","reason":"Verify UI work did not create a second Runtime or alter transport/protocol contracts."}
+{"file":".trellis/spec/frontend/chat-queue-contract.md","reason":"Verify Composer restyling preserves steer, follow-up, cancel and queue snapshot semantics."}
+{"file":".trellis/tasks/08-24-pi-desktop-ui-port/research/pi-desktop-source-audit.md","reason":"Audit copied structures against the selected source and forbidden PI runtime coupling."}

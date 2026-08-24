@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/desktop-chat-experience.md","reason":"Preserve Renderer state ownership, accessibility and desktop information architecture while replacing visuals."}
+{"file":".trellis/spec/frontend/desktop-assistant-runtime-contract.md","reason":"Keep assistant-ui, REST/WS projection, reconnect and approval behavior unchanged."}
+{"file":".trellis/spec/frontend/toolview-display-contract.md","reason":"Preserve tool identity and display semantics while restyling tool activity."}
+{"file":".trellis/tasks/08-24-pi-desktop-ui-port/research/pi-desktop-source-audit.md","reason":"Use the pinned PI-Desktop source inventory and selective-port boundary."}

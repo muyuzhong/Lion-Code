@@ -196,6 +196,9 @@ class LionCodingSession:
     async def resume(self, session_id: str) -> bool:
         return await self._backend.resume(session_id)
 
+    async def rename_session(self, session_id: str, label: str) -> bool:
+        return await self._backend.rename_session(session_id, label)
+
     async def restore_latest(self) -> bool:
         return await self._backend.restore_latest()
 

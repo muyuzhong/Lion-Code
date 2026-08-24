@@ -39,6 +39,7 @@ export interface ServerStatus {
 
 export interface SessionSummary {
   id: string;
+  label: string | null;
   startTime: string | null;
   messageCount: number;
   cwd: string | null;
@@ -103,6 +104,10 @@ export class LionRestClient {
 
   async newSession(): Promise<void> {
     await this.postJson("/api/sessions/new", {});
+  }
+
+  async renameSession(sessionId: string, label: string): Promise<void> {
+    await this.postJson("/api/sessions/rename", { session_id: sessionId, label });
   }
 
   async configureProvider(configuration: ProviderConfiguration): Promise<void> {
@@ -242,6 +247,7 @@ function isServerStatus(value: unknown): value is ServerStatus {
 function isSessionSummary(value: unknown): value is SessionSummary {
   return isRecord(value)
     && typeof value.id === "string"
+    && (value.label === null || typeof value.label === "string")
     && (value.startTime === null || typeof value.startTime === "string")
     && typeof value.messageCount === "number"
     && (value.cwd === null || typeof value.cwd === "string");

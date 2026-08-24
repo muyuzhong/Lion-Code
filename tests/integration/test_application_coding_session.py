@@ -148,6 +148,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             notices=composition.interaction.notices,
             status_sink=composition.interaction.status_sink,
             terminal_output_sink=composition.runtime.agent.set_terminal_output,
+            session_renamer=composition.runtime.session.rename_session,
             session_repository=composition.runtime.session.repository,
             cwd=_Path(composition.tooling.context.cwd),
         )
@@ -159,6 +160,17 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         session, agent, _harness, _fake = self._make_session([])
         self.assertIs(session._backend, agent)
         self.assertIsNone(_harness.composition.runtime.agent._terminal_renderer)
+
+    async def test_rename_active_session_persists_label(self) -> None:
+        session, _agent, harness, _fake = self._make_session([_stop_event("ready")])
+        [event async for event in session.prompt("start")]
+
+        session_id = harness.agent.session_id
+        self.assertTrue(await session.rename_session(session_id, "需求文档"))
+        state = await self._session_repository.load(session_id)
+        self.assertIsNotNone(state)
+        self.assertEqual(state.label, "需求文档")
+        await session.aclose()
 
     async def test_structured_session_only_unsubscribes_terminal_renderer(self) -> None:
         with patch("full_agent.TerminalRenderer") as renderer_factory:
@@ -221,6 +233,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 notices=composition.interaction.notices,
                 status_sink=composition.interaction.status_sink,
                 terminal_output_sink=composition.runtime.agent.set_terminal_output,
+                session_renamer=composition.runtime.session.rename_session,
                 session_repository=composition.runtime.session.repository,
                 cwd=Path(composition.tooling.context.cwd),
             )

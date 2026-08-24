@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from core.fakes import FakeProvider
+
 from lion_code.core.events import MessageEndEvent, MessageUpdateEvent
 from lion_code.core.harness import AgentHarness, AgentHarnessConfig
 from lion_code.core.messages import (
@@ -13,13 +15,9 @@ from lion_code.core.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from lion_code.core.provider_events import TextDeltaEvent
-from lion_code.core.provider_events import AssistantDoneEvent
-from lion_code.core.session import JsonlSessionStorage, SessionState
-from lion_code.core.session import SessionInfoEntry
+from lion_code.core.provider_events import AssistantDoneEvent, TextDeltaEvent
+from lion_code.core.session import JsonlSessionStorage, SessionInfoEntry, SessionState
 from lion_code.session_runtime import SessionRecorder
-
-from core.fakes import FakeProvider
 
 
 class TestSessionRecorder(unittest.IsolatedAsyncioTestCase):
@@ -105,6 +103,26 @@ class TestSessionRecorder(unittest.IsolatedAsyncioTestCase):
             entries = await storage.read_all()
             self.assertEqual(entries[-1].parent_id, entries[-2].id)
             self.assertEqual(len(SessionState.from_entries(entries).messages), 2)
+
+    async def test_label_keeps_recorder_parent_chain_and_skips_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = JsonlSessionStorage(Path(tmp) / "s1.jsonl")
+            recorder = SessionRecorder(
+                session_id="s1",
+                model="m1",
+                thinking_level="disabled",
+                cwd=Path(tmp),
+                storage=storage,
+            )
+
+            first = await recorder.record_label("需求文档")
+            duplicate = await recorder.record_label("需求文档")
+            message = await recorder.record_message(UserMessage(content="continue"))
+
+            self.assertIsNotNone(first)
+            self.assertIsNone(duplicate)
+            self.assertEqual(message.parent_id, first.id if first else None)
+            self.assertEqual(SessionState.from_entries(await storage.read_all()).label, "需求文档")
 
     async def test_initialization_repairs_metadata_interrupted_after_info(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -127,6 +127,18 @@ export class LionAssistantRuntimeAdapter {
     }
   }
 
+  async renameSession(sessionId: string, label: string): Promise<boolean> {
+    if (this.snapshot.protocol.isStreaming) return false;
+    try {
+      await this.rest.renameSession(sessionId, label);
+      await this.refreshMetadata();
+      return true;
+    } catch (error) {
+      this.setMetadataError(errorMessage(error));
+      return false;
+    }
+  }
+
   async configureProvider(configuration: ProviderConfiguration): Promise<boolean> {
     try {
       await this.rest.configureProvider(configuration);

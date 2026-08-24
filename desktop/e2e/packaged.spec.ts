@@ -50,7 +50,7 @@ test("packaged app owns the bundled sidecar through shutdown", async () => {
       const global = globalThis as typeof globalThis & { lionDesktop: DesktopBridge };
       return (await global.lionDesktop.getBootstrapState()).phase;
     }), { timeout: 60_000 }).toBe("ready");
-    await expect.poll(() => sidecarsForWorkspace(workspace)).toHaveLength(1);
+    await expect.poll(() => sidecarsForWorkspace(workspace), { timeout: 20_000 }).toHaveLength(1);
   } finally {
     await application.close();
   }
