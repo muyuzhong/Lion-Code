@@ -1879,3 +1879,25 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 62: 完成桌面 UI 设计
+
+**Date**: 2026-08-24
+**Task**: 完成桌面 UI 设计
+**Branch**: `muyuzhong/pi-desktop-ui-port`
+
+### Summary
+
+完成桌面聊天界面设计、输入焦点修复、持久化会话重命名与斜杠技能菜单，并通过全量 Python、桌面单元测试、类型检查、构建与 Electron E2E 验证。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0cd9299` | (see git log) |
+| `d712fbf` | (see git log) |
+
+### Status
+
+[OK] **Completed**
