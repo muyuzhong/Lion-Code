@@ -48,7 +48,7 @@ class SessionRecorder:
         return self._initialized
 
     async def initialize(self) -> None:
-        """恢复现有写入位置，或为新会话写入初始元数据。"""
+        """恢复现有写入位置；新会话尚无可写文件时不产生磁盘文件。"""
         async with self._lock:
             await self._initialize_unlocked()
 
@@ -60,6 +60,7 @@ class SessionRecorder:
     async def record_message(self, message: AgentMessage) -> MessageEntry:
         async with self._lock:
             await self._initialize_unlocked()
+            await self._ensure_initial_entries_unlocked()
             entry = MessageEntry(parent_id=self._parent_id, message=message)
             await self._append_unlocked(entry)
             self._context_entry_ids.append(entry.id)
@@ -82,9 +83,12 @@ class SessionRecorder:
             await self._initialize_unlocked()
             if model == self.model:
                 return None
+            self.model = model
+            if self._parent_id is None:
+                # 全新会话尚未落盘：不单独写配置 Entry，初始 ModelChangeEntry 会带当前模型。
+                return None
             entry = ModelChangeEntry(parent_id=self._parent_id, model=model)
             await self._append_unlocked(entry)
-            self.model = model
             return entry
 
     async def record_thinking_level_change(
@@ -95,12 +99,15 @@ class SessionRecorder:
             await self._initialize_unlocked()
             if thinking_level == self.thinking_level:
                 return None
+            self.thinking_level = thinking_level
+            if self._parent_id is None:
+                # 同 record_model_change：未落盘会话不产生仅配置的空文件。
+                return None
             entry = ThinkingLevelChangeEntry(
                 parent_id=self._parent_id,
                 thinking_level=thinking_level,
             )
             await self._append_unlocked(entry)
-            self.thinking_level = thinking_level
             return entry
 
     async def record_compaction(
@@ -134,44 +141,50 @@ class SessionRecorder:
             return tuple(self._context_entry_ids)
 
     async def _initialize_unlocked(self) -> None:
+        """恢复已有文件写入位置；不存在的文件视为全新会话（不落盘）。"""
         if self._initialized:
             return
+        self._initialized = True
 
         entries = await self.storage.read_all()
-        if entries:
-            state = SessionState.from_entries(entries)
-            self._parent_id = entries[-1].id
-            self._context_entry_ids = list(state.context_entry_ids)
-            if state.model is not None:
-                self.model = state.model
-            else:
-                await self._append_unlocked(
-                    ModelChangeEntry(parent_id=self._parent_id, model=self.model)
-                )
-            if any(entry.type == "thinking_level_change" for entry in entries):
-                self.thinking_level = state.thinking_level
-            else:
-                await self._append_unlocked(
-                    ThinkingLevelChangeEntry(
-                        parent_id=self._parent_id,
-                        thinking_level=self.thinking_level,
-                    )
-                )
-            self._initialized = True
+        if not entries:
+            # 新会话：文件尚未创建，初始元数据推迟到首条消息落盘时写入。
             return
 
-        info = SessionInfoEntry(cwd=str(self.cwd))
-        await self._append_unlocked(info)
+        state = SessionState.from_entries(entries)
+        self._parent_id = entries[-1].id
+        self._context_entry_ids = list(state.context_entry_ids)
+        if state.model is not None:
+            self.model = state.model
+        else:
+            await self._append_unlocked(
+                ModelChangeEntry(parent_id=self._parent_id, model=self.model)
+            )
+        if any(entry.type == "thinking_level_change" for entry in entries):
+            self.thinking_level = state.thinking_level
+        else:
+            await self._append_unlocked(
+                ThinkingLevelChangeEntry(
+                    parent_id=self._parent_id,
+                    thinking_level=self.thinking_level,
+                )
+            )
 
-        model_entry = ModelChangeEntry(parent_id=self._parent_id, model=self.model)
-        await self._append_unlocked(model_entry)
-
-        thinking_entry = ThinkingLevelChangeEntry(
-            parent_id=self._parent_id,
-            thinking_level=self.thinking_level,
+    async def _ensure_initial_entries_unlocked(self) -> None:
+        """首条消息落盘前补齐新会话的初始元数据三行（仅全新会话）。"""
+        if self._parent_id is not None:
+            # 已有历史：初始元数据早已写入，只追加消息。
+            return
+        await self._append_unlocked(SessionInfoEntry(cwd=str(self.cwd)))
+        await self._append_unlocked(
+            ModelChangeEntry(parent_id=self._parent_id, model=self.model)
         )
-        await self._append_unlocked(thinking_entry)
-        self._initialized = True
+        await self._append_unlocked(
+            ThinkingLevelChangeEntry(
+                parent_id=self._parent_id,
+                thinking_level=self.thinking_level,
+            )
+        )
 
     async def _append_unlocked(self, entry: SessionEntry) -> None:
         await self.storage.append(entry)

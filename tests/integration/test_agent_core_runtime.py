@@ -679,7 +679,8 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
     async def test_clear_creates_new_session_and_preserves_old_jsonl(self) -> None:
         registry = ToolRegistry()
-        agent, _ = self._make_agent([_stop_event()], registry)
+        # 两个 stop 事件：new_session 前的 chat + new_session 后的 chat 各用一个。
+        agent, _ = self._make_agent([_stop_event(), _stop_event("new session message")], registry)
         await agent.agent.chat("hello")
         previous_session_id = agent.agent.session_id
         session_view = agent.composition.tooling.context.session
@@ -696,9 +697,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertIs(session_view, agent.composition.runtime.session.state)
         self.assertEqual(session_view.id, agent.agent.session_id)
         self.assertTrue(previous_path.exists())
-        self.assertTrue(
-            self._session_repository.storage_for(agent.agent.session_id).path.exists()
-        )
+        # R3：新建会话只切换内存身份，零消息不落盘；首条消息后才创建 JSONL。
+        new_path = self._session_repository.storage_for(agent.agent.session_id).path
+        self.assertFalse(new_path.exists())
         self.assertEqual(agent.composition.runtime.conversation.messages, ())
         self.assertEqual(agent.agent.usage, UsageSnapshot())
         self.assertIs(agent.composition.runtime.usage, usage)
@@ -706,6 +707,14 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             agent.composition.runtime.agent._usage_observer, usage_observer
         )
         self.assertIs(agent.composition.runtime.agent._usage_observer._ledger, usage)
+
+        await agent.agent.chat("new session message")
+        self.assertTrue(new_path.exists())
+        state = await self._session_repository.load(agent.agent.session_id)
+        self.assertEqual(len(state.messages), 2)
+        self.assertEqual(state.messages[0].role, "user")
+        self.assertEqual(state.messages[0].text, "new session message")
+        self.assertEqual(state.messages[1].role, "assistant")
 
     async def test_model_and_thinking_changes_are_restored(self) -> None:
         registry = ToolRegistry()
