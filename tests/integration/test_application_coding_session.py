@@ -161,6 +161,17 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         self.assertIs(session._backend, agent)
         self.assertIsNone(_harness.composition.runtime.agent._terminal_renderer)
 
+    async def test_rename_active_session_persists_label(self) -> None:
+        session, _agent, harness, _fake = self._make_session([_stop_event("ready")])
+        [event async for event in session.prompt("start")]
+
+        session_id = harness.agent.session_id
+        self.assertTrue(await session.rename_session(session_id, "需求文档"))
+        state = await self._session_repository.load(session_id)
+        self.assertIsNotNone(state)
+        self.assertEqual(state.label, "需求文档")
+        await session.aclose()
+
     async def test_structured_session_only_unsubscribes_terminal_renderer(self) -> None:
         with patch("full_agent.TerminalRenderer") as renderer_factory:
             session, agent, harness, _fake = self._make_session(
