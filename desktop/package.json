@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@assistant-ui/react": "0.15.16",
+    "lucide-react": "1.33.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "streamdown": "2.5.0"
@@ -52,6 +53,7 @@
       "out/**",
       "THIRD_PARTY_NOTICES.md",
       "node_modules/@assistant-ui/react/LICENSE",
+      "node_modules/lucide-react/LICENSE",
       "node_modules/streamdown/LICENSE",
       "node_modules/react/LICENSE",
       "node_modules/react-dom/LICENSE",

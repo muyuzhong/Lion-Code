@@ -157,6 +157,8 @@ class LionCodingSessionPortTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(session.cwd, Path("D:/workspace"))
         self.assertEqual(await session.list_sessions(), [{"id": "s1"}])
+        self.assertTrue(await session.rename_session("s1", "需求文档"))
+        self.assertEqual(backend.sessions[0]["label"], "需求文档")
         self.assertTrue(await session.resume("s1"))
         self.assertTrue(await session.restore_latest())
         await session.new_session()
@@ -170,7 +172,7 @@ class LionCodingSessionPortTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [operation[0] for operation in backend.session_operations],
-            ["list", "resume", "restore_latest", "new", "compact"],
+            ["list", "rename", "resume", "restore_latest", "new", "compact"],
         )
         self.assertTrue(backend.closed)
 

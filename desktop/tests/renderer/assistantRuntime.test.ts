@@ -28,7 +28,7 @@ function harness(history: unknown[] = []) {
       requests.push({ url, authorization: headers.get("Authorization"), body: typeof init?.body === "string" ? init.body : null });
       const payload = url.endsWith("/api/messages") ? history
         : url.endsWith("/api/status") ? { session_id: "s1", model: "model-a", provider_name: "anthropic", permission_mode: "default", api_configured: true, cwd: "C:/work", thinking_level: "medium", available_thinking_levels: ["off", "medium"], input_tokens: 12, output_tokens: 4, is_running: false }
-          : url.endsWith("/api/sessions") ? [{ id: "s1", startTime: null, messageCount: 2, cwd: "C:/work" }]
+          : url.endsWith("/api/sessions") ? [{ id: "s1", label: null, startTime: null, messageCount: 2, cwd: "C:/work" }]
             : url.endsWith("/api/models") ? [{ provider_name: "anthropic", model: "model-a" }]
               : url.endsWith("/api/skills") ? [{ name: "review", description: "Review changes" }]
                 : { success: true };
@@ -92,6 +92,16 @@ describe("Lion assistant runtime adapter", () => {
     expect(await adapter.setThinkingLevel("medium")).toBe(true);
     expect(h.requests.find((request) => request.url.endsWith("/api/config/provider"))?.body).toBe(JSON.stringify({ provider: "anthropic", model: "model-a", api_key: "secret" }));
     expect(h.requests.find((request) => request.url.endsWith("/api/thinking"))?.body).toBe(JSON.stringify({ level: "medium" }));
+  });
+
+  it("renames a Python-owned session and refreshes canonical metadata", async () => {
+    const h = harness([]);
+    const adapter = new LionAssistantRuntimeAdapter(h.bootstrap);
+    await adapter.start();
+    await vi.waitFor(() => expect(adapter.getSnapshot().sessions).toHaveLength(1));
+    expect(await adapter.renameSession("s1", "需求文档")).toBe(true);
+    expect(h.requests.find((request) => request.url.endsWith("/api/sessions/rename"))?.body).toBe(JSON.stringify({ session_id: "s1", label: "需求文档" }));
+    expect(h.requests.filter((request) => request.url.endsWith("/api/sessions"))).toHaveLength(2);
   });
 
   it("folds WS events and refreshes canonical history before reconnect", async () => {

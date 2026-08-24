@@ -2,7 +2,7 @@
 
 ## Design Boundary
 
-本任务采用“视觉结构移植 + Lion 行为适配”，而不是整仓 Renderer 替换。
+本任务采用“忠实复现上游展示层 + Lion 行为适配”，而不是重新设计，也不是整仓 Renderer 替换。
 
 ```text
 Python sidecar / REST / WS                       unchanged
@@ -11,12 +11,17 @@ LionAssistantRuntimeAdapter                     unchanged
         │
 assistant-ui Runtime and primitives             unchanged
         │
-Lion PI-style presentation components           replace
+Lion presentation components matching PI source replace
         │
 PI-inspired semantic tokens and CSS             replace
 ```
 
 `WorkspaceShell` 继续拥有主题、面板开关和草稿种子；`ChatThread` 继续消费 assistant-ui primitives；所有动作仍经 `useLionRuntime()` 进入 `LionAssistantRuntimeAdapter`。
+
+会话重命名是唯一新增的跨层动作：`POST /api/sessions/rename` 进入
+`LionCodingSession`，由 `SessionRuntime` 通过当前 `SessionRecorder` 或
+`SessionRepository` 追加 `LabelEntry`。这样标题保持 Python canonical，避免 Renderer
+本地标题在刷新后丢失，也不会把重命名塞入聊天 WebSocket 协议。
 
 ## Source Selection
 
@@ -28,7 +33,7 @@ PI-inspired semantic tokens and CSS             replace
 - `PermissionCard.tsx`、`PlanApprovalBar.tsx`、`ToolDetails.tsx`、`TurnOutcomeCard.tsx`：编码 Agent 状态表达。
 - `tokens.css`、`chat-shell.css`、`messages.css`、`composer.css`、`sidebar-threads.css`：Token、间距、边框、背景和层次。
 
-这些组件分别达到 155–2480 行并直接依赖 PI store/API/shared types，因此只迁移结构、样式规则与纯展示片段；业务 props 由 Lion 类型重新定义。
+这些组件分别达到 155–2480 行并直接依赖 PI store/API/shared types，因此不能直接复制其状态耦合实现；展示结果仍须忠实匹配上游。布局与 Token 直接复用，业务 props 由 Lion 类型重新定义。
 
 ## Renderer Shape
 
@@ -40,7 +45,8 @@ components/
 ├─ ConversationTopbar.tsx
 ├─ ToolActivity.tsx
 ├─ ApprovalSurface.tsx
-└─ ComposerChrome.tsx
+├─ ComposerChrome.tsx
+└─ WorkPanel.tsx
 
 styles/
 ├─ tokens.css
@@ -60,13 +66,14 @@ styles/
 | transcript messages | assistant-ui `ThreadPrimitive` | 不复制 PI transcript reducer |
 | tool activity | assistant-ui `MessagePrimitive.Parts` + `toolPresentation.ts` | 保持 `toolCallId` 语义 |
 | composer running state | assistant-ui `ComposerPrimitive` + `snapshot.protocol` | 保持 send/cancel/queue 动作 |
+| work panel shell | Lion local open/close state | 复现右栏与空资源态，不伪造资源 Runtime |
 | permissions | `snapshot.protocol.confirmRequest` | safe action 默认不变 |
 | plan approval | `snapshot.protocol.planApprovalRequest` | `keep-planning` 默认不变 |
 | model/thinking | Python REST metadata | 仍由设置表单写回 Python |
 
 ## Styling
 
-- 使用 Lion-owned CSS custom properties，把 PI 的尺寸、对比度、层级和圆角映射到 Lion 名称。
+- 使用 Lion-owned CSS custom properties，值直接对齐 PI 的背景、尺寸、对比度、层级和圆角。
 - 不引入 Tailwind；避免为了复制 className 而增加构建系统。
 - `styles.css` 改为聚合入口，具体规则拆到 `styles/`，降低单文件冲突与后续替换成本。
 - 主题使用 `document.documentElement.dataset.theme`，延续当前 `lion-theme` 偏好键。
@@ -84,4 +91,6 @@ styles/
 
 ## Rollback
 
-本任务只修改 Renderer 展示层和一个图标依赖。回滚该 PR 即恢复当前 Cherry 风格 UI；assistant-ui、协议、sidecar、Session 文件和打包链路不受影响。
+本任务主要修改 Renderer 展示层和一个图标依赖，并新增一条 append-only 会话标题
+REST 链路。回滚该提交会恢复旧 UI 并移除重命名入口；既有 Session JSONL 中未知的
+`LabelEntry` 已属于 Core schema，历史与聊天协议、sidecar 启动和打包链路不受影响。

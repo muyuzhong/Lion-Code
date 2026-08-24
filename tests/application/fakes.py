@@ -129,6 +129,14 @@ class FakeCodingSessionBackend:
         self.session_operations.append(("resume", session_id))
         return session_id in {str(item.get("id")) for item in self.sessions}
 
+    async def rename_session(self, session_id: str, label: str) -> bool:
+        self.session_operations.append(("rename", session_id))
+        for item in self.sessions:
+            if str(item.get("id")) == session_id:
+                item["label"] = label
+                return True
+        return False
+
     async def restore_latest(self) -> bool:
         self.session_operations.append(("restore_latest", None))
         return bool(self.sessions)

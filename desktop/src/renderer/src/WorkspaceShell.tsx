@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Settings2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { BackendEndpoint } from "../../shared/types";
 import { LionRuntimeProvider, useLionRuntime } from "./assistantRuntime";
 import { browserBackendBootstrap } from "./backend";
 import { ChatThread } from "./ChatThread";
+import { DesktopSidebar } from "./components/DesktopSidebar";
+import { WorkPanel } from "./components/WorkPanel";
 
 type Theme = "light" | "dark";
 
@@ -14,9 +17,14 @@ export function WorkspaceShell({ endpoint, workspacePath }: { endpoint: BackendE
 function Workspace({ workspacePath }: { workspacePath: string }) {
   const { adapter, snapshot } = useLionRuntime();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [workPanelOpen, setWorkPanelOpen] = useState(true);
+  const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [skillPrompt, setSkillPrompt] = useState<{ key: number; text: string } | null>(null);
   const [theme, setTheme] = useState<Theme>(() => preferredTheme());
+  const [sidebarWidth, setSidebarWidth] = useState(() => preferredPaneWidth("lion-sidebar-width", 275, 240, 520));
+  const [workPanelWidth, setWorkPanelWidth] = useState(() => preferredPaneWidth("lion-work-panel-width", 320, 280, 640));
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const firstRunShown = useRef(false);
   const workspaceName = workspacePath.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || workspacePath;
 
@@ -25,6 +33,14 @@ function Workspace({ workspacePath }: { workspacePath: string }) {
     localStorage.setItem("lion-theme", theme);
   }, [theme]);
 
+  useEffect(() => localStorage.setItem("lion-sidebar-width", String(sidebarWidth)), [sidebarWidth]);
+  useEffect(() => localStorage.setItem("lion-work-panel-width", String(workPanelWidth)), [workPanelWidth]);
+  useEffect(() => {
+    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", updateViewportWidth);
+    return () => window.removeEventListener("resize", updateViewportWidth);
+  }, []);
+
   useEffect(() => {
     if (snapshot.status?.api_configured === false && !firstRunShown.current) {
       firstRunShown.current = true;
@@ -32,52 +48,73 @@ function Workspace({ workspacePath }: { workspacePath: string }) {
     }
   }, [snapshot.status?.api_configured]);
 
+  const createSession = () => void adapter.createSession();
+  const startPaneResize = (pane: "sidebar" | "work-panel", event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const controller = new AbortController();
+    document.documentElement.dataset.paneResizing = pane;
+    const move = (moveEvent: PointerEvent) => {
+      if (pane === "sidebar") {
+        setSidebarWidth(clampPaneWidth(moveEvent.clientX, 240, Math.min(520, window.innerWidth - workPanelWidth - 360)));
+      } else {
+        setWorkPanelWidth(clampPaneWidth(window.innerWidth - moveEvent.clientX, 280, Math.min(640, window.innerWidth - sidebarWidth - 360)));
+      }
+    };
+    const finish = () => {
+      controller.abort();
+      delete document.documentElement.dataset.paneResizing;
+    };
+    window.addEventListener("pointermove", move, { signal: controller.signal });
+    window.addEventListener("pointerup", finish, { once: true, signal: controller.signal });
+    window.addEventListener("blur", finish, { once: true, signal: controller.signal });
+  };
+  const workPanelConsumesWidth = workPanelOpen && viewportWidth > 980;
+  const renderedSidebarWidth = clampPaneWidth(sidebarWidth, 240, Math.min(520, viewportWidth - (workPanelConsumesWidth ? 280 : 0) - 360));
+  const renderedWorkPanelWidth = clampPaneWidth(workPanelWidth, 280, Math.min(640, viewportWidth - renderedSidebarWidth - 360));
+  const shellStyle = {
+    "--ds-sidebar-width": `${renderedSidebarWidth}px`,
+    "--work-panel-width": `${renderedWorkPanelWidth}px`,
+  } as CSSProperties;
   return (
-    <div className={`workspace-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div className={`workspace-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`} style={shellStyle}>
       <a className="skip-link" href="#lion-thread">跳到对话</a>
-      <aside className="sidebar" aria-label="工作区与会话">
-        <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">L</span><div><strong>Lion</strong><small>desktop agent</small></div></div>
-        <div className="workspace-identity"><span className="workspace-kicker">当前工作区</span><strong title={workspacePath}>{workspaceName}</strong><span title={workspacePath}>{workspacePath}</span></div>
-        <button className="new-session" type="button" disabled={snapshot.protocol.isStreaming} onClick={() => void adapter.createSession()}><span aria-hidden="true">＋</span> 新建任务</button>
-        <nav className="session-nav" aria-label="会话">
-          <div className="section-heading"><span>会话</span><small>{snapshot.sessions.length}</small></div>
-          <div className="session-list">
-            {snapshot.sessions.map((session) => (
-              <button
-                className={`session-item ${session.id === snapshot.status?.session_id ? "active" : ""}`}
-                type="button"
-                key={session.id}
-                disabled={snapshot.protocol.isStreaming || session.id === snapshot.status?.session_id}
-                onClick={() => void adapter.switchSession(session.id)}
-              >
-                <span>{session.id.slice(0, 12)}</span>
-                <small>{session.messageCount} 条消息 · {formatRelativeTime(session.startTime)}</small>
-              </button>
-            ))}
-            {snapshot.sessions.length === 0 ? <p className="sidebar-empty">新任务会在这里留下会话记录。</p> : null}
-          </div>
-        </nav>
-        <details className="skills">
-          <summary>可用 Skills <span>{snapshot.skills.length}</span></summary>
-          <div>
-            {snapshot.skills.map((skill) => <button type="button" key={skill.name} onClick={() => setSkillPrompt({ key: Date.now(), text: `用 ${skill.name} 技能帮我：` })}><strong>{skill.name}</strong><small>{skill.description || "项目技能"}</small></button>)}
-            {snapshot.skills.length === 0 ? <p>当前工作区没有可用 Skill。</p> : null}
-          </div>
-        </details>
-        <footer className="sidebar-footer">
-          <button type="button" onClick={() => setSettingsOpen(true)}>设置</button>
-          <button type="button" aria-label={`切换到${theme === "dark" ? "浅色" : "深色"}主题`} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? "浅色" : "深色"}</button>
-          <button type="button" onClick={() => void window.lionDesktop.disconnect()}>切换工作区</button>
-          <span>Recent tokens: {formatTokens((snapshot.status?.input_tokens ?? 0) + (snapshot.status?.output_tokens ?? 0))}</span>
-        </footer>
-      </aside>
-      <ChatThread
+      {!sidebarCollapsed ? <DesktopSidebar
         workspaceName={workspaceName}
-        sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
+        sessions={snapshot.sessions}
+        activeSessionId={snapshot.status?.session_id}
+        skills={snapshot.skills}
+        isStreaming={snapshot.protocol.isStreaming}
+        theme={theme}
+        formatTime={formatRelativeTime}
+        onCreateSession={createSession}
+        onSwitchSession={(sessionId) => void adapter.switchSession(sessionId)}
+        onRenameSession={(sessionId, label) => adapter.renameSession(sessionId, label)}
+        onSelectSkill={(skillName) => setSkillPrompt({ key: Date.now(), text: `/${skillName} ` })}
         onOpenSettings={() => setSettingsOpen(true)}
-        skillPrompt={skillPrompt}
-      />
+        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+        onDisconnect={() => void window.lionDesktop.disconnect()}
+        onCollapse={() => setSidebarCollapsed(true)}
+        searchOpen={sessionSearchOpen}
+        onSearchOpenChange={setSessionSearchOpen}
+        onResizeStart={(event) => startPaneResize("sidebar", event)}
+        onResizeBy={(delta) => setSidebarWidth((width) => clampPaneWidth(width + delta, 240, Math.min(520, window.innerWidth - workPanelWidth - 360)))}
+      /> : null}
+      <section className="workspace-main">
+        <ChatThread
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed(false)}
+          onCreateSession={createSession}
+          onOpenSearch={() => { setSidebarCollapsed(false); setSessionSearchOpen(true); }}
+          onOpenSettings={() => setSettingsOpen(true)}
+          skills={snapshot.skills}
+          skillPrompt={skillPrompt}
+        />
+        {workPanelOpen ? <WorkPanel
+          onClose={() => setWorkPanelOpen(false)}
+          onResizeStart={(event) => startPaneResize("work-panel", event)}
+          onResizeBy={(delta) => setWorkPanelWidth((width) => clampPaneWidth(width + delta, 280, Math.min(640, window.innerWidth - sidebarWidth - 360)))}
+        /> : <button className="work-panel-return" type="button" aria-label="打开工作面板" onClick={() => setWorkPanelOpen(true)}><span>工作面板</span></button>}
+      </section>
       {settingsOpen ? <ProviderSettings onClose={() => setSettingsOpen(false)} /> : null}
     </div>
   );
@@ -93,15 +130,10 @@ function ProviderSettings({ onClose }: { onClose: () => void }) {
   const [baseUrl, setBaseUrl] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const save = async (event: React.FormEvent) => {
+  const save = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true);
-    const saved = await adapter.configureProvider({
-      provider,
-      model,
-      ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
-      ...(baseUrl.trim() ? { base_url: baseUrl.trim() } : {}),
-    });
+    const saved = await adapter.configureProvider({ provider, model, ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}), ...(baseUrl.trim() ? { base_url: baseUrl.trim() } : {}) });
     setSaving(false);
     if (saved) onClose();
   };
@@ -109,7 +141,7 @@ function ProviderSettings({ onClose }: { onClose: () => void }) {
   return (
     <dialog className="settings-panel" open aria-labelledby="settings-title" onCancel={(event) => { event.preventDefault(); onClose(); }}>
       <form onSubmit={(event) => void save(event)}>
-        <header><div><span className="workspace-kicker">运行配置</span><h2 id="settings-title">Provider 与模型</h2></div><button className="icon-button" type="button" aria-label="关闭设置" onClick={onClose}>×</button></header>
+        <header><span className="settings-icon" aria-hidden="true"><Settings2 size={18} /></span><div><span className="workspace-kicker">运行配置</span><h2 id="settings-title">Provider 与模型</h2></div><button className="dialog-close" type="button" aria-label="关闭设置" onClick={onClose}><X aria-hidden="true" size={17} /></button></header>
         {snapshot.metadataError ? <p className="form-error" role="alert">{snapshot.metadataError}</p> : null}
         <label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value as "openai" | "anthropic")}><option value="anthropic">Anthropic</option><option value="openai">OpenAI compatible</option></select></label>
         <label>模型<select value={model} onChange={(event) => setModel(event.target.value)}>{snapshot.models.map((choice) => <option key={`${choice.provider_name}:${choice.model}`} value={choice.model}>{choice.model}</option>)}</select></label>
@@ -136,10 +168,14 @@ export function formatRelativeTime(value: string | null, now = Date.now()): stri
 
 function preferredTheme(): Theme {
   const stored = localStorage.getItem("lion-theme");
-  if (stored === "light" || stored === "dark") return stored;
-  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return stored === "light" || stored === "dark" ? stored : "dark";
 }
 
-function formatTokens(tokens: number): string {
-  return tokens < 1_000 ? String(tokens) : `${(tokens / 1_000).toFixed(tokens < 10_000 ? 1 : 0)}k`;
+function preferredPaneWidth(key: string, fallback: number, minimum: number, maximum: number): number {
+  const stored = Number(localStorage.getItem(key));
+  return Number.isFinite(stored) && stored > 0 ? clampPaneWidth(stored, minimum, maximum) : fallback;
+}
+
+function clampPaneWidth(value: number, minimum: number, maximum: number): number {
+  return Math.round(Math.min(Math.max(value, minimum), Math.max(minimum, maximum)));
 }

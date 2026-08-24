@@ -20,9 +20,10 @@
 - 不引入 PI-Desktop 的 Zustand store、Rust Host、Agent Runtime、Plugin SDK、持久化或 API client。
 - 不建立第二套消息、会话、Provider、审批或执行状态。
 
-### R2. PI-Desktop 视觉语言
+### R2. 忠实复现 PI-Desktop UI
 
-- 采用 PI-Desktop 的桌面信息密度、深色工作台、项目/会话树、顶部状态区、连续消息流、内联工具活动和浮动底部 Composer。
+- 以固定 commit 的实际源码和用户提供的 PI-Desktop 截图为像素级方向，复现黑色左侧项目/会话树、深灰中央消息区、46px 顶栏、浮动底部 Composer 和右侧工作面板。
+- 直接采用上游深色 Token、三栏比例、主要间距、边框、圆角与文字层级，不再做 Lion 暖色或营销化再设计。
 - 保留 Lion 品牌、产品名称和文案，不复制 PI 品牌、Logo、Marketplace 或更新界面。
 - 同一套语义 Token 支持深色与浅色主题；深色为默认视觉验收基准。
 - 图标优先使用成熟图标库或已有 assistant-ui primitive，不手写大批 SVG。
@@ -49,19 +50,22 @@
 
 ## Acceptance Criteria
 
-- [ ] 启动后的桌面 Shell、会话侧栏、消息流和 Composer 明显采用统一的 PI-Desktop 风格，且仍显示 Lion 品牌。
+- [ ] 启动后的三栏 Shell、会话侧栏、消息流、Composer 和工作面板与用户提供的 PI-Desktop 截图结构一致，且只将产品标识和业务数据替换为 Lion。
 - [ ] 新建/恢复会话、Provider/模型/Thinking 设置与 Skills 入口行为不变。
+- [ ] 会话可持久化重命名；Composer 输入 `/` 会弹出可筛选、可键盘选择的 Skills 列表。
+- [ ] 点击 Composer 不出现 textarea 内层黑色焦点框，仅保留容器级焦点状态。
 - [ ] REST history → WS streaming → assistant-ui Thread 的现有端到端路径无需协议修改即可通过。
 - [ ] Reasoning、Tool start/update/end、错误、重试/压缩、Permission 与 Plan 审批均有 PI 风格展示并保持原动作语义。
 - [ ] Steer、Follow-up、Cancel 和 queue snapshot 契约测试无回归。
 - [ ] 深色与浅色主题、空状态、运行态、错误态、审批态均有 Renderer/Electron 截图覆盖。
 - [ ] 1280x720 与 2560x1440 下无 document 级横向溢出或 Composer/审批遮挡。
 - [ ] `npm test`、`npm run typecheck`、`npm run build` 与相关 Electron Playwright project 通过。
-- [ ] 实现 diff 不包含当前工作树中用户未提交的 `styles.css` 修改，也不修改 Python、Main、Preload 或 shared wire 协议。
+- [ ] 实现 diff 不包含当前工作树中用户未提交的 `styles.css` 修改；除会话重命名的
+  `LabelEntry` / REST 窄链路外，不修改 Python，且不修改 Main、Preload 或 shared wire 协议。
 
 ## Out of Scope
 
 - PI-Desktop 的 Rust Host、pi Agent Runtime、Zustand store、插件系统、Marketplace、更新器与通知中心。
-- 文件树、Diff Review、浏览器、PTY、工作面板真实功能、Subagent 拓扑和定时任务。
+- 文件树、Diff Review、浏览器、PTY、工作面板真实资源能力、Subagent 拓扑和定时任务；右侧工作面板的 Shell 与空状态属于本次视觉范围。
 - 附件、语音、命令面板、会话分支、项目多开和新的后端接口。
 - 修改 Lion canonical Session、Provider、Tool Runtime、Capability 或安全边界。

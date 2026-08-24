@@ -27,4 +27,4 @@ Research date: 2026-08-24.
 
 ## Conclusion
 
-The visual system is a strong fit, but whole-component copying would import a second state/runtime architecture and increase change size. The lowest-risk port is to reuse PI's information architecture, token values, CSS patterns and small rendering fragments while keeping Lion's `WorkspaceShell`, assistant-ui primitives and `LionAssistantRuntimeAdapter` as the behavior seams.
+The target is PI-Desktop's actual rendered UI, not a Lion-themed reinterpretation. Whole-component copying would import a second state/runtime architecture, so the implementation must reproduce the pinned source's three-column structure, exact dark token values, spacing and presentation while keeping Lion's `WorkspaceShell`, assistant-ui primitives and `LionAssistantRuntimeAdapter` only as behavior seams.

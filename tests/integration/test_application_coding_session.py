@@ -148,6 +148,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             notices=composition.interaction.notices,
             status_sink=composition.interaction.status_sink,
             terminal_output_sink=composition.runtime.agent.set_terminal_output,
+            session_renamer=composition.runtime.session.rename_session,
             session_repository=composition.runtime.session.repository,
             cwd=_Path(composition.tooling.context.cwd),
         )
@@ -221,6 +222,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 notices=composition.interaction.notices,
                 status_sink=composition.interaction.status_sink,
                 terminal_output_sink=composition.runtime.agent.set_terminal_output,
+                session_renamer=composition.runtime.session.rename_session,
                 session_repository=composition.runtime.session.repository,
                 cwd=Path(composition.tooling.context.cwd),
             )

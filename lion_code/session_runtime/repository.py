@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from lion_code.core.session import JsonlSessionStorage, SessionJsonlError, SessionState
+from lion_code.core.session import (
+    JsonlSessionStorage,
+    LabelEntry,
+    SessionJsonlError,
+    SessionState,
+)
 
 SESSION_DIR = Path.home() / ".lion-code" / "sessions"
 
@@ -49,6 +54,7 @@ class SessionRepository:
             sessions.append(
                 {
                     "id": path.stem,
+                    "label": state.label,
                     "model": state.model,
                     "cwd": state.session_info.cwd if state.session_info else None,
                     "startTime": _format_timestamp(created_at),
@@ -58,6 +64,18 @@ class SessionRepository:
             )
         sessions.sort(key=lambda item: item["startTime"], reverse=True)
         return sessions
+
+    async def rename(self, session_id: str, label: str) -> bool:
+        """为非活动会话追加标题 Entry；活动会话由 SessionRuntime 的 Recorder 写入。"""
+        storage = self.storage_for(session_id)
+        entries = await storage.read_all()
+        if not entries:
+            return False
+        state = SessionState.from_entries(entries)
+        if state.label == label:
+            return True
+        await storage.append(LabelEntry(parent_id=entries[-1].id, label=label))
+        return True
 
     async def latest_session_id(self) -> str | None:
         sessions = await self.list_sessions()
@@ -71,6 +89,6 @@ def _safe_session_id(session_id: str) -> str:
 
 
 def _format_timestamp(timestamp: float) -> str:
-    return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime(
+    return datetime.fromtimestamp(timestamp, tz=UTC).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )

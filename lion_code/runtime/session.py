@@ -131,6 +131,16 @@ class SessionRuntime:
         if self._recorder is not None:
             await self._recorder.initialize()
 
+    async def rename_session(self, session_id: str, label: str) -> bool:
+        """通过当前 Recorder 或仓库更新 canonical 会话标题。"""
+        await self.flush()
+        if session_id != self._session_state.id:
+            return await self._repository.rename(session_id, label)
+        if self._recorder is None:
+            return False
+        await self._recorder.record_label(label)
+        return True
+
     async def close(self) -> None:
         """收敛待写 Entry 并关闭 Capability 会话参与者。"""
         try:

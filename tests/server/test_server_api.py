@@ -109,6 +109,7 @@ def _build_test_session() -> tuple[LionCodingSession, FakeCodingSessionBackend]:
         sessions=[
             {
                 "id": "sess-1",
+                "label": "当前会话",
                 "startTime": "2026-08-21T10:00:00",
                 "messageCount": 4,
                 "cwd": str(Path("/workspace")),
@@ -166,6 +167,15 @@ def test_list_and_resume_sessions() -> None:
     sessions = res.json()
     assert len(sessions) == 1
     assert sessions[0]["id"] == "sess-1"
+    assert sessions[0]["label"] == "当前会话"
+
+    res_rename = client.post(
+        "/api/sessions/rename",
+        json={"session_id": "sess-1", "label": "需求文档"},
+    )
+    assert res_rename.status_code == 200
+    assert res_rename.json()["label"] == "需求文档"
+    assert backend.sessions[0]["label"] == "需求文档"
 
     # 恢复会话
     res_resume = client.post("/api/sessions/resume", json={"session_id": "sess-1"})
@@ -200,6 +210,30 @@ def test_list_sessions_zero_match_returns_empty() -> None:
 
     assert res.status_code == 200
     assert res.json() == []
+
+
+def test_rename_session_rejects_blank_cross_workspace_and_running() -> None:
+    session, backend = _build_test_session()
+    client = _build_client(session)
+
+    blank = client.post(
+        "/api/sessions/rename",
+        json={"session_id": "sess-1", "label": "   "},
+    )
+    foreign = client.post(
+        "/api/sessions/rename",
+        json={"session_id": "sess-2", "label": "其他项目"},
+    )
+    session._running = True
+    running = client.post(
+        "/api/sessions/rename",
+        json={"session_id": "sess-1", "label": "运行中"},
+    )
+
+    assert blank.status_code == 422
+    assert foreign.status_code == 404
+    assert running.status_code == 400
+    assert not any(operation[0] == "rename" for operation in backend.session_operations)
 
 
 def test_list_and_resume_legacy_session_without_cwd() -> None:

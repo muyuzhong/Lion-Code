@@ -5,7 +5,12 @@ import unittest
 from pathlib import Path
 
 from lion_code.core.messages import UserMessage
-from lion_code.core.session import MessageEntry, SessionInfoEntry, SessionJsonlError
+from lion_code.core.session import (
+    LabelEntry,
+    MessageEntry,
+    SessionInfoEntry,
+    SessionJsonlError,
+)
 from lion_code.session_runtime import SessionRepository
 
 
@@ -31,6 +36,12 @@ class TestSessionRepository(unittest.IsolatedAsyncioTestCase):
             state = await repository.load("s1")
             self.assertEqual(state.messages[0].text, "hello")
             self.assertEqual((await repository.list_sessions())[0]["cwd"], "/work")
+            self.assertIsNone((await repository.list_sessions())[0]["label"])
+            self.assertTrue(await repository.rename("s1", "需求文档"))
+            self.assertEqual((await repository.list_sessions())[0]["label"], "需求文档")
+            entries = await storage.read_all()
+            self.assertIsInstance(entries[-1], LabelEntry)
+            self.assertEqual(entries[-1].parent_id, "message")
             self.assertEqual(await repository.latest_session_id(), "s1")
 
     async def test_incomplete_tail_is_ignored_and_removed_before_append(self) -> None:

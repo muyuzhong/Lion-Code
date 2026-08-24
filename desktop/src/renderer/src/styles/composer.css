@@ -1,0 +1,47 @@
+.composer-dock { pointer-events: none; position: absolute; inset-inline: 0; bottom: 0; z-index: 5; display: flex; justify-content: center; padding: 0 24px 16px; }
+.composer-stack { pointer-events: auto; display: flex; width: min(100%, 900px); flex-direction: column; }
+.runtime-notice, .queue-count { margin: 0 0 8px; padding: 7px 10px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); color: var(--ds-text-secondary); background: var(--ds-bg-secondary); font-size: 12px; }
+.queue-count { display: flex; justify-content: space-between; }
+.queue-count span { color: var(--ds-text-muted); }
+.run-metrics { display: flex; gap: 12px; margin: 0 0 8px; padding-inline: 2px; color: var(--ds-text-muted); font-size: 11px; }
+.queue-controls { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 5px; margin-bottom: 8px; padding: 6px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-lg); background: var(--ds-bg-composer); box-shadow: var(--shadow-composer); }
+.queue-controls input { min-width: 0; padding: 0 6px; border: 0; outline: 0; background: transparent; }
+.queue-controls button { display: inline-flex; min-height: 28px; align-items: center; gap: 5px; padding: 0 8px; border-radius: var(--radius-sm); color: var(--ds-text-secondary); font-size: 12px; }
+.queue-controls button:hover { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
+.composer-shell { position: relative; width: 100%; border-radius: var(--radius-xl); background: var(--ds-bg-composer); box-shadow: var(--shadow-composer); isolation: isolate; transition: box-shadow var(--motion-normal) var(--ease-out); }
+.composer-shell:focus-within { box-shadow: var(--shadow-composer); }
+.composer-input-wrap { display: flex; min-height: 84px; padding: 10px 12px 0; }
+.composer-input { width: 100%; min-height: 68px; max-height: 7lh; overflow-y: auto; resize: none; border: 0; outline: none; color: var(--ds-text-primary); background: transparent; font-size: 14px; line-height: 1.45; }
+.composer-input-wrap textarea:focus, .composer-input-wrap textarea:focus-visible { outline: none; }
+.composer-input::placeholder { color: var(--ds-text-secondary); opacity: .72; }
+.composer-skill-menu { position: absolute; z-index: 50; bottom: 150px; left: 50%; display: flex; width: min(calc(100% - 48px), 900px); max-height: min(360px, calc(100vh - 220px)); flex-direction: column; overflow: hidden; border: 1px solid var(--ds-border-default); border-radius: var(--radius-md); background: var(--ds-bg-elevated); box-shadow: 0 16px 44px #0009; transform: translateX(-50%); }
+.composer-skill-menu [role="group"] { min-height: 0; overflow-y: auto; padding: 0 5px 5px; }
+.composer-skill-heading { display: flex; height: 34px; align-items: center; gap: 7px; margin: 0 -5px 5px; padding: 0 10px; border-bottom: 1px solid var(--ds-border-subtle); color: var(--ds-text-secondary); font-size: 12px; }
+.composer-skill-heading small { margin-left: auto; color: var(--ds-text-muted); }
+.composer-skill-item { display: grid; width: 100%; gap: 2px; padding: 7px 9px; border-radius: var(--radius-sm); color: var(--ds-text-secondary); text-align: left; }
+.composer-skill-item:hover, .composer-skill-item[data-highlighted] { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
+.composer-skill-item strong { font-size: 12.5px; font-weight: 500; }
+.composer-skill-item small { overflow: hidden; color: var(--ds-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 8px; }
+.composer-left, .composer-right { display: flex; min-width: 0; align-items: center; gap: 4px; }
+.composer-mode, .composer-model, .composer-thinking, .composer-tool { display: inline-flex; height: 28px; align-items: center; gap: 6px; padding: 0 8px; border-radius: var(--radius-full); color: var(--ds-text-secondary); font-size: 12px; white-space: nowrap; }
+.composer-tool:hover, .composer-model:hover, .composer-thinking:hover { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
+.composer-model { max-width: 190px; overflow: hidden; color: var(--ds-text-primary); text-overflow: ellipsis; }
+.composer-thinking { padding-inline: 5px; color: var(--ds-text-muted); }
+.composer-more { position: relative; }
+.composer-more > summary { list-style: none; cursor: pointer; }
+.composer-more > summary::-webkit-details-marker { display: none; }
+.composer-more-menu { position: absolute; bottom: calc(100% + 7px); left: 0; z-index: 30; display: grid; width: 230px; padding: 5px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-md); background: var(--ds-bg-elevated); box-shadow: 0 12px 32px #0007; }
+.composer-more-menu button { display: grid; grid-template-columns: 18px minmax(0,1fr); align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius-sm); color: var(--ds-text-secondary); text-align: left; }
+.composer-more-menu button:hover { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
+.composer-more-menu button > span { display: grid; gap: 1px; }
+.composer-more-menu strong { font-size: 12px; font-weight: 500; }
+.composer-more-menu small { color: var(--ds-text-muted); font-size: 10.5px; }
+.send-btn, .stop-btn { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 50%; }
+.send-btn { color: var(--gray-1000); background: var(--gray-0); }
+.stop-btn { color: var(--ds-text-primary); background: color-mix(in oklab, var(--ds-text-primary) 16%, transparent); }
+:root[data-theme="light"] .send-btn { color: var(--gray-0); background: var(--gray-1000); }
+.send-btn:hover:not(:disabled), .stop-btn:hover:not(:disabled) { opacity: .86; }
+.send-btn:disabled { opacity: 1; color: color-mix(in oklab, var(--ds-bg-primary) 92%, transparent); background: color-mix(in oklab, var(--ds-text-primary) 18%, transparent); }
+.send-btn:active:not(:disabled), .stop-btn:active:not(:disabled) { transform: scale(.94); }
+@media (max-width: 720px) { .composer-model, .composer-thinking, .composer-tool { display: none; } .composer-dock { padding-inline: 12px; } .composer-stack { width: 100%; } }
