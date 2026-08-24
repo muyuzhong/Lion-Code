@@ -219,7 +219,7 @@
         "lion_code/session_runtime/legacy.py:123:_anthropic_messages:D:24",
         "lion_code/tui/adapter.py:24:TuiEventAdapter.apply:D:21",
         "lion_code/tui/app.py:1040:LionTuiApp._apply_streaming_transcript_event:E:32",
-        "lion_code/__main__.py:222:main:E:36"
+        "lion_code/__main__.py:222:main:D:25"
       ]
     },
     "vulture": {

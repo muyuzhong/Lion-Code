@@ -1,0 +1,6 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Follow frontend pre-development and protocol test requirements."}
+{"file":".trellis/spec/frontend/chat-queue-contract.md","reason":"Preserve queue snapshot and user-message consumption semantics."}
+{"file":".trellis/spec/frontend/runtime-events-contract.md","reason":"Preserve retry, compaction, reasoning and metric lifecycle semantics."}
+{"file":".trellis/spec/frontend/toolview-display-contract.md","reason":"Preserve tool identity, diff format and ANSI display boundaries in projections."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Keep Application, Session and Provider canonical state in Python owners."}
+{"file":".trellis/tasks/08-23-electron-desktop-reconstruction/research/open-source-stack.md","reason":"Use assistant-ui as the selected single runtime and respect dependency licenses."}

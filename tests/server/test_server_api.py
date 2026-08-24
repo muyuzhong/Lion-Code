@@ -693,7 +693,7 @@ def test_run_server_uses_loopback_and_fragment_capability(monkeypatch) -> None:
         return object()
 
     monkeypatch.setattr(
-        "lion_code.server.app._generate_capability", lambda: _CAPABILITY
+        "lion_code.server.app.generate_capability", lambda: _CAPABILITY
     )
     monkeypatch.setattr("lion_code.server.app.create_app", fake_create_app)
     monkeypatch.setattr("lion_code.server.app.threading.Thread", ImmediateThread)
@@ -719,7 +719,7 @@ def test_run_server_headless_does_not_deliver_capability(monkeypatch) -> None:
     server_calls: list[dict[str, Any]] = []
 
     monkeypatch.setattr(
-        "lion_code.server.app._generate_capability", lambda: _CAPABILITY
+        "lion_code.server.app.generate_capability", lambda: _CAPABILITY
     )
     monkeypatch.setattr(
         "lion_code.server.app.create_app",

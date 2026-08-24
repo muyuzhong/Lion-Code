@@ -45,6 +45,8 @@ from .models import (
 
 _LOOPBACK_HOST = "127.0.0.1"
 _VITE_ORIGIN = "http://127.0.0.1:3000"
+# Electron Renderer 通过受限自定义协议加载，Origin 固定为该值。
+_DESKTOP_ORIGIN = "lion://app"
 _WEBSOCKET_PROTOCOL = "lion-code"
 _WEBSOCKET_CAPABILITY_PREFIX = "lion-code-capability."
 _CAPABILITY_PATTERN = re.compile(r"[A-Za-z0-9_-]{32,128}")
@@ -96,7 +98,7 @@ def _has_websocket_capability(protocol_header: str | None, capability: str) -> b
     )
 
 
-def _generate_capability() -> str:
+def generate_capability() -> str:
     return secrets.token_urlsafe(32)
 
 
@@ -116,13 +118,16 @@ def create_app(
     capability: str,
     port: int = 8000,
     static_dir: Path | None = None,
+    serve_static: bool = True,
 ) -> FastAPI:
     """创建仅接受本机 capability 客户端的应用。
 
     静态页面与健康检查保持公开，其余 REST/WS 控制面共享传入的进程内
     capability。函数不持久化或输出该值；格式不符合 URL-safe token 契约时抛出
-    ``ValueError``。前端静态产物缺失时抛出 ``RuntimeError``，不提供
-    API-only fallback。进程关闭时按「活动连接 → Session」顺序各关闭一次。
+    ``ValueError``。``serve_static=False`` 供桌面 sidecar 使用：不挂载静态
+    前端，只暴露 API；此时不要求静态产物存在。前端静态产物缺失时抛出
+    ``RuntimeError``，不提供 API-only fallback。进程关闭时按「活动连接 →
+    Session」顺序各关闭一次。
     """
     if _CAPABILITY_PATTERN.fullmatch(capability) is None:
         raise ValueError("capability 必须是 URL-safe token")
@@ -147,7 +152,7 @@ def create_app(
 
     app_origin = _http_origin(port)
     expected_host = _expected_host(port)
-    allowed_origins = frozenset((app_origin, _VITE_ORIGIN))
+    allowed_origins = frozenset((app_origin, _VITE_ORIGIN, _DESKTOP_ORIGIN))
     app = FastAPI(
         title="Lion Code Web API",
         description="Lion Code 编码 Agent 的 Web 与 WebSocket 服务端",
@@ -454,17 +459,18 @@ def create_app(
                 await websocket.close()
 
     # ─── 静态前端页面（package resource，缺失即启动失败）──────────
-    static_root = (
-        static_dir if static_dir is not None else _default_static_dir()
-    )
-    if not (static_root / "index.html").is_file():
-        raise RuntimeError(
-            f"前端静态产物缺失: {static_root}。先运行 python scripts/build_frontend.py"
-            " 重建后再启动 Web 服务。"
+    if serve_static:
+        static_root = (
+            static_dir if static_dir is not None else _default_static_dir()
         )
-    app.mount(
-        "/", StaticFiles(directory=str(static_root), html=True), name="frontend"
-    )
+        if not (static_root / "index.html").is_file():
+            raise RuntimeError(
+                f"前端静态产物缺失: {static_root}。先运行 python scripts/build_frontend.py"
+                " 重建后再启动 Web 服务。"
+            )
+        app.mount(
+            "/", StaticFiles(directory=str(static_root), html=True), name="frontend"
+        )
 
     return app
 
@@ -482,7 +488,7 @@ def run_server(
     """
     import uvicorn
 
-    capability = _generate_capability()
+    capability = generate_capability()
     app = create_app(session=session, capability=capability, port=port)
 
     if open_browser:

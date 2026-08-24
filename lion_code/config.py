@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 CONFIG_PATH = Path.home() / ".lion-code" / "config.json"
 
@@ -57,3 +58,49 @@ def save_api_config(
         }
     )
     write_config(config, path)
+
+
+def resolve_api_credentials(
+    *,
+    env: dict[str, str] | None = None,
+    allow_placeholder: bool = False,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    """按优先级解析 API 凭证：环境变量 > 本地配置 > 占位端点。"""
+    source_env = os.environ if env is None else env
+    api_key: str | None = None
+    api_base: str | None = None
+    use_openai = False
+    model: str | None = None
+
+    if source_env.get("OPENAI_API_KEY") and source_env.get("OPENAI_BASE_URL"):
+        api_key = source_env["OPENAI_API_KEY"]
+        api_base = source_env["OPENAI_BASE_URL"]
+        use_openai = True
+    elif source_env.get("ANTHROPIC_API_KEY"):
+        api_key = source_env["ANTHROPIC_API_KEY"]
+        api_base = source_env.get("ANTHROPIC_BASE_URL") or None
+        use_openai = False
+    elif source_env.get("OPENAI_API_KEY"):
+        api_key = source_env["OPENAI_API_KEY"]
+        api_base = source_env.get("OPENAI_BASE_URL") or None
+        use_openai = True
+
+    if api_key is None:
+        saved = load_api_config(config_path)
+        if saved.get("api_key"):
+            api_key = saved["api_key"]
+            use_openai = saved.get("provider") == "openai"
+            api_base = saved.get("base_url") or None
+            model = saved.get("model") or None
+
+    if api_key is None and allow_placeholder:
+        use_openai = True
+        api_base = api_base or "https://api.openai.com/v1"
+
+    return {
+        "api_key": api_key,
+        "api_base": api_base,
+        "use_openai": use_openai,
+        "model": model,
+    }

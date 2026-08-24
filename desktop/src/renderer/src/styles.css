@@ -1,0 +1,15 @@
+:root { color: #e8e4dc; background: #111311; font-family: Inter, "Segoe UI", sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at 30% 20%, #273129, #111311 55%); }
+main { width: min(680px, calc(100vw - 48px)); padding: 48px; border: 1px solid #3b443b; border-radius: 24px; background: rgba(21, 24, 21, .92); box-shadow: 0 24px 80px #0008; }
+.eyebrow { color: #a9c29f; letter-spacing: .18em; font-size: 12px; }
+h1 { margin: 12px 0; font: 500 clamp(32px, 6vw, 56px)/1.05 Georgia, serif; }
+.detail { color: #aaa99f; line-height: 1.6; overflow-wrap: anywhere; }
+.actions { display: flex; gap: 12px; margin-top: 28px; }
+button { border: 0; border-radius: 999px; padding: 11px 18px; color: #152016; background: #b7d3ad; cursor: pointer; }
+button:disabled { opacity: .5; cursor: wait; }
+button.secondary, button.recent { color: #e8e4dc; background: #2b302b; }
+section { margin-top: 32px; display: grid; gap: 8px; }
+h2 { color: #aaa99f; font-size: 13px; font-weight: 500; }
+button.recent { border-radius: 10px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+pre { padding: 12px; overflow: auto; border-radius: 10px; background: #090a09; color: #d7a59b; white-space: pre-wrap; }

@@ -1,0 +1,5 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Run the required frontend contract tests and build checks."}
+{"file":".trellis/spec/frontend/chat-queue-contract.md","reason":"Review queue behavior across every event and reconnect path."}
+{"file":".trellis/spec/frontend/runtime-events-contract.md","reason":"Review all streaming terminal and notice cleanup paths."}
+{"file":".trellis/spec/frontend/toolview-display-contract.md","reason":"Check tool classification and result rendering do not regress."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Check the Adapter remains projection-only and creates no duplicate owner."}

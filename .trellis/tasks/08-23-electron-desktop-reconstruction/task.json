@@ -1,0 +1,31 @@
+{
+  "id": "electron-desktop-reconstruction",
+  "name": "electron-desktop-reconstruction",
+  "title": "Electron 桌面客户端重构",
+  "description": "以 Electron 和 assistant-ui 重构 Lion 的 Windows 桌面聊天产品，移除 Web 产品形态。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-23",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-23-electron-host-sidecar",
+    "08-23-assistant-ui-protocol-adapter",
+    "08-23-lion-desktop-chat-experience",
+    "08-23-desktop-cutover-web-removal"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

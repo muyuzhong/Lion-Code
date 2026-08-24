@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply Python focused/full test and review requirements."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Verify Electron concepts do not leak into Runtime ownership."}
+{"file":".trellis/spec/backend/secret-boundary.md","reason":"Audit capability and diagnostic output handling."}
+{"file":".trellis/tasks/08-23-electron-desktop-reconstruction/research/open-source-stack.md","reason":"Verify Electron and sidecar implementation follows reviewed security and distribution evidence."}

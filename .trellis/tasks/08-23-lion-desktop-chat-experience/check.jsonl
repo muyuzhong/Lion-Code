@@ -1,0 +1,5 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Verify component tests, protocol tests and desktop build."}
+{"file":".trellis/spec/frontend/chat-queue-contract.md","reason":"Check queue UI matches service snapshot and consumption semantics."}
+{"file":".trellis/spec/frontend/runtime-events-contract.md","reason":"Check every runtime status surface terminates correctly."}
+{"file":".trellis/spec/frontend/toolview-display-contract.md","reason":"Review Tool cards against current cross-layer display contracts."}
+{"file":".trellis/tasks/08-23-electron-desktop-reconstruction/research/open-source-stack.md","reason":"Check the UI uses only the selected open-source stack and observes license constraints."}
