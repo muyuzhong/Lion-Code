@@ -174,6 +174,25 @@ class TestSessionRecorder(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(state.thinking_level, "high")
             self.assertEqual(len(state.messages), 1)
 
+    async def test_ensure_on_disk_persists_empty_session(self) -> None:
+        """显式落盘路径（legacy 迁移）即使零消息也创建文件（R3 例外）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "s-migrated.jsonl"
+            storage = JsonlSessionStorage(path)
+            recorder = SessionRecorder(
+                session_id="s-migrated",
+                model="m1",
+                thinking_level="disabled",
+                cwd=Path(tmp),
+                storage=storage,
+            )
+
+            await recorder.ensure_on_disk()
+            self.assertTrue(path.exists())
+            state = SessionState.from_entries(await storage.read_all())
+            self.assertEqual(state.model, "m1")
+            self.assertEqual(len(state.messages), 0)
+
     async def test_compaction_changes_replay_but_retains_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             storage = JsonlSessionStorage(Path(tmp) / "s1.jsonl")

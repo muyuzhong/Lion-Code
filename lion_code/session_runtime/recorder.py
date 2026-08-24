@@ -52,6 +52,16 @@ class SessionRecorder:
         async with self._lock:
             await self._initialize_unlocked()
 
+    async def ensure_on_disk(self) -> None:
+        """确保本会话已落盘初始元数据（含全新会话）。
+
+        供必须保留历史会话的显式路径（如 legacy 会话迁移）使用；普通新建会话
+        走惰性初始化，只在首条消息时落盘。
+        """
+        async with self._lock:
+            await self._initialize_unlocked()
+            await self._ensure_initial_entries_unlocked()
+
     async def handle(self, event: AgentEvent) -> None:
         """只持久化完成态消息；增量渲染事件不进入 durable history。"""
         if isinstance(event, MessageEndEvent):
