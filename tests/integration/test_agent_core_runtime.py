@@ -680,7 +680,9 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_clear_creates_new_session_and_preserves_old_jsonl(self) -> None:
         registry = ToolRegistry()
         # 两个 stop 事件：new_session 前的 chat + new_session 后的 chat 各用一个。
-        agent, _ = self._make_agent([_stop_event(), _stop_event("new session message")], registry)
+        agent, _ = self._make_agent(
+            [_stop_event(), _stop_event("new session message")], registry
+        )
         await agent.agent.chat("hello")
         previous_session_id = agent.agent.session_id
         session_view = agent.composition.tooling.context.session

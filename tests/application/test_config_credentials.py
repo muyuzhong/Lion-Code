@@ -11,7 +11,9 @@ from pathlib import Path
 from lion_code.config import resolve_api_credentials, save_api_config
 
 
-def _write_config(tmp_path: Path, *, provider: str, model: str, api_key: str, base_url: str = "") -> None:
+def _write_config(
+    tmp_path: Path, *, provider: str, model: str, api_key: str, base_url: str = ""
+) -> None:
     save_api_config(
         provider=provider,
         model=model,
@@ -22,7 +24,9 @@ def _write_config(tmp_path: Path, *, provider: str, model: str, api_key: str, ba
 
 
 def test_no_credentials_no_config_placeholder(tmp_path: Path) -> None:
-    result = resolve_api_credentials(env={}, allow_placeholder=True, config_path=tmp_path / "config.json")
+    result = resolve_api_credentials(
+        env={}, allow_placeholder=True, config_path=tmp_path / "config.json"
+    )
     assert result["api_key"] is None
     assert result["model"] is None
     assert result["use_openai"] is True
@@ -30,8 +34,12 @@ def test_no_credentials_no_config_placeholder(tmp_path: Path) -> None:
 
 
 def test_config_only_without_env(tmp_path: Path) -> None:
-    _write_config(tmp_path, provider="anthropic", model="claude-sonnet-4-6", api_key="sk-config")
-    result = resolve_api_credentials(env={}, allow_placeholder=False, config_path=tmp_path / "config.json")
+    _write_config(
+        tmp_path, provider="anthropic", model="claude-sonnet-4-6", api_key="sk-config"
+    )
+    result = resolve_api_credentials(
+        env={}, allow_placeholder=False, config_path=tmp_path / "config.json"
+    )
     assert result["api_key"] == "sk-config"
     assert result["model"] == "claude-sonnet-4-6"
     assert result["use_openai"] is False
@@ -39,9 +47,14 @@ def test_config_only_without_env(tmp_path: Path) -> None:
 
 def test_env_key_keeps_saved_model(tmp_path: Path) -> None:
     """env 凭证存在时，已保存 model 仍从 config 读回（R1 回归）。"""
-    _write_config(tmp_path, provider="anthropic", model="claude-sonnet-4-6", api_key="sk-config")
+    _write_config(
+        tmp_path, provider="anthropic", model="claude-sonnet-4-6", api_key="sk-config"
+    )
     result = resolve_api_credentials(
-        env={"OPENAI_API_KEY": "sk-env", "OPENAI_BASE_URL": "https://api.openai.com/v1"},
+        env={
+            "OPENAI_API_KEY": "sk-env",
+            "OPENAI_BASE_URL": "https://api.openai.com/v1",
+        },
         allow_placeholder=False,
         config_path=tmp_path / "config.json",
     )
@@ -64,7 +77,9 @@ def test_env_anthropic_keeps_saved_model(tmp_path: Path) -> None:
 
 
 def test_missing_config_file_returns_defaults(tmp_path: Path) -> None:
-    result = resolve_api_credentials(env={}, allow_placeholder=False, config_path=tmp_path / "config.json")
+    result = resolve_api_credentials(
+        env={}, allow_placeholder=False, config_path=tmp_path / "config.json"
+    )
     assert result["api_key"] is None
     assert result["model"] is None
     assert result["use_openai"] is False
