@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import io
 import json
 import os
@@ -114,6 +115,66 @@ class TestFormatReadyRecord:
 
 
 class TestParseArgs:
+    @pytest.mark.parametrize(
+        ("env", "expected"),
+        [
+            (
+                {"OPENAI_API_KEY": "openai", "OPENAI_BASE_URL": "https://openai"},
+                ("openai", "https://openai", True, None),
+            ),
+            (
+                {
+                    "ANTHROPIC_API_KEY": "anthropic",
+                    "ANTHROPIC_BASE_URL": "https://anthropic",
+                },
+                ("anthropic", "https://anthropic", False, None),
+            ),
+            ({"OPENAI_API_KEY": "openai"}, ("openai", None, True, None)),
+        ],
+    )
+    def test_environment_credentials_take_precedence(self, tmp_path, env, expected):
+        from lion_code.config import resolve_api_credentials
+
+        resolved = resolve_api_credentials(
+            env=env, config_path=tmp_path / "missing.json"
+        )
+
+        assert (
+            resolved["api_key"],
+            resolved["api_base"],
+            resolved["use_openai"],
+            resolved["model"],
+        ) == expected
+
+    def test_saved_credentials_and_placeholder_are_resolved(self, tmp_path):
+        from lion_code.config import resolve_api_credentials, write_config
+
+        config_path = tmp_path / "config.json"
+        write_config(
+            {
+                "provider": "anthropic",
+                "model": "claude-test",
+                "api_key": "saved",
+                "base_url": "https://saved",
+            },
+            config_path,
+        )
+
+        assert resolve_api_credentials(env={}, config_path=config_path) == {
+            "api_key": "saved",
+            "api_base": "https://saved",
+            "use_openai": False,
+            "model": "claude-test",
+        }
+        assert resolve_api_credentials(
+            env={}, config_path=tmp_path / "missing.json", allow_placeholder=True
+        ) == {
+            "api_key": None,
+            "api_base": "https://api.openai.com/v1",
+            "use_openai": True,
+            "model": None,
+        }
+
     def test_state_home_applies_before_config_import(self, tmp_path):
         state_home = tmp_path / "state"
         repo_root = Path(__file__).resolve().parents[2]
@@ -150,6 +211,163 @@ class TestParseArgs:
 
         assert exit_code == 2
         assert "工作区不存在" in capsys.readouterr().err
+
+    def test_build_session_uses_resolved_provider(self, tmp_path, monkeypatch):
+        import lion_code.application.session as session_module
+        import lion_code.composition.full_product as composition_module
+        import lion_code.config as config_module
+        from lion_code.sidecar import build_session
+
+        backend = object()
+        captured = {}
+        monkeypatch.setattr(
+            config_module,
+            "resolve_api_credentials",
+            lambda **_kwargs: {
+                "api_key": "key",
+                "api_base": "https://anthropic",
+                "use_openai": False,
+                "model": "claude-test",
+            },
+        )
+        monkeypatch.setattr(
+            composition_module,
+            "build_full_coding_backend",
+            lambda **kwargs: captured.update(kwargs) or backend,
+        )
+        monkeypatch.setattr(
+            session_module,
+            "LionCodingSession",
+            lambda **kwargs: kwargs,
+        )
+
+        session = build_session(tmp_path)
+
+        assert session == {"backend": backend, "terminal_output": False}
+        assert captured == {
+            "model": "claude-test",
+            "api_key": "key",
+            "api_base": None,
+            "anthropic_base_url": "https://anthropic",
+        }
+
+    def test_apply_state_home_without_override_is_a_noop(self, monkeypatch):
+        from lion_code.sidecar import _apply_state_home
+
+        monkeypatch.delenv("LION_SIDECAR_STATE_HOME", raising=False)
+        before = (os.environ.get("HOME"), os.environ.get("USERPROFILE"))
+
+        _apply_state_home()
+
+        assert (os.environ.get("HOME"), os.environ.get("USERPROFILE")) == before
+
+
+class TestServeLifecycle:
+    def test_ready_protocol_is_flushed_before_server_exit(self):
+        from lion_code.sidecar import _serve_until_ready
+
+        class Server:
+            started = True
+            should_exit = False
+
+            async def serve(self, *, sockets):
+                assert sockets == ["socket"]
+
+        output = io.StringIO()
+        asyncio.run(
+            _serve_until_ready(
+                Server(),
+                "socket",
+                port=49152,
+                capability=_CAPABILITY,
+                protocol_out=output,
+                control_in=io.StringIO("shutdown\n"),
+            )
+        )
+
+        assert json.loads(output.getvalue()) == {
+            "type": "ready",
+            "version": 1,
+            "port": 49152,
+            "capability": _CAPABILITY,
+        }
+
+    def test_startup_failure_is_propagated(self):
+        from lion_code.sidecar import _serve_until_ready
+
+        class Server:
+            started = False
+            should_exit = False
+
+            async def serve(self, *, sockets):
+                raise RuntimeError("startup failed")
+
+        with pytest.raises(RuntimeError, match="startup failed"):
+            asyncio.run(
+                _serve_until_ready(
+                    Server(),
+                    "socket",
+                    port=49152,
+                    capability=_CAPABILITY,
+                )
+            )
+
+
+class TestRun:
+    def test_backend_construction_failure_returns_one(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        import lion_code.sidecar as sidecar_module
+
+        monkeypatch.setattr(
+            sidecar_module,
+            "build_session",
+            lambda _workspace: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+
+        exit_code = sidecar_module.run(argparse.Namespace(workspace=tmp_path))
+
+        assert exit_code == 1
+        assert "backend 构建失败" in capsys.readouterr().err
+
+    def test_service_failure_returns_one(self, tmp_path, monkeypatch, capsys):
+        import lion_code.server.app as app_module
+        import lion_code.sidecar as sidecar_module
+
+        class Socket:
+            closed = False
+
+            def bind(self, address):
+                assert address == ("127.0.0.1", 0)
+
+            def getsockname(self):
+                return ("127.0.0.1", 49152)
+
+            def listen(self, backlog):
+                assert backlog == 128
+
+            def close(self):
+                self.closed = True
+
+        sock = Socket()
+
+        def fail_run(awaitable):
+            awaitable.close()
+            raise RuntimeError("serve failed")
+
+        monkeypatch.setattr(
+            sidecar_module, "build_session", lambda _workspace: object()
+        )
+        monkeypatch.setattr(sidecar_module.socket, "socket", lambda *_args: sock)
+        monkeypatch.setattr(app_module, "generate_capability", lambda: _CAPABILITY)
+        monkeypatch.setattr(app_module, "create_app", lambda **_kwargs: object())
+        monkeypatch.setattr(sidecar_module.asyncio, "run", fail_run)
+
+        exit_code = sidecar_module.run(argparse.Namespace(workspace=tmp_path))
+
+        assert exit_code == 1
+        assert "服务异常退出" in capsys.readouterr().err
+        assert sock.closed is False
 
 
 class TestApiOnlyApp:
