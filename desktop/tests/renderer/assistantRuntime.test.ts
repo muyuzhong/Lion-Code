@@ -26,7 +26,13 @@ function harness(history: unknown[] = []) {
       const url = String(input);
       const headers = new Headers(init?.headers);
       requests.push({ url, authorization: headers.get("Authorization"), body: typeof init?.body === "string" ? init.body : null });
-      return new Response(JSON.stringify(url.endsWith("/api/messages") ? history : { success: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+      const payload = url.endsWith("/api/messages") ? history
+        : url.endsWith("/api/status") ? { session_id: "s1", model: "model-a", provider_name: "anthropic", permission_mode: "default", api_configured: true, cwd: "C:/work", thinking_level: "medium", available_thinking_levels: ["off", "medium"], input_tokens: 12, output_tokens: 4, is_running: false }
+          : url.endsWith("/api/sessions") ? [{ id: "s1", startTime: null, messageCount: 2, cwd: "C:/work" }]
+            : url.endsWith("/api/models") ? [{ provider_name: "anthropic", model: "model-a" }]
+              : url.endsWith("/api/skills") ? [{ name: "review", description: "Review changes" }]
+                : { success: true };
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
     },
     createWebSocket: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
     scheduleReconnect: (callback) => { reconnect = callback; return 7; },
@@ -73,6 +79,19 @@ describe("Lion assistant runtime adapter", () => {
       { action: "plan_approval_response", requestId: "p1", choice: "keep-planning", feedback: "more" },
       { action: "cancel" },
     ]);
+  });
+
+  it("projects desktop metadata and refreshes it after Provider and Thinking writes", async () => {
+    const h = harness([]);
+    const adapter = new LionAssistantRuntimeAdapter(h.bootstrap);
+    await adapter.start();
+    await vi.waitFor(() => expect(adapter.getSnapshot().status?.session_id).toBe("s1"));
+    expect(adapter.getSnapshot().sessions[0].messageCount).toBe(2);
+    expect(adapter.getSnapshot().skills[0].name).toBe("review");
+    expect(await adapter.configureProvider({ provider: "anthropic", model: "model-a", api_key: "secret" })).toBe(true);
+    expect(await adapter.setThinkingLevel("medium")).toBe(true);
+    expect(h.requests.find((request) => request.url.endsWith("/api/config/provider"))?.body).toBe(JSON.stringify({ provider: "anthropic", model: "model-a", api_key: "secret" }));
+    expect(h.requests.find((request) => request.url.endsWith("/api/thinking"))?.body).toBe(JSON.stringify({ level: "medium" }));
   });
 
   it("folds WS events and refreshes canonical history before reconnect", async () => {

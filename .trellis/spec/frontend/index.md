@@ -8,6 +8,7 @@
 - [runtime-events-contract.md](runtime-events-contract.md) — 运行时事件契约：重试/压缩两层事件架构、状态条生命周期、耗时统计边界（改 runtimeNotice/metrics/轨迹面板必读）
 - [toolview-display-contract.md](toolview-display-contract.md) — ToolView 展示契约：diff hunk 跨层格式依赖、agent 精确判定、分类耦合与 ANSI 解析边界
 - [desktop-assistant-runtime-contract.md](desktop-assistant-runtime-contract.md) — 桌面 REST/WS 到 assistant-ui 的单一 Runtime、重连隔离与 fail-closed 契约
+- [desktop-chat-experience.md](desktop-chat-experience.md) — 桌面工作区/会话导航、Provider 设置、主题、审批与可访问性契约
 
 ## Pre-Development Checklist
 
@@ -15,6 +16,7 @@
 - [ ] 改队列相关代码前读 [chat-queue-contract.md](chat-queue-contract.md)；改状态条/统计/思考耗时前读 [runtime-events-contract.md](runtime-events-contract.md)
 - [ ] 协议层（chatProtocol.ts）改动必须配套 chatProtocol.test.ts 契约级单测
 - [ ] 桌面聊天协议或 transport 改动前读 [desktop-assistant-runtime-contract.md](desktop-assistant-runtime-contract.md)，并覆盖 history、重连、审批和严格解码
+- [ ] 桌面信息架构、设置或审批 UI 改动前读 [desktop-chat-experience.md](desktop-chat-experience.md)，保持 Python 状态所有权与安全默认行为
 - [ ] 不新增依赖前先确认现有依赖（lucide-react 图标、既有工具函数）无法满足
 
 ## Quality Check

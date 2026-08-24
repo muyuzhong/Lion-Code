@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import type { BackendEndpoint, BootstrapState } from "../../shared/types";
-import { LionRuntimeProvider } from "./assistantRuntime";
-import { browserBackendBootstrap } from "./backend";
-import { ChatThread } from "./ChatThread";
+import { useEffect, useState } from "react";
+import type { BootstrapState } from "../../shared/types";
+import { WorkspaceShell } from "./WorkspaceShell";
 
 export function App() {
   const [state, setState] = useState<BootstrapState>({ phase: "idle" });
@@ -19,27 +17,26 @@ export function App() {
   };
   const connect = async (path: string) => window.lionDesktop.connectWorkspace(path);
 
-  if (state.phase === "ready") return <ReadyChat endpoint={state.endpoint} />;
+  if (state.phase === "ready") return <WorkspaceShell endpoint={state.endpoint} workspacePath={state.workspacePath} />;
 
-  return <main>
-    <p className="eyebrow">LION DESKTOP</p>
-    <h1>{headline(state)}</h1>
-    <p className="detail">{detail(state)}</p>
-    {state.phase === "failed" || state.phase === "exited" ? <pre>{state.failure.stderrTail ?? state.failure.message}</pre> : null}
-    <div className="actions">
-      <button onClick={() => void choose()} disabled={state.phase === "starting"}>选择工作区</button>
-      {state.phase !== "idle" ? <button className="secondary" onClick={() => void window.lionDesktop.disconnect()}>断开</button> : null}
-    </div>
-    {recent.length > 0 && state.phase === "idle" ? <section><h2>最近工作区</h2>{recent.map((path) => <button className="recent" key={path} onClick={() => void connect(path)}>{path}</button>)}</section> : null}
+  return <main className="boot-shell">
+    <section className="boot-copy">
+      <div className="brand-lockup boot-brand"><span className="brand-mark" aria-hidden="true">L</span><div><strong>Lion</strong><small>desktop agent</small></div></div>
+      <p className="eyebrow">WINDOWS WORKSPACE</p>
+      <h1>{headline(state)}</h1>
+      <p className="detail">{detail(state)}</p>
+      <div className="actions">
+        <button onClick={() => void choose()} disabled={state.phase === "starting"}>{state.phase === "idle" ? "选择工作区" : "选择其他工作区"}</button>
+        {state.phase !== "idle" ? <button className="button-quiet" onClick={() => void window.lionDesktop.disconnect()}>停止连接</button> : null}
+      </div>
+    </section>
+    <section className="boot-activity" aria-live="polite">
+      <span className={`boot-orbit ${state.phase}`} aria-hidden="true"><i /><i /><i /></span>
+      <div><span className="workspace-kicker">连接状态</span><strong>{state.phase === "starting" ? "正在创建本机安全会话" : headline(state)}</strong></div>
+      {state.phase === "failed" || state.phase === "exited" ? <pre>{state.failure.stderrTail ?? state.failure.message}</pre> : null}
+    </section>
+    {recent.length > 0 && state.phase === "idle" ? <section className="recent-workspaces"><h2>最近打开</h2>{recent.map((path) => <button className="recent" key={path} onClick={() => void connect(path)}><span>{path.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1)}</span><small>{path}</small></button>)}</section> : null}
   </main>;
-}
-
-function ReadyChat({ endpoint }: { endpoint: BackendEndpoint }) {
-  const bootstrap = useMemo(() => browserBackendBootstrap(endpoint), [endpoint.baseUrl, endpoint.capability]);
-  return <>
-    <LionRuntimeProvider bootstrap={bootstrap}><ChatThread /></LionRuntimeProvider>
-    <button className="disconnect-floating" onClick={() => void window.lionDesktop.disconnect()}>断开工作区</button>
-  </>;
 }
 
 function headline(state: BootstrapState): string {

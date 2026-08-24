@@ -11,6 +11,11 @@ import {
   LionRestClient,
   LionWebSocketTransport,
   type BackendBootstrap,
+  type ModelChoice,
+  type ProviderConfiguration,
+  type ServerStatus,
+  type SessionSummary,
+  type SkillSummary,
   type TransportEvent,
 } from "./backend";
 
@@ -20,6 +25,11 @@ export interface LionRuntimeSnapshot {
   protocol: ChatProtocolState;
   transportStatus: LionTransportStatus;
   transportError: string | null;
+  status: ServerStatus | null;
+  sessions: SessionSummary[];
+  models: ModelChoice[];
+  skills: SkillSummary[];
+  metadataError: string | null;
 }
 
 type Listener = () => void;
@@ -33,6 +43,11 @@ export class LionAssistantRuntimeAdapter {
     protocol: initialChatProtocolState,
     transportStatus: "idle",
     transportError: null,
+    status: null,
+    sessions: [],
+    models: [],
+    skills: [],
+    metadataError: null,
   };
   private readonly listeners = new Set<Listener>();
   private readonly rest: LionRestClient;
@@ -61,6 +76,7 @@ export class LionAssistantRuntimeAdapter {
     const generation = ++this.connectionGeneration;
     this.setTransport("loading", null);
     const loaded = await this.loadCanonicalHistory();
+    void this.refreshMetadata();
     if (this.active && loaded && generation === this.connectionGeneration) this.transport.connect();
   }
 
@@ -88,9 +104,48 @@ export class LionAssistantRuntimeAdapter {
     try {
       await this.rest.resumeSession(sessionId);
       const loaded = await this.loadCanonicalHistory();
+      await this.refreshMetadata();
       if (this.active && loaded && generation === this.connectionGeneration) this.transport.connect();
     } catch (error) {
       this.setTransport("error", errorMessage(error));
+    }
+  }
+
+  async createSession(): Promise<void> {
+    if (this.snapshot.protocol.isStreaming) return;
+    const generation = ++this.connectionGeneration;
+    this.controlledDisconnect = true;
+    if (!this.transport.close()) this.controlledDisconnect = false;
+    this.setTransport("loading", null);
+    try {
+      await this.rest.newSession();
+      this.dispatch({ type: "replace_history", messages: [] });
+      await this.refreshMetadata();
+      if (this.active && generation === this.connectionGeneration) this.transport.connect();
+    } catch (error) {
+      this.setTransport("error", errorMessage(error));
+    }
+  }
+
+  async configureProvider(configuration: ProviderConfiguration): Promise<boolean> {
+    try {
+      await this.rest.configureProvider(configuration);
+      await this.refreshMetadata();
+      return true;
+    } catch (error) {
+      this.setMetadataError(errorMessage(error));
+      return false;
+    }
+  }
+
+  async setThinkingLevel(level: string): Promise<boolean> {
+    try {
+      await this.rest.setThinkingLevel(level);
+      await this.refreshMetadata();
+      return true;
+    } catch (error) {
+      this.setMetadataError(errorMessage(error));
+      return false;
     }
   }
 
@@ -156,6 +211,21 @@ export class LionAssistantRuntimeAdapter {
     }
   }
 
+  private async refreshMetadata(): Promise<void> {
+    try {
+      const [status, sessions, models, skills] = await Promise.all([
+        this.rest.fetchStatus(),
+        this.rest.fetchSessions(),
+        this.rest.fetchModels(),
+        this.rest.fetchSkills(),
+      ]);
+      this.snapshot = { ...this.snapshot, status, sessions, models, skills, metadataError: null };
+      this.emit();
+    } catch (error) {
+      this.setMetadataError(errorMessage(error));
+    }
+  }
+
   private handleTransport(event: TransportEvent): void {
     if (!this.active) return;
     switch (event.type) {
@@ -211,6 +281,11 @@ export class LionAssistantRuntimeAdapter {
 
   private setTransport(transportStatus: LionTransportStatus, transportError: string | null): void {
     this.snapshot = { ...this.snapshot, transportStatus, transportError };
+    this.emit();
+  }
+
+  private setMetadataError(metadataError: string | null): void {
+    this.snapshot = { ...this.snapshot, metadataError };
     this.emit();
   }
 
