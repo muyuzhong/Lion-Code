@@ -1,0 +1,4 @@
+{"file": "tests/application/test_config_credentials.py", "reason": "resolve_api_credentials 四象限回归（无凭证/纯 config/config+env key/env 覆盖）。"}
+{"file": "tests/session_runtime/test_recorder.py", "reason": "惰性落盘与 ensure_on_disk 例外回归。"}
+{"file": "tests/integration/test_application_coding_session.py", "reason": "未配置 API 时事件流含 error assistant 消息（R2 回归）。"}
+{"file": "docs/quality-baseline-2026-08.json", "reason": "ruff/mypy 违规不得超基线；新增项需随代码提交。"}

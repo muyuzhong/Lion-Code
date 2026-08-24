@@ -144,7 +144,10 @@ commands through narrow ports:
 - `PlanRuntime` owns Plan state.
 - `SessionRuntime` owns session lifecycle and the recorder; `SessionRepository`
   replays JSONL and `SessionRecorder` appends events. Provider configuration
-  changes are recorded through the SessionRuntime recorder port.
+  changes are recorded through the SessionRuntime recorder port. `SessionRecorder`
+  initializes lazily: a brand-new session writes no JSONL until its first
+  `record_message`; only explicit retention paths (legacy migration) force
+  on-disk metadata via `ensure_on_disk`.
 - `ContextRuntime` owns the context manager, the provider-derived compactor,
   the model-limits cache, `effective_window`, and all compaction decision
   state (compaction flag, in-flight compaction task).
