@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from full_agent import build_full_agent_harness, execute_tool
-
 from integration.test_agent_core_runtime import _stop_event
+
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.types import ToolResult
 
