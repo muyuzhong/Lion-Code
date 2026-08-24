@@ -66,12 +66,17 @@ def resolve_api_credentials(
     allow_placeholder: bool = False,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
-    """按优先级解析 API 凭证：环境变量 > 本地配置 > 占位端点。"""
+    """按优先级解析 API 凭证：环境变量 > 本地配置 > 占位端点。
+
+    env 只覆盖 api_key 与对应 base_url（同时决定 Provider 通道）；已保存的
+    ``model`` 始终从本地配置读回，避免 env 凭证存在时重启丢失模型选择。
+    """
     source_env = os.environ if env is None else env
+    saved = load_api_config(config_path)
+
     api_key: str | None = None
     api_base: str | None = None
     use_openai = False
-    model: str | None = None
 
     if source_env.get("OPENAI_API_KEY") and source_env.get("OPENAI_BASE_URL"):
         api_key = source_env["OPENAI_API_KEY"]
@@ -86,13 +91,14 @@ def resolve_api_credentials(
         api_base = source_env.get("OPENAI_BASE_URL") or None
         use_openai = True
 
+    # model 独立于凭证来源：env 只覆盖通道与 key，模型选择始终取保存值。
+    model = str(saved["model"]) if saved.get("model") else None
+
     if api_key is None:
-        saved = load_api_config(config_path)
         if saved.get("api_key"):
             api_key = saved["api_key"]
             use_openai = saved.get("provider") == "openai"
             api_base = saved.get("base_url") or None
-            model = saved.get("model") or None
 
     if api_key is None and allow_placeholder:
         use_openai = True
