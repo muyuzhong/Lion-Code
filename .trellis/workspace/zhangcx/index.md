@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 62
-- **Last Active**: 2026-08-24
+- **Total Sessions**: 63
+- **Last Active**: 2026-08-25
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1903 | Active |
+| `journal-1.md` | ~1924 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 63 | 2026-08-25 | 修复桌面客户端 API 错误提示与配置保存卡住 | `d243ef82` | `master` |
 | 62 | 2026-08-24 | 完成桌面 UI 设计 | `0cd9299`, `d712fbf` | `muyuzhong/pi-desktop-ui-port` |
 | 61 | 2026-08-24 | 完成桌面切换与 Web 删除 | `f9659c5`, `06a3b3f`, `f4d4aaa` | `muyuzhong/desktop-cutover-web-removal` |
 | 60 | 2026-08-24 | 完成 Lion 桌面聊天体验 | `1eab764`, `d32a996` | `muyuzhong/lion-desktop-chat-experience` |

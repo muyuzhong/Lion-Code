@@ -51,6 +51,20 @@ describe("Lion chat protocol", () => {
     expect(state.messages[0]).toMatchObject({ content: "hello", reasoning: "think", isStreaming: true });
   });
 
+  it("keeps the unconfigured API error in reducer state", () => {
+    const errorMessage = "API 未配置：请在设置面板中配置 Provider 与模型。";
+    const message = {
+      role: "assistant" as const,
+      content: [{ type: "text" as const, text: errorMessage }],
+      stopReason: "error" as const,
+      errorMessage,
+    };
+    let state = apply(initialChatProtocolState, { type: "message_start", message });
+    state = apply(state, { type: "message_end", message });
+
+    expect(state.messages.at(-1)).toMatchObject({ content: errorMessage, error: errorMessage, isStreaming: false });
+  });
+
   it("pairs parallel tools by toolCallId even when they finish out of order", () => {
     let state = apply(initialChatProtocolState, { type: "tool_execution_start", toolCallId: "a", toolName: "read", args: { path: "a" } });
     state = apply(state, { type: "tool_execution_start", toolCallId: "b", toolName: "exec", args: { cmd: "test" } });
