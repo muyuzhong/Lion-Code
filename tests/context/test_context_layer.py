@@ -287,6 +287,19 @@ def test_git_status_layer_reads_workspace_on_every_render() -> None:
     assert git_output.call_count == 4
 
 
+def test_git_status_layer_ignores_ancestor_repository(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    view = ContextView.from_messages([], current_time="now")
+
+    with patch("lion_code.capabilities.git_status.capability.subprocess.run") as run:
+        rendered = GitStatusLayer().render(view)
+
+    assert "Branch: (detached)" in rendered
+    assert "Dirty files: 0" in rendered
+    assert "- clean" in rendered
+    run.assert_not_called()
+
+
 def test_git_status_layer_bounds_dirty_file_list() -> None:
     view = ContextView.from_messages([], current_time="now")
     with patch(

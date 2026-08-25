@@ -20,7 +20,9 @@ class GitStatusLayer:
         del view
         cwd = Path.cwd()
         branch = _git_output(cwd, "branch", "--show-current") or "(detached)"
-        status = _git_output(cwd, "status", "--porcelain", "--untracked-files=all")
+        # 不扫描未跟踪文件；workspace 可能位于用户目录的上层 Git 仓库内，
+        # 递归扫描会阻塞同步 ContextLayer，导致模型请求无法启动。
+        status = _git_output(cwd, "status", "--porcelain", "--untracked-files=no")
         paths = _status_paths(status)
 
         lines = [
@@ -45,6 +47,9 @@ def create_git_status_capability() -> CapabilitySpec:
 
 
 def _git_output(cwd: Path, *arguments: str) -> str:
+    # 只读取 workspace 自身的仓库，避免把用户目录的祖先仓库当成项目并扫描整棵树。
+    if not (cwd / ".git").exists():
+        return ""
     try:
         result = subprocess.run(
             ["git", *arguments],

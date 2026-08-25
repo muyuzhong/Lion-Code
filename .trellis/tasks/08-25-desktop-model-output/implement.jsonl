@@ -1,0 +1,12 @@
+{"file":".trellis/spec/guides/index.md","reason":"加载跨层与代码复用思考指南入口。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"实现 config → Provider → WebSocket → Renderer 的完整闭环，避免只修单层。"}
+{"file":".trellis/spec/backend/index.md","reason":"确认 backend 运行时、错误处理和 sidecar 规范入口。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"遵守 Provider 结构化错误、应用流异常、取消和终态事件边界。"}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"保持 Python canonical Session/Provider ownership 与 Runtime 分层边界。"}
+{"file":".trellis/spec/backend/desktop-sidecar.md","reason":"遵守隔离 state home、sidecar 生命周期、stderr 脱敏和真实 Electron 测试约束。"}
+{"file":".trellis/spec/backend/secret-boundary.md","reason":"确保 API key、capability 和认证信息不进入错误、日志或测试输出。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"遵守 Python 定向测试、静态检查和提交前质量门禁。"}
+{"file":".trellis/spec/frontend/index.md","reason":"确认 Renderer 协议、Runtime 和桌面聊天开发前检查清单。"}
+{"file":".trellis/spec/frontend/desktop-assistant-runtime-contract.md","reason":"保持 REST history、WS 严格解码、连接代次和 fail-closed 投影契约。"}
+{"file":".trellis/spec/frontend/desktop-chat-experience.md","reason":"保持 Provider 状态由 Python 拥有、assistant error 可见和 composer idle 恢复。"}
+{"file":".trellis/spec/frontend/runtime-events-contract.md","reason":"保持 runtimeNotice、metrics 和流终态的清除语义。"}

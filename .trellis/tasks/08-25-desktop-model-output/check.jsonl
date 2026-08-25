@@ -1,0 +1,11 @@
+{"file":".trellis/spec/guides/index.md","reason":"检查共享思考指南与本次跨层修复的一致性。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查存储、Provider、WebSocket、Renderer 数据流与错误传播。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查所有 Provider/Session/bridge 错误是否保持结构化且不吞异常。"}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"检查状态 ownership、Kernel/Runtime/Application 依赖方向和架构门禁。"}
+{"file":".trellis/spec/backend/desktop-sidecar.md","reason":"检查真实 sidecar、回归测试、stderr 和生命周期约束。"}
+{"file":".trellis/spec/backend/secret-boundary.md","reason":"检查错误诊断与测试是否泄露 API key/capability。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"执行项目 Python 质量和测试门禁。"}
+{"file":".trellis/spec/frontend/index.md","reason":"执行 Renderer quality check 与协议测试要求。"}
+{"file":".trellis/spec/frontend/desktop-assistant-runtime-contract.md","reason":"检查严格 wire decoder、history/reconnect 和 assistant Runtime 投影。"}
+{"file":".trellis/spec/frontend/desktop-chat-experience.md","reason":"检查 assistant error、composer idle、Provider 设置和真实 sidecar 验收。"}
+{"file":".trellis/spec/frontend/runtime-events-contract.md","reason":"检查失败与终态对 runtimeNotice/metrics/isStreaming 的清理。"}

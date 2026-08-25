@@ -51,6 +51,10 @@ API-only adapter; it must not locate, mount, or fall back to a browser frontend.
 - `LION_SIDECAR_STATE_HOME` optionally isolates sidecar-owned configuration and
   session state inside the child process; Electron itself must not receive a
   substituted `HOME`/`USERPROFILE`.
+- Synchronous Git context layers may inspect only the selected workspace's own
+  `.git` entry. They must not discover an ancestor repository, and status
+  collection uses `--porcelain --untracked-files=no`; an ordinary workspace
+  without `.git` omits Git context and continues to serve Provider requests.
 
 ## 4. Validation & Error Matrix
 
@@ -63,6 +67,7 @@ API-only adapter; it must not locate, mount, or fall back to a browser frontend.
 | a second valid ready record appears | `failed / duplicate_ready`; child terminated |
 | ready timeout expires | `failed / ready_timeout`; child terminated |
 | ready child exits unexpectedly | `exited / sidecar_exited`; endpoint cleared |
+| workspace has no own `.git` entry | omit Git context; do not scan ancestor repositories or block the event loop |
 | IPC sender ID or frame origin differs | invocation rejected |
 | protocol host/path or development origin escapes | HTTP 404; no filesystem/network escape |
 
@@ -74,10 +79,13 @@ forbidden because a split token suffix would no longer match exact redaction.
 
 - Good: two workspace connections arrive concurrently; operations serialize,
   the previous child exits, and Main owns exactly the last child.
+- Good: a workspace under a user's larger Git repository omits ancestor Git
+  context and still reaches the configured Provider request.
 - Base: one absolute workspace starts, emits one ready record, and Renderer gets
   an in-memory loopback endpoint through checked IPC.
-- Bad: `lion://app//evil.example/x` becomes a remote development fetch, an empty
-  IPC path resolves to Electron cwd, or a second start overwrites a live child.
+- Bad: `git status --porcelain --untracked-files=all` runs from a workspace
+  without its own `.git` and recursively scans the user's ancestor repository,
+  blocking the sidecar event loop before the Provider request.
 
 ## 6. Tests Required
 
@@ -87,6 +95,9 @@ forbidden because a split token suffix would no longer match exact redaction.
   redaction across the tail boundary.
 - Python: API-only app, loopback dynamic port, stdout-only ready, capability not
   in argv, stdin shutdown, and clean real-process exit.
+- Python context regression: an empty workspace nested under an ancestor Git
+  repository must not invoke `subprocess.run` for Git context; the real sidecar
+  test must still observe the local Provider request and assistant output.
 - Playwright: secure `lion://app` bootstrap, absence of Renderer Node/raw IPC,
   fake-sidecar switch/reap behavior, no session storage credential, and an
   explicit real Python sidecar project.
@@ -110,11 +121,21 @@ const target = new URL(new URL(request.url).pathname, devServerUrl);
 this.child = spawn(command, args); // concurrent starts can orphan the old child
 ```
 
+```python
+status = _git_output(cwd, "status", "--porcelain", "--untracked-files=all")
+```
+
 Correct:
 
 ```typescript
 const target = resolveDevProxyUrl(rendererRoot, request.url, devServerUrl);
 return this.enqueue(() => this.startOwned(workspacePath, command, args));
+```
+
+```python
+if not (cwd / ".git").exists():
+    return ""
+status = _git_output(cwd, "status", "--porcelain", "--untracked-files=no")
 ```
 
 The first form treats a trusted custom-scheme request as an unchecked network

@@ -264,6 +264,8 @@ def load_claude_md() -> str:
 
 def get_git_context() -> str:
     """获取分支、近期提交和工作区状态；非 Git 目录或超时时返回空上下文。"""
+    if not (Path.cwd() / ".git").exists():
+        return ""
     try:
 
         def run_git(args: list[str]) -> str:
