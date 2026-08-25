@@ -1,4 +1,4 @@
-import { Settings2, X } from "lucide-react";
+import { Eye, EyeOff, Settings2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { BackendEndpoint } from "../../shared/types";
 import { LionRuntimeProvider, useLionRuntime } from "./assistantRuntime";
@@ -120,7 +120,7 @@ function Workspace({ workspacePath }: { workspacePath: string }) {
   );
 }
 
-function ProviderSettings({ onClose }: { onClose: () => void }) {
+export function ProviderSettings({ onClose }: { onClose: () => void }) {
   const { adapter, snapshot } = useLionRuntime();
   const status = snapshot.status;
   const providerName = status?.provider_name === "openai-compatible" ? "openai" : "anthropic";
@@ -128,7 +128,25 @@ function ProviderSettings({ onClose }: { onClose: () => void }) {
   const [model, setModel] = useState(status?.model ?? "");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  const [loadingConfiguration, setLoadingConfiguration] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    setApiKeyVisible(false);
+    setLoadingConfiguration(true);
+    void adapter.fetchProviderConfiguration().then((configuration) => {
+      if (!mounted || !configuration) return;
+      setProvider(configuration.provider);
+      setModel(configuration.model);
+      setApiKey(configuration.api_key);
+      setBaseUrl(configuration.base_url);
+    }).finally(() => {
+      if (mounted) setLoadingConfiguration(false);
+    });
+    return () => { mounted = false; };
+  }, [adapter]);
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -143,12 +161,12 @@ function ProviderSettings({ onClose }: { onClose: () => void }) {
       <form onSubmit={(event) => void save(event)}>
         <header><span className="settings-icon" aria-hidden="true"><Settings2 size={18} /></span><div><span className="workspace-kicker">运行配置</span><h2 id="settings-title">Provider 与模型</h2></div><button className="dialog-close" type="button" aria-label="关闭设置" onClick={onClose}><X aria-hidden="true" size={17} /></button></header>
         {snapshot.metadataError ? <p className="form-error" role="alert">{snapshot.metadataError}</p> : null}
-        <label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value as "openai" | "anthropic")}><option value="anthropic">Anthropic</option><option value="openai">OpenAI compatible</option></select></label>
-        <label>模型<select value={model} onChange={(event) => setModel(event.target.value)}>{snapshot.models.map((choice) => <option key={`${choice.provider_name}:${choice.model}`} value={choice.model}>{choice.model}</option>)}</select></label>
-        <label>API key<input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={status?.api_configured ? "已配置；留空保持不变" : "输入 API key"} /></label>
-        <label>API 地址<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={provider === "openai" ? "https://api.openai.com/v1" : "可选自定义地址"} /></label>
+        <label htmlFor="provider-select">Provider<select id="provider-select" value={provider} onChange={(event) => setProvider(event.target.value as "openai" | "anthropic")}><option value="anthropic">Anthropic</option><option value="openai">OpenAI compatible</option></select></label>
+        <label htmlFor="model-select">模型<select id="model-select" value={model} onChange={(event) => setModel(event.target.value)}>{model && !snapshot.models.some((choice) => choice.model === model) ? <option value={model}>{model}</option> : null}{snapshot.models.map((choice) => <option key={`${choice.provider_name}:${choice.model}`} value={choice.model}>{choice.model}</option>)}</select></label>
+        <label htmlFor="provider-api-key">API key<div style={{ position: "relative" }}><input id="provider-api-key" type={apiKeyVisible ? "text" : "password"} autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={loadingConfiguration ? "正在读取…" : status?.api_configured ? "已配置；留空保持不变" : "输入 API key"} style={{ paddingRight: 40 }} /><button type="button" aria-label={apiKeyVisible ? "隐藏 API key" : "显示 API key"} aria-pressed={apiKeyVisible} aria-controls="provider-api-key" onClick={() => setApiKeyVisible((visible) => !visible)} style={{ position: "absolute", top: "50%", right: 5, display: "inline-flex", width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: "var(--radius-xs)", color: "var(--ds-text-muted)", transform: "translateY(-50%)" }}>{apiKeyVisible ? <EyeOff aria-hidden="true" size={16} /> : <Eye aria-hidden="true" size={16} />}</button></div></label>
+        <label htmlFor="provider-base-url">API 地址<input id="provider-base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={provider === "openai" ? "https://api.openai.com/v1" : "可选自定义地址"} /></label>
         <label>Thinking<select value={status?.thinking_level ?? "off"} onChange={(event) => void adapter.setThinkingLevel(event.target.value)}>{status?.available_thinking_levels.map((level) => <option key={level}>{level}</option>)}</select></label>
-        <footer><button type="button" className="button-quiet" onClick={onClose}>保留当前配置</button><button type="submit" disabled={saving || snapshot.protocol.isStreaming}>{saving ? "正在保存…" : "保存配置"}</button></footer>
+        <footer><button type="button" className="button-quiet" onClick={onClose}>保留当前配置</button><button type="submit" disabled={saving || loadingConfiguration || snapshot.protocol.isStreaming}>{loadingConfiguration ? "正在读取…" : saving ? "正在保存…" : "保存配置"}</button></footer>
       </form>
     </dialog>
   );

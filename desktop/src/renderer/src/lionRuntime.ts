@@ -13,6 +13,7 @@ import {
   type BackendBootstrap,
   type ModelChoice,
   type ProviderConfiguration,
+  type ProviderConfigurationResponse,
   type ServerStatus,
   type SessionSummary,
   type SkillSummary,
@@ -148,6 +149,15 @@ export class LionAssistantRuntimeAdapter {
     } catch (error) {
       this.setMetadataError(errorMessage(error));
       return false;
+    }
+  }
+
+  async fetchProviderConfiguration(): Promise<ProviderConfigurationResponse | null> {
+    try {
+      return await this.rest.fetchProviderConfiguration();
+    } catch (error) {
+      this.setMetadataError(errorMessage(error));
+      return null;
     }
   }
 

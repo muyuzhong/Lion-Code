@@ -15,8 +15,20 @@ LionRestClient.fetchSessions(): Promise<SessionSummary[]>
 LionRestClient.renameSession(sessionId: string, label: string): Promise<void>
 LionRestClient.fetchModels(): Promise<ModelChoice[]>
 LionRestClient.fetchSkills(): Promise<SkillSummary[]>
+LionRestClient.fetchProviderConfiguration(): Promise<ProviderConfigurationResponse>
 LionRestClient.configureProvider(configuration: ProviderConfiguration): Promise<void>
 LionRestClient.setThinkingLevel(level: string): Promise<void>
+```
+
+`ProviderConfigurationResponse` is the explicit settings readback contract:
+
+```typescript
+type ProviderConfigurationResponse = {
+  provider: "openai" | "anthropic";
+  model: string;
+  api_key: string;
+  base_url: string;
+};
 ```
 
 The Renderer may persist only presentation preferences such as `lion-theme`,
@@ -50,13 +62,19 @@ remain Python-owned and are refreshed from REST after writes.
   Composer 阴影。
 - REST metadata uses the existing strict response fields. A malformed status, session,
   model, or Skill response is an explicit metadata error, never a permissive cast.
+- Provider settings are read from the Python-owned `GET /api/config/provider` snapshot
+  when the surface opens. The response is capability-protected and is not folded into
+  `/api/status`, history, ordinary logs, or error text. The API key is rendered as a
+  password by default; an explicit eye action may reveal it for the current surface only.
 - Provider writes await only the canonical Python-owned write. Auxiliary metadata refresh
   runs independently after a successful write, so a slow or unavailable metadata endpoint
   cannot leave the settings save pending; refresh failures still update `metadataError`.
-- Provider forms never populate or reveal the stored API key. An empty key preserves the
-  current credential through the server's partial-update contract.
+- An empty submitted key preserves the current credential through the server's
+  partial-update contract. This task does not change the existing on-disk credential
+  persistence or add disk encryption.
 - `api_configured=false` opens the first-run Provider surface once. Closing it is allowed;
-  it must not reopen on every snapshot.
+  it must not reopen on every snapshot. Sending without a configured API must render a
+  terminal assistant error and return the composer to an idle, usable state.
 - Approval dialogs focus the safe action. Escape maps to deny for Permission and
   `keep-planning` for Plan approval.
 - Light and dark themes use the same semantic tokens. Status always has text or a label in
@@ -73,10 +91,12 @@ remain Python-owned and are refreshed from REST after writes.
 | Condition | Renderer behavior |
 | --- | --- |
 | metadata response is non-2xx or invalid | keep chat transport usable and show a diagnostic metadata error |
+| Provider configuration read is non-2xx or invalid | keep the settings surface usable and show a diagnostic metadata error |
 | Provider write succeeds while metadata refresh is pending | resolve the write and close the settings surface; keep the later metadata result diagnostic |
 | Provider/Thinking write fails | keep settings open and show the server detail |
 | active run | disable Session, Provider, and Thinking mutations |
-| `api_configured=false` | open first-run settings without exposing a credential value |
+| `api_configured=false` and a prompt is sent | render an assistant error and clear the streaming state |
+| `api_configured=false` on status refresh | open first-run settings once; do not reopen on every snapshot |
 | 1280x720 or 2560x1440 | no document-level horizontal overflow; composer and approvals remain reachable |
 | restored pane widths exceed the current display | clamp both panes and retain at least 360px for chat |
 | search has no matching session | show an explicit local empty result without mutating canonical sessions |
@@ -95,16 +115,18 @@ remain Python-owned and are refreshed from REST after writes.
 - Good: rename appends a `LabelEntry`, refreshes `/api/sessions`, and updates both sidebar
   and topbar without replacing the active assistant-ui Thread.
 - Base: no prior sessions or Skills yields instructive empty copy and a usable composer.
-- Bad: component `useState` owns a session title, API credentials are inserted into form
-  defaults, `/` suggestions bypass assistant-ui keyboard handling, or Escape implicitly
-  approves a blocking request.
+- Bad: component `useState` owns a session title, API credentials are copied into status,
+  history, logs, or error text, the settings form cannot read back its canonical values,
+  `/` suggestions bypass assistant-ui keyboard handling, or Escape implicitly approves a
+  blocking request.
 
 ## 6. Tests Required
 
 - Vitest: strict metadata decoding, metadata actions, relative-time boundaries, and the
   existing protocol/runtime suite; assert that a successful Provider write resolves while
-  an auxiliary metadata request remains pending, and that sidecar assistant errors project
-  as incomplete assistant messages.
+  an auxiliary metadata request remains pending, that Provider settings read back into a
+  masked form with an explicit reveal action, and that sidecar assistant errors project as
+  incomplete assistant messages.
 - Electron Playwright: REST history to streamed response, 1280x720 and 2560x1440 overflow
   checks, both themes, screenshots for the desktop chat state, and a Composer bounding-box
   assertion proving the short-transcript layout remains bottom-reachable. The desktop chrome
@@ -116,11 +138,20 @@ remain Python-owned and are refreshed from REST after writes.
 
 ## 7. Wrong vs Correct
 
-**Wrong:** load metadata and canonical history as one blocking `Promise.all` before opening
-WebSocket. A slow optional endpoint makes an otherwise healthy chat appear unavailable.
+**Wrong:** infer the Provider from an optional base URL, or load settings values only from
+the status projection. A saved OpenAI configuration with an empty custom URL can restart as
+the wrong Provider, and a settings reopen loses the key even though Python persisted it.
 
-**Correct:** await canonical history before connecting WebSocket, then refresh auxiliary
+**Correct:** persist an explicit Provider kind, apply the default OpenAI endpoint when no
+custom URL is stored, and read the complete Provider snapshot through a dedicated protected
+REST route. Await canonical history before connecting WebSocket, then refresh auxiliary
 metadata independently and surface its failure separately.
+
+**Wrong:** verify missing-API behavior only with a fake REST/WebSocket harness.
+
+**Correct:** keep the strict protocol unit test, and add a real preview Electron/sidecar
+scenario that sends without credentials, observes the visible assistant error, verifies the
+composer becomes usable again, saves settings, and reads them back after sidecar restart.
 
 **Wrong:** rename only the visible row or build an ad-hoc `/` menu with independent key
 handling. The title disappears after refresh and keyboard/IME behavior diverges from the

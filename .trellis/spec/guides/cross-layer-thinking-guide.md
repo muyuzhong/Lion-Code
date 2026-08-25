@@ -325,3 +325,30 @@ state correctly, but several commands still re-parsed event payload fields with
 local casts. The fix was to make the core event layer own `ThreadChannelEvent`
 and `isThreadEvent`, make `reduceChannelMetadata` the only channel metadata
 projection, and make `reduceThreads` the only thread replay reducer.
+
+## Desktop Provider Configuration and Streaming Errors
+
+For settings and chat behavior that crosses the local config file, sidecar
+composition, protected REST, WebSocket events, and Renderer state, use an
+explicit round trip instead of deriving one layer's state from another:
+
+```text
+config.json → resolve credentials → ProviderController
+           → GET /api/config/provider → strict Renderer decoder → masked form
+prompt → Session/Agent event → WebSocket bridge → strict protocol reducer
+       → assistant error + idle composer
+```
+
+The failure pattern to avoid is a partial fix at one boundary: a save request
+may finish while the form has no readback path, and a fake transport test may
+pass while the real sidecar still selects the wrong Provider after restart.
+Before closing a bug in this flow, verify:
+
+- Provider kind is explicit even when an OpenAI custom base URL is empty.
+- Settings open by reading the canonical Provider snapshot; the key is masked by
+  default and is absent from status, history, logs, and error details.
+- A successful canonical write is not blocked by auxiliary metadata refresh.
+- Missing credentials produce a terminal assistant error and clear the Renderer
+  streaming flag.
+- At least one real Electron + Python sidecar preview test covers send-without-
+  credentials, settings readback, and restart persistence.

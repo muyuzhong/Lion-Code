@@ -30,6 +30,7 @@ from .models import (
     ChatMessageDTO,
     ModelChoiceItem,
     ProviderConfigRequest,
+    ProviderConfigResponse,
     RenameSessionRequest,
     ResumeSessionRequest,
     ServerStatusResponse,
@@ -325,6 +326,16 @@ def create_app(
             ModelChoiceItem(provider_name=c.provider_name, model=c.model)
             for c in session.available_model_choices
         ]
+
+    @api.get("/config/provider", response_model=ProviderConfigResponse)
+    async def get_provider_config() -> ProviderConfigResponse:
+        snapshot = session.get_provider_config()
+        return ProviderConfigResponse(
+            provider="openai" if snapshot.get("use_openai") else "anthropic",
+            model=str(snapshot.get("model") or session.model),
+            api_key=str(snapshot.get("api_key") or ""),
+            base_url=str(snapshot.get("base_url") or ""),
+        )
 
     @api.post("/config/provider")
     async def configure_provider(body: ProviderConfigRequest) -> dict[str, Any]:
