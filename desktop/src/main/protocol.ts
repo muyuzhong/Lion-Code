@@ -17,6 +17,17 @@ const CONTENT_SECURITY_POLICY = [
   "frame-ancestors 'none'",
 ].join("; ");
 
+// dev 模式下 lion:// 页面由 vite dev server 代理：HMR websocket 按协议相对
+// 解析为 ws://app/...，@vitejs/plugin-react 的 preamble 以内联 script 注入。
+// 生产模式走文件协议不涉及，故仅在 dev 放宽这两项。
+const DEV_CONTENT_SECURITY_POLICY = CONTENT_SECURITY_POLICY.replace(
+  "script-src 'self' lion:",
+  "script-src 'self' lion: 'unsafe-inline'",
+).replace(
+  "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*",
+  "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* ws://app:*",
+);
+
 const MIME_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -32,7 +43,7 @@ export function registerLionProtocol(rendererRoot: string, devServerUrl?: string
       if (devServerUrl) {
         const response = await net.fetch(resolveDevProxyUrl(rendererRoot, request.url, devServerUrl));
         const headers = new Headers(response.headers);
-        headers.set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+        headers.set("Content-Security-Policy", DEV_CONTENT_SECURITY_POLICY);
         return new Response(response.body, { status: response.status, headers });
       }
       const filePath = resolveRendererPath(rendererRoot, request.url);
