@@ -157,6 +157,23 @@ def test_get_status() -> None:
     assert "available_thinking_levels" in data
 
 
+def test_get_provider_config_returns_explicit_snapshot_without_status_key() -> None:
+    session, _ = _build_test_session()
+    client = _build_client(session)
+
+    response = client.get("/api/config/provider")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "api_key": "sk-old",
+        "base_url": "https://api.test/v1",
+    }
+    status = client.get("/api/status")
+    assert "sk-old" not in status.text
+
+
 def test_list_and_resume_sessions() -> None:
     session, backend = _build_test_session()
     client = _build_client(session)
@@ -400,6 +417,15 @@ def test_configure_provider_model_only_keeps_credentials(
     assert saved["provider"] == "openai"
     assert saved["base_url"] == "https://api.test/v1"
 
+    read_back = client.get("/api/config/provider")
+    assert read_back.status_code == 200
+    assert read_back.json() == {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "api_key": "sk-old",
+        "base_url": "https://api.test/v1",
+    }
+
 
 def test_configure_provider_same_provider_with_empty_key_succeeds(
     isolated_config: Path,
@@ -510,15 +536,18 @@ def test_protected_rest_requires_exact_local_access() -> None:
             "Origin": _VITE_ORIGIN,
         },
     )
+    missing_config = client.get("/api/config/provider")
 
     assert missing.status_code == 401
     assert wrong.status_code == 401
     assert foreign_origin.status_code == 403
     assert foreign_host.status_code == 403
     assert vite_origin.status_code == 200
+    assert missing_config.status_code == 401
     for response in (missing, wrong, foreign_origin, foreign_host):
         assert _CAPABILITY not in response.text
         assert _WRONG_CAPABILITY not in response.text
+    assert "sk-old" not in missing_config.text
 
 
 def test_cors_allows_only_exact_loopback_origins() -> None:

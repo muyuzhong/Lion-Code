@@ -129,7 +129,10 @@ class TestParseArgs:
                 },
                 ("anthropic", "https://anthropic", False, None),
             ),
-            ({"OPENAI_API_KEY": "openai"}, ("openai", None, True, None)),
+            (
+                {"OPENAI_API_KEY": "openai"},
+                ("openai", "https://api.openai.com/v1", True, None),
+            ),
         ],
     )
     def test_environment_credentials_take_precedence(self, tmp_path, env, expected):
@@ -249,6 +252,49 @@ class TestParseArgs:
             "api_key": "key",
             "api_base": None,
             "anthropic_base_url": "https://anthropic",
+        }
+
+    def test_build_session_reconstructs_saved_openai_without_base_url(
+        self, tmp_path, monkeypatch
+    ):
+        import lion_code.application.session as session_module
+        import lion_code.composition.full_product as composition_module
+        import lion_code.config as config_module
+        from lion_code.config import save_api_config
+        from lion_code.sidecar import build_session
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        config_path = tmp_path / "state" / "config.json"
+        save_api_config(
+            provider="openai",
+            model="gpt-5",
+            api_key="sk-config",
+            path=config_path,
+        )
+        monkeypatch.setattr(config_module, "CONFIG_PATH", config_path)
+        captured = {}
+        backend = object()
+        monkeypatch.setattr(
+            composition_module,
+            "build_full_coding_backend",
+            lambda **kwargs: captured.update(kwargs) or backend,
+        )
+        monkeypatch.setattr(
+            session_module,
+            "LionCodingSession",
+            lambda **kwargs: kwargs,
+        )
+        monkeypatch.chdir(tmp_path)
+
+        session = build_session(workspace)
+
+        assert session == {"backend": backend, "terminal_output": False}
+        assert captured == {
+            "model": "gpt-5",
+            "api_key": "sk-config",
+            "api_base": "https://api.openai.com/v1",
+            "anthropic_base_url": None,
         }
 
     def test_apply_state_home_without_override_is_a_noop(self, monkeypatch):

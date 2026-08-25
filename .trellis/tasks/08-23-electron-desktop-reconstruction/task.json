@@ -23,7 +23,8 @@
     "08-23-assistant-ui-protocol-adapter",
     "08-23-lion-desktop-chat-experience",
     "08-23-desktop-cutover-web-removal",
-    "08-24-pi-desktop-ui-port"
+    "08-24-pi-desktop-ui-port",
+    "08-25-desktop-config-session-recovery"
   ],
   "parent": null,
   "relatedFiles": [],

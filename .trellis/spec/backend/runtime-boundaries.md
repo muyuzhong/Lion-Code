@@ -379,6 +379,9 @@ def create_app(
     port: int = 8000,
 ) -> FastAPI: ...
 
+GET /api/config/provider -> ProviderConfigResponse
+POST /api/config/provider <- ProviderConfigRequest
+
 ```
 
 The CLI has no Web startup flags. Electron starts `lion-code-sidecar` with a
@@ -402,6 +405,14 @@ WebSocket protocols: lion-code, lion-code-capability.<token>
 - Only `/api/health` is public. Status, messages, sessions,
   provider/model settings, skills, thinking, and Agent controls require the
   capability. FastAPI OpenAPI/docs routes remain disabled.
+- `GET /api/config/provider` reads the ProviderController snapshot through the
+  application session port. It is the only settings readback path for the API key;
+  `/api/status`, session history, ordinary logs, and error details do not contain the
+  credential. Renderer settings mask the returned key by default and reveal it only by
+  an explicit local UI action. This does not change the existing disk persistence policy.
+- An OpenAI Provider remains OpenAI-compatible when its saved custom base URL is empty:
+  configuration resolution supplies `https://api.openai.com/v1` before sidecar
+  composition, rather than inferring Provider kind from whether a URL happens to exist.
 - REST validates Host, any supplied Origin, and Bearer capability at the Server
   entry point. WebSocket validates Host, required Origin, and both offered
   subprotocol values before `accept()` and before binding interaction callbacks.
@@ -444,6 +455,8 @@ WebSocket protocols: lion-code, lion-code-capability.<token>
 | WS disconnect during a run or notice send | Collect all bridge-owned tasks, unbind callbacks, then release the lease |
 | Malformed or snake-case server event in the Renderer | Reject at the decoder and expose a terminal protocol error |
 | Reconnect history responses complete out of order | Apply only the newest canonical `/api/messages` response |
+| GET `/api/config/provider` succeeds | Return the canonical Provider/model/base URL/key snapshot without adding it to status or history |
+| GET `/api/config/provider` is missing capability or malformed at Renderer | Reject the request/response and show a metadata diagnostic; never keep settings in a pending state |
 | Invalid capability passed to `create_app` | `ValueError` before route construction |
 | GET `/` | HTTP 404; the API app never mounts static content |
 
@@ -471,6 +484,10 @@ WebSocket protocols: lion-code, lion-code-capability.<token>
   prompt rejection, second-owner rejection/release, idempotent disconnect, and a
   run waiting behind a blocked notice send. Compact success notices come from the
   Session owner and must not be duplicated by the bridge.
+- Server tests assert protected Provider configuration readback, save-then-read
+  round trips, and the absence of the key from status. A real Electron/sidecar
+  preview test asserts the missing-API assistant error reaches the UI and clears
+  streaming, then verifies settings survive sidecar restart.
 - Desktop protocol tests assert canonical camelCase decoding, parallel tool
   correlation/result text/error state, terminal provider/server/protocol errors,
   final-message reconciliation, latest-request reconnect replacement, and typed

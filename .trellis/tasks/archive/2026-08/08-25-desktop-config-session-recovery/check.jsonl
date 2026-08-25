@@ -1,0 +1,7 @@
+{"file":".trellis/spec/frontend/desktop-chat-experience.md","reason":"检查新 Provider 读取与设置 UX 契约是否与 Python canonical ownership、错误终态一致。"}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"检查配置读取仍通过 application/server adapter，不把 Renderer 变成 Provider 状态 owner。"}
+{"file":".trellis/spec/backend/secret-boundary.md","reason":"检查 API key 仅在明确的本机 capability 配置读取路径返回，不进入 status、日志或错误。"}
+{"file":"lion_code/config.py","reason":"检查 env/config/default base URL 修复没有破坏既有凭证优先级和 CLI/TUI 入口。"}
+{"file":"lion_code/server/app.py","reason":"检查 GET/POST 配置路由认证、错误处理、运行中保护和回滚不变量。"}
+{"file":"desktop/src/renderer/src/WorkspaceShell.tsx","reason":"检查回显、掩码/明文切换、表单加载失败和保存状态不会造成永久 pending。"}
+{"file":"desktop/e2e/sidecar-real.spec.ts","reason":"检查真实 Electron、Python sidecar、隔离 state home 与 WebSocket 终态覆盖，而非只依赖 fake transport。"}

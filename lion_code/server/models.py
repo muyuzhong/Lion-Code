@@ -128,6 +128,17 @@ class ServerStatusResponse(BaseModel):
     is_running: bool = False
 
 
+class ProviderConfigResponse(BaseModel):
+    """设置页明确读取的 Provider 配置；该响应不用于普通状态投影。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    provider: Literal["openai", "anthropic"]
+    model: str
+    api_key: str
+    base_url: str
+
+
 class ProviderConfigRequest(BaseModel):
     model: str | None = None
     api_key: str | None = None

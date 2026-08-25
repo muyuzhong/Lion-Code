@@ -54,6 +54,13 @@ export interface ProviderConfiguration {
   base_url?: string;
 }
 
+export interface ProviderConfigurationResponse {
+  provider: "openai" | "anthropic";
+  model: string;
+  api_key: string;
+  base_url: string;
+}
+
 export function browserBackendBootstrap(endpoint: BackendEndpoint): BackendBootstrap {
   return {
     endpoint,
@@ -100,6 +107,10 @@ export class LionRestClient {
 
   async fetchSkills(): Promise<SkillSummary[]> {
     return this.readArray("/api/skills", isSkillSummary, "Skill 列表不符合 REST 契约");
+  }
+
+  async fetchProviderConfiguration(): Promise<ProviderConfigurationResponse> {
+    return this.readJson("/api/config/provider", isProviderConfiguration, "Provider 配置不符合 REST 契约");
   }
 
   async newSession(): Promise<void> {
@@ -259,6 +270,14 @@ function isModelChoice(value: unknown): value is ModelChoice {
 
 function isSkillSummary(value: unknown): value is SkillSummary {
   return isRecord(value) && typeof value.name === "string" && (value.description === null || typeof value.description === "string");
+}
+
+function isProviderConfiguration(value: unknown): value is ProviderConfigurationResponse {
+  return isRecord(value)
+    && (value.provider === "openai" || value.provider === "anthropic")
+    && typeof value.model === "string"
+    && typeof value.api_key === "string"
+    && typeof value.base_url === "string";
 }
 
 async function responseDetail(response: Response, fallback: string): Promise<string> {

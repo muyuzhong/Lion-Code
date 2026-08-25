@@ -1,0 +1,16 @@
+{"file":"lion_code/config.py","reason":"修复保存的 OpenAI provider 在 base_url 为空时重启降级为 Anthropic，并覆盖 env/config 优先级回归。"}
+{"file":"lion_code/server/app.py","reason":"增加 capability 保护的 Provider 配置读取契约，验证保存后读取与 sidecar canonical state 一致。"}
+{"file":"lion_code/server/models.py","reason":"定义 Provider 配置读取响应的严格 REST schema。"}
+{"file":"desktop/src/renderer/src/backend.ts","reason":"实现 Provider 配置读取与严格响应解码。"}
+{"file":"desktop/src/renderer/src/lionRuntime.ts","reason":"在设置页读取 Python canonical Provider 配置并处理读取错误。"}
+{"file":"desktop/src/renderer/src/WorkspaceShell.tsx","reason":"实现设置回显、API key 默认掩码及眼睛按钮切换。"}
+{"file":"desktop/src/renderer/src/styles/overlays.css","reason":"保证设置对话框位于 composer 之上，真实 Electron 中保存与关闭按钮可交互。"}
+{"file":"desktop/tests/renderer/WorkspaceShell.test.tsx","reason":"覆盖设置回显、默认掩码、眼睛按钮切换、重开重置和保存失败不关闭。"}
+{"file":"tests/server/test_server_api.py","reason":"覆盖 Provider 配置读取、写入后读取和真实 sidecar 状态契约。"}
+{"file":"tests/application/test_config_credentials.py","reason":"覆盖保存 OpenAI provider 空 base URL 和环境凭证组合。"}
+{"file":"tests/server/test_sidecar.py","reason":"覆盖 sidecar 重建时保存 OpenAI 配置的 Provider/base URL 选择。"}
+{"file":"desktop/tests/renderer/assistantRuntime.test.ts","reason":"覆盖 Renderer 配置读取、保存错误和 canonical 投影。"}
+{"file":"desktop/e2e/sidecar-real.spec.ts","reason":"使用隔离真实 sidecar 验证 preview 配置恢复和无 API 错误终态。"}
+{"file":".trellis/spec/frontend/desktop-chat-experience.md","reason":"同步设置回显、密文切换和真实 preview 错误终态契约。"}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"同步 sidecar Provider 配置读取、凭证边界和 OpenAI 默认端点契约。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"记录本次跨层回归的根因类别、验证路径和真实 sidecar 防回归要求。"}

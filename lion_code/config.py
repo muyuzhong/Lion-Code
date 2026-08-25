@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 CONFIG_PATH = Path.home() / ".lion-code" / "config.json"
+_DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 
 def _resolve_path(path: Path | None) -> Path:
@@ -98,11 +99,18 @@ def resolve_api_credentials(
         if saved.get("api_key"):
             api_key = saved["api_key"]
             use_openai = saved.get("provider") == "openai"
-            api_base = saved.get("base_url") or None
+            if use_openai:
+                # 保存的 OpenAI 配置没有自定义端点时仍需保持 OpenAI 通道。
+                api_base = saved.get("base_url") or _DEFAULT_OPENAI_BASE_URL
+            else:
+                api_base = saved.get("base_url") or None
 
     if api_key is None and allow_placeholder:
         use_openai = True
-        api_base = api_base or "https://api.openai.com/v1"
+        api_base = api_base or _DEFAULT_OPENAI_BASE_URL
+
+    if use_openai and api_base is None:
+        api_base = _DEFAULT_OPENAI_BASE_URL
 
     return {
         "api_key": api_key,
