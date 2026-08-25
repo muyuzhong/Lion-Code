@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import patch
@@ -298,6 +299,32 @@ def test_git_status_layer_ignores_ancestor_repository(tmp_path, monkeypatch) -> 
     assert "Dirty files: 0" in rendered
     assert "- clean" in rendered
     run.assert_not_called()
+
+
+def test_git_status_layer_does_not_capture_subprocess_pipes(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    outputs = iter(("main\n", "M  a.py\n"))
+
+    def run_git(*_args, stdout, stderr, **_kwargs):
+        assert stdout is not subprocess.PIPE
+        assert stderr is subprocess.DEVNULL
+        stdout.write(next(outputs))
+        stdout.flush()
+        return subprocess.CompletedProcess([], 0)
+
+    with patch(
+        "lion_code.capabilities.git_status.capability.subprocess.run",
+        side_effect=run_git,
+    ):
+        rendered = GitStatusLayer().render(
+            ContextView.from_messages([], current_time="now")
+        )
+
+    assert "Branch: main" in rendered
+    assert "- a.py" in rendered
 
 
 def test_git_status_layer_bounds_dirty_file_list() -> None:

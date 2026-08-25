@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from pathlib import Path
 
 from ...context.types import ContextView
@@ -51,19 +52,29 @@ def _git_output(cwd: Path, *arguments: str) -> str:
     if not (cwd / ".git").exists():
         return ""
     try:
-        result = subprocess.run(
-            ["git", *arguments],
-            cwd=cwd,
-            capture_output=True,
-            check=False,
-            text=True,
+        # Windows 上 Git 的子进程可能继承 PIPE；超时杀掉 Git 后，
+        # subprocess.run() 仍会等待持有管道的子进程，进而卡死整个事件循环。
+        # 临时文件不需要 communicate() 的 reader thread，超时可以真正收敛。
+        with tempfile.TemporaryFile(
+            mode="w+",
             encoding="utf-8",
             errors="replace",
-            timeout=2,
-        )
+        ) as output:
+            subprocess.run(
+                ["git", *arguments],
+                cwd=cwd,
+                stdout=output,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=2,
+            )
+            output.seek(0)
+            return output.read().strip()
     except (OSError, subprocess.SubprocessError):
         return ""
-    return result.stdout.strip()
 
 
 def _status_paths(status: str) -> tuple[str, ...]:
