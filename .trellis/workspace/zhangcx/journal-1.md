@@ -1922,3 +1922,24 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 64: 修复桌面客户端配置恢复与会话错误链路
+
+**Date**: 2026-08-25
+**Task**: 修复桌面客户端配置恢复与会话错误链路
+**Branch**: `master`
+
+### Summary
+
+新增受保护 Provider 配置读取与设置回显，API key 默认掩码并支持眼睛按钮；修复保存 OpenAI 空 base URL 重启后 Provider 选择错误；真实 Electron/sidecar 验证未配置 API 显示错误并恢复空闲态，配置重启后可读回。定向 Python 69 passed，桌面 Vitest 55 passed，typecheck/build、sidecar-real 2 passed、chat-protocol 1 passed；全量 Python 973 passed/3 skipped，历史 corpus hash 基线失败。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e67d65c3` | (see git log) |
+
+### Status
+
+[OK] **Completed**
