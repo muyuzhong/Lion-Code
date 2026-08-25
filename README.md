@@ -25,7 +25,6 @@ Lion Code 提供覆盖桌面 GUI、终端 TUI、命令行 CLI 以及 Python 编�
 
 桌面端采用 **Electron + React 19 + `@assistant-ui/react`** 构建，由独立的 API-only Python Sidecar（FastAPI / WebSocket）托管会话运行时，实现严格的进程隔离与工作区管理：
 
-<!-- 桌面客户端界面预览图：请将图片放置于 docs/assets/desktop-preview.png -->
 <p align="center">
   <img src="docs/assets/desktop-preview.png" alt="Lion Desktop Client Preview" width="850" />
 </p>
@@ -34,7 +33,6 @@ Lion Code 提供覆盖桌面 GUI、终端 TUI、命令行 CLI 以及 Python 编�
 
 基于 [Textual](https://textual.textualize.io/) 构建的流式终端应用，支持会话热切换、模型配置、实时路径/命令补全与工具卡片折叠：
 
-<!-- 终端 TUI 界面预览图：请将图片放置于 docs/assets/tui-preview.png -->
 <p align="center">
   <img src="docs/assets/tui-preview.png" alt="Lion Textual TUI Preview" width="800" />
 </p>
@@ -47,7 +45,6 @@ Lion Code 提供覆盖桌面 GUI、终端 TUI、命令行 CLI 以及 Python 编�
 
 Lion Code 围绕这四个核心支柱进行工程构建：
 
-<!-- 系统分层概念图：请将图片放置于 docs/assets/lion-core-concept.png -->
 <p align="center">
   <img src="docs/assets/lion-core-concept.png" alt="Lion Code Concept Architecture" width="600" />
 </p>
@@ -123,7 +120,6 @@ Lion Code 在架构上将**运行时数据流（Runtime Data Flow）**与**构�
 
 回答：*Lion Code 包含哪些模块，运行时数据如何流动？*
 
-<!-- 运行时数据流架构图：请将图片放置于 docs/assets/architecture-runtime.png -->
 <p align="center">
   <img src="docs/assets/architecture-runtime.png" alt="Runtime Data Flow Architecture" width="800" />
 </p>
@@ -134,7 +130,6 @@ Lion Code 在架构上将**运行时数据流（Runtime Data Flow）**与**构�
 
 装配根（`composition/agent_builder.py`）是一次性构造对象图的唯一场所，输入三轴严格正交：
 
-<!-- 组合构建架构图：请将图片放置于 docs/assets/architecture-composition.png -->
 <p align="center">
   <img src="docs/assets/architecture-composition.png" alt="Composition Architecture" width="800" />
 </p>
@@ -176,7 +171,6 @@ Core Runtime 是一个位于 `lion_code/core/loop.py` 的**单一异步生成器
 
 工具执行流经严密的拦截管道，任何环节异常均 Fail-Closed：
 
-<!-- 工具执行拦截流程图：请将图片放置于 docs/assets/tool-execution-boundary.png -->
 <p align="center">
   <img src="docs/assets/tool-execution-boundary.png" alt="Tool Execution Boundary Flow" width="750" />
 </p>
@@ -288,9 +282,7 @@ Lion-Code/
 
 ## 路线图
 
-- [ ] **视觉与多媒体演示**：录制桌面端工作流演示与 TUI 高阶操作录屏
 - [ ] **评测集扩展**：增加更多现实大型仓库重构任务与对抗性注入测试用例
-- [ ] **多平台桌面发布**：扩展 macOS (Apple Silicon / Intel) 与 Linux 桌面客户端构建与自动化签名
 
 ---
 

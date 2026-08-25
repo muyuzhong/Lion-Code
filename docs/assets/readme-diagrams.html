@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
+  <title>Lion Code · README Architecture Plates</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --paper: #f2f6f7;
+      --surface: #ffffff;
+      --surface-2: #e4ecee;
+      --ink: #10262f;
+      --muted: #5b727b;
+      --line: #b7c7cc;
+      --line-strong: #6f8790;
+      --accent: #d3722c;
+      --accent-soft: #f4dfcf;
+      --secure: #2c756c;
+      --secure-soft: #d9eae6;
+      --blue: #416d86;
+      --blue-soft: #dce8ef;
+      --danger: #a64b43;
+      --shadow: 0 24px 70px rgb(16 38 47 / 14%);
+      --display: Georgia, "Times New Roman", serif;
+      --body: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+      --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: #0b1317;
+        --surface: #111d22;
+        --surface-2: #18272d;
+        --ink: #e8f0f2;
+        --muted: #9bb0b7;
+        --line: #31454c;
+        --line-strong: #728991;
+        --accent: #ed985a;
+        --accent-soft: #3b2a20;
+        --secure: #70bbae;
+        --secure-soft: #193731;
+        --blue: #82adc3;
+        --blue-soft: #1b3340;
+        --danger: #e08076;
+        --shadow: 0 24px 70px rgb(0 0 0 / 40%);
+      }
+    }
+
+    :root[data-theme="light"] {
+      --paper: #f2f6f7;
+      --surface: #ffffff;
+      --surface-2: #e4ecee;
+      --ink: #10262f;
+      --muted: #5b727b;
+      --line: #b7c7cc;
+      --line-strong: #6f8790;
+      --accent: #d3722c;
+      --accent-soft: #f4dfcf;
+      --secure: #2c756c;
+      --secure-soft: #d9eae6;
+      --blue: #416d86;
+      --blue-soft: #dce8ef;
+      --danger: #a64b43;
+      --shadow: 0 24px 70px rgb(16 38 47 / 14%);
+    }
+
+    :root[data-theme="dark"] {
+      --paper: #0b1317;
+      --surface: #111d22;
+      --surface-2: #18272d;
+      --ink: #e8f0f2;
+      --muted: #9bb0b7;
+      --line: #31454c;
+      --line-strong: #728991;
+      --accent: #ed985a;
+      --accent-soft: #3b2a20;
+      --secure: #70bbae;
+      --secure-soft: #193731;
+      --blue: #82adc3;
+      --blue-soft: #1b3340;
+      --danger: #e08076;
+      --shadow: 0 24px 70px rgb(0 0 0 / 40%);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-width: 320px;
+      margin: 0;
+      background:
+        linear-gradient(90deg, transparent 23px, color-mix(in srgb, var(--line) 28%, transparent) 24px, transparent 25px) 0 0 / 48px 48px,
+        linear-gradient(transparent 23px, color-mix(in srgb, var(--line) 28%, transparent) 24px, transparent 25px) 0 0 / 48px 48px,
+        var(--paper);
+      color: var(--ink);
+      font-family: var(--body);
+    }
+
+    button { font: inherit; }
+
+    .app {
+      display: grid;
+      min-height: 100vh;
+      grid-template-rows: auto 1fr;
+      gap: 24px;
+      padding: 24px;
+    }
+
+    .toolbar {
+      width: min(1200px, 100%);
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      box-shadow: 0 8px 30px rgb(16 38 47 / 8%);
+      backdrop-filter: blur(12px);
+    }
+
+    .brand { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+    .brand strong { font-family: var(--display); font-size: 19px; letter-spacing: -.02em; }
+    .brand span, .hint { color: var(--muted); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+
+    .tabs { display: flex; gap: 4px; overflow-x: auto; }
+    .tab, .tool-button {
+      min-height: 34px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      padding: 7px 11px;
+      cursor: pointer;
+    }
+    .tab:hover, .tool-button:hover { color: var(--ink); border-color: var(--line); }
+    .tab[aria-selected="true"] { background: var(--ink); color: var(--surface); }
+    .tab:focus-visible, .tool-button:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+    .tools { display: flex; gap: 4px; white-space: nowrap; }
+
+    .viewport { width: 100%; overflow: auto; padding: 0 0 24px; }
+    .plate {
+      position: relative;
+      display: none;
+      width: 1200px;
+      height: 720px;
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .plate.active { display: block; }
+    .plate::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at 88% 8%, color-mix(in srgb, var(--blue-soft) 65%, transparent), transparent 31%);
+    }
+
+    .plate-head {
+      position: relative;
+      display: grid;
+      grid-template-columns: 190px 1fr 180px;
+      align-items: start;
+      gap: 26px;
+      padding: 30px 40px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+    .kicker { color: var(--accent); font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
+    .plate-title { margin: 0; font-family: var(--display); font-size: 35px; font-weight: 600; line-height: 1; letter-spacing: -.035em; text-wrap: balance; }
+    .plate-summary { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; max-width: 62ch; }
+    .plate-index { justify-self: end; color: var(--line-strong); font-family: var(--mono); font-size: 11px; text-align: right; }
+    .plate-index strong { display: block; color: var(--ink); font-family: var(--display); font-size: 25px; font-weight: 500; }
+
+    .canvas { position: relative; height: 602px; padding: 24px 40px 34px; }
+    .mono { font-family: var(--mono); }
+    .label { color: var(--muted); font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { padding: 5px 8px; border: 1px solid var(--line); background: var(--surface); font-family: var(--mono); font-size: 10px; }
+    .arrow-right { color: var(--line-strong); font-family: var(--mono); font-size: 18px; align-self: center; }
+    .note { color: var(--muted); font-size: 10px; line-height: 1.45; }
+
+    /* 图一：核心概念 */
+    .concept-layout { display: grid; height: 100%; grid-template-columns: 1fr 170px; gap: 18px; }
+    .layers { display: grid; grid-template-rows: 68px 92px 94px 1fr; gap: 9px; }
+    .layer { position: relative; display: grid; grid-template-columns: 160px 1fr; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 93%, var(--surface-2)); }
+    .layer-label { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 14px 16px; border-right: 1px solid var(--line); }
+    .layer-label strong { font-family: var(--display); font-size: 17px; font-weight: 600; }
+    .layer-label span { color: var(--muted); font-family: var(--mono); font-size: 9px; }
+    .layer-body { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
+    .layer.capability { border-left: 4px solid var(--accent); }
+    .layer.runtime { border-left: 4px solid var(--blue); }
+    .layer.kernel { border-left: 4px solid var(--secure); }
+    .kernel-grid { display: grid; width: 100%; height: 100%; grid-template-columns: 1.15fr .85fr .95fr .9fr .85fr; gap: 7px; }
+    .kernel-cell { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 9px; border-left: 1px solid var(--line); }
+    .kernel-cell:first-child { border-left: 0; }
+    .kernel-cell strong { font-family: var(--mono); font-size: 11px; }
+    .kernel-cell span { color: var(--muted); font-size: 9px; line-height: 1.35; }
+    .kernel-cell.core { background: var(--secure-soft); }
+    .supervisor-rail { display: grid; grid-template-rows: auto 1fr auto; align-items: center; padding: 16px; border: 1px solid var(--line-strong); background: var(--ink); color: var(--surface); }
+    .supervisor-rail .label { color: color-mix(in srgb, var(--surface) 62%, transparent); }
+    .supervisor-rail strong { font-family: var(--display); font-size: 23px; line-height: 1.05; }
+    .supervisor-rail p { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 10px; line-height: 1.5; }
+    .contract-line { border-top: 1px solid color-mix(in srgb, var(--surface) 25%, transparent); padding-top: 12px; font-family: var(--mono); font-size: 9px; line-height: 1.6; }
+    .pillar-strip { position: absolute; left: 200px; right: 230px; bottom: 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .pillar { display: grid; grid-template-columns: 26px 1fr; gap: 8px; align-items: start; padding-top: 8px; border-top: 2px solid var(--line); }
+    .pillar b { color: var(--accent); font-family: var(--display); font-size: 18px; font-weight: 500; }
+    .pillar strong { display: block; font-size: 10px; }
+    .pillar span { color: var(--muted); font-size: 8px; }
+
+    /* 图二：运行时数据流 */
+    .runtime-map { display: grid; height: 100%; grid-template-rows: 1fr 108px; gap: 16px; }
+    .runtime-lanes { display: grid; grid-template-rows: repeat(3, 1fr); border: 1px solid var(--line); }
+    .runtime-lane { display: grid; grid-template-columns: 120px repeat(6, 1fr); align-items: stretch; border-top: 1px solid var(--line); }
+    .runtime-lane:first-child { border-top: 0; }
+    .lane-name { display: flex; flex-direction: column; justify-content: center; padding: 12px; border-right: 1px solid var(--line); background: var(--surface-2); }
+    .lane-name strong { font-family: var(--display); font-size: 15px; }
+    .lane-name span { color: var(--muted); font-family: var(--mono); font-size: 8px; }
+    .runtime-step { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; margin: 12px 6px; padding: 10px; border: 1px solid var(--line); background: var(--surface); }
+    .runtime-step::after { content: "→"; position: absolute; right: -17px; z-index: 3; color: var(--line-strong); font-family: var(--mono); font-size: 16px; }
+    .runtime-step.last::after { display: none; }
+    .runtime-step strong { font-family: var(--mono); font-size: 10px; }
+    .runtime-step span { color: var(--muted); font-size: 8px; line-height: 1.35; }
+    .runtime-step.active { border-color: var(--accent); box-shadow: inset 3px 0 var(--accent); }
+    .runtime-step.secure { background: var(--secure-soft); border-color: var(--secure); }
+    .runtime-step.event { background: var(--blue-soft); border-color: var(--blue); }
+    .step-1 { grid-column: 2; } .step-2 { grid-column: 3; } .step-3 { grid-column: 4; }
+    .step-4 { grid-column: 5; } .step-5 { grid-column: 6; } .step-6 { grid-column: 7; }
+    .runtime-loop { position: absolute; left: 680px; top: 297px; width: 330px; height: 20px; border-top: 1px dashed var(--accent); color: var(--accent); font-family: var(--mono); font-size: 8px; text-align: center; padding-top: 4px; }
+    .runtime-loop::before { content: "↖"; position: absolute; left: -2px; top: -10px; font-size: 15px; }
+    .runtime-loop::after { content: "↘"; position: absolute; right: -2px; top: -10px; font-size: 15px; }
+    .runtime-fanout { display: grid; grid-template-columns: 120px 1fr 1fr; gap: 10px; }
+    .fanout-title { display: flex; align-items: center; font-family: var(--display); font-size: 16px; }
+    .fanout-box { display: grid; grid-template-columns: 110px 1fr; gap: 12px; align-items: center; padding: 12px 16px; border-top: 2px solid var(--blue); background: var(--blue-soft); }
+    .fanout-box.persist { border-color: var(--secure); background: var(--secure-soft); }
+    .fanout-box strong { font-family: var(--mono); font-size: 10px; }
+
+    /* 图三：组合构建 */
+    .composition { display: grid; height: 100%; grid-template-rows: 132px 112px 1fr; gap: 12px; }
+    .input-axes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .axis { position: relative; padding: 15px 18px; border: 1px solid var(--line); background: var(--surface); }
+    .axis::after { content: "↓"; position: absolute; left: 50%; bottom: -21px; color: var(--line-strong); font-family: var(--mono); font-size: 18px; }
+    .axis em { color: var(--accent); font-family: var(--mono); font-size: 9px; font-style: normal; letter-spacing: .12em; }
+    .axis strong { display: block; margin-top: 5px; font-family: var(--display); font-size: 18px; }
+    .axis p { margin: 5px 0 0; color: var(--muted); font-size: 9px; line-height: 1.4; }
+    .build-root { display: grid; grid-template-columns: 248px 1fr; gap: 18px; align-items: center; padding: 14px 18px; background: var(--ink); color: var(--surface); }
+    .build-root h3 { margin: 0; font-family: var(--display); font-size: 18px; font-weight: 500; }
+    .build-root .label { color: color-mix(in srgb, var(--surface) 60%, transparent); }
+    .topology { display: flex; align-items: center; justify-content: space-between; min-width: 0; }
+    .topology-node { max-width: 108px; color: var(--surface); font-family: var(--mono); font-size: 8px; text-align: center; line-height: 1.35; }
+    .topology-node b { display: block; margin-bottom: 4px; color: var(--accent); font-size: 10px; }
+    .topology-arrow { color: color-mix(in srgb, var(--surface) 50%, transparent); }
+    .composition-output { display: grid; grid-template-columns: 180px 1fr; gap: 14px; }
+    .output-label { padding: 18px; border: 1px solid var(--line-strong); }
+    .output-label h3 { margin: 8px 0; font-family: var(--display); font-size: 21px; font-weight: 500; }
+    .output-label p { color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .output-groups { display: grid; grid-template-columns: 1.3fr 1fr 1fr .8fr; gap: 8px; }
+    .output-group { padding: 13px; border-top: 3px solid var(--blue); background: var(--blue-soft); }
+    .output-group:nth-child(2) { border-color: var(--accent); background: var(--accent-soft); }
+    .output-group:nth-child(3) { border-color: var(--secure); background: var(--secure-soft); }
+    .output-group:nth-child(4) { border-color: var(--line-strong); background: var(--surface-2); }
+    .output-group h4 { margin: 0 0 10px; font-family: var(--display); font-size: 15px; }
+    .output-group ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+    .output-group li { padding-top: 5px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); font-family: var(--mono); font-size: 8px; line-height: 1.3; }
+
+    /* 图四：工具执行边界 */
+    .tool-map { display: grid; height: 100%; grid-template-rows: 55px 188px 116px 1fr; gap: 10px; }
+    .tool-entry { display: grid; grid-template-columns: 180px 1fr 180px; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); }
+    .tool-entry strong { font-family: var(--mono); font-size: 11px; }
+    .tool-entry .status { justify-self: end; color: var(--secure); font-family: var(--mono); font-size: 9px; }
+    .pipe-section { display: grid; grid-template-columns: 92px 1fr; gap: 10px; }
+    .pipe-label { display: flex; flex-direction: column; justify-content: center; padding: 10px; border-right: 1px solid var(--line); }
+    .pipe-label strong { font-family: var(--display); font-size: 17px; }
+    .pipe-label span { color: var(--muted); font-family: var(--mono); font-size: 8px; }
+    .gates { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+    .gate { position: relative; display: flex; flex-direction: column; justify-content: space-between; padding: 12px 9px; border: 1px solid var(--line); background: var(--surface); }
+    .gate::after { content: "→"; position: absolute; right: -10px; top: 45%; z-index: 2; color: var(--line-strong); font-family: var(--mono); }
+    .gate:last-child::after { display: none; }
+    .gate b { color: var(--accent); font-family: var(--mono); font-size: 11px; }
+    .gate strong { font-size: 10px; line-height: 1.2; }
+    .gate span { color: var(--muted); font-size: 8px; line-height: 1.35; }
+    .gate .deny { color: var(--danger); font-family: var(--mono); font-size: 7px; }
+    .gate.execute { border: 2px solid var(--secure); background: var(--secure-soft); }
+    .post-pipe { display: grid; grid-template-columns: 92px repeat(4, 1fr); gap: 8px; }
+    .post-node { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 5px; padding: 10px 13px; border-top: 2px solid var(--secure); background: var(--secure-soft); }
+    .post-node::after { content: "→"; position: absolute; right: -12px; color: var(--line-strong); font-family: var(--mono); }
+    .post-node:last-child::after { display: none; }
+    .post-node strong { font-family: var(--mono); font-size: 9px; }
+    .post-node span { color: var(--muted); font-size: 8px; }
+    .recovery { display: grid; grid-template-columns: 92px 1fr 1fr 1fr; gap: 8px; align-items: stretch; }
+    .recovery-node { display: flex; flex-direction: column; justify-content: center; gap: 5px; padding: 12px 14px; border: 1px dashed var(--line-strong); }
+    .recovery-node strong { font-family: var(--mono); font-size: 9px; }
+    .recovery-node span { color: var(--muted); font-size: 8px; line-height: 1.35; }
+
+    .capture .toolbar { display: none; }
+    .capture .app { display: block; min-height: 0; padding: 0; }
+    .capture .viewport { padding: 0; overflow: visible; }
+    .capture .plate { border: 0; box-shadow: none; }
+
+    /* README 已提供标题和说明，截图画布只保留架构本体。 */
+    .plate-head { display: none; }
+    .canvas { height: 720px; padding: 30px 36px; }
+
+    .label { font-size: 11px; }
+    .chip { padding: 8px 11px; font-size: 13px; }
+    .note { font-size: 12px; line-height: 1.5; }
+
+    /* 概念图压缩所有权分层、放大标签，并为底部支柱保留完整空间。 */
+    .concept-layout { height: calc(100% - 88px); grid-template-columns: 1fr 205px; gap: 16px; }
+    .layers { grid-template-rows: 86px 118px 118px 1fr; gap: 10px; }
+    .layer { grid-template-columns: 190px 1fr; }
+    .layer-label { padding: 16px 18px; }
+    .layer-label strong { font-size: 22px; }
+    .layer-label span { font-size: 11px; }
+    .layer-body { padding: 14px 18px; gap: 10px; }
+    .kernel-cell { padding: 14px 10px; }
+    .kernel-cell strong { font-size: 14px; }
+    .kernel-cell span { font-size: 11px; line-height: 1.45; }
+    .supervisor-rail { padding: 20px; }
+    .supervisor-rail strong { font-size: 29px; }
+    .supervisor-rail p { font-size: 12px; }
+    .contract-line { font-size: 11px; }
+    .pillar-strip { left: 226px; right: 257px; bottom: 22px; }
+    .pillar { grid-template-columns: 34px 1fr; gap: 9px; padding-top: 10px; }
+    .pillar b { font-size: 23px; }
+    .pillar strong { font-size: 12px; }
+    .pillar span { font-size: 10px; }
+
+    /* 运行时图使用连续编号路径，避免仅靠松散对齐暗示调用关系。 */
+    .runtime-v2 { display: grid; height: 100%; grid-template-rows: 1fr 118px; gap: 18px; }
+    .runtime-path {
+      position: relative;
+      display: grid;
+      grid-template-rows: 1fr 34px 1fr;
+      gap: 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--surface) 94%, var(--surface-2));
+    }
+    .path-row { display: grid; align-items: stretch; gap: 10px; }
+    .path-row.forward { grid-template-columns: 1fr 30px 1fr 30px 1fr 30px 1fr; }
+    .path-row.return { grid-template-columns: 1fr 30px 1fr 30px 1fr 30px 1fr; }
+    .path-arrow { display: grid; place-items: center; color: var(--line-strong); font-family: var(--mono); font-size: 27px; }
+    .path-turn { display: flex; align-items: center; justify-content: flex-end; padding-right: 10.5%; color: var(--accent); font-family: var(--mono); font-size: 25px; }
+    .path-node { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 7px; padding: 16px; border: 1px solid var(--line); background: var(--surface); }
+    .path-node.primary { border-color: var(--accent); box-shadow: inset 4px 0 var(--accent); }
+    .path-node.secure { border-color: var(--secure); background: var(--secure-soft); }
+    .path-node.event { border-color: var(--blue); background: var(--blue-soft); }
+    .path-node .step { position: absolute; top: 12px; right: 12px; color: var(--accent); font-family: var(--mono); font-size: 12px; font-weight: 700; }
+    .path-node .owner { color: var(--muted); font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .12em; }
+    .path-node strong { font-family: var(--mono); font-size: 15px; }
+    .path-node p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .path-node .subsystem { width: fit-content; margin-top: 3px; padding: 5px 7px; border-left: 2px solid var(--secure); background: var(--surface-2); color: var(--ink); font-family: var(--mono); font-size: 10px; }
+    .runtime-v2 .runtime-fanout { grid-template-columns: 150px 1fr 1fr; }
+    .runtime-v2 .fanout-title { font-size: 20px; }
+    .runtime-v2 .fanout-box { grid-template-columns: 130px 1fr; padding: 16px 18px; }
+    .runtime-v2 .fanout-box strong { font-size: 12px; }
+
+    /* 组合图压缩输出所有权，避免内容稀疏的高卡片。 */
+    .composition { grid-template-rows: 158px 132px 1fr; gap: 14px; }
+    .axis { padding: 20px 22px; }
+    .axis em { font-size: 11px; }
+    .axis strong { font-size: 24px; }
+    .axis p { font-size: 12px; }
+    .build-root { grid-template-columns: 226px 1fr; padding: 16px 20px; }
+    .build-root h3 { font-size: 19px; }
+    .topology-node { max-width: 105px; font-size: 11px; }
+    .topology-node b { font-size: 12px; }
+    .composition-output-v2 { display: grid; min-height: 0; grid-template-rows: 72px 1fr; gap: 10px; }
+    .output-heading { display: grid; grid-template-columns: 220px 1fr; align-items: center; gap: 20px; padding: 12px 18px; border: 1px solid var(--line-strong); }
+    .output-heading strong { font-family: var(--display); font-size: 24px; font-weight: 500; }
+    .output-heading span { color: var(--muted); font-size: 12px; }
+    .composition-output-v2 .output-groups { grid-template-columns: 1.2fr 1.15fr 1.15fr .8fr; }
+    .composition-output-v2 .output-group { padding: 16px 18px; }
+    .composition-output-v2 .output-group h4 { font-size: 20px; }
+    .composition-output-v2 .output-group li { padding-top: 8px; font-size: 11px; }
+
+    /* 工具图确保连接箭头可见，并放大导出后的文字。 */
+    .tool-map { grid-template-rows: 68px 232px 142px 1fr; gap: 12px; }
+    .tool-entry { grid-template-columns: 240px 1fr 220px; padding: 14px 18px; }
+    .tool-entry strong { font-size: 14px; }
+    .tool-entry .status { font-size: 11px; }
+    .pipe-section { grid-template-columns: 112px 1fr; }
+    .pipe-label { padding: 12px; }
+    .pipe-label strong { font-size: 21px; }
+    .pipe-label span { font-size: 10px; }
+    .gate { padding: 15px 11px; }
+    .gate::after, .post-node::after { right: -16px; z-index: 5; width: 24px; background: var(--surface); font-size: 21px; text-align: center; }
+    .gate b { font-size: 13px; }
+    .gate strong { font-size: 13px; }
+    .gate span { font-size: 10px; }
+    .gate .deny { font-size: 9px; }
+    .post-pipe { grid-template-columns: 112px repeat(4, 1fr); gap: 10px; }
+    .post-node { padding: 14px 16px; }
+    .post-node strong { font-size: 12px; }
+    .post-node span { font-size: 10px; }
+    .recovery { grid-template-columns: 112px repeat(3, 1fr); gap: 10px; }
+    .recovery-node { padding: 16px 18px; }
+    .recovery-node strong { font-size: 12px; }
+    .recovery-node span { font-size: 10px; }
+
+    @media (max-width: 900px) {
+      .app { padding: 12px; }
+      .toolbar { align-items: flex-start; flex-wrap: wrap; }
+      .tabs { order: 3; width: 100%; }
+      .viewport { padding-bottom: 12px; }
+      .plate { margin: 0; transform-origin: top left; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <nav class="toolbar" aria-label="图表切换与截图工具">
+      <div class="brand"><strong>Lion Code</strong><span>README plates</span></div>
+      <div class="tabs" role="tablist" aria-label="架构图">
+        <button class="tab" role="tab" aria-selected="true" data-target="concept">1 核心概念</button>
+        <button class="tab" role="tab" aria-selected="false" data-target="runtime">2 运行时数据流</button>
+        <button class="tab" role="tab" aria-selected="false" data-target="composition">3 组合构建</button>
+        <button class="tab" role="tab" aria-selected="false" data-target="tooling">4 工具边界</button>
+      </div>
+      <div class="tools">
+        <button class="tool-button" id="themeButton" type="button">切换深色</button>
+        <button class="tool-button" id="captureButton" type="button" title="隐藏工具栏，按 F 恢复">截图模式 · F</button>
+      </div>
+    </nav>
+
+    <div class="viewport">
+      <article class="plate active" id="concept" role="tabpanel" aria-label="Lion Code 核心概念架构图">
+        <header class="plate-head">
+          <div class="kicker">Lion Code / Concept map</div>
+          <div><h1 class="plate-title">Small kernel. Large system.</h1><p class="plate-summary">能力向上组合，风险向下收口。最小 Agent Kernel 保持 Provider-neutral，产品功能不反向污染核心循环。</p></div>
+          <div class="plate-index"><strong>01</strong>PHYSICAL OWNERSHIP</div>
+        </header>
+        <div class="canvas">
+          <div class="concept-layout">
+            <div class="layers">
+              <section class="layer">
+                <div class="layer-label"><span>Product surface</span><strong>Interfaces</strong></div>
+                <div class="layer-body chip-row"><span class="chip">Electron Desktop</span><span class="chip">Textual TUI</span><span class="chip">Headless CLI</span><span class="chip">Python API</span></div>
+              </section>
+              <section class="layer capability">
+                <div class="layer-label"><span>Orthogonal features</span><strong>Capabilities</strong></div>
+                <div class="layer-body"><div><div class="chip-row"><span class="chip">Plan</span><span class="chip">Skill</span><span class="chip">SubAgent</span><span class="chip">Semantic Memory</span><span class="chip">Agent State</span><span class="chip">Git Status</span></div><p class="note">CapabilityRegistry 聚合 tool · prompt · context · lifecycle；不是 service locator。</p></div></div>
+              </section>
+              <section class="layer runtime">
+                <div class="layer-label"><span>Single-session owners</span><strong>Agent Runtime</strong></div>
+                <div class="layer-body chip-row"><span class="chip">Conversation</span><span class="chip">Session</span><span class="chip">Context</span><span class="chip">Execution</span><span class="chip">Provider Controller</span><span class="chip">Usage + Budget</span></div>
+              </section>
+              <section class="layer kernel">
+                <div class="layer-label"><span>Portable narrow waist</span><strong>Kernel</strong></div>
+                <div class="layer-body kernel-grid">
+                  <div class="kernel-cell core"><strong>core/</strong><span>run_agent_loop<br />AgentEvent stream</span></div>
+                  <div class="kernel-cell"><strong>context/</strong><span>prepared projection<br />compaction</span></div>
+                  <div class="kernel-cell"><strong>tooling/</strong><span>ToolRuntime<br />fail-closed gates</span></div>
+                  <div class="kernel-cell"><strong>providers/</strong><span>provider-neutral<br />streaming</span></div>
+                  <div class="kernel-cell"><strong>session_runtime/</strong><span>append-only<br />JSONL</span></div>
+                </div>
+              </section>
+            </div>
+            <aside class="supervisor-rail">
+              <div class="label">External control plane</div>
+              <div><strong>Supervisor</strong><p>目标、调度、重试与 Checkpoint 位于 Agent 对象图之外。</p></div>
+              <div class="contract-line">CONSUMES ONLY<br />events · results · sessions<br /><br />OWNS NO<br />tools · content · usage</div>
+            </aside>
+          </div>
+          <div class="pillar-strip" aria-label="Lion Code 四个核心支柱">
+            <div class="pillar"><b>01</b><div><strong>Minimal Kernel</strong><span>单一异步生成器</span></div></div>
+            <div class="pillar"><b>02</b><div><strong>Composable</strong><span>正交 Capability SPI</span></div></div>
+            <div class="pillar"><b>03</b><div><strong>Reliable</strong><span>Fail-closed 执行边界</span></div></div>
+            <div class="pillar"><b>04</b><div><strong>Long-running</strong><span>缓存感知上下文</span></div></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="plate" id="runtime" role="tabpanel" aria-label="Lion Code 运行时数据流架构图">
+        <header class="plate-head">
+          <div class="kicker">Lion Code / Runtime trace</div>
+          <div><h1 class="plate-title">One turn, one canonical path.</h1><p class="plate-summary">AgentRuntime 只编排 owner；Conversation 持有唯一消息历史，Session 持有唯一 JSONL writer，Context 只生成 prepared projection。</p></div>
+          <div class="plate-index"><strong>02</strong>RUNTIME DATA FLOW</div>
+        </header>
+        <div class="canvas">
+          <div class="runtime-v2">
+            <div class="runtime-path" aria-label="一次 Agent turn 的连续运行路径">
+              <div class="path-row forward">
+                <section class="path-node primary"><span class="step">01</span><span class="owner">INTERFACE</span><strong>User prompt</strong><p>Desktop · TUI · CLI · Python API</p></section>
+                <span class="path-arrow">→</span>
+                <section class="path-node primary"><span class="step">02</span><span class="owner">ORCHESTRATOR</span><strong>AgentRuntime</strong><p>固定 owner 调用顺序与 stop reason</p></section>
+                <span class="path-arrow">→</span>
+                <section class="path-node"><span class="step">03</span><span class="owner">SESSION OWNER</span><strong>SessionRuntime</strong><p>ensure_ready · recorder lifecycle</p></section>
+                <span class="path-arrow">→</span>
+                <section class="path-node"><span class="step">04</span><span class="owner">CONTEXT OWNER</span><strong>ContextRuntime</strong><p>compact decision · prepared projection</p><span class="subsystem">uses ContextManager</span></section>
+              </div>
+              <div class="path-turn" aria-hidden="true">↓</div>
+              <div class="path-row return">
+                <section class="path-node event"><span class="step">08</span><span class="owner">PUBLIC CONTRACT</span><strong>AgentEvent</strong><p>message · tool · turn lifecycle</p></section>
+                <span class="path-arrow">←</span>
+                <section class="path-node secure"><span class="step">07</span><span class="owner">PORTABLE KERNEL</span><strong>run_agent_loop</strong><p>Provider stream ↔ structured results</p><span class="subsystem">calls ToolRuntime.execute</span></section>
+                <span class="path-arrow">←</span>
+                <section class="path-node"><span class="step">06</span><span class="owner">KERNEL WRAPPER</span><strong>AgentHarness</strong><p>canonical loop state</p></section>
+                <span class="path-arrow">←</span>
+                <section class="path-node"><span class="step">05</span><span class="owner">HISTORY OWNER</span><strong>ConversationRuntime</strong><p>canonical messages · live provider</p></section>
+              </div>
+            </div>
+            <div class="runtime-fanout">
+              <div class="fanout-title">Durable fan-out</div>
+              <div class="fanout-box persist"><strong>Canonical history</strong><div class="note">Core messages/events → SessionRuntime → SessionRecorder → <span class="mono">&lt;session-id&gt;.jsonl</span></div></div>
+              <div class="fanout-box"><strong>Prepared only</strong><div class="note">System + projected history + transient ContextLayer → Provider。不会写回 canonical session。</div></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="plate" id="composition" role="tabpanel" aria-label="Lion Code 组合构建架构图">
+        <header class="plate-head">
+          <div class="kicker">Lion Code / Composition</div>
+          <div><h1 class="plate-title">Three axes. One composition root.</h1><p class="plate-summary">选择、设置与实现绑定保持正交，只在 build_agent_composition 汇合；对象图一次拓扑构造，不做二段式回绑。</p></div>
+          <div class="plate-index"><strong>03</strong>ONE-SHOT OBJECT GRAPH</div>
+        </header>
+        <div class="canvas">
+          <div class="composition">
+            <div class="input-axes">
+              <section class="axis"><em>WHAT TO BUILD</em><strong>Profile</strong><p>Minimal / Coding / Full<br />tools · system prompt · extension_specs</p></section>
+              <section class="axis"><em>HOW IT RUNS</em><strong>AgentConfig</strong><p>Frozen runtime values<br />model · budget · permission · context policy</p></section>
+              <section class="axis"><em>WITH WHAT</em><strong>RuntimeBindings</strong><p>Provider · Session · Tool · Interaction<br />concrete implementations, no state ownership</p></section>
+            </div>
+            <section class="build-root">
+              <div><div class="label">Sole convergence point</div><h3>build_agent_composition()</h3></div>
+              <div class="topology" aria-label="对象图构建顺序">
+                <div class="topology-node"><b>01</b>foundation</div><span class="topology-arrow">→</span>
+                <div class="topology-node"><b>02</b>Provider<br />Projection</div><span class="topology-arrow">→</span>
+                <div class="topology-node"><b>03</b>Context</div><span class="topology-arrow">→</span>
+                <div class="topology-node"><b>04</b>Conversation</div><span class="topology-arrow">→</span>
+                <div class="topology-node"><b>05</b>Session</div><span class="topology-arrow">→</span>
+                <div class="topology-node"><b>06</b>Agent</div><span class="topology-arrow">→</span>
+                <div class="topology-node"><b>07</b>Provider<br />Controller</div>
+              </div>
+            </section>
+            <div class="composition-output-v2">
+              <section class="output-heading"><strong>AgentComposition</strong><span>分层结果，不保留 Profile、Config 或 Bindings；最终统一包装为 feature-neutral <span class="mono">MetaAgent</span>。</span></section>
+              <div class="output-groups">
+                <section class="output-group"><h4>Runtime</h4><ul><li>agent / conversation</li><li>session / context</li><li>provider_controller</li><li>usage / budget</li></ul></section>
+                <section class="output-group"><h4>Capabilities</h4><ul><li>registry / runtime</li><li>agent_state / git_status</li><li>plan / skill / subagent</li><li>semantic memory</li></ul></section>
+                <section class="output-group"><h4>Tooling</h4><ul><li>registry / ToolRuntime</li><li>ToolContext / permission</li><li>PromptComposer</li><li>prepared ContextManager</li></ul></section>
+                <section class="output-group"><h4>Interaction</h4><ul><li>notices</li><li>confirmation</li><li>status_sink</li></ul></section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="plate" id="tooling" role="tabpanel" aria-label="Lion Code 工具执行边界流程图">
+        <header class="plate-head">
+          <div class="kicker">Lion Code / Tool boundary</div>
+          <div><h1 class="plate-title">Every tool crosses the narrow waist.</h1><p class="plate-summary">ToolRuntime.execute 是唯一执行入口。前置门禁拒绝即停止；异常也必须经过输出净化，之后才允许持久化与审计。</p></div>
+          <div class="plate-index"><strong>04</strong>FAIL-CLOSED PIPELINE</div>
+        </header>
+        <div class="canvas">
+          <div class="tool-map">
+            <div class="tool-entry"><strong>ToolRegistry.resolve(name)</strong><span class="note">validated tool call · arguments · cancellation · progress callback</span><span class="status">UNKNOWN → ERROR RESULT</span></div>
+            <section class="pipe-section">
+              <div class="pipe-label"><span>Before</span><strong>Pre gates</strong></div>
+              <div class="gates">
+                <div class="gate"><b>01</b><strong>Cancellation</strong><span>运行前检查组合取消信号</span><small class="deny">CANCEL → STOP</small></div>
+                <div class="gate"><b>02</b><strong>Workspace Snapshot</strong><span>写入 / 进程工具先创建恢复点</span><small class="deny">FAIL → STOP</small></div>
+                <div class="gate"><b>03</b><strong>PreToolUse Hook</strong><span>隔离执行；deny / crash / timeout 均阻断</span><small class="deny">NOT ALLOW → STOP</small></div>
+                <div class="gate"><b>04</b><strong>Permission</strong><span>硬边界、规则、预算与人工确认</span><small class="deny">DENY → STOP</small></div>
+                <div class="gate"><b>05</b><strong>Egress Guard</strong><span>出站域名白名单与敏感参数检查</span><small class="deny">BLOCK → STOP</small></div>
+                <div class="gate"><b>06</b><strong>Read Freshness</strong><span>写前已读且 mtime 未变化</span><small class="deny">STALE → STOP</small></div>
+                <div class="gate execute"><b>07</b><strong>Tool.execute()</strong><span>LionTool 接收窄 ToolContext</span><small class="deny">EXCEPTION → ERROR RESULT</small></div>
+              </div>
+            </section>
+            <section class="post-pipe">
+              <div class="pipe-label"><span>After</span><strong>Post chain</strong></div>
+              <div class="post-node"><strong>Output Sanitizer</strong><span>secret / fingerprint 全文净化</span></div>
+              <div class="post-node"><strong>Result Policy</strong><span>大结果落盘或切片预览</span></div>
+              <div class="post-node"><strong>Audit</strong><span>授权源、snapshot 与结果</span></div>
+              <div class="post-node"><strong>ToolResult</strong><span>content · details · is_error</span></div>
+            </section>
+            <section class="recovery">
+              <div class="pipe-label"><span>Recover</span><strong>Rollback</strong></div>
+              <div class="recovery-node"><strong>snapshot_id</strong><span>随写入 / 进程工具结果返回；恢复前再建安全快照。</span></div>
+              <div class="recovery-node"><strong>ToolRuntime.rollback()</strong><span>WorkspaceSnapshot.restore；成功或失败都转换成普通 ToolResult。</span></div>
+              <div class="recovery-node"><strong>ExecutionAuditLog</strong><span>记录 rolled_back / failed；模型基于当前 workspace 重新判断。</span></div>
+            </section>
+          </div>
+        </div>
+      </article>
+    </div>
+  </main>
+
+  <script>
+    const root = document.documentElement;
+    const tabs = [...document.querySelectorAll(".tab")];
+    const plates = [...document.querySelectorAll(".plate")];
+    const themeButton = document.querySelector("#themeButton");
+    const captureButton = document.querySelector("#captureButton");
+
+    function showPlate(id) {
+      tabs.forEach((tab) => tab.setAttribute("aria-selected", String(tab.dataset.target === id)));
+      plates.forEach((plate) => plate.classList.toggle("active", plate.id === id));
+      const active = plates.find((plate) => plate.id === id);
+      if (active) document.title = `Lion Code · ${active.getAttribute("aria-label")}`;
+    }
+
+    function toggleTheme() {
+      const dark = root.dataset.theme !== "dark";
+      root.dataset.theme = dark ? "dark" : "light";
+      themeButton.textContent = dark ? "切换浅色" : "切换深色";
+    }
+
+    function toggleCapture() {
+      document.body.classList.toggle("capture");
+    }
+
+    tabs.forEach((tab) => tab.addEventListener("click", () => showPlate(tab.dataset.target)));
+    themeButton.addEventListener("click", toggleTheme);
+    captureButton.addEventListener("click", toggleCapture);
+    document.addEventListener("keydown", (event) => {
+      if (event.key.toLowerCase() === "f") toggleCapture();
+      if (/^[1-4]$/.test(event.key)) showPlate(tabs[Number(event.key) - 1].dataset.target);
+    });
+  </script>
+</body>
+</html>
