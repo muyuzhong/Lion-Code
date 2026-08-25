@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from pathlib import Path
 
 from ...context.types import ContextView
@@ -20,7 +21,9 @@ class GitStatusLayer:
         del view
         cwd = Path.cwd()
         branch = _git_output(cwd, "branch", "--show-current") or "(detached)"
-        status = _git_output(cwd, "status", "--porcelain", "--untracked-files=all")
+        # 不扫描未跟踪文件；workspace 可能位于用户目录的上层 Git 仓库内，
+        # 递归扫描会阻塞同步 ContextLayer，导致模型请求无法启动。
+        status = _git_output(cwd, "status", "--porcelain", "--untracked-files=no")
         paths = _status_paths(status)
 
         lines = [
@@ -45,20 +48,33 @@ def create_git_status_capability() -> CapabilitySpec:
 
 
 def _git_output(cwd: Path, *arguments: str) -> str:
+    # 只读取 workspace 自身的仓库，避免把用户目录的祖先仓库当成项目并扫描整棵树。
+    if not (cwd / ".git").exists():
+        return ""
     try:
-        result = subprocess.run(
-            ["git", *arguments],
-            cwd=cwd,
-            capture_output=True,
-            check=False,
-            text=True,
+        # Windows 上 Git 的子进程可能继承 PIPE；超时杀掉 Git 后，
+        # subprocess.run() 仍会等待持有管道的子进程，进而卡死整个事件循环。
+        # 临时文件不需要 communicate() 的 reader thread，超时可以真正收敛。
+        with tempfile.TemporaryFile(
+            mode="w+",
             encoding="utf-8",
             errors="replace",
-            timeout=2,
-        )
+        ) as output:
+            subprocess.run(
+                ["git", *arguments],
+                cwd=cwd,
+                stdout=output,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=2,
+            )
+            output.seek(0)
+            return output.read().strip()
     except (OSError, subprocess.SubprocessError):
         return ""
-    return result.stdout.strip()
 
 
 def _status_paths(status: str) -> tuple[str, ...]:

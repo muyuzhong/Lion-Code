@@ -24,7 +24,8 @@
     "08-23-lion-desktop-chat-experience",
     "08-23-desktop-cutover-web-removal",
     "08-24-pi-desktop-ui-port",
-    "08-25-desktop-config-session-recovery"
+    "08-25-desktop-config-session-recovery",
+    "08-25-desktop-model-output"
   ],
   "parent": null,
   "relatedFiles": [],

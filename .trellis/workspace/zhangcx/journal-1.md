@@ -1943,3 +1943,24 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+
+## Session 65: 修复桌面客户端模型输出阻塞
+
+**Date**: 2026-08-25
+**Task**: 修复桌面客户端模型输出阻塞
+**Branch**: `master`
+
+### Summary
+
+定位并修复桌面 sidecar 在用户目录祖先 Git 仓库下执行同步 Git 上下文扫描导致事件循环阻塞的问题；补充真实 Electron + Python sidecar 的本地 OpenAI-compatible SSE 成功、HTTP 400 错误终态与失败后重试回归。通过 Python 定向与全量测试、桌面 Vitest、typecheck、build、sidecar-real Playwright；保留 protocol.ts 和 docs/assets 未提交改动。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a44a6803` | (see git log) |
+
+### Status
+
+[OK] **Completed**
