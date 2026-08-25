@@ -2,461 +2,81 @@
 
 # Lion Code
 
-**一个强调执行可控、长会话效率与经验复用的轻量级 Python Coding Agent**
+**以最小 Agent Kernel 为核心、面向可靠 Coding Agent 构建的可组合运行时与完整客户端**<br/>
+*A composable runtime for building reliable Coding Agents, built around a minimal agent kernel.*
 
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
-[![Tests: 718 passed](https://img.shields.io/badge/Tests-718%20passed-22c55e.svg)](tests/)
+[![CI](https://github.com/muyuzhong/Lion-Code/actions/workflows/ci.yml/badge.svg)](https://github.com/muyuzhong/Lion-Code/actions/workflows/ci.yml)
+[![Architecture: import--linter](https://img.shields.io/badge/Architecture-Import%20Linter%20Enforced-blueviolet.svg)](pyproject.toml)
 [![Status: Active](https://img.shields.io/badge/Status-Active%20Development-f59e0b.svg)](#路线图)
 
-[快速开始](#快速开始) · [架构](#架构) · [安全模型](#1-fail-closed-工具执行边界) · [上下文管理](#2-多级上下文管理) · [评测](#可复现评测) · [路线图](#路线图)
+[产品体验](#产品界面) · [核心特性](#为什么选择-lion-code) · [快速开始](#快速开始) · [架构设计](#架构设计) · [工程设计](#核心工程设计) · [内置能力](#内置核心能力) · [交互界面](#交互界面与使用)
 
 </div>
 
 ---
 
-## 为什么做 Lion Code
+## 产品界面
 
-大多数 Coding Agent 示例在"模型调用工具，工具返回结果"这一步就结束了。真正影响长任务可靠性的，往往是之后的问题：
+Lion Code 提供覆盖桌面 GUI、终端 TUI、命令行 CLI 以及 Python 编程式 API 的完整交互矩阵。
 
-- **工具怎样安全执行**——如何阻止模型执行 `rm -rf` 或未经审查就推送到生产环境？
-- **上下文怎样持续工作**——50+ 次工具调用后，如何避免上下文窗口爆炸，同时保护前缀缓存不被破坏？
-- **经验怎样被再次使用**——辛苦排查出的问题，如何在下一次会话、下一位同事遇到时自动生效？
-- **这些机制到底有没有用**——如何用数据说话，而不是凭感觉？
+### 1. Electron 桌面客户端（Primary GUI）
 
-Lion Code 就是我对这些问题的回答。它是一个**可读、可验证的 Agent 运行时**（~43K 行 Python，718 条测试），用较少的依赖实现了上述所有关键机制，并为每项重要结论保留了源码、测试或 Benchmark 证据。
+桌面端采用 **Electron + React 19 + `@assistant-ui/react`** 构建，由独立的 API-only Python Sidecar（FastAPI / WebSocket）托管会话运行时，实现严格的进程隔离与工作区管理：
 
----
+<!-- 桌面客户端界面预览图：请将图片放置于 docs/assets/desktop-preview.png -->
+<p align="center">
+  <img src="docs/assets/desktop-preview.png" alt="Lion Desktop Client Preview" width="850" />
+</p>
 
-## 架构
+### 2. Textual 终端 TUI（Terminal GUI）
 
-```
-Interfaces (CLI / TUI / Electron sidecar / Application / package API)
-    ↓
-Composition / Profile
-    ↓
-MetaAgent facade
-    ↓
-Agent Kernel ─────→ Harness
-    │
-    └─────────────→ Capability Plane ─────→ optional features
+基于 [Textual](https://textual.textualize.io/) 构建的流式终端应用，支持会话热切换、模型配置、实时路径/命令补全与工具卡片折叠：
 
-Supervisor
-    ↓
-AgentFactory selects Profile
-    ↓
-MetaAgent
-```
-
-组合输入按三轴正交分离：`Profile` 表达 WHAT TO BUILD（产品形态），
-`AgentConfig` 表达 HOW IT RUNS（运行策略值），`RuntimeBindings` 表达
-WITH WHAT（`ProviderBindings` / `SessionBindings` / `ToolBindings` /
-`InteractionBindings` 四组 concrete 实现绑定）。三者只在
-`build_agent_composition(profile, config=config, bindings=bindings)` 汇合。
-
-Profile 只决定组装图，不把 feature 开关塞进通用配置，也不携带 config、
-bindings、provider 或呈现回调：
-
-- `MinimalProfile` = `MetaAgent` + caller tools + zero-extension registry
-- `CodingProfile` = `MetaAgent` + Coding Tools + Coding Harness policy
-- `FullProfile` = `CodingProfile` + Skill + Plan + SubAgent + external `CapabilitySpec`
-
-三个 Profile 都返回同一个 feature-neutral `MetaAgent` facade。FullProfile 当前不含
-Memory；项目中也没有 Legacy Memory、Dream 或 Learning 生产对象图。Supervisor 位于
-普通 Agent 对象图之外，只通过公开 Agent 端口运行 Profile 选择出的 MetaAgent。
-
-每次工具调用按以下顺序执行：
-
-1. **权限门控**——静态规则或 Auto 分类器先决定 `allow` / `confirm` / `deny`
-2. **人工确认**——敏感操作等待用户批准（`--yolo` 可跳过）
-3. **PreToolUse Hook**——用户/项目级命令 Hook，任何异常均 fail-closed
-4. **工具分发**——内置工具 / MCP / Skill / Sub-agent / 内部工具统一路由
-5. **结果持久化**——大结果（>30 KB）先完整落盘，上下文只保留路径和预览
-6. **上下文预算**——管线在下一轮模型调用前裁剪老化结果
+<!-- 终端 TUI 界面预览图：请将图片放置于 docs/assets/tui-preview.png -->
+<p align="center">
+  <img src="docs/assets/tui-preview.png" alt="Lion Textual TUI Preview" width="800" />
+</p>
 
 ---
 
-## 技术深度解析
+## 为什么选择 Lion Code
 
-### 1. Fail-Closed 工具执行边界
+很多 Coding Agent 演示项目止步于“模型调用工具，工具返回结果”。但在真实复杂长任务中，决定系统可靠性的关键在于：**核心内核是否足够小、扩展能力是否可组合、工具执行是否具备安全硬边界、以及上下文在几十轮高频工具交互后能否稳定维持。**
 
-权限系统是分层的——没有单一机制拥有最终决定权。四种模式提供渐进控制：
+Lion Code 围绕这四个核心支柱进行工程构建：
 
-| 模式 | CLI 参数 | 行为 |
-|------|----------|------|
-| **Default** | *(默认)* | 只读操作走快路径，敏感操作按规则确认或拒绝 |
-| **Accept Edits** | `--accept-edits` | 自动批准文件编辑，危险 Shell 仍需确认 |
-| **Don't Ask** | `--dont-ask` | 自动拒绝所有需要人工确认的操作，适合非交互环境 |
-| **Yolo** | `--yolo` | 跳过人工确认，仅建议在隔离环境中使用 |
+<!-- 系统分层概念图：请将图片放置于 docs/assets/lion-core-concept.png -->
+<p align="center">
+  <img src="docs/assets/lion-core-concept.png" alt="Lion Code Concept Architecture" width="600" />
+</p>
 
-> PR4：Permission 只负责通用安全语义，不再包含 `plan`/`auto` 模式。Plan 是
-> Capability 层产品概念（`--plan` 通过 Plan 能力命令激活，期间读写限制由未来注入的
-> `PlanRestrictedPolicy` 负责）。Supervisor 不参与工具权限判定，权限策略仍属于
-> Tooling/Harness 边界。
+### 01 · Minimal Agent Kernel（最小核心内核）
+Kernel 绝不塞入业务特化逻辑。核心（`core/loop.py`）仅作为一个**单一异步生成器**，纯粹负责驱动 Agent Loop、工具调用批处理、上下文投影准备、取消信号中断（`CancellationToken`）与事件流分发（`AgentEvent`）。核心保持 Provider 完全无关，上层功能膨胀零污染。
 
-这些模式与四层防御叠加：
+### 02 · Composable Capabilities（可组合能力平面）
+上层功能（Plan、Skill、SubAgent、Semantic Memory、Agent State、Git Status 等）全部抽象为正交的 Capability 扩展（`capabilities/`），由 `CapabilityRegistry` 统一管理生命周期与状态注入。支持按需组合或替换实现（例如通过 `extension_specs` 注入第三方向量检索记忆引擎）。
 
-| 层级 | 机制 | 故障模式 |
-|------|------|----------|
-| 权限模式 | 按工具的静态规则 + 模式分类器 | 未知工具 → 拒绝 |
-| 人工门控 | `confirm` 操作需用户批准 | 超时 → 拒绝 |
-| PreToolUse Hook | 任意命令行程序 | 崩溃 / 超时 / 非零退出 / 非法 JSON → **fail-closed** |
-| 信任注册 | 项目 Hook 指纹（配置哈希 + 文件内容哈希 + 项目根目录） | 指纹不匹配 → 重新确认，`--yolo` 下也不例外 |
+### 03 · Reliable Execution（Fail-Closed 执行硬边界）
+面向长时程与无人值守任务的防御模型：
+- **分层权限控制**：提供 `default` / `accept-edits` / `dont-ask` / `yolo` 四级渐进权限。
+- **Fail-Closed 命令 Hook**：`PreToolUse` Hook 在隔离子进程运行，严禁传递敏感环境变量（API Key、云凭据），崩溃/超时/非法输出一律拒绝执行，并受复合指纹信任机制保护。
+- **状态防御与出站控制**：写操作前强校验读取新鲜度（Read Freshness）、工作区无条件快照回滚（Workspace Snapshot）、出站域名白名单与敏感数据脱敏（Egress Guard & Secret Redaction）。
 
-Hook 以子进程方式运行，仅继承最小环境（`PATH`、`HOME`、`SYSTEMROOT`）。API 密钥（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GITHUB_TOKEN`）和云凭证前缀（`AWS_*`、`AZURE_*`、`GOOGLE_*`）被**禁止**传入子进程。每个 Hook 从 stdin 接收 UTF-8 JSON，必须在可配置的超时时间内通过 stdout 返回 `{"action": "allow"}` 或 `{"action": "deny", "reason": "..."}`。
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "id": "block-force-push",
-        "matcher": "run_shell",
-        "command": ["python", ".claude/hooks/pre_shell.py"],
-        "timeout_ms": 5000,
-        "pass_env": ["POLICY_CONFIG_PATH"]
-      }
-    ]
-  }
-}
-```
-
-用户级 Hook 默认可信。项目级 Hook 首次匹配时必须由用户确认——即使使用 `--yolo` 也不会自动获得信任。信任记录保存在 `~/.lion-code/trusted-hooks.json`，使用复合指纹：**规范化项目根目录 + Hook ID + 完整配置哈希 + 所引用项目脚本内容的哈希**。任一组件变化，原信任记录不再匹配。
-
-```json
-{"action": "allow"}
-```
-
-```json
-{"action": "deny", "reason": "当前项目禁止直接推送到主分支"}
-```
-
-需要管道或重定向的 Hook 可以显式启用 Shell 模式，信任确认时会显示额外风险警告：
-
-```json
-{
-  "id": "legacy-policy",
-  "matcher": "run_shell",
-  "shell": true,
-  "command": "python check.py | jq ."
-}
-```
-
-**关键不变量：**Hook 返回 `allow` 不能绕过权限拒绝。权限门控始终最先执行。Hook 故障（崩溃、超时、畸形输出）是**基础设施故障**，不是策略拒绝——Agent 被告知"Hook 系统故障"，而非"你的操作被策略拒绝"。Hook 链以结构化结果记录每个已执行 Hook 的耗时与终态（`allow` / `deny` / `error`）。
-
-### 2. 多级上下文管理
-
-上下文不是在即将溢出时才做一次摘要，而是逐级处理不同来源的浪费：
-
-| 阶段 | 触发条件 | 行为 | 缓存感知？ |
-|------|----------|------|:---:|
-| **大结果持久化** | 结果 > 30 KB | 全文落盘 → `~/.lion-code/tool-results/`；上下文保留路径 + 前 200 行预览 | — |
-| **动态预算** | 利用率 > 50% | 限制单个工具结果长度，保留首尾信息 | — |
-| **陈旧结果裁剪** | 利用率 > 60% | 将旧结果替换为占位符 `[result truncated]` | ✓ |
-| **空闲清理** | 距上次 API 调用 > 5 分钟 | 清理更早的工具结果，保留最近 3 项 | ✓ |
-| **全量摘要** | 利用率 > 85% | 用模型摘要历史，保留继续任务所需的决策、路径和状态 | — |
-
-**缓存热度感知**是其中的核心洞察。当 Provider 的前缀缓存仍然温热（上次 API 调用 < 5 分钟前），系统会延迟裁剪旧结果——即使超过 60% 阈值——直到利用率达到 75% 的覆盖水位。这避免了改写缓存前缀，用少量 Token 缓冲换取显著更高的缓存命中率。
-
-```python
-# context/manager.py —— 缓存感知的裁剪决策
-def _should_snip(self, state: ContextRuntimeState) -> bool:
-    if state.utilization < self.policy.snip_start_ratio:
-        return False
-    # 缓存仍热 且 未超过热缓存覆盖水位？保留旧前缀。
-    return not (
-        self._cache_is_hot(state)
-        and state.utilization < self.policy.hot_cache_override_ratio
-    )
-```
-
-摘要系统使用**同一模型 Provider** 进行压缩——不依赖外部 LLM。摘要提示词保留具体决策、文件路径、命令、故障和剩余工作，而非生成泛化的 tl;dr。
-
-### 3. Provider 无关的核心循环
-
-Core Runtime 是一个**单一异步生成器**（`core/loop.py` 中的 `run_agent_loop`），驱动整个工具使用周期。它完全 Provider 无关——同一循环同时适配 Anthropic、OpenAI-compatible 和测试用 Fake Provider：
-
-```python
-async def run_agent_loop(
-    *,
-    provider: ModelProvider,
-    model: str,
-    system: str,
-    messages: list[AgentMessage],
-    tools: list[AgentTool],
-    get_system: GetSystem | None = None,          # 每轮动态系统提示
-    get_tools: GetTools | None = None,             # 每轮动态工具解析
-    prepare_context: PrepareContext | None = None,  # 上下文投影钩子
-    signal: CancellationToken | None = None,
-    get_steering_messages: Callable | None = None,  # 运行中 steer
-    get_follow_up_messages: Callable | None = None, # 本轮结束 follow-up
-    ...
-) -> AsyncIterator[AgentEvent]:
-```
-
-三个动态钩子实现了每轮自适应，无需重建运行时：
-
-- **`get_system()`**——允许 Plan 模式、Skill 激活和工具变更更新系统提示
-- **`get_tools()`**——动态发现的 MCP 工具、延迟激活的 Skill、按 Sub-agent 的工具集视图
-- **`prepare_context(messages)`**——裁剪、预算并生成 Provider 投影上下文
-
-并行工具执行将相邻的并行能力工具分组为并发批次，串行工具则作为屏障：
-
-```python
-def _tool_call_batches(calls, tools):
-    """将相邻并行调用分组；串行工具作为屏障。"""
-    batches, parallel_batch = [], []
-    for call in calls:
-        tool = tools.get(call.name)
-        if tool is not None and tool.execution_mode == "parallel":
-            parallel_batch.append(call)
-        else:
-            if parallel_batch:
-                batches.append(parallel_batch)
-                parallel_batch = []
-            batches.append([call])
-    if parallel_batch:
-        batches.append(parallel_batch)
-    return batches
-```
-
-### 4. 会话持久化与崩溃恢复
-
-会话使用 **JSONL** 格式（每行一个 JSON 对象），选择 JSONL 而非 JSON 就是为了崩溃恢复——会话结束时的不完整写入最多丢失不完整的最后一行，而非整个文件：
-
-```python
-# session/storage.py —— 追加 + fsync，清掉崩溃残留半行
-async def _append_entry(self, entry: dict) -> None:
-    line = json.dumps(entry, ensure_ascii=False) + "\n"
-    fd = os.open(self._path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    try:
-        os.write(fd, line.encode("utf-8"))
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-```
-
-旧 JSON 会话透明发现与迁移——源文件永不修改，只读不写。
-
-### 5. Supervisor Plane 与长期任务控制
-
-长期运行行为由 Agent 外部显式组合产生：
-
-```python
-Supervisor(
-    agent_factory=...,       # 在外部选择 Minimal/Coding/Full Profile
-    goal=...,
-    retry_policy=...,
-    checkpoint_store=...,
-)
-```
-
-Supervisor 只负责再次运行 Agent 的主体、时机和策略。Checkpoint 仅保存 goal、phase、
-attempt、status、session reference、retry metadata 和 timestamps；它不保存会话内容，
-也不替代 JSONL session history。普通 Profile 和 Agent 不知道 Supervisor、goal、retry
-或 scheduler。
-
-### 6. Textual TUI 与实时流式渲染
-
-TUI 基于 [Textual](https://textual.textualize.io/) 构建，是一个完整的终端应用程序，而非一个带样式的 REPL：
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Lion Code — claude-sonnet-5 · 会话: abc123              │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  🤖 我来分析代码结构...                                  │
-│                                                         │
-│  ┌─ read_file (src/auth.py) ───────────────────────┐   │
-│  │  [1] import jwt                                  │   │
-│  │  [2] def verify_token(token): ...                │   │
-│  │  [120 行 · 4.2 KB]                               │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                         │
-│  ┌─ run_shell (pytest tests/auth/ -q) ─────────────┐   │
-│  │  3 passed, 1 failed                               │   │
-│  │  FAILED tests/auth/test_login.py::test_refresh   │   │
-│  │  AssertionError: expected 200, got 401            │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                         │
-├─────────────────────────────────────────────────────────┤
-│  > 修一下 refresh token 的测试                           │
-│  [Tab:补全] [Ctrl+S:steer] [Ctrl+O:follow-up]           │
-└─────────────────────────────────────────────────────────┘
-```
-
-TUI 核心能力：
-
-- **流式 Markdown 渲染**——模型回复随 Token 到达逐字渲染
-- **工具卡片**——每次工具调用和结果以独立可展开卡片展示
-- **路径自动补全**——Tab 补全项目目录下的文件路径
-- **命令/Skill 补全**——斜杠命令和 Skill 名称自动提示
-- **会话内切换模型**——不退出即可更换 Provider / 模型 / Thinking 档位
-- **会话恢复**——从历史会话列表选择并恢复完整上下文
-- **Steer & Follow-Up**——Agent 运行中注入指令或任务结束后追加消息
-- **Plan 审批弹窗**——模态覆盖层审阅和选择执行方式
-
----
-
-## 可复现评测
-
-项目包含两套正式评测——不是临时演示，而是带有统计分析的受控实验。
-
-### 上下文管理评测
-
-**实验设计：** 9 项编码任务 × 3 档上下文负载（60–70%、75–85%、85–95%）× 2 种策略 × 2 次重复 = **54 个真实 API 会话**。
-
-**结果**（`managed` vs `summary_only`）：
-
-| 指标 | `summary_only` | `managed`（Lion Code） | Δ |
-|---|---|---|---|
-| 成功任务 | 13/18 | **14/18** | +5.6% |
-| 累计输入 Token | 14,560,434 | **12,872,748** | −11.6% |
-| 峰值输入 Token | 175,546 | **145,581** | −17.1% |
-| API 费用（元） | 4.6672 | **4.4865** | −3.9% |
-
-- Token 缩减具有统计显著性（配对 bootstrap 95% CI: [9.1%, 14.4%]）
-- 费用下降方向利好但 95% 置信区间尚未跨 0（CI: [−7.2%, 13.6%]）
-- 缓存命中率在热感知策略下从 64.2% 提升至 66.6%
-
-离线校验（无 API 费用）：
-
-```bash
-python benchmarks/context_management/formal_benchmark.py
-```
-
-完整在线评测（产生真实 API 费用）：
-
-```bash
-export OPENAI_API_KEY="<你的 API Key>"
-python benchmarks/context_management/formal_benchmark.py --online \
-  --base-url "https://api.deepseek.com" \
-  --model "deepseek-v4-flash" \
-  --budget-cny 15
-```
-
-所有原始数据、任务定义和统计分析均在 `benchmarks/context_management/results/` 中。
-
-### Agent 端到端评测
-
-一个面向 Coding Agent 的生产级评测框架：
-
-- **任务语料库**——版本化、哈希钉定的任务定义，带 SHA-256 完整性校验（`corpus_assets/public_catalog.v1.json`）
-- **Orchestrator**——管理 Worker 生命周期、重试和超时
-- **Checkpoint 系统**——评测运行可恢复
-- **Verifier**——每项任务的结构化通过/失败判定
-- **回归检测**——自动对比基线并标记退化
-- **外部 Anchor**——SWE-bench 实时验证集成
-
-```bash
-python -m benchmarks.agent_e2e --help
-```
-
----
-
-## 项目结构
-
-```
-Lion-Code/
-├── lion_code/                  # 主包 (~43K 行)
-│   ├── __init__.py             # 最终公共 API
-│   ├── __main__.py             # CLI、TUI 与 REPL 进程入口
-│   ├── meta_agent.py           # feature-neutral 公共 Agent facade
-│   ├── adapters/               # Product Adapter 与前端端口组合实现
-│   ├── composition/            # Profile 与一次性 Composition Root
-│   ├── runtime/                # Agent Runtime 物理边界（Agent 生命周期协调）
-│   │   ├── agent.py            # AgentRuntime
-│   │   ├── conversation.py     # ConversationRuntime / Harness 与活动消息
-│   │   ├── context.py          # ContextRuntime / compaction policy
-│   │   ├── execution.py        # ExecutionControl（取消命令）
-│   │   ├── session.py          # SessionRuntime（会话与 JSONL recorder）
-│   │   ├── session_identity.py # SessionIdentityState / SessionView
-│   │   └── provider.py         # ProviderController / ProviderState
-│   ├── core/                   # Agent Kernel、Harness 与规范协议
-│   │   ├── loop.py             # 异步生成器：整个工具使用周期
-│   │   ├── harness.py          # 配置、事件总线、消息队列
-│   │   ├── messages.py         # 规范消息类型（AgentMessage、ToolResult...）
-│   │   ├── tools.py            # 工具定义、执行协议、并行批处理
-│   │   ├── provider.py         # ModelProvider 抽象
-│   │   └── provider_events.py  # 流式事件（delta、done、error）
-│   ├── capabilities/           # Generic SPI 与内聚的内置 Feature package
-│   │   ├── plan/               # Plan capability/runtime
-│   │   ├── skill/              # Skill capability/runtime/discovery
-│   │   └── subagent/           # SubAgent capability/factory/runtime/types
-│   ├── providers/              # 纯 httpx HTTP Provider（零 SDK 依赖）
-│   │   ├── http.py             # 共享 HTTP 客户端（重试/流式）
-│   │   ├── anthropic.py        # Anthropic Messages API 适配
-│   │   ├── openai_compatible.py# OpenAI-compatible 适配
-│   │   ├── model_limits.py     # 运行时上下文窗口发现
-│   │   └── fake.py             # 测试用确定性 Fake Provider
-│   ├── context/                # 多级上下文管理
-│   │   ├── manager.py          # 编排管线
-│   │   ├── policy.py           # 可配置阈值与预算
-│   │   ├── projector.py        # 消息投影（裁剪/占位/清理）
-│   │   ├── compaction.py       # 模型驱动摘要
-│   │   ├── estimator.py        # Token 估算
-│   │   └── limits.py           # 模型特定上下文限制
-│   ├── tooling/                # 工具执行运行时
-│   │   ├── runtime.py          # 统一执行入口（pre/post 中间件）
-│   │   ├── builtin.py          # 文件、Shell、搜索、Web 工具
-│   │   ├── permission.py       # 静态权限规则与危险操作判定
-│   │   ├── registry.py         # 工具注册与解析
-│   │   ├── middleware.py       # 拦截器链
-│   │   └── result_store.py     # 大结果持久化存储
-│   ├── application/            # 前端消费的会话边界
-│   │   ├── session.py          # LionCodingSession：事件桥接 + 命令分发
-│   │   ├── commands.py         # 斜杠命令协议
-│   │   ├── events.py           # 高层会话事件
-│   │   └── skills.py           # Skill 注册
-│   ├── tui/                    # Textual 终端 UI (~5K 行)
-│   │   ├── app.py              # 主 TUI 应用、屏幕、组件 (~1.4K 行)
-│   │   ├── prompt_input.py     # 带补全、粘贴、快捷键的输入框
-│   │   ├── widgets.py          # Transcript、工具卡片、Markdown 渲染
-│   │   ├── themes.py           # 内置 + 自定义主题加载
-│   │   └── autocomplete.py     # 路径/命令/Skill 补全引擎
-│   ├── server/                 # Electron 使用的 API-only REST/WS 适配器
-│   ├── sidecar.py              # Electron 托管的 Python 进程入口
-│   ├── hooks.py                # PreToolUse 命令 Hook (~23 KB)
-│   ├── session_runtime/        # JSONL 记录、旧 JSON 迁移、Repository
-│   ├── supervisor.py           # Agent 外部 goal/retry/scheduler/checkpoint 平面
-│   ├── prompt.py               # System Prompt 拼装
-│   └── config.py               # API 配置
-├── benchmarks/
-│   ├── context_management/     # 正式上下文评测（54 个 API 会话）
-│   │   ├── formal_benchmark.py # 离线校验 + 在线跑测入口
-│   │   ├── formal_dataset.json # 9 任务 × 3 负载水平
-│   │   ├── formal_tasks.py     # 任务定义与验证标准
-│   │   └── results/            # 原始数据与统计分析
-│   └── agent_e2e/              # 生产级评测框架
-│       ├── orchestrator.py     # Worker 生命周期与调度
-│       ├── corpus.py           # 版本化、哈希钉定的任务目录
-│       ├── verifier.py         # 结构化通过/失败判定
-│       ├── regression.py       # 基线对比与退化检测
-│       └── external_anchor.py  # SWE-bench 集成
-├── desktop/                    # Windows x64 Electron 桌面客户端
-│   ├── src/main/               # 窗口、workspace、sidecar 与 IPC owner
-│   ├── src/preload/            # 受限 DesktopBridge
-│   ├── src/renderer/           # assistant-ui 聊天与 Lion design system
-│   └── e2e/                    # Electron Playwright 主链路
-├── tests/                      # Python 测试
-│   ├── core/                   # Core Runtime 单元测试
-│   ├── context/                # 上下文管理测试
-│   ├── integration/            # 集成测试
-│   ├── tui/                    # TUI 组件测试
-│   └── ...
-├── docs/
-│   ├── tui.md                  # TUI 使用说明、快捷键与配置
-│    
-├── pyproject.toml              # 构建、依赖、CLI 入口
-├── MAINTENANCE.md              # 维护台账与瘦身日志
-└── README.md
-```
+### 04 · Long-running Context（缓存感知长上下文管理）
+拒绝无脑全量截断。采用多级上下文预算管道：
+- **大结果落盘**：超大工具输出（>30 KB）自动持久化至本地，上下文仅保留切片预览与回读路径。
+- **缓存热度感知**：在前缀缓存温热（< 5 分钟）时延迟裁剪陈旧结果，避免打碎 LLM Prefix Cache，显著提升缓存命中率。
+- **模型自摘要**：高负载水位时由同一 Provider 提取关键路径、决策与剩余状态执行精确压缩。
 
 ---
 
 ## 快速开始
 
-**环境要求：** Python 3.12+
+### 1. 环境准备
+
+需要 **Python 3.12+** 环境：
 
 ```bash
 git clone https://github.com/muyuzhong/Lion-Code.git
@@ -466,146 +86,216 @@ source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
 pip install -e .
 ```
 
-### Anthropic API
+### 2. 快速运行
 
+#### 运行 CLI 命令
 ```bash
+# Anthropic API
 export ANTHROPIC_API_KEY="<你的 API Key>"
 lion-code "读取当前项目并总结最重要的执行路径"
-```
 
-### OpenAI-compatible API
-
-```bash
+# OpenAI-compatible API
 export OPENAI_API_KEY="<你的 API Key>"
 export OPENAI_BASE_URL="https://api.openai.com/v1"
-lion-code --model "gpt-4o" "检查这个项目并运行测试"
+lion-code --model "gpt" "检查这个项目并运行测试"
 ```
 
-### 常用命令
-
+#### 常用参数
 ```bash
-lion-code --plan "设计一个重构方案"                   # 只读规划（Plan 能力激活）
-lion-code --accept-edits "修复测试并说明原因"          # 自动批准编辑
-lion-code --max-cost 0.50 --max-turns 20 "完成任务 X"  # 预算控制
-lion-code --resume                                     # 恢复最近会话
-lion-code                                              # 启动 Textual TUI
-lion-code --repl                                       # 纯文本 REPL
+lion-code --plan "设计一个重构方案"                   # 激活只读规划（Plan 模式）
+lion-code --accept-edits "修复测试并说明原因"          # 自动批准文件编辑
+lion-code --max-cost 0.50 --max-turns 20 "完成任务 X"  # 严格预算与轮次控制
+lion-code --resume                                     # 自动恢复最近一次会话
 ```
 
-### REPL 命令
+#### 启动终端 TUI
+```bash
+lion-code
+```
 
-| 命令 | 作用 |
-|---------|------|
-| `/clear` / `/new` | 清空对话，开始新会话 |
-| `/plan` | 切换 Plan 模式（只读分析） |
-| `/cost` | 查看 Token 使用量和费用 |
-| `/compact` | 手动压缩当前对话 |
-| `/task` | 查看当前项目的目标、活动任务与下一步 |
-| `/task switch <内容>` | 切换活动任务，并把旧任务保留为待继续事项 |
-| `/task done` | 结束活动任务，保留完成摘要并准备受限长期候选 |
-| `/skills` | 查看可用 Skill |
-| `/<skill-name>` | 调用一个用户可执行 Skill |
-| `exit` / `quit` | 退出程序 |
+---
 
-项目上下文按 `AGENTS.md`（兼容 `CLAUDE.md`）临时投影给 Provider；不会写入 canonical
-对话或 JSONL。`/clear` 只开启新对话，长期任务则由外部 Supervisor 显式恢复。
+## 架构设计
 
-### TUI（Textual）
+Lion Code 在架构上将**运行时数据流（Runtime Data Flow）**与**构建装配流（Composition Flow）**清晰拆分为两个正交维度。
 
-裸运行 `lion-code` 启动 TUI。主要快捷键：
+### 1. 运行时数据流架构（Runtime Architecture）
 
-| 快捷键 | 作用 |
-|----------|------|
-| `Ctrl+K` | 命令补全 |
-| `Ctrl+R` | 会话选择器 |
-| `Ctrl+P` | 模型选择器 |
-| `Ctrl+M` | 模型/API 配置 |
-| `Ctrl+T` | 切换 Thinking 可见性 |
-| `Ctrl+O` | 展开/折叠工具结果 |
-| `Ctrl+B` | 切换会话侧栏 |
-| `Ctrl+N` | 新建会话 |
-| `Esc` | 关闭补全或中止任务 |
-| `Tab` / `↑` / `↓` | 移动补全选择 |
-| `Shift+Tab` | 循环 Thinking 档位 |
-| `Alt+Enter` | 以 Follow-Up 提交（运行中） |
-| `Ctrl+D` | 退出 TUI |
+回答：*Lion Code 包含哪些模块，运行时数据如何流动？*
 
-TUI 支持实时路径补全、命令/Skill 提示、流式 Markdown、可展开工具卡片，以及运行中 Steer / Follow-Up 消息注入。模型、API 地址、Thinking 档位和主题均可在会话内切换。详见 [`docs/tui.md`](docs/tui.md)。
+<!-- 运行时数据流架构图：请将图片放置于 docs/assets/architecture-runtime.png -->
+<p align="center">
+  <img src="docs/assets/architecture-runtime.png" alt="Runtime Data Flow Architecture" width="800" />
+</p>
 
-### 运行时数据
+### 2. 组合构建架构（Composition Architecture）
 
-所有持久状态位于 `~/.lion-code/`：
+回答：*Lion Code 为什么极易扩展且各组件互不耦合？*
+
+装配根（`composition/agent_builder.py`）是一次性构造对象图的唯一场所，输入三轴严格正交：
+
+<!-- 组合构建架构图：请将图片放置于 docs/assets/architecture-composition.png -->
+<p align="center">
+  <img src="docs/assets/architecture-composition.png" alt="Composition Architecture" width="800" />
+</p>
+
+内部对象图按照严格的单向拓扑顺序创建，杜绝循环依赖与二段式延迟绑定：
 
 ```text
-~/.lion-code/
-├── sessions/           # JSONL 会话记录（旧 JSON 透明迁移）
-├── supervisor/         # 可选的执行控制 checkpoint
-├── tool-results/       # 超大工具结果全文（>30 KB）
-├── trusted-hooks.json  # 项目 Hook 信任指纹
-├── config.json         # 已保存的 API 配置
-└── tui.json            # TUI 主题、快捷键和通知偏好
+foundation ──► ContextRuntime ──► ConversationRuntime ──► SessionRuntime ──► AgentRuntime ──► ProviderController
 ```
+
+#### 产品 Profile 预设
+- `MinimalProfile`：零内置 Capability 的最小产品，仅装配调用方 tools 与外部 extension。
+- `CodingProfile`：内置全套 Coding Tools 与安全 Harness 策略。
+- `FullProfile`：**默认包含全套内置能力**（`Skill` + `SubAgent` + `Plan` + `Semantic Memory`），并支持通过 `extension_specs` 替换为自定义能力引擎。
+
+#### 架构分层契约（Import-Linter 门禁）
+在 `pyproject.toml` 中通过 `import-linter` 将模块依赖关系固化为 CI 强制门禁：
+- `core` 严禁依赖任何上层运行时包与能力包；
+- `providers` 仅依赖 `core` 抽象，零 SDK 绑定（纯 `httpx` 驱动）；
+- `capabilities` 绝不依赖 Agent 宿主与 UI 应用层；
+- `supervisor` 独立于 Agent 内部对象图，仅消费公开事件契约。
 
 ---
 
-## 设计取舍
+## 核心工程设计
 
-这张表记录了每个关键决策及其代价：
+### 1. Provider 无关的核心循环（Agent Kernel）
 
-| 问题 | Lion Code 的选择 | 代价与边界 |
-|------|-----------------|-----------|
-| 超大结果挤占上下文 | 先完整落盘，再提供预览和可回读路径 | 增加本地 I/O，但避免永久丢失内容 |
-| 立即裁剪能减少 Token | 缓存仍热时延迟改写旧前缀 | 短期保留更多 Token，换取更高缓存复用 |
-| Hook 故障时是否继续执行 | 所有异常均 fail-closed | Hook 故障降低可用性，但不会静默绕过安全边界 |
-| 长期任务恢复 | Supervisor checkpoint + session reference | 只保存执行控制，不复制会话内容 |
-| 防止覆盖外部修改 | 写文件前要求先读，并校验 mtime | 多一次读取，换取更清晰的并发修改保护 |
-| Provider SDK 依赖 | 纯 httpx，核心路径零 SDK 导入 | 必须直接实现 API 适配器 |
-| 会话格式 | JSONL 而非 JSON | 读取器略复杂，但崩溃恢复更安全 |
+Core Runtime 是一个位于 `lion_code/core/loop.py` 的**单一异步生成器**（`run_agent_loop`），同时适配 Anthropic、OpenAI-compatible 以及用于确定性测试的 Fake Provider。
+
+每轮循环通过三个动态钩子实现自适应调整，无需重建运行时：
+- `get_system()`：动态合并 Plan 模式、Skill 激活与工具声明的最新上下文。
+- `get_tools()`：动态注入 MCP 工具、延迟激活的 Skill 与 Sub-agent 工具集。
+- `prepare_context(messages)`：生成经过投影、裁剪与预算控制的 Provider 消息序列。
+
+支持**智能并行工具批处理**：相邻的并行工具分组为并发批次，串行工具则自动作为隔离屏障安全执行。
+
+### 2. Fail-Closed 工具执行边界（Tooling Boundary）
+
+工具执行流经严密的拦截管道，任何环节异常均 Fail-Closed：
+
+<!-- 工具执行拦截流程图：请将图片放置于 docs/assets/tool-execution-boundary.png -->
+<p align="center">
+  <img src="docs/assets/tool-execution-boundary.png" alt="Tool Execution Boundary Flow" width="750" />
+</p>
+
+- **隔离 Hook 体系**：Hook 从 stdin 接收 UTF-8 JSON，执行超时、异常退出或畸形输出均触发 `fail-closed` 阻断。敏感凭据（`*_API_KEY`、`AWS_*` 等）被严格禁止传入子进程。项目级 Hook 基于“规范化路径 + 配置哈希 + 脚本内容哈希”生成复合指纹，防范恶意篡改。
+- **状态保护与出站防护**：文件写入前强校验读取时间戳（防外部并发覆盖）；网络请求由 `EgressGuardMiddleware` 拦截，阻断非白名单出站请求并对登记密钥执行全文脱敏（Redaction）。
+
+### 3. 多级上下文管理（Context Management）
+
+| 阶段 | 触发水位 | 处理行为 | 缓存友好 |
+|------|----------|----------|:---:|
+| **大结果持久化** | 工具输出 > 30 KB | 全文落盘至 `~/.lion-code/tool-results/`；上下文仅留路径与首尾预览 | — |
+| **动态预算** | 窗口利用率 > 50% | 动态限制单次工具输出长度，保留头尾关键信息 | — |
+| **陈旧结果裁剪** | 窗口利用率 > 60% | 将历史远端工具结果替换为 `[result truncated]` 占位符 | ✓ |
+| **空闲清理** | 距上次调用 > 5 分钟 | 清理更早轮次的工具结果，保留最近 3 项 | ✓ |
+| **模型压缩摘要** | 窗口利用率 > 85% | 同模型提取具体决策、文件路径、命令故障与剩余工作进行结构化压缩 | — |
+
+**缓存热度感知**：当 Provider 前缀缓存处于温热状态（< 5 分钟）时，系统主动延迟裁剪旧结果，即使超过 60% 阈值也维持前缀不变，直到达到 75% 强制覆盖水位，用少量 Token 缓冲换取极高的缓存复用率。
+
+### 4. 会话持久化与崩溃恢复（Session & Recovery）
+
+- **Append-Only JSONL 格式**：会话历史逐行追加并执行 `fsync`，进程意外崩溃最多损失最后半行，绝不破坏历史数据完整性。
+- **透明格式迁移**：启动时自动发现旧版 JSON 会话并安全迁移至 JSONL。
+- **Supervisor 检查点**：长期任务的恢复由外部 Supervisor 维护轻量 Checkpoint（包含 Goal、Phase、Attempt、Status 与 Session Reference），与底层会话历史正交解耦。
 
 ---
 
-## 测试
+## 内置核心能力
 
-```bash
-# 完整测试套件（718 条）
-python -m pytest -q
+Lion Code 内置开箱即用的高阶编码能力，全部实现为独立的 Capability 模块：
 
-# 编译检查
-python -m compileall -q lion_code tests
-
-# 离线 Benchmark 校验（无 API 费用）
-python benchmarks/context_management/formal_benchmark.py
+```text
+lion_code/capabilities/
+├── memory/       # 跨会话 Semantic Memory 存储、检索与注入
+├── plan/         # 结构化只读规划模式与执行审批
+├── skill/        # 动态 Skill 发现、元数据解析与激活
+├── subagent/     # 递归子 Agent 实例化、执行与状态收集
+├── agent_state/  # 运行时状态聚合与上下文呈现
+└── git_status/   # 工作区 Git 状态感知与变更捕获
 ```
 
-## Windows 桌面开发与发布
+- **Semantic Memory**：跨会话持久化记忆，支持基于语义检索历史调试经验与业务规则，并允许通过外部扩展规格（`CapabilitySpec`）无缝替换存储引擎。
+- **Plan Mode**：只读分析规划模式。激活后限制写操作工具，生成结构化实施方案并请求用户审批。
+- **Skill System**：遵循标准 Frontmatter 元数据的可复用技能体系，支持运行时动态发现与上下文自动注入。
+- **SubAgent**：轻量级子 Agent 调度机制，支持主 Agent 将独立子任务分发给隔离的子 Agent 执行并汇总结果。
 
-Electron 是唯一 GUI 产品入口。Main 选择工作区并管理 API-only Python sidecar；
-Renderer 通过 `lion://app` 加载，以 REST/WS 使用 Python canonical Session。
-Renderer 禁用 Node integration，Preload 只暴露固定的 `DesktopBridge`。
+---
 
-开发环境需要 Python 3.12、Node.js 22/24（推荐 24）和 Windows 10/11 x64：
+## 交互界面与使用
 
-```powershell
-cd desktop
-npm ci
-npm run dev
+### 1. 桌面端（Electron Desktop）
+- 原生窗口集成工作区管理与多会话标签页；
+- 结合 `@assistant-ui/react` 实现流式回复与交互式工具卡片；
+- 内置独立进程 Sidecar，前后端解耦。
+
+### 2. 终端 TUI（Textual）
+运行 `lion-code` 进入全屏终端界面，主要交互快捷键：
+
+| 快捷键 | 功能说明 |
+|---|---|
+| `Ctrl+P` | 打开模型与 Provider 切换器 |
+| `Ctrl+R` | 浏览并恢复历史会话 |
+| `Ctrl+N` | 创建全新会话 |
+| `Ctrl+M` | 查看与修改 API 配置 |
+| `Ctrl+T` | 展开/折叠模型 Thinking 思考过程 |
+| `Ctrl+O` | 展开/折叠工具调用结果卡片 |
+| `Ctrl+B` | 切换会话侧边栏显隐 |
+| `Tab` | 补全文件路径、斜杠命令或 Skill 名称 |
+| `Alt+Enter` | 运行中提交 Follow-Up 追问指令 |
+| `Esc` | 取消补全或中止当前运行任务 |
+
+详见 [`docs/tui.md`](docs/tui.md)。
+
+### 3. Headless CLI 与 REPL
+- **单次运行**：`lion-code "指令"` 直接完成任务并退出；
+- **交互 REPL**：`lion-code --repl` 启动轻量纯文本交互，支持 `/clear`、`/plan`、`/cost`、`/compact`、`/task`、`/<skill-name>` 等斜杠命令。
+
+---
+
+## 项目结构
+
+```text
+Lion-Code/
+├── lion_code/                  # Python 核心运行时与包
+│   ├── core/                   # 最小 Agent Kernel、规范协议与循环驱动
+│   ├── runtime/                # Agent 运行时状态协调与生命周期
+│   ├── composition/            # Profile 预设与一次性 Composition Root
+│   ├── capabilities/           # Memory / Plan / Skill / SubAgent 等可组合能力
+│   ├── tooling/                # 工具执行边界、Fail-Closed Hook、快照与出站防护
+│   ├── context/                # 多级上下文管理、缓存感知裁剪与压缩
+│   ├── providers/              # 纯 httpx HTTP Provider（零三方 SDK 绑定）
+│   ├── session_runtime/        # Append-Only JSONL 会话存储与迁移
+│   ├── supervisor.py           # 外部目标、调度、重试与 Checkpoint 协调
+│   ├── tui/                    # Textual 终端客户端实现
+│   └── sidecar.py              # Electron 桌面端托管的 API-only Sidecar 入口
+├── desktop/                    # Electron + React + assistant-ui 桌面客户端
+│   ├── src/main/               # 窗口管理、Workspace 调度与 Sidecar 托管
+│   ├── src/preload/            # 安全隔离的 DesktopBridge
+│   ├── src/renderer/           # assistant-ui 与 Lion 交互界面
+│   └── e2e/                    # Playwright 桌面端端到端测试
+├── benchmarks/                 # 可复现基准评测
+│   ├── context_management/     # 上下文管理评测与统计分析
+│   └── agent_e2e/              # 端到端任务评测与回归检测系统
+├── tests/                      # 单元测试、集成测试与架构测试
+└── docs/                       # 技术设计与规范文档
 ```
-
-构建未签名 NSIS 测试安装包：
-
-```powershell
-cd desktop
-npm run package:win
-```
-
-该命令依次生成 PyInstaller `onedir` sidecar、验证版本/资源/许可证布局、构建
-Electron Renderer，并输出 `desktop/release/Lion-<version>-x64.exe`。安装态从
-`resources/sidecar/lion-sidecar.exe` 启动，不依赖系统 Python、Node 或源码目录。
 
 ---
 
 ## 路线图
 
-- [ ] **演示素材**——终端 GIF、代表性任务记录和结果截图
-- [ ] **CI 管线**——跨平台（Windows、Linux）、多 Python 版本 CI，展示测试状态徽章
-- [ ] **评测扩展**——更多任务多样性和对抗性测试用例
+- [ ] **视觉与多媒体演示**：录制桌面端工作流演示与 TUI 高阶操作录屏
+- [ ] **评测集扩展**：增加更多现实大型仓库重构任务与对抗性注入测试用例
+- [ ] **多平台桌面发布**：扩展 macOS (Apple Silicon / Intel) 与 Linux 桌面客户端构建与自动化签名
+
+---
+
+## 贡献与许可证
+
+欢迎通过 Issue 与 Pull Request 共同改进 Lion Code！提交代码前请确保通过本地质量门禁与架构测试。
+
+本项目采用 [MIT 许可证](LICENSE)。
