@@ -87,9 +87,9 @@ test("bootstraps REST history and streams one assistant-ui message over mocked W
     await expect(composerInput).toHaveValue("/review ");
     await composerInput.fill("");
     await expect(page.locator(".composer-skill-heading")).toHaveCount(0);
-    const renameButton = page.getByRole("button", { name: "重命名 session-current" }).first();
+    const renameButton = page.getByRole("button", { name: "重命名 Untitled Conversation" }).first();
     await renameButton.click();
-    const renameInput = page.getByRole("textbox", { name: "重命名 session-current" });
+    const renameInput = page.getByRole("textbox", { name: "重命名 Untitled Conversation" });
     await renameInput.fill("需求文档");
     await renameInput.press("Enter");
     await expect(page.getByText("需求文档", { exact: true }).first()).toBeVisible();
@@ -145,3 +145,146 @@ test("bootstraps REST history and streams one assistant-ui message over mocked W
     await application.close();
   }
 });
+
+test("captures visual screenshots for copy buttons, thinking, and session titles", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lion-screenshot-e2e-"));
+  const workspace = join(root, "workspace");
+  await mkdir(workspace);
+  const application = await electron.launch({
+    args: ["."],
+    env: { ...process.env, PYTHONPATH: resolve("e2e/fixtures") },
+  });
+  try {
+    const page = await application.firstWindow();
+    await page.setViewportSize({ width: 1200, height: 800 });
+
+    await page.route("http://127.0.0.1:43123/api/**", (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const payloads: Record<string, unknown> = {
+        "/api/messages": [
+          {
+            id: "user-1",
+            role: "user",
+            content: "简单介绍一下这个项目的核心思想",
+          },
+          {
+            id: "assistant-1",
+            role: "assistant",
+            reasoning: "正在阅读 Lion 的架构规范与模块设计，梳理核心思想...",
+            tools: [
+              {
+                id: "tool-1",
+                toolName: "list_files",
+                args: { pattern: "lion_code/**" },
+                result: "lion_code/core/\nlion_code/runtime/\nlion_code/providers/",
+                status: "completed",
+              },
+              {
+                id: "tool-2",
+                toolName: "read_file",
+                args: { path: "AGENTS.md" },
+                result: "# 项目约定\n\n## 架构原则\n1. 不保留向后兼容\n2. 选能满足当前需求的最简单实现",
+                status: "completed",
+              },
+            ],
+            content: "Lion 是一个采用四层架构设计的 Agent 框架。其核心思想包括：\n\n1. **极简主义与最小端到端**：不预防性抽象，保持模块化。\n2. **关注点分离**：会话状态、执行流与协议解耦。\n3. **流式打字体验**：支持实时思考与多档位调节。",
+          },
+        ],
+        "/api/status": {
+          session_id: "session-1",
+          model: "deepseek-chat",
+          provider_name: "deepseek",
+          permission_mode: "default",
+          api_configured: true,
+          cwd: workspace,
+          thinking_level: "medium",
+          available_thinking_levels: ["low", "medium", "high", "max"],
+          input_tokens: 1200,
+          output_tokens: 340,
+          is_running: false,
+        },
+        "/api/sessions": [
+          {
+            id: "session-1",
+            label: "简单介绍一下这个项目的核心思想",
+            startTime: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
+            messageCount: 2,
+            cwd: workspace,
+          },
+          {
+            id: "session-2",
+            label: "LionCode 性能分析与基线门禁",
+            startTime: new Date(Date.now() - 47 * 60 * 1000).toISOString(),
+            messageCount: 14,
+            cwd: workspace,
+          },
+          {
+            id: "session-3",
+            label: "Fix Sidecar Git Stdin Issues",
+            startTime: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+            messageCount: 6,
+            cwd: workspace,
+          },
+          {
+            id: "session-4",
+            label: null,
+            startTime: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+            messageCount: 0,
+            cwd: workspace,
+          },
+        ],
+        "/api/models": [{ provider_name: "deepseek", model: "deepseek-chat" }],
+        "/api/skills": [{ name: "review", description: "代码质量审查" }],
+      };
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payloads[path] ?? { success: true }) });
+    });
+
+    await page.evaluate(() => {
+      class FakeWebSocket {
+        static readonly CONNECTING = 0;
+        static readonly OPEN = 1;
+        readyState = FakeWebSocket.OPEN;
+        onopen: (() => void) | null = null;
+        onclose: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        onmessage: ((event: { data: string }) => void) | null = null;
+        constructor() { queueMicrotask(() => { this.onopen?.(); }); }
+        send() {}
+        close() {}
+      }
+      (globalThis as { WebSocket: unknown }).WebSocket = FakeWebSocket;
+    });
+
+    await page.evaluate(async (path) => {
+      const global = globalThis as typeof globalThis & { lionDesktop: DesktopBridge };
+      await global.lionDesktop.connectWorkspace(path);
+    }, workspace);
+
+    const artifactDir = "C:/Users/暮羽中/.gemini/antigravity/brain/0513aaf8-f552-49b7-a367-acd68ceab0d9";
+    await page.waitForSelector(".user-message");
+    await page.waitForSelector(".assistant-message");
+    await page.waitForTimeout(600);
+
+    // 1. 全局视口截图
+    await page.screenshot({ path: `${artifactDir}/ui_full_view.png` });
+
+    // 2. 悬停用户消息，验证复制按钮在左外侧且不遮挡文字
+    const userMsg = page.locator(".user-message").first();
+    await userMsg.hover();
+    await page.waitForTimeout(300);
+    await userMsg.screenshot({ path: `${artifactDir}/ui_user_message_hover.png` });
+
+    // 3. 悬停助手消息，验证复制按钮在底部且工具行整洁
+    const assistantMsg = page.locator(".assistant-message").first();
+    await assistantMsg.hover();
+    await page.waitForTimeout(300);
+    await assistantMsg.screenshot({ path: `${artifactDir}/ui_assistant_message_hover.png` });
+
+    // 4. 侧栏会话摘要与时间列表
+    const sidebar = page.locator(".sidebar").first();
+    await sidebar.screenshot({ path: `${artifactDir}/ui_sidebar_sessions.png` });
+  } finally {
+    await application.close();
+  }
+});
+
