@@ -28,3 +28,7 @@ mypy.jsonl
 radon-cc.json
 vulture.txt
 coverage.json
+
+# 测试与工具产物
+output/
+.playwright-cli/
