@@ -20,7 +20,16 @@ const MarkdownText: TextMessagePartComponent = ({ text }) => <Streamdown>{text}<
 const partComponents = { Text: MarkdownText, Reasoning: ReasoningActivity, tools: { Fallback: ToolActivity } };
 
 function UserMessage() {
-  return <MessagePrimitive.Root className="message user-message"><div className="message-body"><MessagePrimitive.Parts components={partComponents} /></div><MessageActions /></MessagePrimitive.Root>;
+  return (
+    <MessagePrimitive.Root className="message user-message">
+      <div className="user-message-bubble-row">
+        <MessageActions />
+        <div className="message-body">
+          <MessagePrimitive.Parts components={partComponents} />
+        </div>
+      </div>
+    </MessagePrimitive.Root>
+  );
 }
 
 function AssistantMessage() {

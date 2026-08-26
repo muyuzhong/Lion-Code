@@ -257,6 +257,9 @@ export class LionAssistantRuntimeAdapter {
         return;
       case "event":
         this.dispatch({ type: "server_event", event: event.event });
+        if (event.event.type === "agent_settled" || event.event.type === "turn_end" || event.event.type === "agent_end") {
+          void this.refreshMetadata();
+        }
         return;
       case "protocol_error":
         this.dispatch({ type: "server_event", event: { type: "protocol_error", message: event.message } });
