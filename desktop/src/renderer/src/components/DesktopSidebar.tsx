@@ -167,15 +167,59 @@ function SessionRow({ session, active, formatTime, disabled = false, renameDisab
     if (!next) return;
     if (await onRename(session.id, next)) setRenaming(false);
   };
+  const title = session.label || "Untitled Conversation";
+  const compactTime = formatCompactTime(session.startTime);
   return (
     <div className={`thread-item ${active ? "active" : ""}`}>
       <button type="button" className="thread-main" disabled={disabled || renaming} onClick={onClick}>
-      <span className={`thread-status ${active ? "active" : ""}`} aria-hidden="true" />
-      <span className="thread-copy">{renaming
-        ? <input ref={input} aria-label={`重命名 ${session.label || session.id}`} value={label} maxLength={80} onChange={(event) => setLabel(event.target.value)} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void save(); } else if (event.key === "Escape") { setLabel(session.label ?? ""); setRenaming(false); } }} />
-        : <strong>{session.label || `#${session.id.slice(0, 12)}`}</strong>}<small>{session.messageCount} 条消息 · {formatTime(session.startTime)}</small></span>
+        <span className={`thread-status ${active ? "active" : ""}`} aria-hidden="true" />
+        <span className="thread-copy">
+          {renaming ? (
+            <input
+              ref={input}
+              aria-label={`重命名 ${title}`}
+              value={label}
+              maxLength={80}
+              onChange={(event) => setLabel(event.target.value)}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") { event.preventDefault(); void save(); }
+                else if (event.key === "Escape") { setLabel(session.label ?? ""); setRenaming(false); }
+              }}
+            />
+          ) : (
+            <>
+              <strong>{title}</strong>
+              {compactTime ? <small>{compactTime}</small> : null}
+            </>
+          )}
+        </span>
       </button>
-      {!renaming ? <button type="button" className="thread-rename" aria-label={`重命名 ${session.label || session.id}`} title="重命名会话" disabled={renameDisabled} onClick={() => { setLabel(session.label ?? ""); setRenaming(true); }}><Pencil aria-hidden="true" size={12} /></button> : null}
+      {!renaming ? (
+        <button
+          type="button"
+          className="thread-rename"
+          aria-label={`重命名 ${title}`}
+          title="重命名会话"
+          disabled={renameDisabled}
+          onClick={() => { setLabel(session.label ?? ""); setRenaming(true); }}
+        >
+          <Pencil aria-hidden="true" size={12} />
+        </button>
+      ) : null}
     </div>
   );
 }
+
+function formatCompactTime(value: string | null, now = Date.now()): string {
+  if (!value) return "";
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return "";
+  const elapsed = Math.max(0, now - timestamp);
+  if (elapsed < 60_000) return "1m";
+  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m`;
+  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h`;
+  if (elapsed < 604_800_000) return `${Math.floor(elapsed / 86_400_000)}d`;
+  return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(timestamp);
+}
+

@@ -258,7 +258,7 @@ def create_default_command_registry() -> CommandRegistry:
         SlashCommand(
             name="thinking",
             description="切换 thinking 档位",
-            usage="/thinking [off|minimal|low|medium|high|xhigh]",
+            usage="/thinking [low|medium|high|max]",
             handler=_thinking_command,
         ),
         SlashCommand(

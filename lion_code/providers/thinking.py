@@ -17,25 +17,22 @@ from __future__ import annotations
 
 from typing import Literal
 
-type ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
+type ThinkingLevel = Literal["low", "medium", "high", "max"]
 
 THINKING_LEVELS: tuple[ThinkingLevel, ...] = (
-    "off",
-    "minimal",
     "low",
     "medium",
     "high",
-    "xhigh",
+    "max",
 )
 DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium"
 
-# Anthropic thinking budget_tokens per level; ``off`` disables thinking (None).
+# Anthropic thinking budget_tokens per level
 _ANTHROPIC_BUDGET_TOKENS: dict[str, int] = {
-    "minimal": 1024,
     "low": 2048,
-    "medium": 4096,
-    "high": 8192,
-    "xhigh": 16384,
+    "medium": 8192,
+    "high": 16384,
+    "max": 32768,
 }
 
 
@@ -49,20 +46,19 @@ def normalize_thinking_level(level: str | None) -> ThinkingLevel:
     return normalized  # type: ignore[return-value]
 
 
-# 旧 SDK 路径遗留的 thinking_mode 词汇 -> 新档位(Core 路径采用)。
-# 恢复历史会话时,JSONL 里可能存有这些旧值,用本映射平滑过渡。
+# 旧 SDK / 历史会话遗留词汇 -> 新 4 档。
 _LEGACY_THINKING_MODE_MAP: dict[str, ThinkingLevel] = {
-    "disabled": "off",
+    "off": "low",
+    "disabled": "low",
+    "minimal": "low",
     "adaptive": "medium",
     "enabled": "medium",
+    "xhigh": "max",
 }
 
 
 def coerce_thinking_level(level: str | None) -> ThinkingLevel:
-    """容忍式归一化:接受新档位与旧 SDK 词汇,未知值回落到 ``off``。
-
-    供恢复历史会话使用--不抛错,避免一条坏 entry 中断整段恢复。
-    """
+    """容忍式归一化:接受新档位与旧词汇,未知值回落到默认档位。"""
     if level is None:
         return DEFAULT_THINKING_LEVEL
     normalized = level.strip().lower()
@@ -70,33 +66,29 @@ def coerce_thinking_level(level: str | None) -> ThinkingLevel:
         return normalized  # type: ignore[return-value]
     if normalized in _LEGACY_THINKING_MODE_MAP:
         return _LEGACY_THINKING_MODE_MAP[normalized]
-    return "off"
+    return DEFAULT_THINKING_LEVEL
 
 
 def next_thinking_level(
     current: ThinkingLevel,
     available: tuple[str, ...] = THINKING_LEVELS,
 ) -> ThinkingLevel:
-    """循环到下一档(在 ``available`` 集合内环绕)。
-
-    ``current`` 不在 ``available`` 内时(例如被模型裁剪掉),回落到首档
-    (对齐 Tau 的兜底语义)。
-    """
+    """循环到下一档(在 ``available`` 集合内环绕)。"""
     if not available:
         return current
     index = available.index(current) if current in available else -1
     return available[(index + 1) % len(available)]  # type: ignore[return-value]
 
 
-def anthropic_budget_tokens_for_level(level: ThinkingLevel) -> int | None:
-    """Anthropic thinking ``budget_tokens``;``off`` 返回 ``None``(禁用 thinking)。"""
-    return _ANTHROPIC_BUDGET_TOKENS.get(level)
+def anthropic_budget_tokens_for_level(level: ThinkingLevel) -> int:
+    """Anthropic thinking ``budget_tokens``。"""
+    return _ANTHROPIC_BUDGET_TOKENS.get(level, _ANTHROPIC_BUDGET_TOKENS[DEFAULT_THINKING_LEVEL])
 
 
 def openai_reasoning_effort_for_level(level: ThinkingLevel) -> str:
-    """OpenAI-compatible ``reasoning_effort``;``off`` -> ``"none"``,其余原样透传。"""
-    if level == "off":
-        return "none"
+    """OpenAI-compatible ``reasoning_effort``。"""
+    if level == "max":
+        return "high"
     return level
 
 
@@ -105,7 +97,7 @@ def provider_thinking_levels(
     *,
     model: str | None = None,
 ) -> tuple[ThinkingLevel, ...]:
-    """某后端支持的档位集合。v1 两后端都返回全 6 档。"""
+    """某后端支持的档位集合。v1 两后端都返回 4 档。"""
     return THINKING_LEVELS
 
 
@@ -116,3 +108,4 @@ def provider_default_thinking_level(
 ) -> ThinkingLevel:
     """某后端的默认档位。"""
     return DEFAULT_THINKING_LEVEL
+

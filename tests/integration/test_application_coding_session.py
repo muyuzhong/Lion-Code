@@ -767,10 +767,10 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
     async def test_thinking_level_defaults_and_available(self) -> None:
         session, _agent, _harness, _fake = self._make_session([_stop_event()])
-        self.assertEqual(session.thinking_level, "off")
+        self.assertEqual(session.thinking_level, "low")
         self.assertEqual(
             tuple(session.available_thinking_levels),
-            ("off", "minimal", "low", "medium", "high", "xhigh"),
+            ("low", "medium", "high", "max"),
         )
 
     async def test_set_thinking_level_rebuilds_provider_with_level(self) -> None:
@@ -791,12 +791,12 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
         session, _agent, _harness, _fake = self._make_session([_stop_event()])
         with patch("full_agent.create_provider", return_value=FakeProvider([])):
-            self.assertEqual(session.thinking_level, "off")
-            self.assertEqual(session.cycle_thinking_level(), "minimal")
-            self.assertEqual(session.cycle_thinking_level(), "low")
             self.assertEqual(session.thinking_level, "low")
-            session.set_thinking_level("xhigh")
-            self.assertEqual(session.cycle_thinking_level(), "off")
+            self.assertEqual(session.cycle_thinking_level(), "medium")
+            self.assertEqual(session.cycle_thinking_level(), "high")
+            self.assertEqual(session.thinking_level, "high")
+            session.set_thinking_level("max")
+            self.assertEqual(session.cycle_thinking_level(), "low")
 
     async def test_set_thinking_level_persists_entry(self) -> None:
         from core.fakes import FakeProvider
@@ -818,7 +818,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             session.set_thinking_level("ultra")
         # 被拒后档位不变。
-        self.assertEqual(session.thinking_level, "off")
+        self.assertEqual(session.thinking_level, "low")
 
     async def test_thinking_switch_rejects_unsettled_session(self) -> None:
         session, _agent, harness, provider = self._make_session([])
@@ -834,7 +834,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
 
         create.assert_not_called()
         self.assertIs(harness.composition.runtime.conversation.provider, provider)
-        self.assertEqual(session.thinking_level, "off")
+        self.assertEqual(session.thinking_level, "low")
 
 
 if __name__ == "__main__":

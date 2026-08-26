@@ -268,7 +268,7 @@ def build_agent_composition(
     session_repository = foundation.session_repository
 
     provider_state = _build_provider_state(config)
-    initial_thinking_level: ThinkingLevel = "medium" if config.thinking else "off"
+    initial_thinking_level: ThinkingLevel = "medium" if config.thinking else "low"
     provider = foundation.bindings.provider.provider
     if provider is None:
         provider = build_provider_for_state(
@@ -575,7 +575,7 @@ def _build_provider_state(config: AgentConfig) -> ProviderState:
         else "ANTHROPIC_API_KEY",
         "",
     )
-    initial_thinking_level: ThinkingLevel = "medium" if config.thinking else "off"
+    initial_thinking_level: ThinkingLevel = "medium" if config.thinking else "low"
     return ProviderState(
         model=config.model,
         provider_kind=initial_provider_kind,

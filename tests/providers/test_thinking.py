@@ -18,9 +18,9 @@ from lion_code.providers.thinking import (
 
 
 class TestThinkingVocabulary(unittest.TestCase):
-    def test_levels_are_six_off_to_xhigh(self) -> None:
+    def test_levels_are_four_low_to_max(self) -> None:
         self.assertEqual(
-            THINKING_LEVELS, ("off", "minimal", "low", "medium", "high", "xhigh")
+            THINKING_LEVELS, ("low", "medium", "high", "max")
         )
 
     def test_default_is_medium(self) -> None:
@@ -33,7 +33,7 @@ class TestNormalize(unittest.TestCase):
 
     def test_strips_and_lowercases(self) -> None:
         self.assertEqual(normalize_thinking_level("  HIGH "), "high")
-        self.assertEqual(normalize_thinking_level("XHigh"), "xhigh")
+        self.assertEqual(normalize_thinking_level("Max"), "max")
 
     def test_unknown_raises(self) -> None:
         with self.assertRaises(ValueError):
@@ -48,15 +48,20 @@ class TestCoerce(unittest.TestCase):
         self.assertEqual(coerce_thinking_level("low"), "low")
         self.assertEqual(coerce_thinking_level("  Medium "), "medium")
 
-    def test_legacy_disabled_maps_to_off(self) -> None:
-        self.assertEqual(coerce_thinking_level("disabled"), "off")
+    def test_legacy_disabled_and_off_map_to_low(self) -> None:
+        self.assertEqual(coerce_thinking_level("disabled"), "low")
+        self.assertEqual(coerce_thinking_level("off"), "low")
+        self.assertEqual(coerce_thinking_level("minimal"), "low")
 
     def test_legacy_adaptive_and_enabled_map_to_medium(self) -> None:
         self.assertEqual(coerce_thinking_level("adaptive"), "medium")
         self.assertEqual(coerce_thinking_level("enabled"), "medium")
 
-    def test_unknown_falls_back_to_off(self) -> None:
-        self.assertEqual(coerce_thinking_level("bogus"), "off")
+    def test_legacy_xhigh_maps_to_max(self) -> None:
+        self.assertEqual(coerce_thinking_level("xhigh"), "max")
+
+    def test_unknown_falls_back_to_default(self) -> None:
+        self.assertEqual(coerce_thinking_level("bogus"), "medium")
 
     def test_none_falls_back_to_default(self) -> None:
         self.assertEqual(coerce_thinking_level(None), "medium")
@@ -64,44 +69,36 @@ class TestCoerce(unittest.TestCase):
 
 class TestNextLevel(unittest.TestCase):
     def test_cycles_forward(self) -> None:
-        self.assertEqual(next_thinking_level("off"), "minimal")
+        self.assertEqual(next_thinking_level("low"), "medium")
         self.assertEqual(next_thinking_level("medium"), "high")
+        self.assertEqual(next_thinking_level("high"), "max")
 
     def test_wraps_around(self) -> None:
-        self.assertEqual(next_thinking_level("xhigh"), "off")
-
-    def test_current_not_in_available_falls_back_to_first(self) -> None:
-        # current="xhigh" 已被裁剪;available 不含它 -> 回落到首档(对齐 Tau)。
-        available = ("off", "low", "high")
-        self.assertEqual(next_thinking_level("xhigh", available), "off")
+        self.assertEqual(next_thinking_level("max"), "low")
 
     def test_empty_available_keeps_current(self) -> None:
         self.assertEqual(next_thinking_level("medium", ()), "medium")
 
 
 class TestAnthropicMapping(unittest.TestCase):
-    def test_off_disables_thinking(self) -> None:
-        self.assertIsNone(anthropic_budget_tokens_for_level("off"))
-
     def test_budget_tokens_per_level(self) -> None:
-        self.assertEqual(anthropic_budget_tokens_for_level("minimal"), 1024)
         self.assertEqual(anthropic_budget_tokens_for_level("low"), 2048)
-        self.assertEqual(anthropic_budget_tokens_for_level("medium"), 4096)
-        self.assertEqual(anthropic_budget_tokens_for_level("high"), 8192)
-        self.assertEqual(anthropic_budget_tokens_for_level("xhigh"), 16384)
+        self.assertEqual(anthropic_budget_tokens_for_level("medium"), 8192)
+        self.assertEqual(anthropic_budget_tokens_for_level("high"), 16384)
+        self.assertEqual(anthropic_budget_tokens_for_level("max"), 32768)
 
 
 class TestOpenAIMapping(unittest.TestCase):
-    def test_off_maps_to_none_effort(self) -> None:
-        self.assertEqual(openai_reasoning_effort_for_level("off"), "none")
+    def test_max_maps_to_high(self) -> None:
+        self.assertEqual(openai_reasoning_effort_for_level("max"), "high")
 
     def test_other_levels_passthrough(self) -> None:
-        for level in ("minimal", "low", "medium", "high", "xhigh"):
+        for level in ("low", "medium", "high"):
             self.assertEqual(openai_reasoning_effort_for_level(level), level)
 
 
 class TestProviderLevels(unittest.TestCase):
-    def test_both_backends_expose_all_six(self) -> None:
+    def test_both_backends_expose_all_four(self) -> None:
         for kind in ("anthropic", "openai-compatible"):
             self.assertEqual(provider_thinking_levels(kind), THINKING_LEVELS)
 

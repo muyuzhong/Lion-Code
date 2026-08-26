@@ -312,7 +312,7 @@ def test_thinking_argument_completion_uses_available_modes() -> None:
         "/thinking h",
         command_registry=create_default_command_registry(),
         prompt_templates=(),
-        thinking_levels=("off", "minimal", "low", "medium", "high", "xhigh"),
+        thinking_levels=("low", "medium", "high", "max"),
     )
 
     assert state.items == ()

@@ -65,6 +65,7 @@ class SessionRepository:
         sessions.sort(key=lambda item: item["startTime"], reverse=True)
         return sessions
 
+
     async def rename(self, session_id: str, label: str) -> bool:
         """为非活动会话追加标题 Entry；活动会话由 SessionRuntime 的 Recorder 写入。"""
         storage = self.storage_for(session_id)
@@ -80,6 +81,8 @@ class SessionRepository:
     async def latest_session_id(self) -> str | None:
         sessions = await self.list_sessions()
         return str(sessions[0]["id"]) if sessions else None
+
+
 
 
 def _safe_session_id(session_id: str) -> str:

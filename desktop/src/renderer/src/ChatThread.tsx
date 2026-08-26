@@ -95,7 +95,7 @@ export function ChatThread({ sidebarCollapsed, onToggleSidebar, onCreateSession,
                 metrics={{ steps: protocol.metrics.steps, llm: formatRunDuration(protocol.metrics.llmMs), tools: formatRunDuration(protocol.metrics.toolMs) }}
                 model={snapshot.status?.model ?? "正在读取模型"}
                 permissionMode={snapshot.status?.permission_mode ?? "权限未知"}
-                thinkingLevel={snapshot.status?.thinking_level ?? "off"}
+                thinkingLevel={snapshot.status?.thinking_level ?? "medium"}
                 skills={skills}
                 onOpenSettings={onOpenSettings}
                 onQueuedTextChange={setQueuedText}
