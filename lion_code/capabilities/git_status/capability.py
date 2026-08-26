@@ -52,8 +52,8 @@ def _git_output(cwd: Path, *arguments: str) -> str:
     if not (cwd / ".git").exists():
         return ""
     try:
-        # Windows 上 Git 的子进程可能继承 PIPE；超时杀掉 Git 后，
-        # subprocess.run() 仍会等待持有管道的子进程，进而卡死整个事件循环。
+        # sidecar 控制线程会长期读取 stdin；Windows Git 继承该管道时会阻塞到超时。
+        # Git 超时后还可能留下持有 stdout 管道的子进程，卡住事件循环。
         # 临时文件不需要 communicate() 的 reader thread，超时可以真正收敛。
         with tempfile.TemporaryFile(
             mode="w+",
@@ -63,6 +63,7 @@ def _git_output(cwd: Path, *arguments: str) -> str:
             subprocess.run(
                 ["git", *arguments],
                 cwd=cwd,
+                stdin=subprocess.DEVNULL,
                 stdout=output,
                 stderr=subprocess.DEVNULL,
                 check=False,

@@ -308,7 +308,8 @@ def test_git_status_layer_does_not_capture_subprocess_pipes(
     monkeypatch.chdir(tmp_path)
     outputs = iter(("main\n", "M  a.py\n"))
 
-    def run_git(*_args, stdout, stderr, **_kwargs):
+    def run_git(*_args, stdin, stdout, stderr, **_kwargs):
+        assert stdin is subprocess.DEVNULL
         assert stdout is not subprocess.PIPE
         assert stderr is subprocess.DEVNULL
         stdout.write(next(outputs))
