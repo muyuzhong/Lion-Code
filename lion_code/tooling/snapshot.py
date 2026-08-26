@@ -283,11 +283,13 @@ class WorkspaceSnapshot:
                 scoped.add(path[len(prefix_with_separator) :])
         return scoped
 
-    def _git(self, *args: str) -> bytes:
+    def _git(self, *args: str, timeout: float = 5.0) -> bytes:
         result = subprocess.run(
             ["git", "-C", str(self.workspace_root), *args],
             check=True,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=timeout,
         )
         return result.stdout
 
