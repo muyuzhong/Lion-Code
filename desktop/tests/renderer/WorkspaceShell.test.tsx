@@ -35,6 +35,7 @@ function settingsBootstrap(options: { saveFails?: boolean } = {}): BackendBootst
             : url.endsWith("/api/models") ? [{ provider_name: "anthropic", model: "model-a" }]
               : url.endsWith("/api/skills") ? []
                 : url.endsWith("/api/config/provider") ? { provider: "anthropic", model: "model-a", api_key: "test-secret", base_url: "https://api.anthropic.com/v1" }
+                : url.endsWith("/api/config/egress") ? { allow_hosts: ["api.github.com", "example.com"] }
                 : { success: true };
       return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
     },
@@ -100,6 +101,43 @@ describe("desktop workspace presentation", () => {
       await vi.waitFor(() => expect(mounted.container.querySelector('[role="alert"]')?.textContent).toContain("配置写入失败"));
     });
     expect(onClose).not.toHaveBeenCalled();
+    await act(async () => { mounted.root.unmount(); });
+    mounted.container.remove();
+  });
+
+  it("loads and saves egress allow_hosts in settings panel", async () => {
+    let savedEgressPayload: unknown = null;
+    const customBootstrap: BackendBootstrap = {
+      ...settingsBootstrap(),
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (url.endsWith("/api/config/egress") && init?.method === "POST") {
+          savedEgressPayload = JSON.parse(String(init.body));
+          return new Response(JSON.stringify({ success: true, allow_hosts: ["api.github.com", "example.com", "new.host.org"] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return settingsBootstrap().fetch(input, init);
+      },
+    };
+    const onClose = vi.fn();
+    const mounted = await mountSettings(customBootstrap, onClose);
+    const textarea = mounted.container.querySelector("#egress-allow-hosts") as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+    await vi.waitFor(() => expect(textarea.value).toContain("api.github.com\nexample.com"));
+
+    await act(async () => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+      nativeSetter?.call(textarea, "api.github.com\nexample.com\nnew.host.org");
+      textarea.dispatchEvent(new Event("change", { bubbles: true }));
+      (mounted.container.querySelector("form") as HTMLFormElement).requestSubmit();
+    });
+
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(savedEgressPayload).toEqual({
+      allow_hosts: ["api.github.com", "example.com", "new.host.org"],
+    });
     await act(async () => { mounted.root.unmount(); });
     mounted.container.remove();
   });

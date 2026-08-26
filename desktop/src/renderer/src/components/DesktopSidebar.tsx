@@ -103,7 +103,6 @@ export function DesktopSidebar({
                 {projectOpen ? <ChevronDown aria-hidden="true" size={14} /> : <ChevronRight aria-hidden="true" size={14} />}
                 <Folder aria-hidden="true" size={15} />
                 <strong>{workspaceName}</strong>
-                <span className="project-active-dot" aria-label="当前项目" />
               </button>
               <button type="button" aria-label="新建任务" onClick={onCreateSession} disabled={isStreaming}><Plus aria-hidden="true" size={14} /></button>
             </div>
@@ -155,7 +154,7 @@ export function DesktopSidebar({
   );
 }
 
-function SessionRow({ session, active, formatTime, disabled = false, renameDisabled = false, onClick, onRename }: { session: SessionItem; active: boolean; formatTime: (value: string | null) => string; disabled?: boolean; renameDisabled?: boolean; onClick?: () => void; onRename: (sessionId: string, label: string) => Promise<boolean> }) {
+function SessionRow({ session, active, formatTime, disabled = false, renameDisabled = false, onClick, onRename }: { session: SessionItem; active: boolean; formatTime?: (value: string | null) => string; disabled?: boolean; renameDisabled?: boolean; onClick?: () => void; onRename: (sessionId: string, label: string) => Promise<boolean> }) {
   const [renaming, setRenaming] = useState(false);
   const [label, setLabel] = useState(session.label ?? "");
   const input = useRef<HTMLInputElement>(null);
@@ -168,7 +167,7 @@ function SessionRow({ session, active, formatTime, disabled = false, renameDisab
     if (await onRename(session.id, next)) setRenaming(false);
   };
   const title = session.label || "Untitled Conversation";
-  const compactTime = formatCompactTime(session.startTime);
+  const displayTime = formatTime ? formatTime(session.startTime) : formatCompactTime(session.startTime);
   return (
     <div className={`thread-item ${active ? "active" : ""}`}>
       <button type="button" className="thread-main" disabled={disabled || renaming} onClick={onClick}>
@@ -190,7 +189,7 @@ function SessionRow({ session, active, formatTime, disabled = false, renameDisab
           ) : (
             <>
               <strong>{title}</strong>
-              {compactTime ? <small>{compactTime}</small> : null}
+              {displayTime ? <small>{displayTime}</small> : null}
             </>
           )}
         </span>
