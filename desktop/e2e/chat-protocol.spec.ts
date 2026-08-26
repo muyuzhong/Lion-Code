@@ -187,6 +187,16 @@ test("captures visual screenshots for copy buttons, thinking, and session titles
                 status: "completed",
               },
             ],
+            content: "",
+          },
+          {
+            id: "user-2",
+            role: "user",
+            content: "请给出具体的设计原则总结",
+          },
+          {
+            id: "assistant-2",
+            role: "assistant",
             content: "Lion 是一个采用四层架构设计的 Agent 框架。其核心思想包括：\n\n1. **极简主义与最小端到端**：不预防性抽象，保持模块化。\n2. **关注点分离**：会话状态、执行流与协议解耦。\n3. **流式打字体验**：支持实时思考与多档位调节。",
           },
         ],
