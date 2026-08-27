@@ -48,7 +48,12 @@ def main() -> int:
     recorder = TraceRecorder()
     result = asyncio.run(run_agent_worker(request, trace_recorder=recorder))
     try:
-        patch_sha256, patch_applied = export_git_patch(Path.cwd(), PATCH_PATH)
+        # 以任务卡片的 base_revision 为 diff 基准:兼容 Agent 既未提交
+        # 又已自行 git commit 的两种改动形态(官方 Harness 在 base 上应用 patch)。
+        base_revision = task.base_revision
+        patch_sha256, patch_applied = export_git_patch(
+            Path.cwd(), PATCH_PATH, base_revision=base_revision
+        )
         result = result.model_copy(
             update={
                 "patch_sha256": patch_sha256,
@@ -70,13 +75,22 @@ def main() -> int:
 
 
 def export_git_patch(
-    workspace: str | Path, destination: str | Path
+    workspace: str | Path,
+    destination: str | Path,
+    *,
+    base_revision: str | None = None,
 ) -> tuple[str | None, bool]:
     """导出 tracked 与 untracked 改动，不把评测输出目录纳入 patch。"""
 
     root = Path(workspace).resolve()
     destination_path = Path(destination).resolve()
-    tracked = _git_bytes(root, "diff", "HEAD", "--binary", "--no-ext-diff")
+    tracked = _git_bytes(
+        root,
+        "diff",
+        base_revision or "HEAD",
+        "--binary",
+        "--no-ext-diff",
+    )
     excluded_prefix: Path | None = None
     try:
         destination_path.relative_to(root)
