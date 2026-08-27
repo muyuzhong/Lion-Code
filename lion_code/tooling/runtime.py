@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from ..core.cancellation import CancellationView
 from .audit import AuditResult, ExecutionEvent
 from .context import ToolContext
+from .egress_guard import EgressConfiguration
 from .middleware import ToolMiddleware, can_run_parallel
 from .registry import ToolRegistry
 from .types import JSONValue, ToolResult, ToolUpdateCallback
@@ -34,10 +35,26 @@ class ToolRuntime:
         registry: ToolRegistry,
         context: ToolContext,
         middleware: Sequence[ToolMiddleware] = (),
+        egress_configuration: EgressConfiguration | None = None,
     ) -> None:
         self.registry = registry
         self.context = context
         self.middleware = tuple(middleware)
+        self._egress_configuration = egress_configuration
+
+    def egress_hosts(self) -> list[str]:
+        """返回 tooling 管理的 Egress 白名单，供应用端口读取。"""
+
+        if self._egress_configuration is None:
+            raise RuntimeError("Egress configuration is unavailable")
+        return self._egress_configuration.configured_hosts()
+
+    def configure_egress(self, allow_hosts: Sequence[str]) -> list[str]:
+        """更新 Egress 配置并刷新当前 ToolRuntime 的白名单。"""
+
+        if self._egress_configuration is None:
+            raise RuntimeError("Egress configuration is unavailable")
+        return self._egress_configuration.configure_hosts(allow_hosts)
 
     async def execute(
         self,
