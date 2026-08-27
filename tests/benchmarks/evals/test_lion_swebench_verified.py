@@ -44,5 +44,8 @@ def test_lion_swebench_verified_trajectory() -> None:
     )
     assert analyzed.deepeval is not None
     assert analyzed.deepeval.status is DeepEvalAnalysisStatus.COMPLETED
-    assert tuple(metric.name for metric in analyzed.deepeval.metrics) == DEEPEVAL_METRIC_NAMES
+    assert (
+        tuple(metric.name for metric in analyzed.deepeval.metrics)
+        == DEEPEVAL_METRIC_NAMES
+    )
     assert analyzed.task_result == report.task_result

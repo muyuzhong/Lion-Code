@@ -228,9 +228,7 @@ class TestDeepEvalAnalysis(unittest.TestCase):
         judge = _FakeJudge(
             {
                 DEEPEVAL_METRIC_NAMES[0]: 0.8,
-                DEEPEVAL_METRIC_NAMES[1]: RuntimeError(
-                    "api_key=sk-not-persisted"
-                ),
+                DEEPEVAL_METRIC_NAMES[1]: RuntimeError("api_key=sk-not-persisted"),
                 DEEPEVAL_METRIC_NAMES[2]: 0.6,
             }
         )
@@ -275,7 +273,9 @@ class TestDeepEvalAnalysis(unittest.TestCase):
 
 
 class TestOpikPublisher(unittest.TestCase):
-    def test_fake_client_receives_redacted_tree_timestamps_feedback_and_flush(self) -> None:
+    def test_fake_client_receives_redacted_tree_timestamps_feedback_and_flush(
+        self,
+    ) -> None:
         case = _case()
         analysis = analyze_deepeval_case(
             case,
@@ -352,7 +352,9 @@ class TestOpikPublisher(unittest.TestCase):
         self.assertEqual(retried.status, OpikExportStatus.EXPORTED)
         self.assertEqual(retried.attempts, 2)
 
-    def test_missing_host_credentials_are_unavailable_without_persisting_a_key(self) -> None:
+    def test_missing_host_credentials_are_unavailable_without_persisting_a_key(
+        self,
+    ) -> None:
         case = _case()
         payload = build_opik_trace_payload(
             run_id="run-1",
