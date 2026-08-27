@@ -7,7 +7,7 @@ them structurally without importing the application layer.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
@@ -23,6 +23,14 @@ EventListener = Callable[[AgentEvent], Awaitable[None] | None]
 ConfirmCallback = Callable[[str], Awaitable[bool]]
 PlanApprovalCallback = Callable[[str], Awaitable[dict[str, Any]]]
 NoticeCallback = Callable[[str, Literal["info", "error"]], None]
+
+
+class EgressConfigurationPort(Protocol):
+    """Tooling-owned egress settings exposed through an application port."""
+
+    def egress_hosts(self) -> list[str]: ...
+
+    def configure_egress(self, allow_hosts: Sequence[str]) -> list[str]: ...
 
 
 class ConversationPort(Protocol):
@@ -94,6 +102,10 @@ class SettingsPort(Protocol):
 
     def configure_provider(self, **kwargs: Any) -> None: ...
 
+    def egress_hosts(self) -> list[str]: ...
+
+    def configure_egress(self, allow_hosts: Sequence[str]) -> list[str]: ...
+
     @property
     def thinking_level(self) -> str: ...
 
@@ -142,6 +154,7 @@ __all__ = [
     "ConfirmCallback",
     "ControlPort",
     "ConversationPort",
+    "EgressConfigurationPort",
     "EventListener",
     "NoticeCallback",
     "PlanApprovalCallback",

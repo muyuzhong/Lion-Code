@@ -19,9 +19,7 @@ from lion_code.providers.thinking import (
 
 class TestThinkingVocabulary(unittest.TestCase):
     def test_levels_are_four_low_to_max(self) -> None:
-        self.assertEqual(
-            THINKING_LEVELS, ("low", "medium", "high", "max")
-        )
+        self.assertEqual(THINKING_LEVELS, ("low", "medium", "high", "max"))
 
     def test_default_is_medium(self) -> None:
         self.assertEqual(DEFAULT_THINKING_LEVEL, "medium")

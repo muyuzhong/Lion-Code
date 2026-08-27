@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlsplit
@@ -156,6 +157,48 @@ def save_project_egress_hosts(cwd: Path, allow_hosts: list[str]) -> None:
         encoding="utf-8",
     )
     os.replace(tmp_file, settings_path)
+
+
+def normalize_egress_hosts(allow_hosts: Sequence[str]) -> list[str]:
+    """把 API 输入归一化为可持久化的精确 host 列表。"""
+
+    normalized_hosts: list[str] = []
+    for raw in allow_hosts:
+        host = str(raw).strip()
+        if not host:
+            continue
+        if host.lower().startswith(("http://", "https://")):
+            extracted = host_of(host)
+            if extracted:
+                host = extracted
+        host = host.lower()
+        if host not in normalized_hosts:
+            normalized_hosts.append(host)
+    return normalized_hosts
+
+
+@dataclass(slots=True)
+class EgressConfiguration:
+    """Tooling-owned settings port for reading and refreshing Egress state."""
+
+    home: Path
+    cwd: Path
+    whitelist: EgressWhitelist | None = None
+    provider_hosts: frozenset[str] = frozenset()
+
+    def configured_hosts(self) -> list[str]:
+        return load_configured_egress_hosts(home=self.home, cwd=self.cwd)
+
+    def configure_hosts(self, allow_hosts: Sequence[str]) -> list[str]:
+        normalized_hosts = normalize_egress_hosts(allow_hosts)
+        save_project_egress_hosts(self.cwd, normalized_hosts)
+        if self.whitelist is not None:
+            self.whitelist.reload(
+                home=self.home,
+                cwd=self.cwd,
+                provider_hosts=self.provider_hosts,
+            )
+        return normalized_hosts
 
 
 class EgressGuardMiddleware:

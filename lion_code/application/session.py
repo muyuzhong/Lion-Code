@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -489,3 +489,15 @@ class LionCodingSession:
         self._running = False
         if not task.cancelled():
             task.exception()
+
+    def get_egress_config(self) -> list[str]:
+        """返回 tooling 管理的当前 Egress 白名单配置。"""
+
+        return self._backend.egress_hosts()
+
+    def configure_egress(self, allow_hosts: Sequence[str]) -> list[str]:
+        """在会话空闲时更新 tooling 管理的 Egress 白名单。"""
+
+        if self._running:
+            raise RuntimeError("会话运行中，无法修改 Egress 白名单")
+        return self._backend.configure_egress(allow_hosts)

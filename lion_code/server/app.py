@@ -24,12 +24,6 @@ from starlette.websockets import WebSocketState
 from lion_code.application.session import LionCodingSession
 from lion_code.config import save_api_config
 from lion_code.core.messages import AssistantMessage, ToolResultMessage, UserMessage
-from lion_code.tooling.egress_guard import (
-    EgressGuardMiddleware,
-    host_of,
-    load_configured_egress_hosts,
-    save_project_egress_hosts,
-)
 
 from .bridge import SessionWebsocketBridge, WebsocketConnectionLease
 from .models import (
@@ -105,21 +99,6 @@ def _has_websocket_capability(protocol_header: str | None, capability: str) -> b
 
 def generate_capability() -> str:
     return secrets.token_urlsafe(32)
-
-
-def _refresh_session_egress_whitelist(session: LionCodingSession) -> None:
-    """尝试刷新当前 session 的 EgressGuardMiddleware 白名单。"""
-    try:
-        backend = getattr(session, "_backend", None)
-        agent = getattr(backend, "_agent", None)
-        conv = getattr(agent, "_conversation", None)
-        tool_runtime = getattr(conv, "_tool_runtime", None)
-        if tool_runtime is not None:
-            for mw in tool_runtime.middleware:
-                if isinstance(mw, EgressGuardMiddleware):
-                    mw.whitelist.reload(home=Path.home(), cwd=session.cwd)
-    except Exception:
-        pass
 
 
 def create_app(
@@ -438,35 +417,20 @@ def create_app(
 
     @api.get("/config/egress", response_model=EgressConfigResponse)
     async def get_egress_config() -> EgressConfigResponse:
-        hosts = load_configured_egress_hosts(home=Path.home(), cwd=session.cwd)
-        return EgressConfigResponse(allow_hosts=hosts)
+        return EgressConfigResponse(allow_hosts=session.get_egress_config())
 
     @api.post("/config/egress")
     async def configure_egress(body: EgressConfigRequest) -> dict[str, Any]:
         if session.is_running:
             raise HTTPException(status_code=400, detail="会话运行中，无法修改配置")
 
-        normalized_hosts: list[str] = []
-        for raw in body.allow_hosts:
-            host_str = str(raw).strip()
-            if not host_str:
-                continue
-            if host_str.startswith("http://") or host_str.startswith("https://"):
-                extracted = host_of(host_str)
-                if extracted:
-                    host_str = extracted
-            host_str = host_str.lower()
-            if host_str and host_str not in normalized_hosts:
-                normalized_hosts.append(host_str)
-
         try:
-            save_project_egress_hosts(session.cwd, normalized_hosts)
+            normalized_hosts = session.configure_egress(body.allow_hosts)
         except Exception as exc:
             raise HTTPException(
                 status_code=500, detail=f"保存 Egress 白名单配置失败: {exc}"
             ) from exc
 
-        _refresh_session_egress_whitelist(session)
         return {"success": True, "allow_hosts": normalized_hosts}
 
     @api.get("/skills", response_model=list[SkillItem])

@@ -128,6 +128,7 @@ def build_full_coding_backend(
         terminal_output_sink=runtime.agent.set_terminal_output,
         session_renamer=runtime.session.rename_session,
         session_repository=runtime.session.repository,
+        egress_configuration=composition.tooling.runtime,
         cwd=Path(composition.tooling.context.cwd),
     )
 
