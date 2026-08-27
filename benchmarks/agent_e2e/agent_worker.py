@@ -5,19 +5,19 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from lion_code.adapters.coding_session_backend import CodingSessionBackendAdapter
 from lion_code.composition.full_product import build_full_coding_backend
+from lion_code.config import resolve_api_credentials
 from lion_code.session_runtime import SessionRepository
 
 from .backend import AgentExecutionRequest
 from .models import AgentRunSummary, WorkerResult, WorkerStatus
 from .trace import TraceRecorder, redact_text
-
 
 AgentFactory = Callable[..., CodingSessionBackendAdapter]
 
@@ -41,6 +41,18 @@ async def run_agent_worker(
     _require_external_session_dir(session_dir, workspace)
     session_repository = SessionRepository(session_dir)
     recorder = trace_recorder or TraceRecorder()
+    # 凭证只从进程环境解析(容器内无本地配置),避免默认落到 anthropic 通道;
+    # 未解析到凭证时不传参,保持 factory 自身默认(离线测试/占位端点)不变。
+    credentials = resolve_api_credentials()
+    credential_kwargs: dict[str, Any] = {}
+    if credentials["api_key"]:
+        credential_kwargs["api_key"] = credentials["api_key"]
+        credential_kwargs["api_base"] = (
+            credentials["api_base"] if credentials["use_openai"] else None
+        )
+        credential_kwargs["anthropic_base_url"] = (
+            credentials["api_base"] if not credentials["use_openai"] else None
+        )
     agent: Agent | None = None
     unsubscribe: Callable[[], None] | None = None
     result: WorkerResult | None = None
@@ -58,6 +70,7 @@ async def run_agent_worker(
                 confirm_fn=_auto_confirm,
                 session_repository=session_repository,
                 terminal_output=False,
+                **credential_kwargs,
             )
             unsubscribe = agent.subscribe(recorder.record)
             run_result = await agent.run(
@@ -71,7 +84,7 @@ async def run_agent_worker(
         )
     except asyncio.CancelledError:
         raise
-    except asyncio.TimeoutError:
+    except TimeoutError:
         result = WorkerResult(
             status=WorkerStatus.TIMEOUT,
             error_summary="worker timeout",
