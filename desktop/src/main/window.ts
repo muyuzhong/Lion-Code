@@ -1,5 +1,6 @@
 /** Electron 窗口的安全配置与外部导航策略。 */
 
+import path from "node:path";
 import { BrowserWindow, session, shell } from "electron";
 import { isTrustedRendererUrl, secureWebPreferences } from "./window-security";
 
@@ -21,6 +22,8 @@ export class WindowController {
       minWidth: 720,
       minHeight: 520,
       show: false,
+      // 路径相对 out/main（dev 与打包后一致）：dev 下指向 desktop/build/icon.png；打包后在 asar 根目录。
+      icon: path.join(__dirname, "../../build/icon.png"),
       webPreferences: secureWebPreferences(this.options.preloadPath),
     });
     this.window = window;

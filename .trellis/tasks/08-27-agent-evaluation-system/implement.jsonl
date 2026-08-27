@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "评测隔离、正式得分、轨迹脱敏与既有模块边界"}
+{"file": ".trellis/tasks/08-27-agent-evaluation-system/prd.md", "reason": "本任务需求、验收标准与非目标"}
+{"file": ".trellis/tasks/08-27-agent-evaluation-system/design.md", "reason": "本任务固定链路与权责边界"}
+{"file": ".trellis/tasks/08-27-agent-evaluation-system/implement.md", "reason": "分阶段实施、质量门禁与停止条件"}
+{"file": ".trellis/tasks/08-27-agent-evaluation-system/research/opik-trace-export.md", "reason": "Opik OTLP 官方接入、DeepEval 边界与凭证隔离调研"}

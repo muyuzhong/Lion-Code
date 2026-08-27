@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "校验正式得分、隔离和敏感信息边界"}
+{"file": ".trellis/tasks/08-27-agent-evaluation-system/prd.md", "reason": "逐项核对用户验收标准"}
+{"file": ".trellis/tasks/08-27-agent-evaluation-system/design.md", "reason": "按验收链路与停止条件复核"}
+{"file": "tests/benchmarks/", "type": "directory", "reason": "覆盖模型、Harbor、Harness、DeepEval、CLI 与报告"}
+{"file": ".trellis/tasks/08-27-agent-evaluation-system/research/opik-trace-export.md", "reason": "校验 Opik 官方 endpoint、脱敏与上传失败边界"}

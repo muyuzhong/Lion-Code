@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "复核 official-only 与隔离约束"}
+{"file": ".trellis/tasks/08-27-verified-execution-chain/prd.md", "reason": "逐项核对验收标准"}
+{"file": ".trellis/tasks/08-27-verified-execution-chain/design.md", "reason": "检查链路边界与失败语义"}
+{"file": "tests/benchmarks/", "type": "directory", "reason": "验证 artifact、Harbor 和 Harness 行为边界"}

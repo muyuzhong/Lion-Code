@@ -6,8 +6,9 @@ __pycache__/
 .ci-venv/
 .tmp-ci/
 .pi/
-build/
-dist/
+/build/
+/dist/
+!desktop/build/icon.png
 *.egg-info/
 /tags
 .lion-code/

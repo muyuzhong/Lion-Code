@@ -51,6 +51,7 @@
     },
     "files": [
       "out/**",
+      "build/icon.png",
       "THIRD_PARTY_NOTICES.md",
       "node_modules/@assistant-ui/react/LICENSE",
       "node_modules/lucide-react/LICENSE",
@@ -70,6 +71,7 @@
       }
     ],
     "win": {
+      "icon": "build/icon.png",
       "target": [
         "nsis"
       ],

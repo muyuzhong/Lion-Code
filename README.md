@@ -1,6 +1,6 @@
 <div align="center">
 
-# Lion Code
+# <img src="docs/assets/logo.png" width="40" height="40" alt="Lion Code Logo" valign="middle" /> Lion Code
 
 **以最小 Agent Kernel 为核心、面向可靠 Coding Agent 构建的可组合运行时与完整客户端**<br/>
 *A composable runtime for building reliable Coding Agents, built around a minimal agent kernel.*

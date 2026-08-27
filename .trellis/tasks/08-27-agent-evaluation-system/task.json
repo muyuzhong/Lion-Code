@@ -1,0 +1,35 @@
+{
+  "id": "agent-evaluation-system",
+  "name": "agent-evaluation-system",
+  "title": "构建 Lion 自动化评测系统",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "backend",
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-27",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-27-verified-execution-chain",
+    "08-27-eval-analysis-observability",
+    "08-27-eval-cli-linux-smoke"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "dataset": "swe-bench-verified",
+    "runner": "harbor",
+    "analyzer": "deepeval",
+    "observability": "opik-cloud"
+  }
+}

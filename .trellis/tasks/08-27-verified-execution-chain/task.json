@@ -1,0 +1,29 @@
+{
+  "id": "verified-execution-chain",
+  "name": "verified-execution-chain",
+  "title": "接通 Harbor 与 SWE-bench 官方评分链",
+  "description": "从当前 Git commit 构建 Lion 产物，在 Linux Harbor 中执行单条 SWE-bench Verified，并由官方 Harness 给出确定性结果。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "backend",
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-27",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-27-agent-evaluation-system",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "environment": "linux-docker",
+    "depends_on": "425ef995"
+  }
+}
