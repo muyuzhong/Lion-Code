@@ -6,7 +6,8 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, ClassVar, Mapping
+from pathlib import Path
+from typing import Any, ClassVar, Literal, Mapping, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -38,7 +39,7 @@ class VersionedModel(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _validate_schema_version(self) -> "VersionedModel":
+    def _validate_schema_version(self) -> Self:
         if self.schema_version != self._expected_schema_version:
             raise ValueError(
                 f"Unsupported schema_version: {self.schema_version}; "
@@ -49,19 +50,30 @@ class VersionedModel(BaseModel):
     @field_validator("extensions", check_fields=False)
     @classmethod
     def _reject_sensitive_extension_keys(cls, value: dict[str, Any]) -> dict[str, Any]:
-        def check(mapping: Mapping[str, Any]) -> None:
-            for key, nested in mapping.items():
-                normalized = str(key).casefold()
-                if any(part in normalized for part in cls._forbidden_extension_key_parts):
-                    raise ValueError("extensions cannot contain credential or session fields")
-                if isinstance(nested, Mapping):
+        def check(value: Any) -> None:
+            if isinstance(value, Mapping):
+                items = value.items()
+            elif isinstance(value, (list, tuple, set, frozenset)):
+                for nested in value:
                     check(nested)
+                return
+            else:
+                return
+            for key, nested in items:
+                normalized = str(key).casefold()
+                if any(
+                    part in normalized for part in cls._forbidden_extension_key_parts
+                ):
+                    raise ValueError(
+                        "extensions cannot contain credential or session fields"
+                    )
+                check(nested)
 
         check(value)
         return value
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "VersionedModel":
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         """从外部 JSON 对象读取，先把版本漂移报告为专用错误。"""
 
         supplied_version = payload.get("schema_version")
@@ -73,7 +85,7 @@ class VersionedModel(BaseModel):
         return cls.model_validate(dict(payload))
 
     @classmethod
-    def from_json(cls, text: str) -> "VersionedModel":
+    def from_json(cls, text: str) -> Self:
         """从 JSON 文本读取严格版本化模型。"""
 
         try:
@@ -146,6 +158,60 @@ class WorkerStatus(str, Enum):
     COMPLETED = "completed"
     TIMEOUT = "timeout"
     ERROR = "error"
+
+
+class TrialExecutionStatus(str, Enum):
+    """一次 Verified trial 的生命周期状态，与任务得分保持正交。"""
+
+    COMPLETED = "completed"
+    SUBJECT_FAILED = "subject_failed"
+    INFRA_FAILED = "infra_failed"
+    INDETERMINATE = "indeterminate"
+
+
+class AdapterStatus(str, Enum):
+    """外部适配器的结果状态；不可用不等于被测 Agent 失败。"""
+
+    COMPLETED = "completed"
+    UNAVAILABLE = "unavailable"
+    BLOCKED = "blocked"
+    INVALID = "invalid"
+    FAILED = "failed"
+    TIMEOUT = "timeout"
+
+
+class FailureSource(str, Enum):
+    """平台适配器故障来源，和 ``TrialExecutionStatus`` 分开记录。"""
+
+    HARBOR = "harbor"
+    HARNESS = "harness"
+    DEEPEVAL = "deepeval"
+    OPIK = "opik"
+    DOCKER = "docker"
+    SCHEMA = "schema"
+    PATH = "path"
+    TIMEOUT = "timeout"
+    CANCELLATION = "cancellation"
+    CLEANUP = "cleanup"
+
+
+class DeepEvalAnalysisStatus(str, Enum):
+    """DeepEval 过程分析状态；不改变确定性 verifier 结论。"""
+
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+    TIMEOUT = "timeout"
+
+
+class OpikExportStatus(str, Enum):
+    """Opik 后置可观测性发布状态。"""
+
+    EXPORTED = "exported"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+    TIMEOUT = "timeout"
 
 
 class VerifierOutcome(str, Enum):
@@ -296,6 +362,97 @@ class ExperimentManifest(VersionedModel):
         return self
 
 
+class VerifiedProvenance(VersionedModel):
+    """从已提交 Git object 构建的 Verified 产物 provenance。
+
+    这里只保留可复核的摘要和版本指纹；源 checkout、临时目录和凭证不属于
+    持久化契约。``dirty_worktree`` 固定为 false，避免调用方误把工作区文件
+    当成评测对象。
+    """
+
+    git_commit_sha: str = Field(min_length=7, max_length=128)
+    git_tree_sha: str = Field(min_length=7, max_length=128)
+    wheel_sha256: str = Field(min_length=64, max_length=64)
+    wheel_filename: str = Field(min_length=1, max_length=240)
+    wheel_size_bytes: int = Field(ge=1)
+    source_tree_sha256: str = Field(min_length=64, max_length=64)
+    repository_fingerprint: str = Field(min_length=64, max_length=64)
+    python_version: str = Field(min_length=1, max_length=64)
+    platform: str = Field(min_length=1, max_length=128)
+    builder_version: str = Field(min_length=1, max_length=128)
+    dirty_worktree: Literal[False] = False
+    source_kind: Literal["git_object"] = "git_object"
+    harbor_version: str | None = Field(default=None, max_length=128)
+    swebench_version: str | None = Field(default=None, max_length=128)
+    deepeval_version: str | None = Field(default=None, max_length=128)
+    opik_version: str | None = Field(default=None, max_length=128)
+    image_digest: str | None = Field(default=None, max_length=320)
+    network_policy_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
+    dependency_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("wheel_filename")
+    @classmethod
+    def _validate_wheel_filename(cls, value: str) -> str:
+        if Path(value).name != value or value in {".", ".."}:
+            raise ValueError("wheel_filename must be a plain file name")
+        if not value.endswith(".whl"):
+            raise ValueError("wheel_filename must end with .whl")
+        return value
+
+    @field_validator(
+        "git_commit_sha",
+        "git_tree_sha",
+        "wheel_sha256",
+        "source_tree_sha256",
+        "repository_fingerprint",
+        "network_policy_fingerprint",
+        "dependency_fingerprint",
+    )
+    @classmethod
+    def _validate_hex_digest(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if any(character not in "0123456789abcdefABCDEF" for character in value):
+            raise ValueError("provenance digests must be hexadecimal")
+        return value.lower()
+
+
+class TrialExecution(VersionedModel):
+    """Harbor trial 生命周期摘要，不承担任务正确性判定。"""
+
+    run_id: str = Field(min_length=1, max_length=128)
+    task_id: str = Field(min_length=1, max_length=160)
+    attempt: int = Field(ge=1)
+    status: TrialExecutionStatus
+    failure_source: FailureSource | None = None
+    reason: str | None = Field(default=None, min_length=1, max_length=320)
+    started_at: datetime = Field(default_factory=utc_now)
+    finished_at: datetime = Field(default_factory=utc_now)
+    wall_time_seconds: float = Field(ge=0)
+    patch_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    trace_digest: str | None = Field(default=None, min_length=64, max_length=64)
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_failure_state(self) -> TrialExecution:
+        if self.finished_at < self.started_at:
+            raise ValueError("trial finished_at cannot precede started_at")
+        failed = self.status is not TrialExecutionStatus.COMPLETED
+        if failed and self.reason is None:
+            raise ValueError("non-completed trials require a controlled reason")
+        if (
+            self.status is TrialExecutionStatus.COMPLETED
+            and self.failure_source is not None
+        ):
+            raise ValueError("completed trials cannot carry a failure source")
+        return self
+
+
 class AgentRunSummary(VersionedModel):
     """从 Agent.run 提炼的无 session-ID、无原始文本的受控结果。"""
 
@@ -320,6 +477,42 @@ class TraceSummary(VersionedModel):
     redaction_count: int = Field(ge=0)
     loop_fingerprints: tuple[str, ...] = ()
     trace_digest: str = Field(min_length=64, max_length=64)
+
+
+class DeepEvalTrajectoryEvent(VersionedModel):
+    """供离线 Judge/Opik 共用的单个脱敏事件，只携带摘要和 digest。"""
+
+    sequence: int = Field(ge=1)
+    event_type: str = Field(min_length=1, max_length=160)
+    payload_digest: str = Field(min_length=64, max_length=64)
+    tool_name: str | None = Field(default=None, max_length=160)
+    argument_digest: str | None = Field(default=None, min_length=64, max_length=64)
+    workspace_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=128
+    )
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class DeepEvalTrajectory(VersionedModel):
+    """同一条 Lion typed trace 的有界、可脱敏投影。"""
+
+    task_id: str = Field(min_length=1, max_length=160)
+    trace_id: str = Field(min_length=1, max_length=128)
+    trace_digest: str = Field(min_length=64, max_length=64)
+    events: tuple[DeepEvalTrajectoryEvent, ...] = Field(max_length=256)
+    deterministic_verdict: TaskVerdict | None = None
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeepEvalCase(VersionedModel):
+    """传给 DeepEval SDK 的最小 case；不含 prompt、推理或工具正文。"""
+
+    task_id: str = Field(min_length=1, max_length=160)
+    input_digest: str = Field(min_length=64, max_length=64)
+    trajectory: DeepEvalTrajectory
+    expected_verdict: TaskVerdict | None = None
+    extensions: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkerResult(VersionedModel):
@@ -349,6 +542,234 @@ class VerifierResult(VersionedModel):
     exit_code: int
     output_digest: str = Field(min_length=64, max_length=64)
     output_preview: str = Field(default="", max_length=320)
+
+
+class HarborRoutineVerifierResult(VersionedModel):
+    """Harbor 日常 verifier 的受控结果；它永远不是 official score。"""
+
+    task_id: str = Field(min_length=1, max_length=160)
+    job_id: str = Field(min_length=1, max_length=240)
+    status: AdapterStatus
+    execution_status: TrialExecutionStatus
+    verifier_outcome: VerifierOutcome | None = None
+    reward: float | None = Field(default=None, ge=0, le=1)
+    patch_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    patch_applied: bool | None = None
+    output_digest: str | None = Field(default=None, min_length=64, max_length=64)
+    command_summary: str | None = Field(default=None, max_length=320)
+    artifact_references: tuple[str, ...] = Field(default=(), max_length=256)
+    failure_source: FailureSource | None = None
+    reason: str | None = Field(default=None, min_length=1, max_length=320)
+    wall_time_seconds: float | None = Field(default=None, ge=0)
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_status(self) -> HarborRoutineVerifierResult:
+        if self.status is AdapterStatus.COMPLETED:
+            if self.verifier_outcome is None or self.reward is None:
+                raise ValueError("completed Harbor results require reward and outcome")
+            if self.execution_status not in {
+                TrialExecutionStatus.COMPLETED,
+                TrialExecutionStatus.SUBJECT_FAILED,
+            }:
+                raise ValueError("completed Harbor results require a finished trial")
+            if self.failure_source is not None:
+                raise ValueError(
+                    "completed Harbor results cannot carry a failure source"
+                )
+        elif self.reason is None:
+            raise ValueError("non-completed Harbor results require a reason")
+        elif self.failure_source is None:
+            raise ValueError("non-completed Harbor results require a failure source")
+        if self.patch_applied is True and self.patch_sha256 is None:
+            raise ValueError("patch_applied requires patch_sha256")
+        if self.patch_applied is False and self.patch_sha256 is not None:
+            raise ValueError("patch_sha256 requires patch_applied")
+        return self
+
+    @field_validator("artifact_references")
+    @classmethod
+    def _validate_artifact_references(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        for value in values:
+            path = Path(value)
+            if (
+                not value.strip()
+                or "\\" in value
+                or path.is_absolute()
+                or path == Path(".")
+                or ".." in path.parts
+                or len(value) > 1000
+            ):
+                raise ValueError("artifact_references must be relative POSIX paths")
+        return values
+
+
+class HarnessRecheckResult(VersionedModel):
+    """官方 SWE-bench Harness 复核摘要，原始 patch/log 不进入模型。"""
+
+    task_id: str = Field(min_length=1, max_length=160)
+    status: AdapterStatus
+    resolved: bool | None = None
+    patch_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    output_digest: str = Field(min_length=64, max_length=64)
+    evaluator_revision: str = Field(min_length=7, max_length=128)
+    image_digest: str | None = Field(default=None, min_length=7, max_length=320)
+    failure_source: FailureSource | None = None
+    reason: str | None = Field(default=None, min_length=1, max_length=320)
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_result(self) -> HarnessRecheckResult:
+        if self.status is AdapterStatus.COMPLETED and self.resolved is None:
+            raise ValueError("completed Harness results require boolean resolved")
+        if self.status is not AdapterStatus.COMPLETED and self.reason is None:
+            raise ValueError("non-completed Harness results require a reason")
+        if self.status is AdapterStatus.COMPLETED and self.image_digest is None:
+            raise ValueError("completed Harness results require an image digest")
+        if self.status is AdapterStatus.COMPLETED and self.failure_source is not None:
+            raise ValueError("completed Harness results cannot carry a failure source")
+        if self.status is not AdapterStatus.COMPLETED and self.failure_source is None:
+            raise ValueError("non-completed Harness results require a failure source")
+        if self.status is not AdapterStatus.COMPLETED and self.resolved is not None:
+            raise ValueError("non-completed Harness results cannot claim resolved")
+        return self
+
+
+class DeepEvalMetricResult(VersionedModel):
+    """单项 DeepEval Judge 评分；reason 仅为受控短摘要。"""
+
+    name: str = Field(min_length=1, max_length=160)
+    score: float | None = Field(default=None, ge=0, le=1)
+    reason: str | None = Field(default=None, min_length=1, max_length=320)
+    model: str = Field(min_length=1, max_length=256)
+    input_digest: str = Field(min_length=64, max_length=64)
+    status: AdapterStatus = AdapterStatus.COMPLETED
+
+    @model_validator(mode="after")
+    def _validate_score(self) -> DeepEvalMetricResult:
+        if self.status is AdapterStatus.COMPLETED and self.score is None:
+            raise ValueError("completed DeepEval metric requires a score")
+        if self.status is not AdapterStatus.COMPLETED and self.reason is None:
+            raise ValueError("failed DeepEval metric requires a reason")
+        if self.status is not AdapterStatus.COMPLETED and self.score is not None:
+            raise ValueError("failed DeepEval metrics cannot carry a score")
+        return self
+
+
+class DeepEvalAnalysis(VersionedModel):
+    """运行后离线分析；它没有权限覆盖 Harness/TaskResult。"""
+
+    task_id: str = Field(min_length=1, max_length=160)
+    status: DeepEvalAnalysisStatus
+    judge_model: str = Field(min_length=1, max_length=256)
+    input_digest: str = Field(min_length=64, max_length=64)
+    trajectory_digest: str = Field(min_length=64, max_length=64)
+    metrics: tuple[DeepEvalMetricResult, ...] = Field(default=(), max_length=64)
+    failure_source: FailureSource | None = None
+    reason: str | None = Field(default=None, min_length=1, max_length=320)
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_analysis(self) -> DeepEvalAnalysis:
+        if self.status is DeepEvalAnalysisStatus.COMPLETED and not self.metrics:
+            raise ValueError("completed DeepEval analysis requires metrics")
+        if self.status is not DeepEvalAnalysisStatus.COMPLETED and self.reason is None:
+            raise ValueError("unavailable DeepEval analysis requires a reason")
+        if (
+            self.status is DeepEvalAnalysisStatus.COMPLETED
+            and self.failure_source is not None
+        ):
+            raise ValueError(
+                "completed DeepEval analysis cannot carry a failure source"
+            )
+        if (
+            self.status is not DeepEvalAnalysisStatus.COMPLETED
+            and self.failure_source is None
+        ):
+            raise ValueError(
+                "non-completed DeepEval analysis requires a failure source"
+            )
+        metric_names = [metric.name for metric in self.metrics]
+        if len(set(metric_names)) != len(metric_names):
+            raise ValueError("DeepEval metric names must be unique")
+        return self
+
+
+class OpikSpan(VersionedModel):
+    """Opik trace 中的受控 span；只保存 digest，不保存原始输入输出。"""
+
+    span_id: str = Field(min_length=1, max_length=160)
+    parent_id: str | None = Field(default=None, max_length=160)
+    span_type: Literal["agent", "llm", "tool", "error"]
+    name: str = Field(min_length=1, max_length=160)
+    started_at: datetime
+    finished_at: datetime
+    status: str = Field(min_length=1, max_length=64)
+    input_digest: str | None = Field(default=None, min_length=64, max_length=64)
+    output_digest: str | None = Field(default=None, min_length=64, max_length=64)
+    summary: str = Field(default="", max_length=320)
+
+
+class OpikFeedback(VersionedModel):
+    """写入 Opik 的受控反馈，不能反向改变本地正式结果。"""
+
+    name: str = Field(min_length=1, max_length=160)
+    value: float | None = Field(default=None, ge=0, le=1)
+    reason: str | None = Field(default=None, min_length=1, max_length=320)
+
+
+class OpikTracePayload(VersionedModel):
+    """宿主侧批量发布的脱敏 trace payload，可独立重试。"""
+
+    run_id: str = Field(min_length=1, max_length=128)
+    task_id: str = Field(min_length=1, max_length=160)
+    attempt: int = Field(ge=1)
+    commit_sha: str = Field(min_length=7, max_length=128)
+    profile_fingerprint: str = Field(min_length=64, max_length=64)
+    spans: tuple[OpikSpan, ...] = Field(min_length=1, max_length=257)
+    feedback: tuple[OpikFeedback, ...] = Field(default=(), max_length=256)
+    metadata: dict[str, str] = Field(default_factory=dict, max_length=64)
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("metadata")
+    @classmethod
+    def _reject_sensitive_metadata(cls, value: dict[str, str]) -> dict[str, str]:
+        forbidden = VersionedModel._forbidden_extension_key_parts
+        for key, item in value.items():
+            if len(key) > 160 or len(item) > 320:
+                raise ValueError("Opik metadata entries exceed the safe bound")
+            if any(part in str(key).casefold() for part in forbidden):
+                raise ValueError(
+                    "Opik metadata cannot contain credential or session keys"
+                )
+        return value
+
+
+class OpikExportResult(VersionedModel):
+    """Opik 发布状态；失败不会改变 Harbor/Harness/DeepEval 结果。"""
+
+    run_id: str = Field(min_length=1, max_length=128)
+    task_id: str = Field(min_length=1, max_length=160)
+    status: OpikExportStatus
+    payload_digest: str = Field(min_length=64, max_length=64)
+    trace_id: str | None = Field(default=None, max_length=160)
+    workspace: str | None = Field(default=None, max_length=160)
+    project: str | None = Field(default=None, max_length=160)
+    attempts: int = Field(default=0, ge=0)
+    failure_source: FailureSource | None = None
+    reason: str | None = Field(default=None, min_length=1, max_length=320)
+
+    @model_validator(mode="after")
+    def _validate_export(self) -> OpikExportResult:
+        if self.status is OpikExportStatus.EXPORTED and not self.trace_id:
+            raise ValueError("exported Opik result requires trace_id")
+        if self.status is not OpikExportStatus.EXPORTED and self.reason is None:
+            raise ValueError("failed Opik export requires a reason")
+        if self.status is OpikExportStatus.EXPORTED and self.failure_source is not None:
+            raise ValueError("exported Opik results cannot carry a failure source")
+        if self.status is not OpikExportStatus.EXPORTED and self.failure_source is None:
+            raise ValueError("failed Opik export requires a failure source")
+        return self
 
 
 class TaskResult(VersionedModel):
@@ -509,4 +930,32 @@ class EvaluationReport(VersionedModel):
                 or self.official_score.valid_denominator != len(official_results)
             ):
                 raise ValueError("Official score does not match official task results")
+        return self
+
+
+class VerifiedEvaluationReport(VersionedModel):
+    """Verified 单题阶段结果的严格组合对象。
+
+    该对象只描述契约和序列化，不代表 Harbor/Harness 已在当前平台执行。
+    """
+
+    manifest: ExperimentManifest
+    task_result: TaskResult
+    status: ReportStatus
+    provenance: VerifiedProvenance | None = None
+    trial: TrialExecution | None = None
+    harbor: HarborRoutineVerifierResult | None = None
+    harness: HarnessRecheckResult | None = None
+    deepeval: DeepEvalAnalysis | None = None
+    opik: OpikExportResult | None = None
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_verified_report(self) -> VerifiedEvaluationReport:
+        if self.task_result.task_id not in self.manifest.task_ids:
+            raise ValueError("Verified report task is outside its manifest")
+        if self.task_result.official and self.status is not ReportStatus.OFFICIAL:
+            raise ValueError("official task result requires official report status")
+        if not self.task_result.official and self.status is ReportStatus.OFFICIAL:
+            raise ValueError("offline task result cannot use official report status")
         return self

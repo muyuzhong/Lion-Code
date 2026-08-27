@@ -1,0 +1,10 @@
+{
+  "error": null,
+  "evaluator_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "image_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "instance_id": "verified-task-1",
+  "report": "resolved=true",
+  "resolved": true,
+  "schema_version": "swebench-harness-result/v1",
+  "status": "completed"
+}

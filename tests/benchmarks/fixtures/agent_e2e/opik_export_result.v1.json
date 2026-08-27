@@ -1,0 +1,12 @@
+{
+  "attempts": 1,
+  "error": null,
+  "payload_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "project": "lion-offline",
+  "run_id": "run-offline-1",
+  "schema_version": "opik-export-result/v1",
+  "status": "exported",
+  "task_id": "verified-task-1",
+  "trace_id": "trace-offline-1",
+  "workspace": "lion-evaluation"
+}
