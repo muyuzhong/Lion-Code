@@ -1,0 +1,15 @@
+{
+  "artifact_paths": ["artifacts/trajectory.json"],
+  "command_summary": "pytest -q tests/test_feature.py",
+  "error": null,
+  "failure_source": null,
+  "job_id": "job-offline-001",
+  "patch_path": "artifacts/patch.diff",
+  "patch_sha256": "1a059963bbf3198857755a48c741d351e21515186ce951464b89a0de0797c081",
+  "reward": 1.0,
+  "schema_version": "harbor-result/v1",
+  "status": "completed",
+  "task_id": "verified-task-1",
+  "verifier_outcome": "passed",
+  "wall_time_seconds": 12.5
+}

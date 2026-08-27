@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -33,6 +33,7 @@ class FakeCodingSessionBackend:
     sessions: list[dict[str, Any]] = field(default_factory=list)
     session_id: str = "fake-session"
     provider_config_data: dict[str, Any] = field(default_factory=dict)
+    egress_configuration: Any | None = None
     thinking_level: str = "off"
     available_thinking_levels: tuple[str, ...] = (
         "off",
@@ -163,6 +164,16 @@ class FakeCodingSessionBackend:
             self.provider_name = (
                 "openai-compatible" if kwargs["use_openai"] else "anthropic"
             )
+
+    def egress_hosts(self) -> list[str]:
+        if self.egress_configuration is None:
+            return []
+        return self.egress_configuration.configured_hosts()
+
+    def configure_egress(self, allow_hosts: Sequence[str]) -> list[str]:
+        if self.egress_configuration is None:
+            raise RuntimeError("Egress configuration is unavailable")
+        return self.egress_configuration.configure_hosts(allow_hosts)
 
     def set_thinking_level(self, level: str) -> str:
         self.thinking_operations.append(f"set:{level}")

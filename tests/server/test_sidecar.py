@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from lion_code.application.session import LionCodingSession
 from lion_code.server.app import create_app
 from lion_code.sidecar import format_ready_record
+from lion_code.tooling.egress_guard import EgressConfiguration
 
 try:
     from application.fakes import FakeCodingSessionBackend
@@ -453,6 +454,56 @@ class TestApiOnlyApp:
             assert websocket.accepted_subprotocol == "lion-code"
             websocket.send_text(json.dumps({"type": "ping"}))
             # 未注册消息类型由 bridge 忽略；连接保持打开即通过。
+
+    def test_egress_config_get_and_post(self, tmp_path):
+        backend = FakeCodingSessionBackend(
+            cwd=tmp_path,
+            model="gpt-4o",
+            egress_configuration=EgressConfiguration(
+                home=tmp_path / "home",
+                cwd=tmp_path,
+            ),
+        )
+        session = LionCodingSession(backend=backend)
+        client = _build_client(session, origin=_DESKTOP_ORIGIN)
+
+        resp = client.get("/api/config/egress")
+        assert resp.status_code == 200
+        assert "allow_hosts" in resp.json()
+
+        post_resp = client.post(
+            "/api/config/egress",
+            json={
+                "allow_hosts": [
+                    "https://api.github.com/v1",
+                    "RAW.GITHUBUSERCONTENT.COM",
+                    "example.com",
+                    "",
+                ]
+            },
+        )
+        assert post_resp.status_code == 200
+        assert post_resp.json()["success"] is True
+        assert post_resp.json()["allow_hosts"] == [
+            "api.github.com",
+            "raw.githubusercontent.com",
+            "example.com",
+        ]
+
+        get_resp = client.get("/api/config/egress")
+        assert get_resp.status_code == 200
+        assert "api.github.com" in get_resp.json()["allow_hosts"]
+        assert "raw.githubusercontent.com" in get_resp.json()["allow_hosts"]
+        assert "example.com" in get_resp.json()["allow_hosts"]
+
+        settings_file = tmp_path / ".claude" / "settings.json"
+        assert settings_file.exists()
+        saved = json.loads(settings_file.read_text(encoding="utf-8"))
+        assert saved["egress"]["allow_hosts"] == [
+            "api.github.com",
+            "raw.githubusercontent.com",
+            "example.com",
+        ]
 
     def test_unknown_origin_rejected_for_api(self):
         client = _build_client(_build_test_session(), origin="https://attacker.example")

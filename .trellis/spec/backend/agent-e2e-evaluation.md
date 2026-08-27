@@ -417,3 +417,142 @@ admission = admit_failure_to_regression(
 )
 assert holdout_task.task_id not in admission.active_holdout_task_ids_after_feedback
 ```
+
+## 8. Verified SWE-bench Execution Chain
+
+### 1. Scope / Trigger
+
+This contract applies to the single-task `verified-run` path that turns one
+selected Git commit into a Harbor routine trial and then rechecks the exact
+exported patch with the official SWE-bench Harness. It is an integration
+boundary: the benchmark runner may orchestrate existing Lion worker behavior,
+but it must not implement a second Agent execution loop or verifier.
+
+### 2. Signatures
+
+```python
+class CommitArtifactBuilder:
+    def build(self, commit_sha: str, output_dir: str | Path) -> CommitArtifact: ...
+
+class HarborSingleTaskRunner:
+    def run(self, request: HarborExecutionRequest) -> HarborExecutionOutput: ...
+
+class OfficialSWEbenchHarnessRunner:
+    def run(self, request: HarnessExecutionRequest) -> HarnessExecutionOutput: ...
+
+def run_verified_evaluation(
+    request: VerifiedExecutionRequest,
+) -> VerifiedExecutionOutput: ...
+```
+
+The CLI entrypoint is `python -m benchmarks.agent_e2e verified-run`. It accepts
+one catalog-selected task and one commit, and writes `verified-report.json`
+and `verified-report.md` under the caller-provided output directory.
+
+### 3. Contracts
+
+- The execution order is exactly `CommitArtifactBuilder -> HarborSingleTaskRunner -> OfficialSWEbenchHarnessRunner`.
+- `CommitArtifactBuilder` reads a resolved Git commit through `git archive`; a
+  dirty host worktree, host `.git` directory, and untracked files are not part
+  of the artifact. The wheel digest and Git tree SHA are persisted as
+  provenance, and repeated builds of the same commit are byte-stable.
+- Harbor is pinned to `0.22.0`, uses dataset `swebench-verified`, exactly one
+  task/attempt/concurrent worker, and the fixed import path
+  `benchmarks.agent_e2e.harbor_agent:LionInstalledAgent`.
+- The installed agent uploads only the wheel, the allowlisted worker source,
+  and the request; it invokes the existing `run_agent_worker` entrypoint. The
+  manifest carries credential variable names, never credential values. Values
+  are not placed in argv, JSON reports, traces, or exception summaries.
+- The official recheck is SWE-bench `5.0.1`, dataset
+  `SWE-bench/SWE-bench_Verified`, split `test`, and module
+  `swebench.harness.run_evaluation`. It receives the exact UTF-8 patch bytes
+  exported by Harbor and verifies their SHA-256 before writing prediction
+  JSONL.
+- Harbor reward is routine evidence only. A `PASSED`/`FAILED` official result
+  may be produced only after the official Harness result is completed and the
+  backend declares `supports_official_scores=True`.
+- Raw Harbor/Harness job roots are deleted on success, timeout, ordinary
+  errors, and unexpected failures. A cleanup failure is an invalid,
+  non-official result and must not be silently ignored. Only controlled
+  digests, patch, worker, trace, and final report artifacts remain.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Selected task is absent from the manifest or repeats is not `1` | Reject before backend execution; no official result |
+| Commit cannot be resolved, wheel build fails, or artifact commit differs from `agent_code_sha` | `blocked` or `invalid` non-official report |
+| Platform is not Linux, Harbor is unavailable/not `0.22.0`, or Docker daemon is unavailable | Harbor `unavailable`/`blocked`; do not invoke official Harness |
+| Dataset, agent import path, task name, run ID, or model path contains an unsupported value | Invalid schema/path result; do not create an evaluator run |
+| Required provider credential variable is missing | Harbor unavailable; do not expose the missing value in the result |
+| Harbor has no controlled patch or patch digest | Blocked/non-official result; do not invoke official Harness |
+| SWE-bench package is not `5.0.1`, image digest is absent, or Docker is unavailable | Harness unavailable/invalid; no official score |
+| Harness report is missing, malformed, or lacks boolean `resolved` | Invalid/non-official result |
+| Any raw-job cleanup fails | Invalid result with `failure_source=CLEANUP`; retain no claim of completion |
+
+### 5. Good / Base / Bad Cases
+
+- Good: build a wheel from the selected commit, run one isolated Harbor
+  installed-agent trial, copy only its patch and controlled metadata, and pass
+  that patch unchanged to the pinned official Harness.
+- Base: on Windows or without credentials/Docker, stop at an explicit blocked
+  report with fixed dependency provenance; this is lifecycle evidence, not an
+  evaluation score.
+- Bad: build from the current dirty worktree, pass a host absolute path or
+  secret in Harbor argv, or treat Harbor's reward as SWE-bench `resolved`.
+- Bad: run the Harness against a newly generated patch, a mutable dataset
+  default, or a leftover raw job directory; those results are not comparable
+  official evidence.
+
+### 6. Tests Required
+
+- `tests/benchmarks/test_verified_execution_chain.py`: stable Git artifact
+  digest, dirty/untracked-file exclusion, patch export redaction, fixed Harbor
+  argv, raw-result normalization, prediction-byte verification, cleanup,
+  path validation, and the artifact-before-backend ordering.
+- Existing worker/contract/CLI tests must continue to pass, including the
+  assertion that `online-run` remains blocked and no fake backend can produce
+  an official verdict.
+- On a Linux Docker host, run one real `verified-run` smoke with Harbor
+  `0.22.0` and SWE-bench `5.0.1`; assert that the Harbor-exported patch SHA,
+  Harness prediction patch SHA, report revisions, image digest, and final
+  cleanup state agree.
+- Before handoff run targeted evaluation tests, full pytest, compileall, the
+  repository quality gates, and `git diff --check`; record unrelated baseline
+  failures separately from this chain.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# Harbor reward is not the official SWE-bench verifier result.
+result = TaskResult(verdict=TaskVerdict.PASSED, official=True)
+```
+
+#### Correct
+
+```python
+harbor = HarborSingleTaskRunner().run(harbor_request)
+if harbor.patch_path is None:
+    return blocked_nonofficial_result(harbor.result)
+
+harness = OfficialSWEbenchHarnessRunner().run(
+    HarnessExecutionRequest(
+        instance_id=instance_id,
+        patch_path=harbor.patch_path,
+        patch_sha256=harbor.result.patch_sha256,
+        model_name=manifest.profile.model,
+        run_id=manifest.run_id,
+        output_dir=output_dir,
+        timeout_seconds=manifest.timeout_seconds,
+        image_digest=manifest.verifier_image_digest,
+    )
+)
+return harness_result_to_task_result(
+    harness.result,
+    manifest=manifest,
+    attempt=1,
+    supports_official_scores=True,
+)
+```

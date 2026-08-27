@@ -1075,7 +1075,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             )
 
         mock_create.assert_called_once_with(
-            api_key="new-key", api_base="https://new.test/v1", thinking_level="off"
+            api_key="new-key", api_base="https://new.test/v1", thinking_level="low"
         )
         self.assertIs(agent.composition.runtime.conversation, old_runtime)
         self.assertEqual(
@@ -1264,7 +1264,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
             {
                 "api_key": "test-key",
                 "api_base": "https://example.test/v1",
-                "thinking_level": "off",
+                "thinking_level": "low",
             },
         )
         self.assertEqual(

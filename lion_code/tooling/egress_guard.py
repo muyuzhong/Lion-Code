@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import parse_qsl, urlsplit
 
 from .context import ToolContext
@@ -48,17 +50,24 @@ class EgressWhitelist:
     def __init__(self, hosts: frozenset[str]) -> None:
         self._hosts = hosts
 
+    @property
+    def hosts(self) -> frozenset[str]:
+        return self._hosts
+
     def allows(self, host: str | None) -> bool:
         return host is not None and host.lower() in self._hosts
 
+    def update_hosts(self, hosts: frozenset[str]) -> None:
+        self._hosts = hosts
+
     @classmethod
-    def from_sources(
+    def _read_hosts_from_sources(
         cls,
         *,
         home: Path,
         cwd: Path,
         provider_hosts: frozenset[str] = frozenset(),
-    ) -> EgressWhitelist:
+    ) -> frozenset[str]:
         hosts = {host.lower() for host in provider_hosts if host}
         for settings_path in (
             home / ".claude" / "settings.json",
@@ -70,7 +79,126 @@ class EgressWhitelist:
             raw = settings["egress"].get("allow_hosts", [])
             if isinstance(raw, list):
                 hosts.update(str(host).lower() for host in raw if host)
-        return cls(frozenset(hosts))
+        return frozenset(hosts)
+
+    @classmethod
+    def from_sources(
+        cls,
+        *,
+        home: Path,
+        cwd: Path,
+        provider_hosts: frozenset[str] = frozenset(),
+    ) -> EgressWhitelist:
+        return cls(
+            cls._read_hosts_from_sources(
+                home=home, cwd=cwd, provider_hosts=provider_hosts
+            )
+        )
+
+    def reload(
+        self,
+        *,
+        home: Path,
+        cwd: Path,
+        provider_hosts: frozenset[str] = frozenset(),
+    ) -> None:
+        self._hosts = self._read_hosts_from_sources(
+            home=home, cwd=cwd, provider_hosts=provider_hosts
+        )
+
+
+def load_configured_egress_hosts(
+    *,
+    home: Path | None = None,
+    cwd: Path | None = None,
+) -> list[str]:
+    """按用户级后项目级顺序读取 settings.json 中的原始 allow_hosts 配置列表。"""
+    home = home or Path.home()
+    cwd = cwd or Path.cwd()
+    hosts: list[str] = []
+    for settings_path in (
+        home / ".claude" / "settings.json",
+        cwd / ".claude" / "settings.json",
+    ):
+        settings = _load_settings(settings_path)
+        if not settings or not isinstance(settings.get("egress"), dict):
+            continue
+        raw = settings["egress"].get("allow_hosts", [])
+        if isinstance(raw, list):
+            for host in raw:
+                if isinstance(host, str) and host.strip():
+                    normalized = host.strip()
+                    if normalized not in hosts:
+                        hosts.append(normalized)
+    return hosts
+
+
+def save_project_egress_hosts(cwd: Path, allow_hosts: list[str]) -> None:
+    """原子写回项目级 .claude/settings.json 中的 egress.allow_hosts。"""
+    settings_path = cwd / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    data: dict[str, Any] = {}
+    if settings_path.exists():
+        loaded = _load_settings(settings_path)
+        if isinstance(loaded, dict):
+            data = loaded
+
+    if not isinstance(data.get("egress"), dict):
+        data["egress"] = {}
+
+    data["egress"]["allow_hosts"] = [
+        host.strip() for host in allow_hosts if isinstance(host, str) and host.strip()
+    ]
+
+    tmp_file = settings_path.with_suffix(f".tmp.{os.getpid()}")
+    tmp_file.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(tmp_file, settings_path)
+
+
+def normalize_egress_hosts(allow_hosts: Sequence[str]) -> list[str]:
+    """把 API 输入归一化为可持久化的精确 host 列表。"""
+
+    normalized_hosts: list[str] = []
+    for raw in allow_hosts:
+        host = str(raw).strip()
+        if not host:
+            continue
+        if host.lower().startswith(("http://", "https://")):
+            extracted = host_of(host)
+            if extracted:
+                host = extracted
+        host = host.lower()
+        if host not in normalized_hosts:
+            normalized_hosts.append(host)
+    return normalized_hosts
+
+
+@dataclass(slots=True)
+class EgressConfiguration:
+    """Tooling-owned settings port for reading and refreshing Egress state."""
+
+    home: Path
+    cwd: Path
+    whitelist: EgressWhitelist | None = None
+    provider_hosts: frozenset[str] = frozenset()
+
+    def configured_hosts(self) -> list[str]:
+        return load_configured_egress_hosts(home=self.home, cwd=self.cwd)
+
+    def configure_hosts(self, allow_hosts: Sequence[str]) -> list[str]:
+        normalized_hosts = normalize_egress_hosts(allow_hosts)
+        save_project_egress_hosts(self.cwd, normalized_hosts)
+        if self.whitelist is not None:
+            self.whitelist.reload(
+                home=self.home,
+                cwd=self.cwd,
+                provider_hosts=self.provider_hosts,
+            )
+        return normalized_hosts
 
 
 class EgressGuardMiddleware:

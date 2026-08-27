@@ -39,6 +39,7 @@ class LocalCommandExecutionBackend:
                 capture_output=True,
                 text=True,
                 timeout=timeout_ms / 1000,
+                stdin=subprocess.DEVNULL,
             )
             output = result.stdout or ""
             if result.returncode != 0:

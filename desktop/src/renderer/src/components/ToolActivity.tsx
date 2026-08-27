@@ -5,9 +5,9 @@ import { Streamdown } from "streamdown";
 import { parseAnsiToSpans, pickResultFormat } from "../toolPresentation";
 
 export const ReasoningActivity: ReasoningMessagePartComponent = ({ text }) => (
-  <details className="reasoning">
+  <details className="reasoning" open>
     <summary><Sparkles aria-hidden="true" size={15} /><span>思考</span><ChevronRight className="disclosure" aria-hidden="true" size={14} /></summary>
-    <pre>{text}</pre>
+    <div className="reasoning-body"><Streamdown>{text}</Streamdown></div>
   </details>
 );
 

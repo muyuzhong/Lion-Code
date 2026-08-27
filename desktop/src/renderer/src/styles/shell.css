@@ -16,21 +16,20 @@
 .sidebar-section { flex: 0 0 auto; margin-bottom: 13px; }
 .projects-section { min-height: 0; flex: 1; overflow: hidden; }
 .sidebar-section-label { height: 24px; padding: 4px 6px; color: var(--ds-text-muted); font-size: 11px; font-weight: 500; }
-.thread-item { position: relative; display: flex; width: 100%; min-height: 38px; align-items: center; border-radius: var(--radius-sm); color: var(--ds-text-secondary); text-align: left; transition: background var(--motion-fast), color var(--motion-fast); }
+.thread-item { position: relative; display: flex; width: 100%; min-height: 32px; align-items: center; border-radius: var(--radius-sm); color: var(--ds-text-secondary); text-align: left; transition: background var(--motion-fast), color var(--motion-fast); }
 .thread-item:hover, .thread-item.active { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
 .thread-item.active { background: var(--ds-bg-active); }
 .thread-item.active:disabled { opacity: 1; }
-.thread-main { display: flex; min-width: 0; min-height: 38px; flex: 1; align-items: center; gap: 6px; padding: 4px 6px; color: inherit; text-align: left; }
+.thread-main { display: flex; min-width: 0; min-height: 32px; flex: 1; align-items: center; gap: 7px; padding: 4px 8px; color: inherit; text-align: left; }
 .thread-main:disabled { opacity: 1; }
-.thread-rename { display: inline-flex; width: 24px; height: 24px; flex: 0 0 24px; align-items: center; justify-content: center; margin-right: 4px; border-radius: var(--radius-xs); color: var(--ds-text-muted); opacity: 0; }
+.thread-rename { display: inline-flex; width: 22px; height: 22px; flex: 0 0 22px; align-items: center; justify-content: center; margin-right: 4px; border-radius: var(--radius-xs); color: var(--ds-text-muted); opacity: 0; }
 .thread-item:hover .thread-rename, .thread-item:focus-within .thread-rename { opacity: 1; }
 .thread-rename:hover { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
-.thread-status { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--ds-text-faint); }
+.thread-status { width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: var(--ds-text-faint); }
 .thread-status.active { background: var(--ds-warning); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ds-warning) 14%, transparent); }
-.thread-copy { display: grid; min-width: 0; gap: 1px; }
-.thread-copy strong, .thread-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.thread-copy strong { font-size: 12.5px; font-weight: 500; }
-.thread-copy small { color: var(--ds-text-muted); font-size: 10.5px; }
+.thread-copy { display: flex; min-width: 0; flex: 1; align-items: center; justify-content: space-between; gap: 8px; }
+.thread-copy strong { min-width: 0; flex: 1; overflow: hidden; font-size: 12.5px; font-weight: 450; text-overflow: ellipsis; white-space: nowrap; }
+.thread-copy small { flex: 0 0 auto; color: var(--ds-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .thread-copy input { min-width: 0; width: 100%; padding: 1px 3px; border: 1px solid var(--ds-border-strong); border-radius: 4px; outline: none; background: var(--ds-bg-inset); font-size: 12px; }
 .project-group { min-height: 0; }
 .project-row { display: flex; min-height: 28px; align-items: center; gap: 5px; padding: 3px 6px; border-radius: var(--radius-sm); color: var(--ds-text-secondary); }

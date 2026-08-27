@@ -61,28 +61,17 @@ def create_provider(
 def _anthropic_thinking_kwargs(
     level: ThinkingLevel | str | None,
 ) -> dict[str, object]:
-    """档位 -> AnthropicConfig 的 thinking 字段。
-
-    ``None``:不注入(默认 mode="budget"、budget=None -> 不开 thinking);
-    ``off``:显式 ``thinking_mode="disabled"``;
-    其余:``thinking_budget_tokens`` 取档位映射值(mode 留默认 "budget" -> enabled)。
-    """
+    """档位 -> AnthropicConfig 的 thinking 字段。"""
     if level is None:
         return {}
     normalized = normalize_thinking_level(level)
-    if normalized == "off":
-        return {"thinking_mode": "disabled"}
     return {"thinking_budget_tokens": anthropic_budget_tokens_for_level(normalized)}
 
 
 def _openai_thinking_kwargs(
     level: ThinkingLevel | str | None,
 ) -> dict[str, object]:
-    """档位 -> OpenAICompatibleConfig 的 reasoning_effort 字段。
-
-    ``None``:不注入(默认 reasoning_effort=None -> 不开 reasoning);
-    其余(含 ``off``):设为 ``reasoning_effort``(off -> "none" -> 不开 reasoning)。
-    """
+    """档位 -> OpenAICompatibleConfig 的 reasoning_effort 字段。"""
     if level is None:
         return {}
     normalized = normalize_thinking_level(level)

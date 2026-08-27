@@ -36,7 +36,7 @@ class TestSessionRepository(unittest.IsolatedAsyncioTestCase):
             state = await repository.load("s1")
             self.assertEqual(state.messages[0].text, "hello")
             self.assertEqual((await repository.list_sessions())[0]["cwd"], "/work")
-            self.assertIsNone((await repository.list_sessions())[0]["label"])
+            self.assertEqual((await repository.list_sessions())[0]["label"], "hello")
             self.assertTrue(await repository.rename("s1", "需求文档"))
             self.assertEqual((await repository.list_sessions())[0]["label"], "需求文档")
             entries = await storage.read_all()

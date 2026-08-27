@@ -61,6 +61,14 @@ export interface ProviderConfigurationResponse {
   base_url: string;
 }
 
+export interface EgressConfiguration {
+  allow_hosts: string[];
+}
+
+export interface EgressConfigurationResponse {
+  allow_hosts: string[];
+}
+
 export function browserBackendBootstrap(endpoint: BackendEndpoint): BackendBootstrap {
   return {
     endpoint,
@@ -113,6 +121,10 @@ export class LionRestClient {
     return this.readJson("/api/config/provider", isProviderConfiguration, "Provider 配置不符合 REST 契约");
   }
 
+  async fetchEgressConfiguration(): Promise<EgressConfigurationResponse> {
+    return this.readJson("/api/config/egress", isEgressConfiguration, "Egress 配置不符合 REST 契约");
+  }
+
   async newSession(): Promise<void> {
     await this.postJson("/api/sessions/new", {});
   }
@@ -123,6 +135,10 @@ export class LionRestClient {
 
   async configureProvider(configuration: ProviderConfiguration): Promise<void> {
     await this.postJson("/api/config/provider", configuration);
+  }
+
+  async configureEgress(configuration: EgressConfiguration): Promise<void> {
+    await this.postJson("/api/config/egress", configuration);
   }
 
   async setThinkingLevel(level: string): Promise<void> {
@@ -278,6 +294,12 @@ function isProviderConfiguration(value: unknown): value is ProviderConfiguration
     && typeof value.model === "string"
     && typeof value.api_key === "string"
     && typeof value.base_url === "string";
+}
+
+function isEgressConfiguration(value: unknown): value is EgressConfigurationResponse {
+  return isRecord(value)
+    && Array.isArray(value.allow_hosts)
+    && value.allow_hosts.every((item) => typeof item === "string");
 }
 
 async function responseDetail(response: Response, fallback: string): Promise<string> {

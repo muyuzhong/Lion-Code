@@ -146,6 +146,22 @@ class ProviderConfigRequest(BaseModel):
     base_url: str | None = None
 
 
+class EgressConfigResponse(BaseModel):
+    """设置页读取的 Web Fetch 出口白名单配置。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    allow_hosts: list[str]
+
+
+class EgressConfigRequest(BaseModel):
+    """设置页提交的 Web Fetch 出口白名单配置。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    allow_hosts: list[str]
+
+
 class ThinkingLevelRequest(BaseModel):
     level: str
 
