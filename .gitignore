@@ -34,3 +34,4 @@ output/
 .playwright-cli/
 .claude/
 .codegraph/
+.deepeval/
