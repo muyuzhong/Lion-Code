@@ -5,16 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 from .models import TraceSummary, VersionedModel
-
 
 REDACTED = "[REDACTED]"
 _SENSITIVE_KEY_PARTS = (
@@ -250,11 +250,11 @@ def loop_fingerprint(
 
 
 def redact_text(value: str, *, max_length: int = 240) -> tuple[str, int]:
-    """删除常见内联凭证，并将正文限制为受控预览。"""
+    """删除常见内联凭证，并将正文限制为不超过 ``max_length`` 的受控预览。"""
 
     redacted, replacements = _SECRET_VALUE.subn(REDACTED, value)
     if len(redacted) > max_length:
-        redacted = f"{redacted[:max_length]}…"
+        redacted = f"{redacted[: max_length - 1]}…"
     return redacted, replacements
 
 
