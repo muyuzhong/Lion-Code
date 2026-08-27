@@ -556,3 +556,139 @@ return harness_result_to_task_result(
     supports_official_scores=True,
 )
 ```
+## 9. Offline DeepEval Analysis and Opik Post-Processing
+
+### 1. Scope / Trigger
+
+This contract applies when a completed Verified report is analyzed after the
+Agent run. It is a benchmark-only integration boundary: analysis and
+observability consume existing redacted evidence and never become a second
+execution or scoring path.
+
+### 2. Signatures
+
+```python
+def analyze_deepeval_case(
+    case: DeepEvalCase,
+    *,
+    judge_model: str,
+    judge: DeepEvalJudge | None = None,
+    timeout_seconds: float | None = 120.0,
+) -> DeepEvalAnalysis: ...
+
+def analyze_verified_report(
+    report: VerifiedEvaluationReport,
+    *,
+    input_digest: str,
+    trajectory: DeepEvalTrajectory,
+    judge_model: str,
+    judge: DeepEvalJudge | None = None,
+    timeout_seconds: float | None = 120.0,
+) -> VerifiedEvaluationReport: ...
+
+def build_opik_trace_payload(...) -> OpikTracePayload: ...
+
+def publish_opik_trace(
+    payload: OpikTracePayload,
+    *,
+    client: object | None = None,
+    timeout_seconds: float = 30.0,
+    export_attempt: int = 1,
+) -> OpikExportResult: ...
+```
+
+### 3. Contracts
+
+- DeepEval always evaluates the fixed metrics `TaskCompletionMetric`,
+  `StepEfficiencyMetric`, and `TrajectoryQuality`; the SDK is optional and
+  pinned in the `benchmark-online` extra, never imported by `lion_code`.
+- The project analyzer and the optional standard pytest entry both consume the
+  same `DeepEvalCase` built from one bounded, redacted trajectory. They must
+  not call the Agent, generate a new dataset, or use hidden reasoning,
+  credentials, raw tool output, or private verifier data.
+- Each metric observation carries the same input digest as the case. A score
+  is persisted only when it is finite and in `[0, 1]`; a single failure or
+  timeout is typed and does not discard successful sibling metrics.
+- `analyze_verified_report` may update only the `deepeval` field. The existing
+  `task_result` and its official Harness verdict remain unchanged.
+- Opik payloads contain a parent agent span, redacted event spans with stable
+  timestamps/digests, and feedback for completed DeepEval metrics plus the
+  Harness verdict. `PASSED`/`FAILED` feedback is emitted only for an official,
+  valid result; blocked/offline results remain metadata/reason only.
+- Opik credentials are read only by the host publisher from environment
+  variables. The publisher explicitly flushes the short-lived client, and a
+  retry reuses the existing payload without rerunning Agent or DeepEval.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Trajectory/report task IDs or analysis digest do not match | Reject before analysis/export; preserve the original report |
+| DeepEval SDK is absent or its pinned API is incompatible | `DeepEvalAnalysisStatus.UNAVAILABLE`; no official verdict change |
+| One metric fails, times out, or returns an invalid score | Typed metric failure; retain other scores and mark aggregate partial/timeout/failed |
+| Metric input digest differs from the case digest | Invalid metric observation; do not persist its score |
+| Trajectory contains unbounded or sensitive text | Redact and bound the projection; never publish the raw value |
+| Opik host credentials or SDK are unavailable | `OpikExportStatus.UNAVAILABLE`; no Agent/Harness rerun |
+| Opik flush or network export fails | Typed timeout/failed result with the same payload digest; allow retry |
+| Task result is blocked/offline/non-official | Do not emit a numeric Harness feedback score |
+
+### 5. Good / Base / Bad Cases
+
+- Good: load one frozen Verified report and trajectory, calculate the three
+  metrics through the shared analyzer, then publish that same redacted data as
+  a post-run Opik tree.
+- Base: on Windows or without optional credentials, record typed unavailable
+  analysis/export state while retaining the deterministic official result.
+- Bad: rerun the Agent for DeepEval, let a judge decide pass/fail, or publish
+  raw prompts, tool output, paths, hidden reasoning, or credentials.
+- Bad: treat an Opik upload failure as a Harness failure or retry by executing
+  the benchmark again instead of reusing the payload.
+
+### 6. Tests Required
+
+- `tests/benchmarks/test_eval_analysis_observability.py`: fixed metrics and
+  shared digest, partial failure, timeout, verdict immutability, span tree,
+  timestamps, feedback, redaction, flush, and retry.
+- `tests/benchmarks/evals/test_lion_swebench_verified.py`: standard pytest
+  composition over precomputed trajectory/report; assert three metric names,
+  completed analysis, and unchanged `task_result`.
+- On a Linux host with the pinned optional dependencies and credentials, run
+  one existing Verified result through DeepEval and Opik, then verify the
+  `run_id` trace, three metric feedback entries, Harness metadata, and flush
+  state. This smoke is separate from offline CI tests.
+- Before handoff run the targeted benchmark tests, targeted lint/compile
+  checks, and `git diff --check`; do not use unavailable optional services as
+  a reason to invent a score.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# Analysis must not replace the official result or rerun the Agent.
+report.task_result = judge_agent_again(case)
+publish_raw_trajectory_to_opik(report)
+```
+
+#### Correct
+
+```python
+analyzed = analyze_verified_report(
+    report,
+    input_digest=input_digest,
+    trajectory=trajectory,
+    judge_model=judge_model,
+)
+payload = build_opik_trace_payload(
+    run_id=analyzed.manifest.run_id,
+    task_id=analyzed.task_result.task_id,
+    attempt=analyzed.task_result.attempt,
+    commit_sha=analyzed.manifest.agent_code_sha,
+    profile_fingerprint=analyzed.manifest.profile_fingerprint,
+    trajectory=trajectory,
+    analysis=analyzed.deepeval,
+    task_result=analyzed.task_result,
+)
+export = publish_opik_trace(payload)
+assert analyzed.task_result == report.task_result
+```
