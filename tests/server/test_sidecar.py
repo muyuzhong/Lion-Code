@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from lion_code.application.session import LionCodingSession
 from lion_code.server.app import create_app
 from lion_code.sidecar import format_ready_record
+from lion_code.tooling.egress_guard import EgressConfiguration
 
 try:
     from application.fakes import FakeCodingSessionBackend
@@ -455,7 +456,14 @@ class TestApiOnlyApp:
             # 未注册消息类型由 bridge 忽略；连接保持打开即通过。
 
     def test_egress_config_get_and_post(self, tmp_path):
-        backend = FakeCodingSessionBackend(cwd=tmp_path, model="gpt-4o")
+        backend = FakeCodingSessionBackend(
+            cwd=tmp_path,
+            model="gpt-4o",
+            egress_configuration=EgressConfiguration(
+                home=tmp_path / "home",
+                cwd=tmp_path,
+            ),
+        )
         session = LionCodingSession(backend=backend)
         client = _build_client(session, origin=_DESKTOP_ORIGIN)
 

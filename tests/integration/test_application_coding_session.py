@@ -152,6 +152,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             terminal_output_sink=composition.runtime.agent.set_terminal_output,
             session_renamer=composition.runtime.session.rename_session,
             session_repository=composition.runtime.session.repository,
+            egress_configuration=composition.tooling.runtime,
             cwd=_Path(composition.tooling.context.cwd),
         )
         return LionCodingSession(agent), agent, harness, fake
@@ -237,6 +238,7 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
                 terminal_output_sink=composition.runtime.agent.set_terminal_output,
                 session_renamer=composition.runtime.session.rename_session,
                 session_repository=composition.runtime.session.repository,
+                egress_configuration=composition.tooling.runtime,
                 cwd=Path(composition.tooling.context.cwd),
             )
         session = LionCodingSession(agent)

@@ -82,7 +82,9 @@ def next_thinking_level(
 
 def anthropic_budget_tokens_for_level(level: ThinkingLevel) -> int:
     """Anthropic thinking ``budget_tokens``。"""
-    return _ANTHROPIC_BUDGET_TOKENS.get(level, _ANTHROPIC_BUDGET_TOKENS[DEFAULT_THINKING_LEVEL])
+    return _ANTHROPIC_BUDGET_TOKENS.get(
+        level, _ANTHROPIC_BUDGET_TOKENS[DEFAULT_THINKING_LEVEL]
+    )
 
 
 def openai_reasoning_effort_for_level(level: ThinkingLevel) -> str:
@@ -108,4 +110,3 @@ def provider_default_thinking_level(
 ) -> ThinkingLevel:
     """某后端的默认档位。"""
     return DEFAULT_THINKING_LEVEL
-

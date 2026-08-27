@@ -90,7 +90,12 @@ from ..tooling import (
 from ..tooling.audit import ExecutionAuditLog, ExecutionEvent
 from ..tooling.builtin import create_builtin_tools
 from ..tooling.context import ToolContext
-from ..tooling.egress_guard import EgressGuardMiddleware, EgressWhitelist, host_of
+from ..tooling.egress_guard import (
+    EgressConfiguration,
+    EgressGuardMiddleware,
+    EgressWhitelist,
+    host_of,
+)
 from ..tooling.internal import create_internal_tools
 from ..tooling.middleware import (
     AuditMiddleware,
@@ -741,15 +746,22 @@ def _build_tooling_graph(
             )
         )
     egress_whitelist = None
+    egress_home = Path.home()
     if tool_bindings.enable_egress_guard:
         egress_whitelist = (
             tool_bindings.egress_whitelist
             or EgressWhitelist.from_sources(
-                home=Path.home(),
+                home=egress_home,
                 cwd=foundation.cwd,
                 provider_hosts=provider_hosts,
             )
         )
+    egress_configuration = EgressConfiguration(
+        home=egress_home,
+        cwd=foundation.cwd,
+        whitelist=egress_whitelist,
+        provider_hosts=provider_hosts,
+    )
 
     def record_audit(tool, arguments, result) -> None:
         if audit_log is not None:
@@ -801,6 +813,7 @@ def _build_tooling_graph(
         foundation.tool_registry,
         tool_context,
         middleware,
+        egress_configuration=egress_configuration,
     )
     context_layers = capability_registry.context_layers
     context_manager = foundation.bindings.session.context_manager

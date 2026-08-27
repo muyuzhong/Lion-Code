@@ -13,10 +13,11 @@ Plan 审批、terminal 回调、confirmation、notices、cost 投影）在本适
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
+from ..application.ports import EgressConfigurationPort
 from ..capabilities.plan.runtime import PlanRuntime
 from ..composition.ports import (
     ConfirmationController,
@@ -50,6 +51,7 @@ class CodingSessionBackendAdapter:
         terminal_output_sink: Callable[[bool], None],
         session_renamer: Callable[[str, str], Awaitable[bool]],
         session_repository: SessionRepository,
+        egress_configuration: EgressConfigurationPort,
         cwd: Path,
     ) -> None:
         self._agent = agent
@@ -60,6 +62,7 @@ class CodingSessionBackendAdapter:
         self._terminal_output_sink = terminal_output_sink
         self._session_renamer = session_renamer
         self._session_repository = session_repository
+        self._egress_configuration = egress_configuration
         self._cwd = cwd
 
     # ─── ConversationPort ────────────────────────────────────
@@ -201,6 +204,12 @@ class CodingSessionBackendAdapter:
 
     def configure_provider(self, **kwargs: Any) -> None:
         self._agent.configure_provider(**kwargs)
+
+    def egress_hosts(self) -> list[str]:
+        return self._egress_configuration.egress_hosts()
+
+    def configure_egress(self, allow_hosts: Sequence[str]) -> list[str]:
+        return self._egress_configuration.configure_egress(allow_hosts)
 
     @property
     def thinking_level(self) -> str:
