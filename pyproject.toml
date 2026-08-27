@@ -22,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 benchmark = ["openai>=1.50.0"]
+benchmark-online = ["deepeval==4.2.0", "opik==2.2.42"]
 dev = [
     "pytest==9.0.3",
     "pytest-asyncio==1.4.0",

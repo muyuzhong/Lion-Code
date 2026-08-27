@@ -1,17 +1,17 @@
-"""DeepEval fixture 解析与脱敏 trajectory 投影。
-
-阶段一只处理固定版本的结果契约。这里没有 DeepEval SDK import、装饰器或 judge
-调用；真实分析器在后续阶段通过窄边界接入，Windows/CI 仍可离线验证 schema 和
-敏感信息边界。
-"""
+"""DeepEval fixture 解析、脱敏 trajectory 投影与离线分析组合。"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
+import time
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -19,15 +19,22 @@ from .models import (
     AdapterStatus,
     DeepEvalAnalysis,
     DeepEvalAnalysisStatus,
+    DeepEvalCase,
     DeepEvalMetricResult,
     DeepEvalTrajectory,
     DeepEvalTrajectoryEvent,
     FailureSource,
+    VerifiedEvaluationReport,
 )
 from .trace import TraceEvent, redact_text
 
 DEEPEVAL_RESULT_SCHEMA_VERSION = "deepeval-result/v1"
 MAX_TRAJECTORY_EVENTS = 256
+DEEPEVAL_METRIC_NAMES = (
+    "TaskCompletionMetric",
+    "StepEfficiencyMetric",
+    "TrajectoryQuality",
+)
 _EMPTY_DIGEST = hashlib.sha256(b"").hexdigest()
 
 
@@ -37,6 +44,34 @@ class DeepEvalResultError(ValueError):
 
 class DeepEvalSchemaError(DeepEvalResultError):
     """检测到版本漂移、未知字段或不完整的结果。"""
+
+
+class DeepEvalTimeoutError(TimeoutError):
+    """DeepEval 单项分析超过宿主侧 deadline。"""
+
+
+@dataclass(frozen=True, slots=True)
+class DeepEvalMetricObservation:
+    """窄 judge protocol 返回的单项、尚未持久化结果。"""
+
+    name: str
+    score: float | None
+    reason: str | None = None
+    model: str | None = None
+    input_digest: str | None = None
+    status: AdapterStatus = AdapterStatus.COMPLETED
+
+
+class DeepEvalJudge(Protocol):
+    """离线分析器使用的最小 judge 边界，便于 fake 测试。"""
+
+    def evaluate_metric(
+        self,
+        *,
+        metric_name: str,
+        case: DeepEvalCase,
+    ) -> DeepEvalMetricObservation:
+        """基于已有 case 计算一项固定 metric。"""
 
 
 class DeepEvalMetricFixture(BaseModel):
@@ -138,6 +173,325 @@ def parse_deepeval_analysis(
     )
 
 
+def analyze_deepeval_case(
+    case: DeepEvalCase,
+    *,
+    judge_model: str,
+    judge: DeepEvalJudge | None = None,
+    timeout_seconds: float | None = 120.0,
+) -> DeepEvalAnalysis:
+    """对冻结 trajectory 做三项离线分析，绝不修改正式 task verdict。"""
+
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be positive or None")
+    safe_model = _safe_model(judge_model)
+    if judge is None:
+        try:
+            from .deepeval_metrics import DeepEvalSdkJudge
+
+            judge = DeepEvalSdkJudge(judge_model=safe_model)
+        except ImportError:
+            return _unavailable_analysis(
+                case,
+                judge_model=safe_model,
+                reason="DeepEval SDK is unavailable",
+            )
+        except Exception:
+            return _unavailable_analysis(
+                case,
+                judge_model=safe_model,
+                reason="DeepEval judge cannot be initialized",
+            )
+
+    deadline = (
+        time.monotonic() + timeout_seconds
+        if timeout_seconds is not None
+        else None
+    )
+    metric_results: list[DeepEvalMetricResult] = []
+    for metric_name in DEEPEVAL_METRIC_NAMES:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                observation = DeepEvalMetricObservation(
+                    name=metric_name,
+                    score=None,
+                    reason="DeepEval analysis timed out",
+                    status=AdapterStatus.TIMEOUT,
+                )
+            else:
+                observation = _evaluate_with_timeout(
+                    judge,
+                    case,
+                    metric_name,
+                    remaining,
+                )
+        else:
+            observation = _evaluate_direct(judge, case, metric_name)
+        metric_results.append(
+            _metric_result_from_observation(
+                observation,
+                case=case,
+                judge_model=safe_model,
+                metric_name=metric_name,
+            )
+        )
+    return _analysis_from_metrics(
+        case,
+        judge_model=safe_model,
+        metrics=tuple(metric_results),
+    )
+
+
+def analyze_verified_report(
+    report: VerifiedEvaluationReport,
+    *,
+    input_digest: str,
+    trajectory: DeepEvalTrajectory,
+    judge_model: str,
+    judge: DeepEvalJudge | None = None,
+    timeout_seconds: float | None = 120.0,
+) -> VerifiedEvaluationReport:
+    """将分析结果写回 report 的独立字段，保留原始正式结果对象。"""
+
+    if report.task_result.task_id != trajectory.task_id:
+        raise ValueError("DeepEval trajectory task_id does not match the report")
+    case = DeepEvalCase(
+        task_id=trajectory.task_id,
+        input_digest=input_digest,
+        trajectory=trajectory,
+        expected_verdict=report.task_result.verdict,
+    )
+    analysis = analyze_deepeval_case(
+        case,
+        judge_model=judge_model,
+        judge=judge,
+        timeout_seconds=timeout_seconds,
+    )
+    return report.model_copy(update={"deepeval": analysis})
+
+
+def _evaluate_direct(
+    judge: DeepEvalJudge,
+    case: DeepEvalCase,
+    metric_name: str,
+) -> DeepEvalMetricObservation:
+    try:
+        return judge.evaluate_metric(metric_name=metric_name, case=case)
+    except TimeoutError:
+        return DeepEvalMetricObservation(
+            name=metric_name,
+            score=None,
+            reason="DeepEval metric timed out",
+            status=AdapterStatus.TIMEOUT,
+        )
+    except ImportError:
+        return DeepEvalMetricObservation(
+            name=metric_name,
+            score=None,
+            reason="DeepEval metric is unavailable",
+            status=AdapterStatus.UNAVAILABLE,
+        )
+    except Exception:
+        return DeepEvalMetricObservation(
+            name=metric_name,
+            score=None,
+            reason="DeepEval metric failed",
+            status=AdapterStatus.FAILED,
+        )
+
+
+def _evaluate_with_timeout(
+    judge: DeepEvalJudge,
+    case: DeepEvalCase,
+    metric_name: str,
+    timeout_seconds: float,
+) -> DeepEvalMetricObservation:
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lion-deepeval")
+    future = executor.submit(judge.evaluate_metric, metric_name=metric_name, case=case)
+    try:
+        return future.result(timeout=timeout_seconds)
+    except FutureTimeoutError:
+        future.cancel()
+        return DeepEvalMetricObservation(
+            name=metric_name,
+            score=None,
+            reason="DeepEval metric timed out",
+            status=AdapterStatus.TIMEOUT,
+        )
+    except ImportError:
+        return DeepEvalMetricObservation(
+            name=metric_name,
+            score=None,
+            reason="DeepEval metric is unavailable",
+            status=AdapterStatus.UNAVAILABLE,
+        )
+    except TimeoutError:
+        return DeepEvalMetricObservation(
+            name=metric_name,
+            score=None,
+            reason="DeepEval metric timed out",
+            status=AdapterStatus.TIMEOUT,
+        )
+    except Exception:
+        return DeepEvalMetricObservation(
+            name=metric_name,
+            score=None,
+            reason="DeepEval metric failed",
+            status=AdapterStatus.FAILED,
+        )
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _metric_result_from_observation(
+    observation: DeepEvalMetricObservation,
+    *,
+    case: DeepEvalCase,
+    judge_model: str,
+    metric_name: str,
+) -> DeepEvalMetricResult:
+    status = _observation_status(getattr(observation, "status", None))
+    reason = _safe_reason(getattr(observation, "reason", None))
+    model = _safe_model(getattr(observation, "model", None) or judge_model)
+    input_digest = getattr(observation, "input_digest", None) or case.input_digest
+    score = getattr(observation, "score", None)
+    if getattr(observation, "name", metric_name) != metric_name:
+        status = AdapterStatus.INVALID
+        score = None
+        reason = "DeepEval judge returned an unexpected metric name"
+    elif input_digest != case.input_digest:
+        status = AdapterStatus.INVALID
+        score = None
+        reason = "DeepEval judge returned a mismatched input digest"
+    elif status is AdapterStatus.COMPLETED:
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            status = AdapterStatus.INVALID
+            score = None
+            reason = reason or "DeepEval metric returned no numeric score"
+        elif not math.isfinite(float(score)) or not 0 <= float(score) <= 1:
+            status = AdapterStatus.INVALID
+            score = None
+            reason = reason or "DeepEval metric returned an invalid score"
+        else:
+            score = float(score)
+    else:
+        score = None
+    if status is not AdapterStatus.COMPLETED:
+        reason = reason or f"DeepEval metric status: {status.value}"
+    return DeepEvalMetricResult(
+        name=metric_name,
+        score=score,
+        reason=reason,
+        model=model,
+        input_digest=case.input_digest,
+        status=status,
+    )
+
+
+def _analysis_from_metrics(
+    case: DeepEvalCase,
+    *,
+    judge_model: str,
+    metrics: tuple[DeepEvalMetricResult, ...],
+) -> DeepEvalAnalysis:
+    statuses = tuple(metric.status for metric in metrics)
+    if all(status is AdapterStatus.COMPLETED for status in statuses):
+        status = DeepEvalAnalysisStatus.COMPLETED
+        reason = None
+        failure_source = None
+    elif any(status is AdapterStatus.COMPLETED for status in statuses):
+        status = DeepEvalAnalysisStatus.PARTIAL
+        reason = _first_metric_reason(metrics) or "DeepEval analysis contains failed metrics"
+        failure_source = FailureSource.DEEPEVAL
+    elif all(
+        status in {AdapterStatus.UNAVAILABLE, AdapterStatus.BLOCKED}
+        for status in statuses
+    ):
+        status = DeepEvalAnalysisStatus.UNAVAILABLE
+        reason = _first_metric_reason(metrics) or "DeepEval analysis is unavailable"
+        failure_source = FailureSource.DEEPEVAL
+    elif all(
+        status in {
+            AdapterStatus.TIMEOUT,
+            AdapterStatus.UNAVAILABLE,
+            AdapterStatus.BLOCKED,
+        }
+        for status in statuses
+    ) and any(status is AdapterStatus.TIMEOUT for status in statuses):
+        status = DeepEvalAnalysisStatus.TIMEOUT
+        reason = _first_metric_reason(metrics) or "DeepEval analysis timed out"
+        failure_source = FailureSource.DEEPEVAL
+    else:
+        status = DeepEvalAnalysisStatus.FAILED
+        reason = _first_metric_reason(metrics) or "DeepEval analysis failed"
+        failure_source = FailureSource.DEEPEVAL
+    return DeepEvalAnalysis(
+        task_id=case.task_id,
+        status=status,
+        judge_model=judge_model,
+        input_digest=case.input_digest,
+        trajectory_digest=case.trajectory.trace_digest,
+        metrics=metrics,
+        failure_source=failure_source,
+        reason=reason,
+    )
+
+
+def _unavailable_analysis(
+    case: DeepEvalCase,
+    *,
+    judge_model: str,
+    reason: str,
+) -> DeepEvalAnalysis:
+    metrics = tuple(
+        DeepEvalMetricResult(
+            name=metric_name,
+            score=None,
+            reason=reason,
+            model=judge_model,
+            input_digest=case.input_digest,
+            status=AdapterStatus.UNAVAILABLE,
+        )
+        for metric_name in DEEPEVAL_METRIC_NAMES
+    )
+    return DeepEvalAnalysis(
+        task_id=case.task_id,
+        status=DeepEvalAnalysisStatus.UNAVAILABLE,
+        judge_model=judge_model,
+        input_digest=case.input_digest,
+        trajectory_digest=case.trajectory.trace_digest,
+        metrics=metrics,
+        failure_source=FailureSource.DEEPEVAL,
+        reason=reason,
+    )
+
+
+def _observation_status(value: Any) -> AdapterStatus:
+    if isinstance(value, AdapterStatus):
+        return value
+    try:
+        return AdapterStatus(str(value))
+    except ValueError:
+        return AdapterStatus.INVALID
+
+
+def _first_metric_reason(metrics: Sequence[DeepEvalMetricResult]) -> str | None:
+    return next((metric.reason for metric in metrics if metric.reason), None)
+
+
+def _safe_model(value: str) -> str:
+    model, _ = redact_text(str(value), max_length=256)
+    return model.strip() or "unknown"
+
+
+def _safe_reason(value: Any) -> str | None:
+    if value is None:
+        return None
+    reason, _ = redact_text(str(value), max_length=320)
+    return reason.strip() or None
+
+
 def map_deepeval_status(
     status: str,
 ) -> tuple[DeepEvalAnalysisStatus, FailureSource | None]:
@@ -179,6 +533,8 @@ def build_deepeval_trajectory(
                 tool_name=tool_name,
                 argument_digest=_optional_digest(event.argument_digest),
                 workspace_fingerprint=_optional_digest(event.workspace_fingerprint),
+                started_at=getattr(event, "started_at", None),
+                finished_at=getattr(event, "finished_at", None),
             )
         )
     digest = _digest_json([item.model_dump(mode="json") for item in projected])
@@ -266,11 +622,17 @@ def _digest_json(value: Any) -> str:
 
 
 __all__: Sequence[str] = (
+    "DEEPEVAL_METRIC_NAMES",
     "DEEPEVAL_RESULT_SCHEMA_VERSION",
+    "DeepEvalJudge",
     "DeepEvalMetricFixture",
+    "DeepEvalMetricObservation",
     "DeepEvalResultError",
     "DeepEvalResultFixture",
     "DeepEvalSchemaError",
+    "DeepEvalTimeoutError",
+    "analyze_deepeval_case",
+    "analyze_verified_report",
     "build_deepeval_trajectory",
     "deepeval_analysis_json",
     "map_deepeval_status",
