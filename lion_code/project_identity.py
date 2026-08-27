@@ -46,6 +46,7 @@ def _git_root(cwd: Path) -> Path | None:
             encoding="utf-8",
             timeout=3,
             check=False,
+            stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
         return None

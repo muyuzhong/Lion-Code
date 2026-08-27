@@ -128,6 +128,7 @@ export function ProviderSettings({ onClose }: { onClose: () => void }) {
   const [model, setModel] = useState(status?.model ?? "");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [allowHosts, setAllowHosts] = useState("");
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [loadingConfiguration, setLoadingConfiguration] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -136,13 +137,19 @@ export function ProviderSettings({ onClose }: { onClose: () => void }) {
     let mounted = true;
     setApiKeyVisible(false);
     setLoadingConfiguration(true);
-    void adapter.fetchProviderConfiguration().then((configuration) => {
-      if (!mounted || !configuration) return;
-      setProvider(configuration.provider);
-      setModel(configuration.model);
-      setApiKey(configuration.api_key);
-      setBaseUrl(configuration.base_url);
-    }).finally(() => {
+    void Promise.all([
+      adapter.fetchProviderConfiguration().then((configuration) => {
+        if (!mounted || !configuration) return;
+        setProvider(configuration.provider);
+        setModel(configuration.model);
+        setApiKey(configuration.api_key);
+        setBaseUrl(configuration.base_url);
+      }),
+      adapter.fetchEgressConfiguration().then((egress) => {
+        if (!mounted || !egress) return;
+        setAllowHosts(egress.allow_hosts.join("\n"));
+      }),
+    ]).finally(() => {
       if (mounted) setLoadingConfiguration(false);
     });
     return () => { mounted = false; };
@@ -151,9 +158,21 @@ export function ProviderSettings({ onClose }: { onClose: () => void }) {
   const save = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true);
-    const saved = await adapter.configureProvider({ provider, model, ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}), ...(baseUrl.trim() ? { base_url: baseUrl.trim() } : {}) });
+    const parsedHosts = allowHosts
+      .split(/[\n,]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const [savedProvider, savedEgress] = await Promise.all([
+      adapter.configureProvider({
+        provider,
+        model,
+        ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+        ...(baseUrl.trim() ? { base_url: baseUrl.trim() } : {})
+      }),
+      adapter.configureEgress({ allow_hosts: parsedHosts }),
+    ]);
     setSaving(false);
-    if (saved) onClose();
+    if (savedProvider && savedEgress) onClose();
   };
 
   return (
@@ -165,7 +184,8 @@ export function ProviderSettings({ onClose }: { onClose: () => void }) {
         <label htmlFor="model-select">模型<select id="model-select" value={model} onChange={(event) => setModel(event.target.value)}>{model && !snapshot.models.some((choice) => choice.model === model) ? <option value={model}>{model}</option> : null}{snapshot.models.map((choice) => <option key={`${choice.provider_name}:${choice.model}`} value={choice.model}>{choice.model}</option>)}</select></label>
         <label htmlFor="provider-api-key">API key<div style={{ position: "relative" }}><input id="provider-api-key" type={apiKeyVisible ? "text" : "password"} autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={loadingConfiguration ? "正在读取…" : status?.api_configured ? "已配置；留空保持不变" : "输入 API key"} style={{ paddingRight: 40 }} /><button type="button" aria-label={apiKeyVisible ? "隐藏 API key" : "显示 API key"} aria-pressed={apiKeyVisible} aria-controls="provider-api-key" onClick={() => setApiKeyVisible((visible) => !visible)} style={{ position: "absolute", top: "50%", right: 5, display: "inline-flex", width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: "var(--radius-xs)", color: "var(--ds-text-muted)", transform: "translateY(-50%)" }}>{apiKeyVisible ? <EyeOff aria-hidden="true" size={16} /> : <Eye aria-hidden="true" size={16} />}</button></div></label>
         <label htmlFor="provider-base-url">API 地址<input id="provider-base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={provider === "openai" ? "https://api.openai.com/v1" : "可选自定义地址"} /></label>
-        <label>Thinking<select value={status?.thinking_level ?? "off"} onChange={(event) => void adapter.setThinkingLevel(event.target.value)}>{status?.available_thinking_levels.map((level) => <option key={level}>{level}</option>)}</select></label>
+        <label htmlFor="egress-allow-hosts">网络出口白名单 (Web Fetch)<textarea id="egress-allow-hosts" value={allowHosts} onChange={(event) => setAllowHosts(event.target.value)} placeholder={loadingConfiguration ? "正在读取…" : "每行一个域名，例如：\napi.github.com\nraw.githubusercontent.com"} rows={3} /></label>
+        <label>Thinking<select value={status?.thinking_level ?? "medium"} onChange={(event) => void adapter.setThinkingLevel(event.target.value)}>{status?.available_thinking_levels.map((level) => <option key={level}>{level}</option>)}</select></label>
         <footer><button type="button" className="button-quiet" onClick={onClose}>保留当前配置</button><button type="submit" disabled={saving || loadingConfiguration || snapshot.protocol.isStreaming}>{loadingConfiguration ? "正在读取…" : saving ? "正在保存…" : "保存配置"}</button></footer>
       </form>
     </dialog>

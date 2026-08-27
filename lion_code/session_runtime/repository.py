@@ -54,7 +54,7 @@ class SessionRepository:
             sessions.append(
                 {
                     "id": path.stem,
-                    "label": state.label,
+                    "label": state.label or _extract_summary_title(state.messages),
                     "model": state.model,
                     "cwd": state.session_info.cwd if state.session_info else None,
                     "startTime": _format_timestamp(created_at),
@@ -64,6 +64,7 @@ class SessionRepository:
             )
         sessions.sort(key=lambda item: item["startTime"], reverse=True)
         return sessions
+
 
     async def rename(self, session_id: str, label: str) -> bool:
         """为非活动会话追加标题 Entry；活动会话由 SessionRuntime 的 Recorder 写入。"""
@@ -80,6 +81,26 @@ class SessionRepository:
     async def latest_session_id(self) -> str | None:
         sessions = await self.list_sessions()
         return str(sessions[0]["id"]) if sessions else None
+
+
+
+
+def _extract_summary_title(messages: tuple[Any, ...]) -> str | None:
+    """从会话消息中提取首条用户消息作为简要标题。"""
+    for message in messages:
+        if getattr(message, "role", None) == "user":
+            content = getattr(message, "text", None) or getattr(message, "content", None)
+            if isinstance(content, str):
+                text = content.strip()
+                if text:
+                    first_line = text.splitlines()[0].strip()
+                    first_line = first_line.lstrip("#*-/ ").strip()
+                    if not first_line:
+                        continue
+                    if len(first_line) > 30:
+                        return first_line[:30].rstrip() + "..."
+                    return first_line
+    return None
 
 
 def _safe_session_id(session_id: str) -> str:

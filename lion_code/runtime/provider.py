@@ -298,8 +298,6 @@ class ProviderController:
 
         normalized = normalize_thinking_level(level)
         current = self._state
-        if normalized == current.thinking_level:
-            return normalized
         target = ProviderState(
             model=current.model,
             provider_kind=current.provider_kind,
@@ -310,7 +308,12 @@ class ProviderController:
             thinking_level=normalized,
         )
         self._reject_if_running("Agent 运行中，无法切换 thinking 档位")
-        self._apply_target_state(target, previous=current, record=True)
+        self._apply_target_state(
+            target,
+            previous=current,
+            record=normalized != current.thinking_level,
+            force_provider_rebuild=True,
+        )
         return normalized
 
     def cycle_thinking_level(self) -> ThinkingLevel:
@@ -435,8 +438,12 @@ class ProviderController:
         *,
         previous: ProviderState,
         record: bool,
+        force_provider_rebuild: bool = False,
     ) -> None:
-        provider_changed = self._provider_configuration_changed(previous, target)
+        provider_changed = (
+            force_provider_rebuild
+            or self._provider_configuration_changed(previous, target)
+        )
         model_changed = previous.model != target.model
         provider: ModelProvider | None = None
         compactor: ProviderContextCompactor | None = None

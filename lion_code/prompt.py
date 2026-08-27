@@ -275,6 +275,7 @@ def get_git_context() -> str:
                 encoding="utf-8",
                 text=True,
                 timeout=3,
+                stdin=subprocess.DEVNULL,
             ).stdout.strip()
 
         branch = run_git(["rev-parse", "--abbrev-ref", "HEAD"])

@@ -28,6 +28,8 @@ from lion_code.core.messages import AssistantMessage, ToolResultMessage, UserMes
 from .bridge import SessionWebsocketBridge, WebsocketConnectionLease
 from .models import (
     ChatMessageDTO,
+    EgressConfigRequest,
+    EgressConfigResponse,
     ModelChoiceItem,
     ProviderConfigRequest,
     ProviderConfigResponse,
@@ -412,6 +414,24 @@ def create_app(
             "model": session.model,
             "provider": session.provider_name,
         }
+
+    @api.get("/config/egress", response_model=EgressConfigResponse)
+    async def get_egress_config() -> EgressConfigResponse:
+        return EgressConfigResponse(allow_hosts=session.get_egress_config())
+
+    @api.post("/config/egress")
+    async def configure_egress(body: EgressConfigRequest) -> dict[str, Any]:
+        if session.is_running:
+            raise HTTPException(status_code=400, detail="会话运行中，无法修改配置")
+
+        try:
+            normalized_hosts = session.configure_egress(body.allow_hosts)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail=f"保存 Egress 白名单配置失败: {exc}"
+            ) from exc
+
+        return {"success": True, "allow_hosts": normalized_hosts}
 
     @api.get("/skills", response_model=list[SkillItem])
     async def get_skills() -> list[SkillItem]:

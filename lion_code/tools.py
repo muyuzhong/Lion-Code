@@ -151,11 +151,17 @@ def _grep_search(inp: dict) -> str:
             if include:
                 args.append(f"--include={include}")
             args.extend(["--", pattern, path])
-            result = subprocess.run(args, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                stdin=subprocess.DEVNULL,
+            )
             if result.returncode == 1:
                 return "No matches found."
             if result.returncode == 0:
-                lines = [l for l in result.stdout.split("\n") if l]
+                lines = [line for line in result.stdout.split("\n") if line]
                 output = "\n".join(lines[:100])
                 if len(lines) > 100:
                     output += f"\n... and {len(lines) - 100} more matches"

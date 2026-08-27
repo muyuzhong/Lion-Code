@@ -16,19 +16,53 @@ import { ConversationTopbar } from "./components/ConversationTopbar";
 import { ReasoningActivity, ToolActivity } from "./components/ToolActivity";
 import type { SkillSummary } from "./backend";
 
-const MarkdownText: TextMessagePartComponent = ({ text }) => <Streamdown>{text}</Streamdown>;
-const partComponents = { Text: MarkdownText, Reasoning: ReasoningActivity, tools: { Fallback: ToolActivity } };
+const UserMarkdownText: TextMessagePartComponent = ({ text }) => <Streamdown>{text}</Streamdown>;
+const AssistantMarkdownText: TextMessagePartComponent = ({ text }) => (
+  <div className="assistant-text-block">
+    <Streamdown>{text}</Streamdown>
+    <MessageActions />
+  </div>
+);
+
+const userPartComponents = { Text: UserMarkdownText };
+const assistantPartComponents = {
+  Text: AssistantMarkdownText,
+  Reasoning: ReasoningActivity,
+  tools: { Fallback: ToolActivity },
+};
 
 function UserMessage() {
-  return <MessagePrimitive.Root className="message user-message"><div className="message-body"><MessagePrimitive.Parts components={partComponents} /></div><MessageActions /></MessagePrimitive.Root>;
+  return (
+    <MessagePrimitive.Root className="message user-message">
+      <div className="message-body">
+        <MessagePrimitive.Parts components={userPartComponents} />
+      </div>
+      <MessageActions />
+    </MessagePrimitive.Root>
+  );
 }
 
 function AssistantMessage() {
-  return <MessagePrimitive.Root className="message assistant-message"><div className="message-body"><MessagePrimitive.Parts components={partComponents} /><MessagePrimitive.Error><p className="message-error">生成未完成。检查连接后重试。</p></MessagePrimitive.Error></div><MessageActions /></MessagePrimitive.Root>;
+  return (
+    <MessagePrimitive.Root className="message assistant-message">
+      <div className="message-body">
+        <MessagePrimitive.Parts components={assistantPartComponents} />
+        <MessagePrimitive.Error>
+          <p className="message-error">生成未完成。检查连接后重试。</p>
+        </MessagePrimitive.Error>
+      </div>
+    </MessagePrimitive.Root>
+  );
 }
 
 function MessageActions() {
-  return <ActionBarPrimitive.Root className="message-actions" hideWhenRunning autohide="always"><ActionBarPrimitive.Copy className="message-action" aria-label="复制消息" title="复制消息"><Copy aria-hidden="true" size={13} /></ActionBarPrimitive.Copy></ActionBarPrimitive.Root>;
+  return (
+    <ActionBarPrimitive.Root className="message-actions" hideWhenRunning>
+      <ActionBarPrimitive.Copy className="message-action" aria-label="复制消息" title="复制消息">
+        <Copy aria-hidden="true" size={13} />
+      </ActionBarPrimitive.Copy>
+    </ActionBarPrimitive.Root>
+  );
 }
 
 const messageComponents = { UserMessage, AssistantMessage };
@@ -95,7 +129,7 @@ export function ChatThread({ sidebarCollapsed, onToggleSidebar, onCreateSession,
                 metrics={{ steps: protocol.metrics.steps, llm: formatRunDuration(protocol.metrics.llmMs), tools: formatRunDuration(protocol.metrics.toolMs) }}
                 model={snapshot.status?.model ?? "正在读取模型"}
                 permissionMode={snapshot.status?.permission_mode ?? "权限未知"}
-                thinkingLevel={snapshot.status?.thinking_level ?? "off"}
+                thinkingLevel={snapshot.status?.thinking_level ?? "medium"}
                 skills={skills}
                 onOpenSettings={onOpenSettings}
                 onQueuedTextChange={setQueuedText}

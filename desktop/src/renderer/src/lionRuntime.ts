@@ -11,6 +11,8 @@ import {
   LionRestClient,
   LionWebSocketTransport,
   type BackendBootstrap,
+  type EgressConfiguration,
+  type EgressConfigurationResponse,
   type ModelChoice,
   type ProviderConfiguration,
   type ProviderConfigurationResponse,
@@ -161,6 +163,25 @@ export class LionAssistantRuntimeAdapter {
     }
   }
 
+  async configureEgress(configuration: EgressConfiguration): Promise<boolean> {
+    try {
+      await this.rest.configureEgress(configuration);
+      return true;
+    } catch (error) {
+      this.setMetadataError(errorMessage(error));
+      return false;
+    }
+  }
+
+  async fetchEgressConfiguration(): Promise<EgressConfigurationResponse | null> {
+    try {
+      return await this.rest.fetchEgressConfiguration();
+    } catch (error) {
+      this.setMetadataError(errorMessage(error));
+      return null;
+    }
+  }
+
   async setThinkingLevel(level: string): Promise<boolean> {
     try {
       await this.rest.setThinkingLevel(level);
@@ -257,6 +278,9 @@ export class LionAssistantRuntimeAdapter {
         return;
       case "event":
         this.dispatch({ type: "server_event", event: event.event });
+        if (event.event.type === "agent_settled" || event.event.type === "turn_end" || event.event.type === "agent_end") {
+          void this.refreshMetadata();
+        }
         return;
       case "protocol_error":
         this.dispatch({ type: "server_event", event: { type: "protocol_error", message: event.message } });
