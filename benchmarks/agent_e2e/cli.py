@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -15,6 +16,11 @@ from .external_anchor import validate_bundled_external_anchor_manifest
 from .models import ExperimentManifest
 from .orchestrator import SingleTaskOrchestrator
 from .report import build_report, write_report
+from .verified_runner import (
+    VerifiedExecutionRequest,
+    run_verified_evaluation,
+    write_verified_report,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +52,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="预留的真实容器入口；foundation 阶段始终 blocked",
     )
     online.add_argument("--manifest", type=Path, required=True)
+
+    verified = commands.add_parser(
+        "verified-run",
+        help="运行单题 Harbor installed-agent 与官方 SWE-bench Harness",
+    )
+    verified.add_argument("--catalog", type=Path, required=True)
+    verified.add_argument("--manifest", type=Path, required=True)
+    verified.add_argument("--task-id", required=True)
+    verified.add_argument("--commit", required=True)
+    verified.add_argument("--repository-root", type=Path, default=Path("."))
+    verified.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("benchmarks/agent_e2e/results/verified"),
+    )
+    verified.add_argument("--python", dest="python_executable", default=sys.executable)
+    verified.add_argument("--harness-python", default=sys.executable)
+    verified.add_argument("--harbor", default="harbor")
 
     anchor_validate = commands.add_parser(
         "external-anchor-validate",
@@ -93,6 +117,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         return 2
+    if args.command == "verified-run":
+        return _verified_run(args)
     if args.command == "external-anchor-validate":
         manifest = validate_bundled_external_anchor_manifest()
         payload = {
@@ -142,3 +168,40 @@ async def _offline_run(args: argparse.Namespace) -> int:
         )
     )
     return 0
+
+
+def _verified_run(args: argparse.Namespace) -> int:
+    catalog = load_catalog(args.catalog)
+    manifest = ExperimentManifest.from_json(args.manifest.read_text(encoding="utf-8"))
+    validate_catalog(catalog, lock=manifest.catalog)
+    task = next((item for item in catalog.tasks if item.task_id == args.task_id), None)
+    if task is None:
+        raise ValueError(f"Unknown task_id: {args.task_id}")
+    execution = run_verified_evaluation(
+        VerifiedExecutionRequest(
+            repository_root=args.repository_root,
+            commit_sha=args.commit,
+            manifest=manifest,
+            task=task,
+            output_dir=args.output_dir,
+            python_executable=args.python_executable,
+            harness_python=args.harness_python,
+            harbor_executable=args.harbor,
+        )
+    )
+    json_path, markdown_path = write_verified_report(
+        execution.report,
+        args.output_dir,
+    )
+    print(
+        json.dumps(
+            {
+                "status": execution.report.task_result.verdict.value,
+                "report_json": str(json_path),
+                "report_markdown": str(markdown_path),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 0 if execution.report.task_result.official else 2
