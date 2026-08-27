@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from .models import (
     EvaluationReport,
     ExperimentManifest,
     OfficialScore,
+    OpikExportResult,
     ReportStatus,
     TaskResult,
     TaskVerdict,
+    VerifiedEvaluationReport,
 )
+from .trace import redact_text
 
 
 def build_report(
@@ -95,6 +99,166 @@ def render_chinese_markdown(report: EvaluationReport) -> str:
             f"{result.verdict.value}（{result.validity.value}）{reason}"
         )
     return "\n".join(lines) + "\n"
+
+
+def render_verified_markdown(report: VerifiedEvaluationReport) -> str:
+    """渲染 Verified 四段结果，只展示受控摘要和非敏感引用。"""
+
+    task_result = report.task_result
+    lines = [
+        "# SWE-bench Verified 单题评测报告",
+        "",
+        f"- 运行 ID：`{_safe_display(report.manifest.run_id, 128)}`",
+        f"- 任务 ID：`{_safe_display(task_result.task_id, 160)}`",
+        f"- Commit：`{_safe_display(report.manifest.agent_code_sha, 128)}`",
+        f"- 配置指纹：`{_safe_display(report.manifest.profile_fingerprint, 64)}`",
+        f"- 报告状态：{_status_label(report.status)}",
+        f"- 执行状态：{_trial_status(report)}",
+        f"- 任务得分：{task_result.verdict.value}；有效性：{task_result.validity.value}；"
+        f"正式结果：{'是' if task_result.official else '否'}",
+        f"- Agent 成本：{task_result.cost_usd:.6f} USD；耗时："
+        f"{_duration(task_result.finished_at, task_result.started_at):.3f} 秒",
+        "",
+        "## 产物与 provenance",
+    ]
+    provenance = report.provenance
+    if provenance is None:
+        lines.append("- 未生成 commit 产物 provenance。")
+    else:
+        lines.extend(
+            [
+                f"- Git tree：`{_safe_display(provenance.git_tree_sha, 128)}`",
+                f"- Wheel SHA-256：`{_safe_display(provenance.wheel_sha256, 64)}`",
+                f"- Wheel：`{_safe_display(provenance.wheel_filename, 240)}`",
+                f"- 镜像：`{_safe_display(provenance.image_digest, 320)}`",
+                f"- 依赖版本：Harbor {_safe_display(provenance.harbor_version, 128)}；"
+                f"SWE-bench {_safe_display(provenance.swebench_version, 128)}；"
+                f"DeepEval {_safe_display(provenance.deepeval_version, 128)}；"
+                f"Opik {_safe_display(provenance.opik_version, 128)}",
+            ]
+        )
+
+    lines.extend(["", "## 四段结果"])
+    _append_harbor(lines, report)
+    _append_harness(lines, report)
+    _append_deepeval(lines, report)
+    _append_opik(lines, report.opik)
+    return "\n".join(lines) + "\n"
+
+
+def _append_harbor(lines: list[str], report: VerifiedEvaluationReport) -> None:
+    harbor = report.harbor
+    if harbor is None:
+        lines.append("- Harbor：未运行。")
+        return
+    lines.extend(
+        [
+            f"- Harbor：状态 `{harbor.status.value}`；reward："
+            f"{_optional_number(harbor.reward)}；trial："
+            f"`{harbor.execution_status.value}`；verifier："
+            f"{_safe_display(harbor.verifier_outcome, 64)}；job："
+            f"`{_safe_display(harbor.job_id, 240)}`；patch digest："
+            f"`{_safe_display(harbor.patch_sha256, 64)}`；耗时："
+            f"{_optional_number(harbor.wall_time_seconds)} 秒",
+            f"  - 失败来源：{_safe_display(harbor.failure_source, 64)}；"
+            f"原因：{_safe_display(harbor.reason, 320)}",
+            f"  - 受控引用：{_safe_refs(harbor.artifact_references)}",
+        ]
+    )
+
+
+def _append_harness(lines: list[str], report: VerifiedEvaluationReport) -> None:
+    harness = report.harness
+    if harness is None:
+        lines.append("- 官方 Harness：未运行。")
+        return
+    lines.extend(
+        [
+            f"- 官方 Harness：状态 `{harness.status.value}`；resolved："
+            f"{_optional_bool(harness.resolved)}；patch digest："
+            f"`{_safe_display(harness.patch_sha256, 64)}`；报告 digest："
+            f"`{_safe_display(harness.output_digest, 64)}`；评估器："
+            f"`{_safe_display(harness.evaluator_revision, 128)}`",
+            f"  - 镜像：`{_safe_display(harness.image_digest, 320)}`；"
+            f"失败来源：{_safe_display(harness.failure_source, 64)}；"
+            f"原因：{_safe_display(harness.reason, 320)}",
+        ]
+    )
+
+
+def _append_deepeval(lines: list[str], report: VerifiedEvaluationReport) -> None:
+    analysis = report.deepeval
+    if analysis is None:
+        lines.append("- DeepEval：未运行。")
+        return
+    lines.append(
+        f"- DeepEval：状态 `{analysis.status.value}`；模型："
+        f"`{_safe_display(analysis.judge_model, 256)}`；输入 digest："
+        f"`{_safe_display(analysis.input_digest, 64)}`；轨迹 digest："
+        f"`{_safe_display(analysis.trajectory_digest, 64)}`"
+    )
+    for metric in analysis.metrics:
+        lines.append(
+            f"  - `{_safe_display(metric.name, 160)}`："
+            f"{_optional_number(metric.score)}；状态 `{metric.status.value}`；"
+            f"原因：{_safe_display(metric.reason, 320)}"
+        )
+    if analysis.reason:
+        lines.append(
+            f"  - 分析失败来源：{_safe_display(analysis.failure_source, 64)}；"
+            f"原因：{_safe_display(analysis.reason, 320)}"
+        )
+
+
+def _append_opik(lines: list[str], export: OpikExportResult | None) -> None:
+    if export is None:
+        lines.append("- Opik Cloud：未发布。")
+        return
+    lines.append(
+        f"- Opik Cloud：状态 `{export.status.value}`；trace ID："
+        f"`{_safe_display(export.trace_id, 160)}`；payload digest："
+        f"`{_safe_display(export.payload_digest, 64)}`；workspace/project："
+        f"`{_safe_display(export.workspace, 160)}` / "
+        f"`{_safe_display(export.project, 160)}`；尝试次数：{export.attempts}"
+    )
+    if export.reason:
+        lines.append(
+            f"  - 失败来源：{_safe_display(export.failure_source, 64)}；"
+            f"原因：{_safe_display(export.reason, 320)}"
+        )
+
+
+def _trial_status(report: VerifiedEvaluationReport) -> str:
+    if report.trial is None:
+        return "未建立 trial"
+    return report.trial.status.value
+
+
+def _duration(finished: datetime, started: datetime) -> float:
+    delta = finished - started
+    return max(0.0, delta.total_seconds())
+
+
+def _optional_bool(value: bool | None) -> str:
+    return "未提供" if value is None else ("是" if value else "否")
+
+
+def _optional_number(value: float | None) -> str:
+    return "未提供" if value is None else f"{value:.6f}"
+
+
+def _safe_refs(values: tuple[str, ...]) -> str:
+    if not values:
+        return "无"
+    return ", ".join(f"`{_safe_display(value, 240)}`" for value in values)
+
+
+def _safe_display(value: object, max_length: int) -> str:
+    if value is None:
+        return "未提供"
+    value = getattr(value, "value", value)
+    text, _ = redact_text(str(value), max_length=max_length)
+    return text.replace("\r", " ").replace("\n", " ")
 
 
 def write_report(

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "组合入口与报告边界"}
+{"file": ".trellis/tasks/08-27-agent-evaluation-system/prd.md", "reason": "父任务最终用户价值"}
+{"file": ".trellis/tasks/08-27-agent-evaluation-system/design.md", "reason": "固定端到端链路"}
+{"file": ".trellis/tasks/08-27-eval-cli-linux-smoke/prd.md", "reason": "本子任务需求和明确非目标"}
+{"file": ".trellis/tasks/08-27-eval-cli-linux-smoke/design.md", "reason": "薄组合入口设计"}
+{"file": ".trellis/tasks/08-27-eval-cli-linux-smoke/implement.md", "reason": "集成与 Linux 验收顺序"}

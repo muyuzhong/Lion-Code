@@ -185,9 +185,14 @@ from .swebench_verified import (
     parse_harbor_result,
 )
 from .verified_runner import (
+    VERIFIED_EXIT_COMPLETED,
+    VERIFIED_EXIT_INFRA_FAILED,
+    VERIFIED_EXIT_INVALID,
+    VERIFIED_EXIT_SUBJECT_FAILED,
     VerifiedExecutionOutput,
     VerifiedExecutionRequest,
     run_verified_evaluation,
+    verified_exit_code,
     write_verified_report,
 )
 
@@ -212,6 +217,10 @@ __all__ = [
     "SWEBENCH_SPLIT",
     "SWEBENCH_VERSION",
     "TRAJECTORY_QUALITY_EVALUATION_STEPS",
+    "VERIFIED_EXIT_COMPLETED",
+    "VERIFIED_EXIT_INFRA_FAILED",
+    "VERIFIED_EXIT_INVALID",
+    "VERIFIED_EXIT_SUBJECT_FAILED",
     "AdapterStatus",
     "AnchorRunStatus",
     "ArtifactBuildError",
@@ -354,6 +363,7 @@ __all__ = [
     "validate_corpus",
     "validate_manifest_against_snapshot",
     "validate_materialized_dataset_snapshot",
+    "verified_exit_code",
     "write_external_anchor_report",
     "write_gate_ledger",
     "write_materialized_dataset_snapshot",

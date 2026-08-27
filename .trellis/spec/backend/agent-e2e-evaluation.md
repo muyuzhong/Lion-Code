@@ -692,3 +692,85 @@ payload = build_opik_trace_payload(
 export = publish_opik_trace(payload)
 assert analyzed.task_result == report.task_result
 ```
+
+## 10. Verified Composition CLI
+
+### 1. Scope / Trigger
+
+This contract applies to the single-run composition added on top of Sections 8
+and 9. It owns only argument parsing, stage ordering, report writing, and exit
+codes; it must not add another Agent loop, scorer, or publisher.
+
+### 2. Signatures
+
+```python
+def run_verified_evaluation(
+    request: VerifiedExecutionRequest,
+) -> VerifiedExecutionOutput: ...
+
+def verified_exit_code(report: VerifiedEvaluationReport) -> int: ...
+```
+
+The command is `python -m benchmarks.agent_e2e verified-run` with required
+`--catalog`, `--manifest`, `--task-id`, and `--commit`; `--run-id` is optional
+but, when supplied, must equal `manifest.run_id`.
+
+### 3. Contracts
+
+- A run has one catalog task and one output directory. The fixed order is
+  `artifact -> Harbor -> Harness -> DeepEval -> Opik`; later stages consume
+  typed results or controlled artifacts from earlier stages.
+- The DeepEval input digest is the SHA-256 of the public prompt sent to the
+  worker. A Harbor `harbor-trace.json` is projected into a bounded, redacted
+  trajectory; no stage invokes the Agent a second time.
+- Harness may return the external SWE-bench instance ID; the composition maps
+  it back to the selected catalog task ID before building `TaskResult`.
+- `verified-report.json` and `verified-report.md` are always written when a
+  report exists. DeepEval or Opik failures update only their own typed fields;
+  they never replace an official Harness result.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Task is not selected, repeats is not `1`, digest/timeout is invalid, or `--run-id` mismatches | Reject before backend execution; no official result |
+| Artifact/Harbor fails or Harbor exports no patch | Blocked/non-official report; do not invoke Harness, and never emit an official score |
+| Harness returns an unknown task ID or malformed official result | Invalid/non-official report |
+| No controlled trajectory is available | Retain the Harbor/Harness report; do not run DeepEval or Opik |
+| DeepEval or Opik fails after official scoring | Typed failure in that stage; preserve the official task result |
+| Trial is subject-failed, infra-failed, indeterminate, or an official task fails | Exit `1`, `2`, `3`, or `1` respectively; completed official pass exits `0` |
+
+### 5. Good / Base / Bad Cases
+
+- Good: invoke the shared function once, pass the exact Harbor patch to
+  Harness, analyze the same redacted trajectory, and write both report forms.
+- Base: on Windows or without a trajectory/optional service, record blocked or
+  unavailable stage state without inventing a score.
+- Bad: rerun the Agent for DeepEval, use Harbor reward as an official verdict,
+  or turn an infrastructure failure into a zero score.
+
+### 6. Tests Required
+
+- `tests/benchmarks/test_verified_cli_composition.py` must assert stage order,
+  public-prompt digest, task-ID normalization, fixed report paths, stable exit
+  codes, redaction, and preservation of the official result when post-processing
+  fails.
+- Existing Verified execution, analysis, and CLI tests must continue to pass;
+  the real Linux smoke is a separate single-task acceptance check.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# Judge output is not an official SWE-bench result.
+report.task_result = judge_result_to_task_result(judge_output)
+```
+
+#### Correct
+
+```python
+execution = run_verified_evaluation(request)
+assert execution.report.task_result == official_task_result
+json_path, markdown_path = write_verified_report(execution.report, output_dir)
+```

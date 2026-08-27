@@ -19,6 +19,7 @@ from .report import build_report, write_report
 from .verified_runner import (
     VerifiedExecutionRequest,
     run_verified_evaluation,
+    verified_exit_code,
     write_verified_report,
 )
 
@@ -61,6 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
     verified.add_argument("--manifest", type=Path, required=True)
     verified.add_argument("--task-id", required=True)
     verified.add_argument("--commit", required=True)
+    verified.add_argument(
+        "--run-id",
+        help="可选的运行 ID 校验；默认使用 manifest.run_id",
+    )
     verified.add_argument("--repository-root", type=Path, default=Path("."))
     verified.add_argument(
         "--output-dir",
@@ -70,6 +75,12 @@ def build_parser() -> argparse.ArgumentParser:
     verified.add_argument("--python", dest="python_executable", default=sys.executable)
     verified.add_argument("--harness-python", default=sys.executable)
     verified.add_argument("--harbor", default="harbor")
+    verified.add_argument("--input-digest")
+    verified.add_argument("--deepeval-judge-model")
+    verified.add_argument("--deepeval-timeout", type=float, default=120.0)
+    verified.add_argument("--opik-timeout", type=float, default=30.0)
+    verified.add_argument("--opik-project")
+    verified.add_argument("--opik-workspace")
 
     anchor_validate = commands.add_parser(
         "external-anchor-validate",
@@ -173,6 +184,8 @@ async def _offline_run(args: argparse.Namespace) -> int:
 def _verified_run(args: argparse.Namespace) -> int:
     catalog = load_catalog(args.catalog)
     manifest = ExperimentManifest.from_json(args.manifest.read_text(encoding="utf-8"))
+    if args.run_id is not None and args.run_id != manifest.run_id:
+        raise ValueError("--run-id must match manifest.run_id")
     validate_catalog(catalog, lock=manifest.catalog)
     task = next((item for item in catalog.tasks if item.task_id == args.task_id), None)
     if task is None:
@@ -187,6 +200,12 @@ def _verified_run(args: argparse.Namespace) -> int:
             python_executable=args.python_executable,
             harness_python=args.harness_python,
             harbor_executable=args.harbor,
+            input_digest=args.input_digest,
+            deepeval_judge_model=args.deepeval_judge_model,
+            deepeval_timeout_seconds=args.deepeval_timeout,
+            opik_timeout_seconds=args.opik_timeout,
+            opik_project_name=args.opik_project,
+            opik_workspace=args.opik_workspace,
         )
     )
     json_path, markdown_path = write_verified_report(
@@ -196,7 +215,12 @@ def _verified_run(args: argparse.Namespace) -> int:
     print(
         json.dumps(
             {
-                "status": execution.report.task_result.verdict.value,
+                "status": (
+                    execution.report.trial.status.value
+                    if execution.report.trial is not None
+                    else "infra_failed"
+                ),
+                "verdict": execution.report.task_result.verdict.value,
                 "report_json": str(json_path),
                 "report_markdown": str(markdown_path),
             },
@@ -204,4 +228,4 @@ def _verified_run(args: argparse.Namespace) -> int:
             sort_keys=True,
         )
     )
-    return 0 if execution.report.task_result.official else 2
+    return verified_exit_code(execution.report)
