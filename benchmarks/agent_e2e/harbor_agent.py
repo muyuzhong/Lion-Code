@@ -27,7 +27,14 @@ class LionInstalledAgent(BaseInstalledAgent):
     MODEL_CONNECTION: ClassVar[None] = None
     _REMOTE_ROOT = "/installed-agent/benchmarks/agent_e2e"
     _REMOTE_REQUEST = "/installed-agent/request.json"
-    _REMOTE_LOG_ROOT = "/logs/agent"
+    _REMOTE_PYTHON312 = "/opt/lion-py"
+    _LOG_ROOT = "/logs/agent"
+    # swebench 任务镜像内置 Python 3.11,而 Lion 要求 >=3.12(PEP 695 语法)。
+    # 固定 python-build-standalone 发布资产(URL 不可变),免编译、免改镜像。
+    _PYTHON312_URL = (
+        "https://github.com/astral-sh/python-build-standalone/releases/download/"
+        "20260825/cpython-3.12.14%2B20260825-x86_64-unknown-linux-gnu-install_only.tar.gz"
+    )
     _SOURCE_FILES = (
         "agent_worker.py",
         "backend.py",
@@ -94,7 +101,7 @@ class LionInstalledAgent(BaseInstalledAgent):
         await self._upload_agent_owned_file(
             environment,
             self._wheel_path,
-            "/installed-agent/lion_code.whl",
+            f"/installed-agent/{self._wheel_path.name}",
         )
         source_root = Path(__file__).resolve().parent
         with tempfile.TemporaryDirectory(prefix="lion-harbor-package-") as directory:
@@ -120,16 +127,79 @@ class LionInstalledAgent(BaseInstalledAgent):
                 source_root / filename,
                 f"{self._REMOTE_ROOT}/{filename}",
             )
+        await self._install_python312(environment)
         await self.exec_as_root(
             environment,
             command=(
-                "python3 -m pip install --no-cache-dir /installed-agent/lion_code.whl"
+                f"{self._REMOTE_PYTHON312}/bin/python3 -m pip install --no-cache-dir "
+                f"/installed-agent/{self._wheel_path.name}"
             ),
+        )
+
+    async def _install_python312(self, environment: Any) -> None:
+        """在任务容器内安装固定版本的独立 Python 3.12。
+
+        swebench 镜像自带 Python 3.11,而 Lion 要求 >=3.12;python-build-standalone
+        的 install_only 资产免编译、URL 内容寻址不变。优先使用评测主机缓存的
+        tarball(host → 容器上传远快于容器外网下载,规避 Harbor 360s setup 上限),
+        缓存缺失时回退容器内标准库下载。解压到 /opt/lion-py 供 wheel 与 worker 共用。
+        """
+        cached = self._cached_python312_tarball()
+        if cached is not None and cached.is_file():
+            await self.exec_as_root(
+                environment,
+                command="mkdir -p /tmp && rm -f /tmp/lion-py312.tar.gz",
+            )
+            await environment.upload_file(cached, "/tmp/lion-py312.tar.gz")
+        else:
+            with tempfile.TemporaryDirectory(
+                prefix="lion-harbor-python312-"
+            ) as directory:
+                fetch_script = Path(directory) / "fetch_lion_py312.py"
+                fetch_script.write_text(
+                    "import urllib.request\n"
+                    f"urllib.request.urlretrieve({self._PYTHON312_URL!r}, "
+                    "'/tmp/lion-py312.tar.gz')\n",
+                    encoding="utf-8",
+                )
+                await self._upload_agent_owned_file(
+                    environment,
+                    fetch_script,
+                    "/tmp/fetch_lion_py312.py",
+                )
+                await self.exec_as_root(
+                    environment,
+                    command=(
+                        "rm -rf /opt/lion-py /tmp/lion-py312 && "
+                        "python3 /tmp/fetch_lion_py312.py"
+                    ),
+                )
+        await self.exec_as_root(
+            environment,
+            command=(
+                "mkdir -p /tmp/lion-py312 && "
+                "tar -xzf /tmp/lion-py312.tar.gz -C /tmp/lion-py312 && "
+                "(test -x /tmp/lion-py312/python/bin/python3 && "
+                "mv /tmp/lion-py312/python /opt/lion-py || tar -xzf "
+                "/tmp/lion-py312.tar.gz -C /opt/lion-py --strip-components=1) && "
+                "rm -rf /tmp/lion-py312 /tmp/lion-py312.tar.gz && "
+                f"{self._REMOTE_PYTHON312}/bin/python3 --version"
+            ),
+        )
+
+    @staticmethod
+    def _cached_python312_tarball() -> Path | None:
+        """返回评测主机上的固定版本 tarball 缓存路径(不存在则 None)。"""
+        repository_root = Path(__file__).resolve().parents[2]
+        return (
+            repository_root
+            / "benchmarks/agent_e2e/results/python312"
+            / "install_only.tar.gz"
         )
 
     async def run(
         self,
-        _instruction: str,
+        instruction: str,
         environment: Any,
         context: Any,
     ) -> None:
@@ -157,7 +227,11 @@ class LionInstalledAgent(BaseInstalledAgent):
         try:
             await self.exec_as_agent(
                 environment,
-                command="python3 -m benchmarks.agent_e2e.worker_entrypoint",
+                command=(
+                    f"{self._REMOTE_PYTHON312}/bin/python3 -m "
+                    "benchmarks.agent_e2e.worker_entrypoint"
+                ),
+                env={"PYTHONPATH": "/installed-agent"},
                 timeout_sec=_timeout_seconds(self._manifest_json),
             )
         finally:
@@ -175,7 +249,7 @@ class LionInstalledAgent(BaseInstalledAgent):
         environment: Any,
         filename: str,
     ) -> Any | None:
-        remote_path = f"{self._REMOTE_LOG_ROOT}/{filename}"
+        remote_path = f"{self._LOG_ROOT}/{filename}"
         if not await environment.is_file(remote_path):
             return None
         self.logs_dir.mkdir(parents=True, exist_ok=True)
