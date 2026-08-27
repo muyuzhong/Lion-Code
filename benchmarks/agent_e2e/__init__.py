@@ -1,5 +1,12 @@
 """可离线验证的编码 Agent 端到端评测基础设施。"""
 
+from .artifact import (
+    ARTIFACT_BUILDER_VERSION,
+    ArtifactBuildError,
+    CommitArtifact,
+    CommitArtifactBuilder,
+    build_commit_artifact,
+)
 from .catalog import CatalogValidationError, freeze_catalog, validate_catalog
 from .corpus import (
     CorpusAdmissionError,
@@ -49,6 +56,15 @@ from .external_anchor import (
     write_external_anchor_report,
     write_materialized_dataset_snapshot,
 )
+from .harbor_runner import (
+    HARBOR_AGENT_IMPORT_PATH,
+    HARBOR_DATASET,
+    HARBOR_VERSION,
+    HarborExecutionError,
+    HarborExecutionOutput,
+    HarborExecutionRequest,
+    HarborSingleTaskRunner,
+)
 from .harness import (
     HARNESS_RESULT_SCHEMA_VERSION,
     HarnessResultError,
@@ -58,6 +74,17 @@ from .harness import (
     harness_result_to_task_result,
     map_harness_status,
     parse_harness_result,
+)
+from .harness_runner import (
+    SWEBENCH_DATASET,
+    SWEBENCH_EVALUATOR_REVISION,
+    SWEBENCH_HARNESS_MODULE,
+    SWEBENCH_SPLIT,
+    SWEBENCH_VERSION,
+    HarnessExecutionError,
+    HarnessExecutionOutput,
+    HarnessExecutionRequest,
+    OfficialSWEbenchHarnessRunner,
 )
 from .models import (
     SCHEMA_VERSION,
@@ -134,15 +161,31 @@ from .swebench_verified import (
     map_harbor_status,
     parse_harbor_result,
 )
+from .verified_runner import (
+    VerifiedExecutionOutput,
+    VerifiedExecutionRequest,
+    run_verified_evaluation,
+    write_verified_report,
+)
 
 __all__ = [
+    "ARTIFACT_BUILDER_VERSION",
     "DEEPEVAL_RESULT_SCHEMA_VERSION",
+    "HARBOR_AGENT_IMPORT_PATH",
+    "HARBOR_DATASET",
     "HARBOR_RESULT_SCHEMA_VERSION",
+    "HARBOR_VERSION",
     "HARNESS_RESULT_SCHEMA_VERSION",
     "OPIK_EXPORT_SCHEMA_VERSION",
     "SCHEMA_VERSION",
+    "SWEBENCH_DATASET",
+    "SWEBENCH_EVALUATOR_REVISION",
+    "SWEBENCH_HARNESS_MODULE",
+    "SWEBENCH_SPLIT",
+    "SWEBENCH_VERSION",
     "AdapterStatus",
     "AnchorRunStatus",
+    "ArtifactBuildError",
     "CalibrationPoint",
     "CalibrationProfileKind",
     "CalibrationReport",
@@ -150,6 +193,8 @@ __all__ = [
     "CatalogLock",
     "CatalogValidationError",
     "ChangeKind",
+    "CommitArtifact",
+    "CommitArtifactBuilder",
     "CorpusAdmissionError",
     "DeepEvalAnalysis",
     "DeepEvalAnalysisStatus",
@@ -179,11 +224,18 @@ __all__ = [
     "GateResult",
     "GateStatus",
     "GeneralizationStatus",
+    "HarborExecutionError",
+    "HarborExecutionOutput",
+    "HarborExecutionRequest",
     "HarborPathBoundaryError",
     "HarborResultError",
     "HarborResultFixture",
     "HarborRoutineVerifierResult",
     "HarborSchemaError",
+    "HarborSingleTaskRunner",
+    "HarnessExecutionError",
+    "HarnessExecutionOutput",
+    "HarnessExecutionRequest",
     "HarnessRecheckResult",
     "HarnessResultError",
     "HarnessResultFixture",
@@ -191,6 +243,7 @@ __all__ = [
     "HistoricalPreflight",
     "OfficialEvaluationRecord",
     "OfficialRecordStatus",
+    "OfficialSWEbenchHarnessRunner",
     "OfficialScore",
     "OpikExportError",
     "OpikExportFixture",
@@ -216,8 +269,11 @@ __all__ = [
     "TrialExecutionStatus",
     "UnavailableOfficialSWEbenchLiveRunner",
     "VerifiedEvaluationReport",
+    "VerifiedExecutionOutput",
+    "VerifiedExecutionRequest",
     "VerifiedProvenance",
     "admit_failure_to_regression",
+    "build_commit_artifact",
     "build_deepeval_trajectory",
     "bundled_catalog",
     "bundled_private_evidence",
@@ -246,6 +302,7 @@ __all__ = [
     "run_external_anchor_evaluation",
     "run_gold_preflight",
     "run_historical_preflight",
+    "run_verified_evaluation",
     "select_external_anchor_instances",
     "validate_bundled_corpus",
     "validate_bundled_external_anchor_manifest",
@@ -256,4 +313,5 @@ __all__ = [
     "write_external_anchor_report",
     "write_gate_ledger",
     "write_materialized_dataset_snapshot",
+    "write_verified_report",
 ]
