@@ -65,6 +65,13 @@
 - Are comments, public docstrings, tests and README/spec statements still true of
   the implementation?
 
+## CI workflow 分层（ci.yml / desktop.yml）
+
+- 不要在 required workflow 的 `pull_request` 上用 `paths`/`paths-ignore`：整 workflow 被跳过时对应 required check 会一直 Pending 并阻塞 merge。改用 job 级的 `if: needs.changes.outputs.* == 'true'`，被 `if` 跳过的 job 以 skipped 结束、不阻塞。
+- 两个 workflow 都有独立的 changes job：用 `git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"` 判断变更范围（push 事件直接输出 true），`fetch-depth: 0` 保证 base/head sha 对象在本地。
+- 全量测试只在 coverage 步骤执行一次，不再单独跑 `pytest -q`。
+- NSIS 打包、安装态烟测、上传安装包仅在 `github.event_name == 'push'`（master）执行；PR 只做单测/typecheck/build/E2E。
+
 ## Avoid
 
 - Do not call real provider APIs in normal unit/integration tests when the
