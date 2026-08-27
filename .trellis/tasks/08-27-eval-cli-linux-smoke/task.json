@@ -1,0 +1,29 @@
+{
+  "id": "eval-cli-linux-smoke",
+  "name": "eval-cli-linux-smoke",
+  "title": "组合单命令评测与 Linux 单题闭环",
+  "description": "用一个薄入口串联既有执行、评分、分析和可视化能力，输出 JSON/中文报告并完成一条 Linux 真实单题验收。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "backend",
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-27",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-27-agent-evaluation-system",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "environment": "linux-docker",
+    "depends_on": "08-27-verified-execution-chain,08-27-eval-analysis-observability"
+  }
+}

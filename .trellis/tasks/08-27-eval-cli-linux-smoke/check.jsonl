@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "验证默认行为和正式结果边界"}
+{"file": ".trellis/tasks/08-27-eval-cli-linux-smoke/prd.md", "reason": "逐项核对端到端验收"}
+{"file": ".trellis/tasks/08-27-eval-cli-linux-smoke/design.md", "reason": "检查入口没有复制下层逻辑"}
+{"file": "tests/benchmarks/", "type": "directory", "reason": "验证 CLI、报告与不重复执行"}
