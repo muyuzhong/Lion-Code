@@ -1,54 +1,150 @@
-# 项目约定
+- # 项目约定
 
-## 注释原则
+  ## 核心原则
 
-- 注释只补充代码无法直接表达的信息：设计原因、业务规则来源、不变量、兼容/性能/安全约束。用准确命名、类型和函数拆分表达"做什么"，不逐行翻译代码。
-- 公共接口的文档注释说明契约、边界、副作用和异常；简单私有实现不强制。
-- 临时方案用 `TODO(issue): 原因与完成条件`，不留无负责人、无期限的 TODO。
-- 注释与代码不一致按缺陷处理，改实现时同步更新或删除。源码注释用中文，标识符和必要术语保留英文。
+  1. 只解决当前明确提出的问题。
+  2. 优先选择满足当前需求的最简单实现。
+  3. 优先局部修改，禁止顺便重构无关代码。
+  4. 不为假设中的未来需求提前设计。
+  5. 不预防性增加抽象层、扩展点、配置项或通用框架。
+  6. 能修改现有实现解决，就不要创建新的架构。
+  7. 只有当前已经存在两个以上真实使用场景时，才考虑提取公共抽象。
+  8. 不保留向后兼容。过时实现直接删除，不增加兼容层、migration 或 fallback。
+  9. 优先使用项目已有依赖和成熟、持续维护的库，不重复实现已有能力。
+  10. 保持模块边界和关注点分离，但不要为了“模块化”本身增加无实际价值的层级。
 
-每完成单次改动都进行提交，并添加中文描述
+  ## 防止过度设计
 
-# 项目原则
+  默认拒绝新增以下结构，除非当前需求明确需要：
 
-1. 不保留向后兼容。过时的直接删，别加兼容层、别写migration、别留fallback。
-2. 选能满足当前需求的最简单实现，先跑通最小端到端版本再往上加。不预防性抽象、不加多余的配置层，绝不为未完成的复杂度拆掉能跑的东西。
-3. 组件保持模块化，关注点分离。
-4. 优先用成熟的、有人维护的库；先翻项目已有依赖能做什么，别假设库里没有，别自己重写。
-5. 架构决策往长了做，不接受"先这样以后再换"。先看成熟产品怎么解决同一问题，用已验证的模式。
+  - Manager
+  - Factory
+  - Registry
+  - Adapter
+  - Strategy
+  - Resolver
+  - Coordinator
+  - 通用 Config 系统
+  - Plugin / Hook / Extension 机制
+  - 新的抽象基类或 Protocol
 
-## PR 规范
+  新增任何上述结构前，先确认：
 
-- 一个 PR 只承载一个职责迁移或一个独立改动（保证可单独回滚），不攒多个子阶段。
-- PR 描述必须包含：迁移的状态所有权、保持不变的不变量、测试矩阵、行数与依赖变化、回滚点。
-- 大于 10 个提交或 20 个文件的 PR 需要拆分，机械重命名或自动生成除外。
+  1. 当前具体问题是否无法通过修改现有实现解决。
+  2. 是否已经存在至少两个真实使用场景。
+  3. 新抽象是否实际减少复杂度，而不是把复杂度转移到更多文件和接口中。
 
-## 工程经验（CI 门禁 / 分层重构）
+  如果理由主要是“未来可能需要”，不要实现。
 
-### 本地验证与 CI 门禁
+  ## 修改范围
 
-- 本地快速验证：`PYTHONPATH=tests python3 -m unittest discover tests -p "test_*.py"`；依赖 pytest fixture 的测试文件在 CI 验证。
-- **推送前本地跑全套质量门禁并同步基线**，只靠 CI 事后报错＝每轮推送必红一次：
-  `python -m ruff check lion_code tests scripts --output-format=json > ruff.json && python scripts/check_quality_baseline.py ruff-check ruff.json --status 1 --baseline docs/quality-baseline-2026-08.json`；
-  ruff format / mypy / radon / vulture 同理（调用方式参照 `.github/workflows/ci.yml`）。
-- 提交前静态预检：`py_compile` + AST 扫描（未使用变量、字段引用）。CI 的 ruff/mypy/coverage 全部与基线 `docs/quality-baseline-2026-08.json` 比对，**新增任何违规（含 F841）都红**；报 `new fingerprints` 时先看输出：新违规修代码，行号漂移则更新基线条目随代码提交。
-- CI 只在 `pull_request` 与 `push: master` 触发（分支推送不跑，必须开 PR），所有门禁 `if: always()` 一次暴露全部问题，`gh run watch --exit-status` 等待结果。
-- 行尾假阳性：WSL 编辑写 LF、Windows checkout 是 CRLF（`core.autocrlf=true`），`git diff` 可能把整文件当改动。提交前复核 `git diff --stat` 只含真实内容改动；被污染副本用 `git checkout HEAD -- <file>` 恢复后重编。
+  - 修改范围严格限制在当前任务所需代码。
+  - 不主动清理、格式化、重命名或重构无关代码。
+  - 不因为发现附近代码“不够优雅”就顺便修改。
+  - 不主动改变公开接口，除非当前任务要求。
+  - 删除已经失去用途的旧代码，不保留废弃路径。
+  - 优先小而可验证的改动。
 
-### GitHub PR 链
+  ## 注释原则
 
-- 判断 PR 是否已落地用 **tree 对比**（`git diff origin/master <sha> --stat` 为空即内容一致），别只看 commit 祖先——squash 合并并删除中间分支后拓扑不可靠。
-- **链式 PR 上游合并后必须 rebase 到新 master 再 force-push**，否则 GitHub 报 `CONFLICTING`（squash 后下游里的上游提交与新 master 拓扑对不上）。更稳的重放：`git rebase --onto origin/master <上游分支旧 tip> <本分支>`，只重放本链专属提交；完成后 `git diff <旧 tip> HEAD --stat` 为空即内容零变化，再 `git push --force-with-lease`。冲突时逐文件取语义正确的一侧。
-- **链上多条 PR 同时打开时按链路顺序合并**：先合最上游，落地后 rebase 下游、等 CI 绿、再合下一个。下游 CONFLICTING 期间 CI 检出的是分支自身而非 merge 结果，解除冲突后的首轮 CI 才跑真实 merge 结果、才暴露基线违规，必须等这轮绿再合。
-- 本地 master 陈旧时先 `git checkout -B master origin/master` 对齐，否则 `gh pr merge` 报 fast-forward 警告（squash 合并实际仍会成功）。
+  - 注释只描述代码本身无法清楚表达的信息：
+    - 设计原因
+    - 业务规则
+    - 不变量
+    - 性能、安全或兼容约束
+  - 不逐行解释代码。
+  - 优先通过命名、类型和函数拆分表达“代码在做什么”。
+  - 公共接口的文档注释描述契约、边界、副作用和异常。
+  - 简单私有实现不强制写注释。
+  - 临时方案使用 `TODO(issue): 原因与完成条件`。
+  - 注释与代码不一致视为缺陷。
+  - 源码注释使用中文，标识符和必要技术术语保留英文。
 
-### 分层重构（改 Kernel 层代码）
+  ## 验证原则
 
-- 四层边界由 `tests/architecture/*`（AST 门禁）+ `_boundaries.py` + import-linter 强制，`.trellis/spec/backend/*.md` 记录。动 Kernel 层前先读 `four-layer-ownership.md` / `runtime-boundaries.md`，改完同步架构测试期望值与 spec，否则 CI 红。
-- 验证路径：改 → `py_compile` → 定向 unittest → 全量可跑 unittest → 用架构测试 helper（`_tree` / `_class_annotated_fields` / `_attribute_call_sites` 等）复核门禁 → 提交 → 推送 → 等 CI。
-- 等待 re-home 的被移除行为测试用 `@unittest.skip(_REHOME)` 标注恢复条件（PR1 模式，见 `tests/memory_runtime/test_core_integration.py`），保留文档价值与恢复点，不要删除。
+  默认执行最小验证。
+
+  - 只运行与本次修改直接相关的 targeted tests。
+  - targeted tests 通过后停止验证。
+  - 不默认运行完整 test suite。
+  - 不默认运行全项目 lint。
+  - 不默认运行完整 mypy。
+  - 不默认运行 coverage。
+  - 不默认运行 radon、vulture 或其他全局质量扫描。
+  - 不因为修改完成而重复运行已经通过的测试。
+
+  以下情况才执行完整质量门禁：
+
+  - 用户明确要求。
+  - 准备提交 PR / merge。
+  - 修改 CI、构建系统或测试基础设施。
+  - 修改影响范围无法通过 targeted tests 合理覆盖。
+  - 修改核心公共接口并可能影响大量模块。
+
+  测试失败时：
+
+  1. 先判断失败是否与当前修改有关。
+  2. 与当前修改无关的已有失败不要顺手修复。
+  3. 优先定位根因，不通过增加 fallback 或绕过测试解决。
+  4. 修复后只重新运行受影响测试。
+
+  ## 架构修改
+
+  涉及 Kernel、Runtime、Context、Provider、Tool 等核心边界时：
+
+  - 修改核心模块前，先阅读对应的 `.trellis/spec/` 和 `docs/architecture/` 文档。
+  - 先理解现有 ownership 和 dependency direction。
+  - 优先保持现有边界，而不是创建新的层。
+  - 不为了“解耦”而机械增加接口。
+  - 接口只存在于确实需要隔离变化或存在多个实现的边界。
+  - 不允许业务逻辑反向依赖组合层或具体基础设施实现。
+
+  架构约束以以下内容为准：
+
+  - `tests/architecture/`
+  - `.trellis/spec/backend/`
+  - `docs/architecture/`
+  - `_boundaries.py`
+  - import-linter 配置
+
+  代码与文档冲突时，以当前代码和架构测试为准，并同步修正文档。修改相关边界时同步更新对应架构测试和文档。
+
+  ## Git 与提交
+
+  - 每个独立改动完成后提交一次。
+  - Commit message 使用中文描述。
+  - 一个提交只包含一个明确目的。
+  - 提交前检查 `git diff`，确保没有无关修改。
+  - 不因为 CRLF / LF 等问题提交整文件无意义变化。
+  - 不擅自 force-push、rebase 或修改历史，除非当前任务明确需要。
+
+  ## PR 原则
+
+  - 一个 PR 只解决一个独立问题或完成一个职责迁移。
+  - 保证 PR 可以独立理解和回滚。
+  - 不把无关清理和功能修改混入同一个 PR。
+  - PR 过大时按行为边界拆分，而不是机械按文件数量拆分。
+
+  ## 工作方式
+
+  开始实现前：
+
+  1. 阅读与当前任务直接相关的代码。
+  2. 找到现有实现路径。
+  3. 优先寻找最小修改方案。
+  4. 再开始编码。
+
+  不要先设计一个“理想架构”再把当前问题塞进去。
+
+  实现完成后：
+
+  1. 检查 diff。
+  2. 删除无必要的新增抽象和代码。
+  3. 运行最小 targeted tests。
+  4. 测试通过后停止。
 
 <!-- TRELLIS:START -->
+
 # Trellis Instructions
 
 These instructions are for AI assistants working in this project.
