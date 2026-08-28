@@ -25,13 +25,13 @@ SMOKE_DIR = REPO_ROOT / "scripts" / "benchmarks" / "verified-smoke"
 RUN_SMOKE = SMOKE_DIR / "run_smoke.sh"
 
 ENV_FILE_CONTENT = (
-    "OPENAI_API_KEY=dummy-key\n"
-    "LION_MODEL=dummy-model\n"
-    "OPIK_WORKSPACE=dummy-workspace\n"
+    "OPENAI_API_KEY=dummy-key\nLION_MODEL=dummy-model\nOPIK_WORKSPACE=dummy-workspace\n"
 )
 
 
-def run_smoke(env_file: Path, *, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run_smoke(
+    env_file: Path, *, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """以 SMOKE_CHECK_ONLY=1 驱动 run_smoke.sh,返回子进程结果。"""
     env = {
         **os.environ,

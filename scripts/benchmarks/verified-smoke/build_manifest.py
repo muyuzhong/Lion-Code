@@ -36,7 +36,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=None)
     parser.add_argument("--provider", default="openai-compatible")
-    parser.add_argument("--env", required=True, help="逗号分隔的 credential_env_vars 名")
+    parser.add_argument(
+        "--env", required=True, help="逗号分隔的 credential_env_vars 名"
+    )
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--output-dir", default=str(Path(__file__).resolve().parent))
     parser.add_argument("--budget", type=float, default=2.0)
@@ -45,9 +47,7 @@ def main() -> None:
     args = parser.parse_args()
     model = args.model or os.environ.get("LION_MODEL", "").strip() or None
     if not model:
-        raise SystemExit(
-            "未填写模型名:请用 --model 传入,或设置环境变量 LION_MODEL"
-        )
+        raise SystemExit("未填写模型名:请用 --model 传入,或设置环境变量 LION_MODEL")
 
     output_dir = Path(args.output_dir)
     catalog = load_catalog(output_dir / "catalog.json")
