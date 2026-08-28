@@ -141,11 +141,33 @@ def render_verified_markdown(report: VerifiedEvaluationReport) -> str:
         )
 
     lines.extend(["", "## 四段结果"])
+    _append_process_metrics(lines, report)
     _append_harbor(lines, report)
     _append_harness(lines, report)
     _append_deepeval(lines, report)
     _append_opik(lines, report.opik)
     return "\n".join(lines) + "\n"
+
+
+def _append_process_metrics(lines: list[str], report: VerifiedEvaluationReport) -> None:
+    """渲染规则化的过程指标(确定性行为画像,不评判对错)。"""
+    metrics = report.extensions.get("process_metrics")
+    if not isinstance(metrics, dict) or "tool_calls" not in metrics:
+        return
+    counts = metrics.get("tool_counts")
+    count_text = (
+        ", ".join(f"{name}×{n}" for name, n in sorted(counts.items()))
+        if isinstance(counts, dict)
+        else "n/a"
+    )
+    lines.append(
+        f"- 行为画像：工具调用 {metrics.get('tool_calls', 'n/a')} 次"
+        f"（{count_text}）；首次编辑在第 "
+        f"{metrics.get('first_edit_tool_index', 'n/a')} 次工具调用后；"
+        f"编辑前 shell 探测 {metrics.get('shell_calls_before_first_edit', 'n/a')} 次；"
+        f"同工具最大连续 {metrics.get('max_consecutive_same_tool', 'n/a')} 次；"
+        f"轨迹事件 {metrics.get('event_count', 'n/a')} 个。"
+    )
 
 
 def _append_harbor(lines: list[str], report: VerifiedEvaluationReport) -> None:

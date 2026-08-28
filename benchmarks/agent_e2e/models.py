@@ -512,12 +512,19 @@ class DeepEvalTrajectory(VersionedModel):
 
 
 class DeepEvalCase(VersionedModel):
-    """传给 DeepEval SDK 的最小 case；不含 prompt、推理或工具正文。"""
+    """传给 DeepEval SDK 的最小 case；不含 prompt、推理或工具正文。
+
+    ``input_preview``/``outcome_preview`` 只携带脱敏截断后的受控摘要
+    （任务卡公开文本与最终结果预览），供 judge 恢复任务的真实意图；
+    工具参数、中间输出与原始正文一律不进入 case。
+    """
 
     task_id: str = Field(min_length=1, max_length=160)
     input_digest: str = Field(min_length=64, max_length=64)
     trajectory: DeepEvalTrajectory
     expected_verdict: TaskVerdict | None = None
+    input_preview: str | None = Field(default=None, max_length=4000)
+    outcome_preview: str | None = Field(default=None, max_length=2000)
     extensions: dict[str, Any] = Field(default_factory=dict)
 
 
