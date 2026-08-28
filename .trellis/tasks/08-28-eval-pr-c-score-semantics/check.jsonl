@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "核对:score_gate/judge 指纹仅观测;task_result 与 verified_exit_code 语义不变;analyze_verified_report 只更新 deepeval 字段"}
+{"file": ".trellis/spec/backend/secret-boundary.md", "reason": "核对:端点原值不落盘(仅指纹);旧报告 JSON 可继续解析;模板无密钥与个人字面量"}

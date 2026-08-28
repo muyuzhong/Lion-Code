@@ -48,6 +48,7 @@ from benchmarks.agent_e2e.models import (
     VerifierOutcome,
     VerifierResult,
 )
+from benchmarks.agent_e2e.report import render_verified_markdown
 from benchmarks.agent_e2e.verified_runner import (
     VerifiedExecutionOutput,
     VerifiedExecutionRequest,
@@ -344,6 +345,13 @@ class TestVerifiedComposition(unittest.TestCase):
                 execution.report.deepeval.input_digest,
                 _digest(task.public_prompt),
             )
+            # judge 身份:未显式指定时默认跟随 agent 模型,但两者均被
+            # 记录,且指纹存在(judge 模型 + LITELLM_API_BASE 的哈希)。
+            self.assertEqual(execution.report.deepeval.judge_model, "test-model")
+            self.assertEqual(execution.report.deepeval.agent_model, "test-model")
+            self.assertIsNotNone(execution.report.deepeval.judge_fingerprint)
+            assert execution.report.deepeval.score_gate is not None
+            self.assertTrue(execution.report.deepeval.score_gate.passed)
             self.assertEqual(execution.report.opik.status.value, "exported")
             self.assertEqual(execution.report.opik.trace_id, "trace-cloud-1")
             self.assertTrue(
@@ -368,6 +376,63 @@ class TestVerifiedComposition(unittest.TestCase):
             self.assertIn("官方 Harness", markdown)
             self.assertIn("DeepEval", markdown)
             self.assertIn("Opik Cloud", markdown)
+            # 评分语义化:模型身份、阈值对照与门禁结论进入报告。
+            self.assertIn("Agent 模型", markdown)
+            self.assertIn("Judge 模型", markdown)
+            self.assertIn("Judge 指纹", markdown)
+            self.assertIn("门禁结论", markdown)
+            self.assertIn("判定 = passed(官方 Harness)", markdown)
+            self.assertIn("阈值 0.5000", markdown)
+            # 一致场景(Harbor PASSED + Harness resolved)→ 无分歧标注。
+            self.assertNotIn("分歧标注", markdown)
+
+    def test_harbor_harness_divergence_is_annotated_in_markdown(self) -> None:
+        """P2-1:例行 verifier 失败而官方 Harness 通过 → 归属文字明确。"""
+        task = _task()
+        manifest = _manifest(task)
+        report = VerifiedEvaluationReport(
+            manifest=manifest,
+            task_result=TaskResult(
+                task_id=task.task_id,
+                attempt=1,
+                verdict=TaskVerdict.PASSED,
+                validity=ResultValidity.VALID,
+                official=True,
+                patch_sha256="c" * 64,
+                verifier=VerifierResult(
+                    outcome=VerifierOutcome.PASSED,
+                    command_summary="official Harness",
+                    exit_code=0,
+                    output_digest="d" * 64,
+                ),
+            ),
+            status=ReportStatus.OFFICIAL,
+            harbor=HarborRoutineVerifierResult(
+                task_id=task.task_id,
+                job_id="job-1",
+                status=AdapterStatus.COMPLETED,
+                execution_status=TrialExecutionStatus.COMPLETED,
+                verifier_outcome=VerifierOutcome.FAILED,
+                reward=0.0,
+                patch_sha256="c" * 64,
+                patch_applied=True,
+                output_digest="h" * 64,
+                command_summary="routine verifier",
+            ),
+            harness=HarnessRecheckResult(
+                task_id=task.task_id,
+                status=AdapterStatus.COMPLETED,
+                resolved=True,
+                patch_sha256="c" * 64,
+                output_digest="f" * 64,
+                evaluator_revision="swebench-5.0.1",
+                image_digest="sha256:" + "b" * 64,
+            ),
+        )
+        markdown = render_verified_markdown(report)
+        self.assertIn("分歧标注", markdown)
+        self.assertIn("以官方 Harness 为准", markdown)
+        self.assertIn("reward 不参与判定", markdown)
 
     def test_post_processing_failures_keep_official_result_and_redact_reason(
         self,

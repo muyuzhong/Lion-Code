@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "verified-run 链路契约(§9-10):DeepEval 分析只改 deepeval 字段、不改变 verdict/退出码;P1-3/P1-5 的新字段与 score_gate 必须保持观测语义"}
+{"file": ".trellis/spec/backend/secret-boundary.md", "reason": "脱敏红线:judge 端点只进指纹哈希不进报告原文;模板/文档不含密钥值与个人字面量"}

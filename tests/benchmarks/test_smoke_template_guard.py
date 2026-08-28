@@ -25,7 +25,8 @@ SMOKE_DIR = REPO_ROOT / "scripts" / "benchmarks" / "verified-smoke"
 RUN_SMOKE = SMOKE_DIR / "run_smoke.sh"
 
 ENV_FILE_CONTENT = (
-    "OPENAI_API_KEY=dummy-key\nLION_MODEL=dummy-model\nOPIK_WORKSPACE=dummy-workspace\n"
+    "OPENAI_API_KEY=dummy-key\nLION_MODEL=dummy-model\n"
+    "OPIK_WORKSPACE=dummy-workspace\nDEEPEVAL_JUDGE_MODEL=dummy-judge\n"
 )
 
 
@@ -85,6 +86,19 @@ class TestEnvGuard:
         result = run_smoke(env_file)
         assert result.returncode == 2
         assert "未填写 LION_MODEL" in result.stderr
+
+    def test_judge_model_missing_rejected(self, tmp_path: Path) -> None:
+        """P1-3:judge 模型必须显式固定,不允许静默跟随 agent 模型。"""
+        env_file = tmp_path / "smoke.env"
+        env_file.write_text(
+            "OPENAI_API_KEY=dummy-key\nLION_MODEL=dummy-model\n"
+            "OPIK_WORKSPACE=dummy-workspace\n",
+            encoding="utf-8",
+        )
+        env_file.chmod(0o600)
+        result = run_smoke(env_file)
+        assert result.returncode == 2
+        assert "未填写 DEEPEVAL_JUDGE_MODEL" in result.stderr
 
     def test_optional_base_url_passthrough(self, tmp_path: Path) -> None:
         """可选变量 OPENAI_BASE_URL 不缺失时校验仍通过。"""

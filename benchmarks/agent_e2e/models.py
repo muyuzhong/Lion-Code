@@ -290,7 +290,9 @@ class ExperimentProfile(VersionedModel):
     model: str = Field(min_length=1, max_length=256)
     provider: str = Field(min_length=1, max_length=128)
     thinking_level: str = Field(default="off", min_length=1, max_length=32)
-    permission_mode: str = Field(default="bypassPermissions", min_length=1, max_length=64)
+    permission_mode: str = Field(
+        default="bypassPermissions", min_length=1, max_length=64
+    )
     prompt_version: str = Field(min_length=1, max_length=128)
     compression_version: str = Field(min_length=1, max_length=128)
     tool_policy_version: str = Field(min_length=1, max_length=128)
@@ -308,7 +310,9 @@ class ExperimentProfile(VersionedModel):
     def _validate_env_var_names(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         for value in values:
             if not value or not value.replace("_", "").isalnum() or value[0].isdigit():
-                raise ValueError("credential_env_vars must contain environment variable names")
+                raise ValueError(
+                    "credential_env_vars must contain environment variable names"
+                )
         return values
 
     def require_online_budget(self) -> None:
@@ -337,7 +341,9 @@ class ExperimentManifest(VersionedModel):
     budget_usd: float = Field(ge=0)
     platform: str = Field(min_length=1, max_length=128)
     agent_image_digest: str | None = Field(default=None, min_length=7, max_length=256)
-    verifier_image_digest: str | None = Field(default=None, min_length=7, max_length=256)
+    verifier_image_digest: str | None = Field(
+        default=None, min_length=7, max_length=256
+    )
     resume_from_run_id: str | None = Field(default=None, min_length=1, max_length=128)
     extensions: dict[str, Any] = Field(default_factory=dict)
 
@@ -644,6 +650,8 @@ class DeepEvalMetricResult(VersionedModel):
     model: str = Field(min_length=1, max_length=256)
     input_digest: str = Field(min_length=64, max_length=64)
     status: AdapterStatus = AdapterStatus.COMPLETED
+    threshold: float | None = Field(default=None, ge=0, le=1)
+    threshold_met: bool | None = None
 
     @model_validator(mode="after")
     def _validate_score(self) -> DeepEvalMetricResult:
@@ -653,6 +661,39 @@ class DeepEvalMetricResult(VersionedModel):
             raise ValueError("failed DeepEval metric requires a reason")
         if self.status is not AdapterStatus.COMPLETED and self.score is not None:
             raise ValueError("failed DeepEval metrics cannot carry a score")
+        if (self.threshold is None) != (self.threshold_met is None):
+            raise ValueError(
+                "DeepEval metric threshold and threshold_met must be both set or both unset"
+            )
+        if self.threshold is not None:
+            expected = (
+                self.status is AdapterStatus.COMPLETED
+                and self.score is not None
+                and float(self.score) >= float(self.threshold)
+            )
+            if self.threshold_met != expected:
+                raise ValueError(
+                    "DeepEval metric threshold_met must match score vs threshold"
+                )
+        return self
+
+
+class DeepEvalScoreGate(VersionedModel):
+    """单次分析的 judge 阈值对照结论；只作观测，不改变确定性判定。"""
+
+    passed: bool
+    passed_metrics: int = Field(ge=0)
+    evaluated_metrics: int = Field(ge=0)
+    reason: str = Field(min_length=1, max_length=320)
+
+    @model_validator(mode="after")
+    def _validate_gate(self) -> DeepEvalScoreGate:
+        if self.passed_metrics > self.evaluated_metrics:
+            raise ValueError("passed metrics cannot exceed evaluated metrics")
+        if self.evaluated_metrics < 1:
+            raise ValueError("score gate requires at least one evaluated metric")
+        if self.passed != (self.passed_metrics == self.evaluated_metrics):
+            raise ValueError("score gate passed must match threshold counts")
         return self
 
 
@@ -665,6 +706,9 @@ class DeepEvalAnalysis(VersionedModel):
     input_digest: str = Field(min_length=64, max_length=64)
     trajectory_digest: str = Field(min_length=64, max_length=64)
     metrics: tuple[DeepEvalMetricResult, ...] = Field(default=(), max_length=64)
+    agent_model: str | None = Field(default=None, max_length=256)
+    judge_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
+    score_gate: DeepEvalScoreGate | None = None
     failure_source: FailureSource | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=320)
     extensions: dict[str, Any] = Field(default_factory=dict)

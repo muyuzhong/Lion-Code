@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -474,6 +475,8 @@ def _run_post_processing(
         return report, None, None
     input_digest = request.input_digest or _verified_input_digest(request.task)
     judge_model = request.deepeval_judge_model or request.manifest.profile.model
+    agent_model = request.manifest.profile.model
+    judge_fingerprint = _judge_fingerprint(judge_model)
     try:
         analyzed = analyze_verified_report(
             report,
@@ -482,6 +485,8 @@ def _run_post_processing(
             judge_model=judge_model,
             judge=request.deepeval_judge,
             timeout_seconds=request.deepeval_timeout_seconds,
+            agent_model=agent_model,
+            judge_fingerprint=judge_fingerprint,
         )
         analysis = analyzed.deepeval
         if (
@@ -497,6 +502,8 @@ def _run_post_processing(
             trajectory,
             input_digest=input_digest,
             judge_model=judge_model,
+            agent_model=agent_model,
+            judge_fingerprint=judge_fingerprint,
             error=error,
         )
     report = report.model_copy(update={"deepeval": analysis})
@@ -680,6 +687,8 @@ def _analysis_failure(
     *,
     input_digest: str,
     judge_model: str,
+    agent_model: str | None,
+    judge_fingerprint: str | None,
     error: Exception,
 ) -> DeepEvalAnalysis:
     timed_out = isinstance(error, TimeoutError)
@@ -698,9 +707,18 @@ def _analysis_failure(
         judge_model=model or "unknown",
         input_digest=input_digest,
         trajectory_digest=trajectory.trace_digest,
+        agent_model=agent_model,
+        judge_fingerprint=judge_fingerprint,
         failure_source=failure_source,
         reason=reason or "DeepEval analysis failed",
     )
+
+
+def _judge_fingerprint(judge_model: str) -> str:
+    """judge 身份指纹：SHA-256(judge 模型 + 端点)，端点只进哈希不进报告。"""
+
+    endpoint = os.environ.get("LITELLM_API_BASE") or ""
+    return hashlib.sha256(f"{judge_model}\n{endpoint}".encode()).hexdigest()
 
 
 def _opik_failure(
