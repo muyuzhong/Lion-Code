@@ -333,7 +333,10 @@ class TestVerifiedComposition(unittest.TestCase):
             )
             self.assertEqual(harbor_runner.calls, 1)
             self.assertEqual(harness_runner.calls, 1)
-            self.assertEqual(judge.calls, list(DEEPEVAL_METRIC_NAMES))
+            self.assertEqual(  # 指标外层、采样内层(默认 3 次采样)
+                judge.calls,
+                [name for name in DEEPEVAL_METRIC_NAMES for _ in range(3)],
+            )
             self.assertTrue(execution.report.task_result.official)
             self.assertEqual(execution.report.task_result.verdict, TaskVerdict.PASSED)
             self.assertIsNotNone(execution.report.deepeval)
@@ -383,8 +386,45 @@ class TestVerifiedComposition(unittest.TestCase):
             self.assertIn("门禁结论", markdown)
             self.assertIn("判定 = passed(官方 Harness)", markdown)
             self.assertIn("阈值 0.5000", markdown)
+            # 采样可复现性:默认 3 次采样与均值±范围进入报告。
+            self.assertIn("采样 3 次", markdown)
+            self.assertIn("范围 0.8000–0.8000", markdown)
             # 一致场景(Harbor PASSED + Harness resolved)→ 无分歧标注。
             self.assertNotIn("分歧标注", markdown)
+
+    def test_single_sample_request_and_report_markdown(self) -> None:
+        """deepeval_samples=1 时走单样本路径,报告不渲染采样/范围。"""
+        task = _task()
+        manifest = _manifest(task)
+        judge = _FakeJudge([])
+        harbor_runner = _FakeHarborRunner([])
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            execution = run_verified_evaluation(
+                VerifiedExecutionRequest(
+                    repository_root=output_dir,
+                    commit_sha="a" * 40,
+                    manifest=manifest,
+                    task=task,
+                    output_dir=output_dir / "run",
+                    python_executable="python",
+                    harness_python="python",
+                    trajectory=_trajectory(task.task_id),
+                    deepeval_judge=judge,
+                    deepeval_samples=1,
+                ),
+                artifact_builder=_FakeArtifactBuilder([]),
+                harbor_runner=harbor_runner,
+                harness_runner=_FakeHarnessRunner([], harbor_runner.patch_sha256),
+            )
+            _, markdown_path = write_verified_report(
+                execution.report,
+                output_dir / "run",
+            )
+            markdown = markdown_path.read_text(encoding="utf-8")
+            self.assertEqual(judge.calls, list(DEEPEVAL_METRIC_NAMES))
+            self.assertNotIn("采样 3 次", markdown)
+            self.assertNotIn("范围 ", markdown)
 
     def test_harbor_harness_divergence_is_annotated_in_markdown(self) -> None:
         """P2-1:例行 verifier 失败而官方 Harness 通过 → 归属文字明确。"""
@@ -568,6 +608,66 @@ class TestVerifiedCli(unittest.TestCase):
             self.assertTrue(Path(payload["report_markdown"]).is_file())
             self.assertEqual(len(captured), 1)
             self.assertEqual(captured[0].commit_sha, "a" * 40)
+            self.assertEqual(captured[0].deepeval_samples, 3)  # CLI 默认采样 3 次
+
+    def test_digest_lookup_cli_three_exit_states(self) -> None:
+        """P2-3:digest-lookup 0=找到 / 1=未找到 / 2=账本缺失。"""
+        from benchmarks.agent_e2e.digest_ledger import DigestLedger, DigestLedgerEntry
+
+        with tempfile.TemporaryDirectory() as directory:
+            ledger_path = Path(directory) / "ledger.jsonl"
+            DigestLedger(ledger_path).append(
+                [
+                    DigestLedgerEntry(
+                        digest="a" * 64,
+                        kind="input",
+                        task_id="verified-task-1",
+                        run_id="run-1",
+                        preview="公开任务",
+                    )
+                ]
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                found = main(
+                    [
+                        "digest-lookup",
+                        "--ledger",
+                        str(ledger_path),
+                        "a" * 64,
+                    ]
+                )
+            self.assertEqual(found, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertTrue(payload["results"][0]["found"])
+            self.assertEqual(payload["results"][0]["entries"][0]["kind"], "input")
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                missing = main(
+                    [
+                        "digest-lookup",
+                        "--ledger",
+                        str(ledger_path),
+                        "b" * 64,
+                    ]
+                )
+            self.assertEqual(missing, 1)
+            self.assertFalse(json.loads(stdout.getvalue())["results"][0]["found"])
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                absent = main(
+                    [
+                        "digest-lookup",
+                        "--ledger",
+                        str(Path(directory) / "missing.jsonl"),
+                        "a" * 64,
+                    ]
+                )
+            self.assertEqual(absent, 2)
+            self.assertEqual(json.loads(stdout.getvalue())["error"], "ledger missing")
 
 
 if __name__ == "__main__":

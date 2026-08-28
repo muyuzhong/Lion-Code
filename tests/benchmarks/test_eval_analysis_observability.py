@@ -135,6 +135,34 @@ class _FakeJudge:
         )
 
 
+class _CyclingJudge:
+    """按调用顺序轮换分数/异常的 judge，用于采样聚合断言。"""
+
+    def __init__(self, outcomes: list[object]) -> None:
+        self.outcomes = outcomes
+        self.index = 0
+        self.calls: list[str] = []
+
+    def evaluate_metric(
+        self,
+        *,
+        metric_name: str,
+        case: DeepEvalCase,
+    ) -> DeepEvalMetricObservation:
+        self.calls.append(metric_name)
+        outcome = self.outcomes[self.index % len(self.outcomes)]
+        self.index += 1
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return DeepEvalMetricObservation(
+            name=metric_name,
+            score=float(outcome),
+            reason="safe score",
+            model="fake-judge",
+            input_digest=case.input_digest,
+        )
+
+
 class _FakeSpan:
     def __init__(self, span_id: str) -> None:
         self.id = span_id
@@ -240,7 +268,10 @@ class TestDeepEvalAnalysis(unittest.TestCase):
             tuple(metric.name for metric in analysis.metrics),
             DEEPEVAL_METRIC_NAMES,
         )
-        self.assertEqual(judge.calls, list(DEEPEVAL_METRIC_NAMES))
+        self.assertEqual(  # 指标外层、采样内层
+            judge.calls,
+            [name for name in DEEPEVAL_METRIC_NAMES for _ in range(3)],
+        )
         self.assertTrue(
             all(metric.input_digest == case.input_digest for metric in analysis.metrics)
         )
@@ -249,6 +280,14 @@ class TestDeepEvalAnalysis(unittest.TestCase):
         self.assertTrue(all(metric.threshold == 0.5 for metric in analysis.metrics))
         self.assertTrue(
             all(metric.threshold_met is True for metric in analysis.metrics)
+        )
+        # 采样聚合:默认 3 次采样,同分样本均值=极值。
+        self.assertTrue(all(metric.samples == 3 for metric in analysis.metrics))
+        self.assertTrue(
+            all(
+                metric.score_min == 0.75 and metric.score_max == 0.75
+                for metric in analysis.metrics
+            )
         )
         self.assertIsNotNone(analysis.score_gate)
         assert analysis.score_gate is not None
@@ -303,6 +342,73 @@ class TestDeepEvalAnalysis(unittest.TestCase):
             all(metric.threshold_met is False for metric in analysis.metrics)
         )
 
+    def test_sampling_aggregates_mean_and_range(self) -> None:
+        case = _case()
+        judge = _CyclingJudge([0.4, 0.8, 0.6])
+        analysis = analyze_deepeval_case(
+            case,
+            judge_model="fake-judge",
+            judge=judge,
+            timeout_seconds=None,
+        )
+        self.assertEqual(analysis.status, DeepEvalAnalysisStatus.COMPLETED)
+        for metric in analysis.metrics:
+            self.assertEqual(metric.samples, 3)
+            self.assertAlmostEqual(metric.score, 0.6)
+            self.assertEqual(metric.score_min, 0.4)
+            self.assertEqual(metric.score_max, 0.8)
+            self.assertTrue(metric.threshold_met)  # 均值 0.6 >= 0.5
+
+    def test_sampling_partial_failure_annotates_reason(self) -> None:
+        case = _case()
+        judge = _CyclingJudge([0.8, RuntimeError("boom"), 0.6])
+        analysis = analyze_deepeval_case(
+            case,
+            judge_model="fake-judge",
+            judge=judge,
+            timeout_seconds=None,
+        )
+        self.assertEqual(analysis.status, DeepEvalAnalysisStatus.COMPLETED)
+        for metric in analysis.metrics:
+            self.assertEqual(metric.samples, 3)
+            self.assertAlmostEqual(metric.score, 0.7)  # (0.8+0.6)/2
+            self.assertEqual(metric.score_min, 0.6)
+            self.assertEqual(metric.score_max, 0.8)
+            self.assertIn("1 次采样失败", metric.reason or "")
+
+    def test_sampling_all_failed_keeps_failure_semantics(self) -> None:
+        case = _case()
+        judge = _CyclingJudge([TimeoutError("slice is gone")])
+        analysis = analyze_deepeval_case(
+            case,
+            judge_model="fake-judge",
+            judge=judge,
+            timeout_seconds=None,
+        )
+        self.assertEqual(analysis.status, DeepEvalAnalysisStatus.TIMEOUT)
+        for metric in analysis.metrics:
+            self.assertEqual(metric.samples, 3)
+            self.assertIsNone(metric.score)
+            self.assertIsNone(metric.score_min)
+            self.assertFalse(metric.threshold_met)
+
+    def test_single_sample_keeps_legacy_semantics(self) -> None:
+        case = _case()
+        judge = _FakeJudge(dict.fromkeys(DEEPEVAL_METRIC_NAMES, 0.75))
+        analysis = analyze_deepeval_case(
+            case,
+            judge_model="fake-judge",
+            judge=judge,
+            timeout_seconds=None,
+            judge_samples=1,
+        )
+        self.assertEqual(judge.calls, list(DEEPEVAL_METRIC_NAMES))
+        for metric in analysis.metrics:
+            self.assertEqual(metric.samples, 1)
+            self.assertIsNone(metric.score_min)
+            self.assertIsNone(metric.score_max)
+            self.assertEqual(metric.score, 0.75)
+
     def test_partial_metric_failure_keeps_other_scores_and_redacts_reason(self) -> None:
         case = _case()
         judge = _FakeJudge(
@@ -320,7 +426,7 @@ class TestDeepEvalAnalysis(unittest.TestCase):
         )
         self.assertEqual(analysis.status, DeepEvalAnalysisStatus.PARTIAL)
         self.assertEqual(analysis.failure_source, FailureSource.DEEPEVAL)
-        self.assertEqual(analysis.metrics[0].score, 0.8)
+        self.assertAlmostEqual(analysis.metrics[0].score, 0.8)
         self.assertIsNone(analysis.metrics[1].score)
         self.assertNotIn("sk-not-persisted", analysis.canonical_json())
         # 失败指标仍带阈值但不可达(score 恒 None → threshold_met False)。
