@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .models import (
+    AdapterStatus,
     EvaluationReport,
     ExperimentManifest,
     OfficialScore,
@@ -14,6 +15,7 @@ from .models import (
     TaskResult,
     TaskVerdict,
     VerifiedEvaluationReport,
+    VerifierOutcome,
 )
 from .trace import redact_text
 
@@ -184,6 +186,36 @@ def _append_harness(lines: list[str], report: VerifiedEvaluationReport) -> None:
             f"原因：{_safe_display(harness.reason, 320)}",
         ]
     )
+    divergence = _harbor_harness_divergence(report)
+    if divergence is not None:
+        lines.append(f"  - 分歧标注：{divergence}")
+
+
+def _harbor_harness_divergence(report: VerifiedEvaluationReport) -> str | None:
+    """例行 verifier 与官方 Harness 结论冲突时的失败归属文字（仅展示层）。
+
+    reward 只进文字不进 JSON 判定；JSON 保留两段原始字段可推导。
+    """
+
+    harbor = report.harbor
+    harness = report.harness
+    if harbor is None or harness is None:
+        return None
+    if harbor.status is not AdapterStatus.COMPLETED:
+        return None
+    if harness.status is not AdapterStatus.COMPLETED:
+        return None
+    if harbor.verifier_outcome is VerifierOutcome.FAILED and harness.resolved is True:
+        return (
+            f"Harbor 例行 verifier 判失败(reward {_optional_number(harbor.reward)})"
+            "而官方 Harness resolved=true：判定以官方 Harness 为准，Harbor 侧"
+            "仅过程证据，reward 不参与判定"
+        )
+    if harbor.verifier_outcome is VerifierOutcome.PASSED and harness.resolved is False:
+        return (
+            "Harbor 例行 verifier 判通过而官方 Harness 未通过：判定以官方 Harness 为准"
+        )
+    return None
 
 
 def _append_deepeval(lines: list[str], report: VerifiedEvaluationReport) -> None:
@@ -192,22 +224,51 @@ def _append_deepeval(lines: list[str], report: VerifiedEvaluationReport) -> None
         lines.append("- DeepEval：未运行。")
         return
     lines.append(
-        f"- DeepEval：状态 `{analysis.status.value}`；模型："
-        f"`{_safe_display(analysis.judge_model, 256)}`；输入 digest："
+        f"- DeepEval：状态 `{analysis.status.value}`；Agent 模型："
+        f"`{_safe_display(analysis.agent_model, 256)}`；Judge 模型："
+        f"`{_safe_display(analysis.judge_model, 256)}`；Judge 指纹："
+        f"`{_safe_display(analysis.judge_fingerprint, 64)}`；输入 digest："
         f"`{_safe_display(analysis.input_digest, 64)}`；轨迹 digest："
         f"`{_safe_display(analysis.trajectory_digest, 64)}`"
     )
     for metric in analysis.metrics:
+        threshold = (
+            f"；阈值 {metric.threshold:.4f}；"
+            f"{'达阈值' if metric.threshold_met else '未达阈值'}"
+            if metric.threshold is not None
+            else ""
+        )
         lines.append(
             f"  - `{_safe_display(metric.name, 160)}`："
-            f"{_optional_number(metric.score)}；状态 `{metric.status.value}`；"
+            f"{_optional_number(metric.score)}{threshold}；状态 `{metric.status.value}`；"
             f"原因：{_safe_display(metric.reason, 320)}"
         )
+    lines.append(f"  - 门禁结论：{_gate_conclusion(report)}")
     if analysis.reason:
         lines.append(
             f"  - 分析失败来源：{_safe_display(analysis.failure_source, 64)}；"
             f"原因：{_safe_display(analysis.reason, 320)}"
         )
+
+
+def _gate_conclusion(report: VerifiedEvaluationReport) -> str:
+    """确定性判定 + judge 评分门禁的合并展示；分数仅为观测。"""
+
+    verdict = report.task_result.verdict
+    deterministic = (
+        f"确定性判定 = {verdict.value}(官方 Harness)"
+        if report.task_result.official
+        else f"确定性判定 = {verdict.value}(无官方结果)"
+    )
+    gate = report.deepeval.score_gate if report.deepeval is not None else None
+    if gate is None:
+        return f"{deterministic}；judge 评分门禁：无已评分指标"
+    label = "通过" if gate.passed else "未达"
+    return (
+        f"{deterministic}；judge 评分门禁：{label}"
+        f"({gate.passed_metrics}/{gate.evaluated_metrics} 达阈值；"
+        "观测，不参与判定)"
+    )
 
 
 def _append_opik(lines: list[str], export: OpikExportResult | None) -> None:
