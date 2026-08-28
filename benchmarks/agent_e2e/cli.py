@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -78,9 +79,22 @@ def build_parser() -> argparse.ArgumentParser:
     verified.add_argument("--input-digest")
     verified.add_argument("--deepeval-judge-model")
     verified.add_argument("--deepeval-timeout", type=float, default=120.0)
+    verified.add_argument("--deepeval-samples", type=int, default=3)
+    verified.add_argument(
+        "--digest-ledger",
+        type=Path,
+        help="digest 寻迹账本路径(可选);设置后运行会把本次 digest → 脱敏摘要追加写入",
+    )
     verified.add_argument("--opik-timeout", type=float, default=30.0)
     verified.add_argument("--opik-project")
     verified.add_argument("--opik-workspace")
+
+    digest_lookup = commands.add_parser(
+        "digest-lookup",
+        help="从本地寻迹账本反查 digest → 脱敏摘要与时间",
+    )
+    digest_lookup.add_argument("--ledger", type=Path, required=True)
+    digest_lookup.add_argument("digests", nargs="+")
 
     anchor_validate = commands.add_parser(
         "external-anchor-validate",
@@ -130,6 +144,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if args.command == "verified-run":
         return _verified_run(args)
+    if args.command == "digest-lookup":
+        return _digest_lookup(args)
     if args.command == "external-anchor-validate":
         manifest = validate_bundled_external_anchor_manifest()
         payload = {
@@ -203,6 +219,8 @@ def _verified_run(args: argparse.Namespace) -> int:
             input_digest=args.input_digest,
             deepeval_judge_model=args.deepeval_judge_model,
             deepeval_timeout_seconds=args.deepeval_timeout,
+            deepeval_samples=args.deepeval_samples,
+            digest_ledger_path=args.digest_ledger,
             opik_timeout_seconds=args.opik_timeout,
             opik_project_name=args.opik_project,
             opik_workspace=args.opik_workspace,
@@ -229,3 +247,41 @@ def _verified_run(args: argparse.Namespace) -> int:
         )
     )
     return verified_exit_code(execution.report)
+
+
+def _digest_lookup(args: argparse.Namespace) -> int:
+    """反查寻迹账本：找到返回 0，未找到返回 1，账本缺失/不可读返回 2。"""
+
+    from .digest_ledger import DigestLedger
+
+    ledger_path = Path(args.ledger)
+    if not ledger_path.is_file():
+        print(
+            json.dumps(
+                {
+                    "error": "ledger missing",
+                    "ledger": str(ledger_path),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
+    ledger = DigestLedger(ledger_path)
+    found_all = True
+    payload: list[dict[str, object]] = []
+    for digest in args.digests:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+            raise ValueError("digest lookup requires SHA-256 hex digests")
+        entries = ledger.lookup(digest)
+        found = bool(entries)
+        found_all = found_all and found
+        payload.append(
+            {
+                "digest": digest,
+                "found": found,
+                "entries": [entry.model_dump(mode="json") for entry in entries],
+            }
+        )
+    print(json.dumps({"results": payload}, ensure_ascii=False, sort_keys=True))
+    return 0 if found_all else 1

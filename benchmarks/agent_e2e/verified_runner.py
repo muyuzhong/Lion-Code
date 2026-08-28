@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,7 @@ from .deepeval_analysis import (
     build_deepeval_trajectory,
 )
 from .deepeval_metrics import DEEPEVAL_SDK_VERSION
+from .digest_ledger import DigestLedger, DigestLedgerEntry, redacted_preview
 from .harbor_runner import (
     HARBOR_VERSION,
     HarborExecutionOutput,
@@ -53,6 +55,7 @@ from .models import (
     TaskVerdict,
     TrialExecution,
     TrialExecutionStatus,
+    utc_now,
     VerifiedEvaluationReport,
     WorkerResult,
 )
@@ -87,6 +90,8 @@ class VerifiedExecutionRequest:
     deepeval_judge_model: str | None = None
     deepeval_judge: DeepEvalJudge | None = None
     deepeval_timeout_seconds: float | None = 120.0
+    deepeval_samples: int = 3
+    digest_ledger_path: Path | None = None
     opik_client: Any | None = None
     opik_environment: Mapping[str, str] | None = None
     opik_project_name: str | None = None
@@ -308,6 +313,8 @@ def _validate_request(request: VerifiedExecutionRequest) -> None:
         and request.deepeval_timeout_seconds <= 0
     ):
         raise ValueError("deepeval_timeout_seconds must be positive or None")
+    if request.deepeval_samples < 1:
+        raise ValueError("deepeval_samples must be at least 1")
     if request.opik_timeout_seconds <= 0:
         raise ValueError("opik_timeout_seconds must be positive")
 
@@ -477,6 +484,8 @@ def _run_post_processing(
     judge_model = request.deepeval_judge_model or request.manifest.profile.model
     agent_model = request.manifest.profile.model
     judge_fingerprint = _judge_fingerprint(judge_model)
+    if request.digest_ledger_path is not None:
+        _write_digest_ledger(request, trajectory, input_digest)
     try:
         analyzed = analyze_verified_report(
             report,
@@ -487,6 +496,7 @@ def _run_post_processing(
             timeout_seconds=request.deepeval_timeout_seconds,
             agent_model=agent_model,
             judge_fingerprint=judge_fingerprint,
+            judge_samples=request.deepeval_samples,
         )
         analysis = analyzed.deepeval
         if (
@@ -719,6 +729,64 @@ def _judge_fingerprint(judge_model: str) -> str:
 
     endpoint = os.environ.get("LITELLM_API_BASE") or ""
     return hashlib.sha256(f"{judge_model}\n{endpoint}".encode()).hexdigest()
+
+
+def _write_digest_ledger(
+    request: VerifiedExecutionRequest,
+    trajectory: DeepEvalTrajectory,
+    input_digest: str,
+) -> None:
+    """把本次运行的 digest → 脱敏摘要写入寻迹账本；失败仅警告不阻断。"""
+
+    entries: list[DigestLedgerEntry] = [
+        DigestLedgerEntry(
+            digest=input_digest,
+            kind="input",
+            task_id=request.task.task_id,
+            run_id=request.manifest.run_id,
+            preview=redacted_preview(request.task.public_prompt, max_length=160),
+        ),
+        DigestLedgerEntry(
+            digest=trajectory.trace_digest,
+            kind="trace",
+            task_id=request.task.task_id,
+            run_id=request.manifest.run_id,
+            preview=f"轨迹 {len(trajectory.events)} 个投影事件",
+        ),
+    ]
+    for event in trajectory.events:
+        entries.append(
+            DigestLedgerEntry(
+                digest=event.payload_digest,
+                kind="payload",
+                task_id=request.task.task_id,
+                run_id=request.manifest.run_id,
+                event_type=event.event_type,
+                tool_name=event.tool_name,
+                first_seen_at=event.started_at or utc_now(),
+                last_seen_at=event.finished_at or event.started_at or utc_now(),
+            )
+        )
+        if event.argument_digest is not None:
+            entries.append(
+                DigestLedgerEntry(
+                    digest=event.argument_digest,
+                    kind="argument",
+                    task_id=request.task.task_id,
+                    run_id=request.manifest.run_id,
+                    event_type=event.event_type,
+                    tool_name=event.tool_name,
+                    first_seen_at=event.started_at or utc_now(),
+                    last_seen_at=event.finished_at or event.started_at or utc_now(),
+                )
+            )
+    try:
+        DigestLedger(request.digest_ledger_path).append(entries)
+    except (OSError, ValueError) as error:
+        print(
+            f"警告:digest 寻迹账本写入失败(不阻断评测):{error}",
+            file=sys.stderr,
+        )
 
 
 def _opik_failure(
