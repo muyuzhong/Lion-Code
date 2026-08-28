@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "PR #130:P0-2/P0-3/P0-4。A5 第二主机复现待评测主机执行;验收通过后合并。",
+  "notes": "PR #130:P0-2/P0-3/P0-4 已合并(4abfea7)。A5 验收通过:模板全量复现 run_id flask-5014-20260828-161826,退出码 0,官方 resolved=是/verdict=passed,DeepEval 三指标 completed(0.0/0.0/0.5),telemetry=off,Opik 已导出;smoke.env 权限守卫生效(600+属主)。",
   "meta": {}
 }
