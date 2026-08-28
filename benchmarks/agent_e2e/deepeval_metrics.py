@@ -211,10 +211,15 @@ def _make_tool_call(tool_name: str) -> object:
 
 
 def _case_input(case: DeepEvalCase) -> str:
-    return (
-        f"task_id={safe_text(case.task_id, max_length=160)} "
-        f"input_digest={case.input_digest}"
-    )
+    parts = [
+        f"task_id={safe_text(case.task_id, max_length=160)}",
+        f"input_digest={case.input_digest}",
+    ]
+    if case.input_preview:
+        parts.append(
+            f"task_description={safe_text(case.input_preview, max_length=4000)}"
+        )
+    return " ".join(parts)
 
 
 def _trajectory_output(case: DeepEvalCase) -> str:
@@ -238,11 +243,21 @@ def _trajectory_output(case: DeepEvalCase) -> str:
                 else None,
             }
         )
+    payload: dict[str, Any] = {
+        "trace_digest": case.trajectory.trace_digest,
+        "events": events,
+    }
+    if case.outcome_preview:
+        payload["outcome_preview"] = safe_text(case.outcome_preview, max_length=2000)
+    # 结果预览放在 events 之前:超长轨迹被截断时,judge 仍能看到最终结果;
+    # 截断只影响事件尾部,不破坏预览字段。
+    ordered: dict[str, Any] = {}
+    if case.outcome_preview:
+        ordered["outcome_preview"] = payload.pop("outcome_preview")
+    ordered["trace_digest"] = payload.pop("trace_digest")
+    ordered["events"] = payload.pop("events")
     serialized = json.dumps(
-        {"trace_digest": case.trajectory.trace_digest, "events": events},
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
+        ordered, ensure_ascii=False, sort_keys=False, separators=(",", ":")
     )
     return serialized[:MAX_DEEPEVAL_TEXT]
 

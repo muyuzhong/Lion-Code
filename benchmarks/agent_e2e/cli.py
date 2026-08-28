@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     verified.add_argument("--harbor", default="harbor")
     verified.add_argument("--input-digest")
     verified.add_argument("--deepeval-judge-model")
-    verified.add_argument("--deepeval-timeout", type=float, default=300.0)
+    verified.add_argument("--deepeval-timeout", type=float, default=600.0)
     verified.add_argument("--deepeval-samples", type=int, default=3)
     verified.add_argument(
         "--digest-ledger",

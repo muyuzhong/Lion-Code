@@ -368,6 +368,8 @@ def analyze_verified_report(
     agent_model: str | None = None,
     judge_fingerprint: str | None = None,
     judge_samples: int = 3,
+    input_preview: str | None = None,
+    outcome_preview: str | None = None,
 ) -> VerifiedEvaluationReport:
     """将分析结果写回 report 的独立字段，保留原始正式结果对象。"""
 
@@ -379,6 +381,8 @@ def analyze_verified_report(
         input_digest=input_digest,
         trajectory=trajectory,
         expected_verdict=report.task_result.verdict,
+        input_preview=input_preview,
+        outcome_preview=outcome_preview,
     )
     analysis = analyze_deepeval_case(
         case,

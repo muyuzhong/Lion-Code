@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,9 +56,9 @@ from .models import (
     TaskVerdict,
     TrialExecution,
     TrialExecutionStatus,
-    utc_now,
     VerifiedEvaluationReport,
     WorkerResult,
+    utc_now,
 )
 from .opik_export import (
     OPIK_SDK_VERSION,
@@ -480,6 +481,14 @@ def _run_post_processing(
     )
     if trajectory is None:
         return report, None, None
+    report = report.model_copy(
+        update={
+            "extensions": {
+                **report.extensions,
+                "process_metrics": _process_metrics(report.task_result, trajectory),
+            }
+        }
+    )
     input_digest = request.input_digest or _verified_input_digest(request.task)
     judge_model = request.deepeval_judge_model or request.manifest.profile.model
     agent_model = request.manifest.profile.model
@@ -497,6 +506,10 @@ def _run_post_processing(
             agent_model=agent_model,
             judge_fingerprint=judge_fingerprint,
             judge_samples=request.deepeval_samples,
+            input_preview=_judge_task_preview(request.task),
+            outcome_preview=_judge_outcome_preview(
+                report.task_result, patch_path=harbor_output.patch_path
+            ),
         )
         analysis = analyzed.deepeval
         if (
@@ -722,6 +735,111 @@ def _analysis_failure(
         failure_source=failure_source,
         reason=reason or "DeepEval analysis failed",
     )
+
+
+def _process_metrics(
+    task_result: TaskResult, trajectory: DeepEvalTrajectory
+) -> dict[str, Any]:
+    """从脱敏轨迹计算规则化的过程指标(确定性、不依赖 LLM judge)。
+
+    这些指标只描述行为形态,不评判对错;与 DeepEval 分数并列,便于
+    跨 run 对照定位(例如首次编辑时机、探测/验证的 shell 比例)。
+    """
+
+    tool_sequence: list[str] = []
+    tool_first_seq: set[int] = set()
+    for event in trajectory.events:
+        if event.event_type == "tool_execution_start" and event.tool_name:
+            tool_first_seq.add(event.sequence)
+            tool_sequence.append(event.tool_name)
+        elif (
+            event.event_type == "tool_execution_start"
+            and not event.tool_name
+            and tool_sequence
+        ):
+            tool_sequence.append("(unknown)")
+    counts: Counter[str] = Counter(tool_sequence)
+    edit_positions = [
+        i for i, name in enumerate(tool_sequence) if name in ("edit_file", "write_file")
+    ]
+    first_edit_index = edit_positions[0] if edit_positions else None
+    shell_total = counts.get("run_shell", 0)
+    shell_before_first_edit = (
+        sum(1 for name in tool_sequence[: first_edit_index + 1] if name == "run_shell")
+        if first_edit_index is not None
+        else shell_total
+    )
+    return {
+        "tool_counts": dict(counts),
+        "tool_calls": len(tool_sequence),
+        "first_edit_tool_index": first_edit_index,
+        "shell_calls_before_first_edit": shell_before_first_edit,
+        "max_consecutive_same_tool": _max_consecutive(tool_sequence),
+        "event_count": len(trajectory.events),
+        "agent_turns": task_result.agent_run.turns if task_result.agent_run else None,
+        "cost_usd": task_result.cost_usd,
+    }
+
+
+def _max_consecutive(sequence: list[str]) -> int:
+    """行为级重复信号：同一工具连续出现的最大次数(确定性、不依赖参数)。"""
+    best = current = 0
+    previous: str | None = None
+    for name in sequence:
+        if name == previous:
+            current += 1
+        else:
+            current = 1
+            previous = name
+        best = max(best, current)
+    return best
+
+
+def _judge_task_preview(task: TaskSpec) -> str:
+    """judge 看到的任务文本预览：public_prompt 脱敏截断（公开任务卡）。"""
+    preview, _ = redact_text(task.public_prompt, max_length=4000)
+    return preview.strip()
+
+
+def _judge_outcome_preview(task_result: TaskResult, *, patch_path: Path | None) -> str:
+    """judge 看到的最终结果预览：agent 最终文本 + patch 摘要(受控)。"""
+    preview, _ = redact_text(
+        _outcome_preview_text(task_result, patch_path=patch_path), max_length=2000
+    )
+    return preview.strip()
+
+
+def _outcome_preview_text(task_result: TaskResult, *, patch_path: Path | None) -> str:
+    parts: list[str] = []
+    final_text = (
+        task_result.agent_run.final_text_preview if task_result.agent_run else None
+    )
+    if final_text:
+        parts.append(f"final_text_preview={final_text!r}")
+    patch_files = _patch_file_names(patch_path)
+    if patch_files:
+        parts.append(f"patch_files={','.join(patch_files)}")
+    if not parts:
+        parts.append("(no final text or patch summary available)")
+    return "; ".join(parts)
+
+
+def _patch_file_names(patch_path: Path | None) -> tuple[str, ...]:
+    """从 Harbor 导出的受控 patch 中解析涉及文件(仅文件名,不含内容)。"""
+    if patch_path is None or not patch_path.is_file():
+        return ()
+    try:
+        text = patch_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ()
+    files: list[str] = []
+    for line in text.splitlines():
+        if not line.startswith("diff --git "):
+            continue
+        match = re.match(r"^diff --git a/(\S+) b/\S+$", line)
+        if match and match.group(1) not in files:
+            files.append(match.group(1))
+    return tuple(files)
 
 
 def _judge_fingerprint(judge_model: str) -> str:
