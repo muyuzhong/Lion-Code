@@ -28,6 +28,12 @@ export OPIK_WORKSPACE=...
 其中 `<MANIFEST_PROVIDER_ENV_VAR>` 必须替换为 manifest 的
 `profile.credential_env_vars` 中声明的变量名；值不要提交到 Git。
 
+DeepEval 离线分析显式关停上报：不要设置 `CONFIDENT_API_KEY`（设置了会
+被分析入口拒绝并记录失败）；未设置时分析结果记
+`extensions.telemetry == "off"`。DeepEval SDK 收尾阶段打印的
+`deepeval view` / Confident AI 共享建议是 SDK 固定文案（无官方开关），
+属于已知输出，不表示发生上报。
+
 ## 单题运行
 
 commit 必须与 manifest 的 `agent_code_sha` 一致。`--run-id` 用于显式校验，
