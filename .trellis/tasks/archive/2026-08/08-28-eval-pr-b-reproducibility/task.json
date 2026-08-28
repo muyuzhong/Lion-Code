@@ -16,11 +16,11 @@
   "base_branch": "master",
   "worktree_path": null,
   "commit": null,
-  "pr_url": null,
+  "pr_url": "https://github.com/muyuzhong/Lion-Code/pull/130",
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "PR #130:P0-2/P0-3/P0-4。A5 第二主机复现待评测主机执行;验收通过后合并。",
   "meta": {}
 }
