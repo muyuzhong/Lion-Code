@@ -238,9 +238,15 @@ def _append_deepeval(lines: list[str], report: VerifiedEvaluationReport) -> None
             if metric.threshold is not None
             else ""
         )
+        sampling = ""
+        if metric.samples > 1:
+            sampling = f"；采样 {metric.samples} 次"
+            if metric.score_min is not None and metric.score_max is not None:
+                sampling += f"；范围 {metric.score_min:.4f}–{metric.score_max:.4f}"
         lines.append(
             f"  - `{_safe_display(metric.name, 160)}`："
-            f"{_optional_number(metric.score)}{threshold}；状态 `{metric.status.value}`；"
+            f"{_optional_number(metric.score)}{threshold}{sampling}；"
+            f"状态 `{metric.status.value}`；"
             f"原因：{_safe_display(metric.reason, 320)}"
         )
     lines.append(f"  - 门禁结论：{_gate_conclusion(report)}")

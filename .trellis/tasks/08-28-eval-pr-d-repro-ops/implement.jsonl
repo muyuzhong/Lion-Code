@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "verified-run 链路契约(§9-10):分析只改 deepeval 字段、不改变 verdict/退出码;P1-4 采样与 P2-3 ledger 均须保持观测语义与脱敏边界"}
+{"file": ".trellis/spec/backend/secret-boundary.md", "reason": "脱敏红线:P2-3 ledger 只存红act_text 摘要与元数据;cleanup 脚本与模板无密钥/个人字面量"}

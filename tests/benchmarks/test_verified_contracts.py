@@ -195,6 +195,46 @@ class TestVerifiedModels(unittest.TestCase):
             threshold_met=False,
         )
         self.assertFalse(below.threshold_met)
+        # 采样聚合:samples>1 必须带 min/max;范围必须包含均值;失败指标不能带范围。
+        with self.assertRaises(ValidationError):
+            DeepEvalMetricResult(
+                name="TaskCompletionMetric",
+                score=0.6,
+                model="fake-judge",
+                input_digest=_digest("input"),
+                samples=3,
+            )
+        with self.assertRaises(ValidationError):
+            DeepEvalMetricResult(
+                name="TaskCompletionMetric",
+                score=0.6,
+                model="fake-judge",
+                input_digest=_digest("input"),
+                samples=3,
+                score_min=0.7,
+                score_max=0.8,
+            )
+        sampled = DeepEvalMetricResult(
+            name="TaskCompletionMetric",
+            score=0.6,
+            model="fake-judge",
+            input_digest=_digest("input"),
+            samples=3,
+            score_min=0.4,
+            score_max=0.8,
+        )
+        self.assertEqual(sampled.samples, 3)
+        with self.assertRaises(ValidationError):
+            DeepEvalMetricResult(
+                name="TaskCompletionMetric",
+                score=None,
+                status=AdapterStatus.FAILED,
+                reason="failed",
+                model="fake-judge",
+                input_digest=_digest("input"),
+                score_min=0.4,
+                score_max=0.8,
+            )
         # score_gate 结论必须与计数一致,且至少评估一个指标。
         with self.assertRaises(ValidationError):
             DeepEvalScoreGate(
@@ -357,6 +397,27 @@ class TestVerifiedFixtures(unittest.TestCase):
         assert analysis.score_gate is not None
         self.assertTrue(analysis.score_gate.passed)
         self.assertEqual(analysis.score_gate.evaluated_metrics, 3)
+        # 采样字段:旧 fixture 无 samples → 默认 1;min/max 缺省。
+        self.assertTrue(all(metric.samples == 1 for metric in analysis.metrics))
+        self.assertTrue(all(metric.score_min is None for metric in analysis.metrics))
+        # fixture 可显式携带采样信息并透传。
+        sampled = parse_deepeval_analysis(
+            {
+                **payload,
+                "metrics": [
+                    {
+                        **payload["metrics"][0],
+                        "samples": 2,
+                        "score_min": 0.9,
+                        "score_max": 1.0,
+                    }
+                ],
+            },
+            expected_task_id="verified-task-1",
+        )
+        self.assertEqual(sampled.metrics[0].samples, 2)
+        self.assertEqual(sampled.metrics[0].score_min, 0.9)
+        self.assertEqual(sampled.metrics[0].score_max, 1.0)
         event = TraceEvent(
             sequence=1,
             event_type="ToolExecutionStartEvent",

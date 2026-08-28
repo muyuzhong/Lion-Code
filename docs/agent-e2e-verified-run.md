@@ -76,6 +76,44 @@ Harbor 侧仅过程证据。JSON 报告保留两段原始字段，分歧可由
 `harbor.verifier_outcome`/`harbor.reward` 与 `harness.resolved`
 推导；reward 仍不参与判定。
 
+### judge 多次采样与均值±范围
+
+每个指标默认独立采样 3 次（`--deepeval-samples` 可调；一键脚本对应
+可选 env `DEEPEVAL_SAMPLES`），`score` 取成功采样均值，指标行同时
+给出采样次数与范围 `score_min–score_max`；部分采样失败在 reason 中
+标注"N 次采样失败"，全部失败仍沿用单次失败语义。采样在分析
+deadline（`--deepeval-timeout`）内逐样本计时，超时样本按 TIMEOUT
+计入。多次采样不保证同一 payload 输出完全一致（LLM 无 stable
+seed），但给出均值±范围，使漂移可见、可复核。
+
+### 运行残留清理
+
+`scripts/benchmarks/verified-smoke/cleanup_smoke.sh` 一键清理可重建的
+运行残留（仅本机运维，不入 CI）：
+
+- 默认删除缓存目录 `harbor-home/`、`hf-home/`、`xdg-cache/`
+  （`run-*` 证据目录永不删除）；`SMOKE_CLEAN_DRY_RUN=1` 干跑只打印
+  将删除项；`SMOKE_CLEAN_IMAGES=1` 时同时删除 `swebench/sweb.eval*`
+  镜像（docker 删除失败仅警告）。
+- 路径守卫：结果根指向被越界时拒绝执行（退出码 2）。
+- 删除后缓存可重建，评测可无损重跑。
+
+### digest 寻迹（digest → 脱敏摘要）
+
+报告与 trajectory 中的 `payload_digest`/`trajectory_digest` 可经本地
+寻迹账本反查：`verified-run` 设置 `--digest-ledger <path>`（一键脚本
+默认 `$RESULT_ROOT/digest-ledger.jsonl`）后，每次运行把 input/trace
+digest 与每个投影事件的 payload/argument digest 追加写入账本——只存
+脱敏摘要与元数据（task/run/event_type/tool_name/时间），不存原始
+正文，不破坏脱敏红线（results/ 整体 gitignore，不入库）。
+
+```bash
+python -m benchmarks.agent_e2e digest-lookup --ledger <ledger-path> <sha256...>
+```
+
+退出码：`0` 全部找到；`1` 存在未找到（仍输出已找到部分）；`2` 账本
+缺失/不可读。
+
 ### smoke.env 权限
 
 评测凭证文件 `smoke.env` 必须为 600 且属主为运行用户（

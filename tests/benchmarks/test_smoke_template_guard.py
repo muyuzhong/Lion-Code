@@ -129,6 +129,7 @@ class TestDesensitization:
 
     TEMPLATE_FILES = (
         "run_smoke.sh",
+        "cleanup_smoke.sh",
         "build_catalog.py",
         "build_manifest.py",
         "smoke.env.example",

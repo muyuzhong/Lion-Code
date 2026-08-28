@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "核对:采样/ledger 仅观测;task_result 与 verified_exit_code(除新增 digest-lookup 自身)语义不变"}
+{"file": ".trellis/spec/backend/secret-boundary.md", "reason": "核对:ledger 无原始正文/密钥;cleanup 与模板无本机路径与个人字面量"}
