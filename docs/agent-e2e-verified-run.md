@@ -28,6 +28,32 @@ export OPIK_WORKSPACE=...
 其中 `<MANIFEST_PROVIDER_ENV_VAR>` 必须替换为 manifest 的
 `profile.credential_env_vars` 中声明的变量名；值不要提交到 Git。
 
+### 受限主目录与缓存重定向
+
+评测主机主目录只读或受限时，跑通依赖两项重定向（一键脚本
+`scripts/benchmarks/verified-smoke/run_smoke.sh` 会自动执行，以下为
+原理与手动等价做法）：
+
+- `HOME` 重定向：Harbor 硬编码 `~/.cache/harbor`，必须把 `HOME` 指向
+  可写目录（如 `export HOME=/path/to/harbor-home` 并提前
+  `mkdir -p "$HOME"`）。
+- `HF_HOME`/`XDG_CACHE_HOME` 重定向：官方 Harness 装载数据集时按
+  passwd 主目录（而非 `$HOME`）解析缓存，受限主目录下会复现
+  `PermissionError: /home/<user>/.cache/huggingface`；显式指到可写区即可：
+  `export HF_HOME=/path/to/hf-home` 与 `export XDG_CACHE_HOME=/path/to/xdg-cache`。
+
+### DeepEval judge 端点
+
+DeepEval judge 经 litellm 访问自定义 OpenAI-compatible 端点：设置
+`export LITELLM_API_BASE=<endpoint>`（与 `OPENAI_BASE_URL` 同源；一键
+脚本在未显式设置时自动取 `OPENAI_BASE_URL` 的值）；不设置时走官方端点。
+
+### smoke.env 权限
+
+评测凭证文件 `smoke.env` 必须为 600 且属主为运行用户（
+`chmod 600 smoke.env`）；一键脚本启动时自动强制该权限并校验属主，
+无法保证时拒绝启动（退出码 2）。
+
 DeepEval 离线分析显式关停上报：不要设置 `CONFIDENT_API_KEY`（设置了会
 被分析入口拒绝并记录失败）；未设置时分析结果记
 `extensions.telemetry == "off"`。DeepEval SDK 收尾阶段打印的
