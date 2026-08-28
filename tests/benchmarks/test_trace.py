@@ -74,9 +74,7 @@ class TestTraceRecorder(unittest.TestCase):
             }
         )
 
-        expected = datetime.fromtimestamp(
-            message_timestamp_ms / 1000, tz=UTC
-        )
+        expected = datetime.fromtimestamp(message_timestamp_ms / 1000, tz=UTC)
         self.assertEqual(recorder.events[0].started_at, expected)
         self.assertEqual(recorder.events[0].finished_at, expected)
         for event in recorder.events:
