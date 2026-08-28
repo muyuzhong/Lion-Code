@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "核对分析契约:analyze_verified_report 只更新 deepeval 字段、verdict 不可变、轨迹投影有界且脱敏。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量门禁与最小验证约定:targeted tests、不引入无关重构。"}
+{"file": ".trellis/spec/backend/secret-boundary.md", "reason": "复核新字段不携带任何敏感内容,extensions 敏感键校验不被绕过。"}
+{"file": ".trellis/tasks/08-28-eval-fidelity-pr-a/research/deepeval-confident-sdk.md", "reason": "复核上报关停实现与 SDK 实际行为一致。"}
+{"file": ".trellis/tasks/08-28-eval-fidelity-pr-a/research/core-event-serialization.md", "reason": "复核 toolName 映射与时间戳提取符合事件真实结构。"}

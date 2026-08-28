@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "离线 DeepEval 分析契约(§9)与本 PR 直接相关:分析只落 deepeval 字段、不改变 verdict、脱敏投影边界。"}
+{"file": ".trellis/spec/backend/secret-boundary.md", "reason": "脱敏红线:轨迹与报告只允许受控元数据;本 PR 新增工具名/时间戳字段不得引入正文。"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "typed 错误处理约定:上报开关检查失败归入分析失败字段而非抛出给调用方。"}
+{"file": ".trellis/tasks/08-28-eval-fidelity-pr-a/research/deepeval-confident-sdk.md", "reason": "deepeval 4.2.0 上报判定与横幅来源(逐行核实):is_confident 语义、无官方开关、非 confident 分支固定文案。"}
+{"file": ".trellis/tasks/08-28-eval-fidelity-pr-a/research/core-event-serialization.md", "reason": "Core WireModel camelCase 序列化根因与时间戳来源;TraceEvent 加字段的贯通路径与 schema 决策。"}
