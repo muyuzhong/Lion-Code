@@ -652,6 +652,9 @@ class DeepEvalMetricResult(VersionedModel):
     status: AdapterStatus = AdapterStatus.COMPLETED
     threshold: float | None = Field(default=None, ge=0, le=1)
     threshold_met: bool | None = None
+    samples: int = Field(default=1, ge=1)
+    score_min: float | None = Field(default=None, ge=0, le=1)
+    score_max: float | None = Field(default=None, ge=0, le=1)
 
     @model_validator(mode="after")
     def _validate_score(self) -> DeepEvalMetricResult:
@@ -675,6 +678,23 @@ class DeepEvalMetricResult(VersionedModel):
                 raise ValueError(
                     "DeepEval metric threshold_met must match score vs threshold"
                 )
+        if (self.score_min is None) != (self.score_max is None):
+            raise ValueError(
+                "DeepEval metric score_min and score_max must be both set or both unset"
+            )
+        if self.status is AdapterStatus.COMPLETED:
+            if self.samples > 1 and (self.score_min is None or self.score_max is None):
+                raise ValueError(
+                    "multi-sample DeepEval metrics require score_min and score_max"
+                )
+            if self.score_min is not None:
+                # 均值聚合允许浮点舍入容差。
+                if not (self.score_min - 1e-9 <= self.score <= self.score_max + 1e-9):
+                    raise ValueError(
+                        "DeepEval metric score must lie in [score_min, score_max]"
+                    )
+        elif self.score_min is not None:
+            raise ValueError("failed DeepEval metrics cannot carry a score range")
         return self
 
 

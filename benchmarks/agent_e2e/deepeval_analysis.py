@@ -100,6 +100,9 @@ class DeepEvalMetricFixture(BaseModel):
     score: float | None = Field(default=None, ge=0, le=1)
     reason: str | None = Field(default=None, max_length=1000)
     status: str = "completed"
+    samples: int = Field(default=1, ge=1)
+    score_min: float | None = Field(default=None, ge=0, le=1)
+    score_max: float | None = Field(default=None, ge=0, le=1)
 
 
 class DeepEvalResultFixture(BaseModel):
@@ -162,20 +165,26 @@ def parse_deepeval_analysis(
             and metric.score is not None
             and float(metric.score) >= threshold
         )
-        metrics.append(
-            DeepEvalMetricResult(
-                name=metric.name,
-                score=metric.score
-                if metric_status is AdapterStatus.COMPLETED
-                else None,
-                reason=reason,
-                model=fixture.judge_model,
-                input_digest=fixture.input_digest,
-                status=metric_status,
-                threshold=threshold,
-                threshold_met=threshold_met,
+        try:
+            metrics.append(
+                DeepEvalMetricResult(
+                    name=metric.name,
+                    score=metric.score
+                    if metric_status is AdapterStatus.COMPLETED
+                    else None,
+                    reason=reason,
+                    model=fixture.judge_model,
+                    input_digest=fixture.input_digest,
+                    status=metric_status,
+                    threshold=threshold,
+                    threshold_met=threshold_met,
+                    samples=metric.samples,
+                    score_min=metric.score_min,
+                    score_max=metric.score_max,
+                )
             )
-        )
+        except ValidationError as error:
+            raise DeepEvalSchemaError(str(error)) from error
     if status is DeepEvalAnalysisStatus.COMPLETED and not metrics:
         status = DeepEvalAnalysisStatus.PARTIAL
         failure_source = FailureSource.DEEPEVAL
@@ -209,11 +218,19 @@ def analyze_deepeval_case(
     timeout_seconds: float | None = 120.0,
     agent_model: str | None = None,
     judge_fingerprint: str | None = None,
+    judge_samples: int = 3,
 ) -> DeepEvalAnalysis:
-    """对冻结 trajectory 做三项离线分析，绝不修改正式 task verdict。"""
+    """对冻结 trajectory 做三项离线分析，绝不修改正式 task verdict。
+
+    每个指标独立采样 ``judge_samples`` 次，score 取成功采样均值并记录
+    范围；采样在分析 deadline 内逐样本计时，超时样本按既有 TIMEOUT
+    语义计入。
+    """
 
     if timeout_seconds is not None and timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive or None")
+    if judge_samples < 1:
+        raise ValueError("judge_samples must be at least 1")
     safe_model = _safe_model(judge_model)
     if judge is None:
         try:
@@ -242,27 +259,33 @@ def analyze_deepeval_case(
     )
     metric_results: list[DeepEvalMetricResult] = []
     for metric_name in DEEPEVAL_METRIC_NAMES:
-        if deadline is not None:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                observation = DeepEvalMetricObservation(
-                    name=metric_name,
-                    score=None,
-                    reason="DeepEval analysis timed out",
-                    status=AdapterStatus.TIMEOUT,
-                )
+        observations: list[DeepEvalMetricObservation] = []
+        for _ in range(judge_samples):
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    observations.append(
+                        DeepEvalMetricObservation(
+                            name=metric_name,
+                            score=None,
+                            reason="DeepEval analysis timed out",
+                            status=AdapterStatus.TIMEOUT,
+                        )
+                    )
+                else:
+                    observations.append(
+                        _evaluate_with_timeout(
+                            judge,
+                            case,
+                            metric_name,
+                            remaining,
+                        )
+                    )
             else:
-                observation = _evaluate_with_timeout(
-                    judge,
-                    case,
-                    metric_name,
-                    remaining,
-                )
-        else:
-            observation = _evaluate_direct(judge, case, metric_name)
+                observations.append(_evaluate_direct(judge, case, metric_name))
         metric_results.append(
-            _metric_result_from_observation(
-                observation,
+            _metric_result_from_samples(
+                observations,
                 case=case,
                 judge_model=safe_model,
                 metric_name=metric_name,
@@ -277,6 +300,63 @@ def analyze_deepeval_case(
     )
 
 
+def _metric_result_from_samples(
+    observations: Sequence[DeepEvalMetricObservation],
+    *,
+    case: DeepEvalCase,
+    judge_model: str,
+    metric_name: str,
+) -> DeepEvalMetricResult:
+    """把同一指标的多轮采样聚合成均值±范围；失败语义沿用单样本路径。"""
+
+    samples = len(observations)
+    if samples == 1:
+        return _metric_result_from_observation(
+            observations[0],
+            case=case,
+            judge_model=judge_model,
+            metric_name=metric_name,
+        )
+    sample_results = tuple(
+        _metric_result_from_observation(
+            observation,
+            case=case,
+            judge_model=judge_model,
+            metric_name=metric_name,
+        )
+        for observation in observations
+    )
+    completed = tuple(
+        result for result in sample_results if result.status is AdapterStatus.COMPLETED
+    )
+    if not completed:
+        # 全部采样失败：沿用首个失败结果，只记录总采样次数。
+        return sample_results[0].model_copy(update={"samples": samples})
+    scores = tuple(
+        float(result.score) for result in completed if result.score is not None
+    )
+    failures = samples - len(completed)
+    reason = completed[0].reason
+    if failures:
+        note = f"{failures} 次采样失败"
+        reason = f"{reason}；{note}" if reason else note
+    threshold = DEEPEVAL_METRIC_THRESHOLDS.get(metric_name)
+    mean_score = sum(scores) / len(scores)
+    return DeepEvalMetricResult(
+        name=metric_name,
+        score=mean_score,
+        reason=reason,
+        model=completed[0].model,
+        input_digest=case.input_digest,
+        status=AdapterStatus.COMPLETED,
+        threshold=threshold,
+        threshold_met=None if threshold is None else mean_score >= threshold,
+        samples=samples,
+        score_min=min(scores),
+        score_max=max(scores),
+    )
+
+
 def analyze_verified_report(
     report: VerifiedEvaluationReport,
     *,
@@ -287,6 +367,7 @@ def analyze_verified_report(
     timeout_seconds: float | None = 120.0,
     agent_model: str | None = None,
     judge_fingerprint: str | None = None,
+    judge_samples: int = 3,
 ) -> VerifiedEvaluationReport:
     """将分析结果写回 report 的独立字段，保留原始正式结果对象。"""
 
@@ -306,6 +387,7 @@ def analyze_verified_report(
         timeout_seconds=timeout_seconds,
         agent_model=agent_model,
         judge_fingerprint=judge_fingerprint,
+        judge_samples=judge_samples,
     )
     analysis = analysis.model_copy(
         update={
