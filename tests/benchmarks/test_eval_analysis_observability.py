@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import unittest
 from datetime import UTC, datetime, timedelta
 
@@ -10,8 +11,10 @@ from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.deepeval_analysis import (
     DEEPEVAL_METRIC_NAMES,
     DeepEvalMetricObservation,
+    DeepEvalTelemetryError,
     analyze_deepeval_case,
     analyze_verified_report,
+    build_deepeval_trajectory,
 )
 from benchmarks.agent_e2e.models import (
     Catalog,
@@ -36,6 +39,7 @@ from benchmarks.agent_e2e.opik_export import (
     publish_opik_trace,
     retry_opik_export,
 )
+from benchmarks.agent_e2e.trace import TraceEvent
 
 
 def _digest(value: str) -> str:
@@ -86,6 +90,24 @@ def _case() -> DeepEvalCase:
         input_digest=_digest("input"),
         trajectory=trajectory,
         expected_verdict=TaskVerdict.PASSED,
+    )
+
+
+def _trace_event(
+    sequence: int,
+    event_type: str,
+    *,
+    tool_name: str | None = None,
+    started_at: datetime | None = None,
+) -> TraceEvent:
+    return TraceEvent(
+        sequence=sequence,
+        event_type=event_type,
+        summary="controlled summary",
+        payload_digest=_digest(f"{event_type}-{sequence}"),
+        tool_name=tool_name,
+        started_at=started_at,
+        finished_at=started_at,
     )
 
 
@@ -270,6 +292,64 @@ class TestDeepEvalAnalysis(unittest.TestCase):
         )
         self.assertEqual(updated.task_result.verdict, report.task_result.verdict)
         self.assertIsNotNone(updated.deepeval)
+
+    def test_confident_api_key_set_rejects_analysis(self) -> None:
+        case = _case()
+        report = _report()
+        os.environ["CONFIDENT_API_KEY"] = "sk-test-key"
+        try:
+            with self.assertRaises(DeepEvalTelemetryError):
+                analyze_verified_report(
+                    report,
+                    input_digest=case.input_digest,
+                    trajectory=case.trajectory,
+                    judge_model="fake-judge",
+                    judge=_FakeJudge(dict.fromkeys(DEEPEVAL_METRIC_NAMES, 0.5)),
+                    timeout_seconds=None,
+                )
+        finally:
+            os.environ.pop("CONFIDENT_API_KEY", None)
+
+    @unittest.skipIf(
+        "CONFIDENT_API_KEY" in os.environ, "requires unset CONFIDENT_API_KEY"
+    )
+    def test_analysis_records_telemetry_off_when_unconfigured(self) -> None:
+        case = _case()
+        report = _report()
+        updated = analyze_verified_report(
+            report,
+            input_digest=case.input_digest,
+            trajectory=case.trajectory,
+            judge_model="fake-judge",
+            judge=_FakeJudge(dict.fromkeys(DEEPEVAL_METRIC_NAMES, 0.75)),
+            timeout_seconds=None,
+        )
+        self.assertEqual(updated.deepeval.status, DeepEvalAnalysisStatus.COMPLETED)
+        self.assertEqual(updated.deepeval.extensions.get("telemetry"), "off")
+
+    def test_trajectory_projection_filters_message_update_noise(self) -> None:
+        start = datetime(2026, 8, 27, 2, 0, tzinfo=UTC)
+        snapshot = _trace_event(1, "message_update")
+        tool_end = _trace_event(
+            3,
+            "tool_execution_end",
+            tool_name="run_shell",
+            started_at=start,
+        )
+        snapshot2 = _trace_event(2, "message_update")
+        message_end = _trace_event(4, "message_end", started_at=start)
+
+        trajectory = build_deepeval_trajectory(
+            task_id="verified-task-1",
+            trace_id="trace-filtered",
+            trace_events=(snapshot, snapshot2, tool_end, message_end),
+        )
+        self.assertEqual(
+            [event.event_type for event in trajectory.events],
+            ["tool_execution_end", "message_end"],
+        )
+        self.assertEqual(trajectory.events[0].tool_name, "run_shell")
+        self.assertEqual(trajectory.events[0].started_at, start)
 
 
 class TestOpikPublisher(unittest.TestCase):
