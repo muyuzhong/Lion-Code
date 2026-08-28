@@ -244,6 +244,64 @@ class TestDeepEvalAnalysis(unittest.TestCase):
         self.assertTrue(
             all(metric.input_digest == case.input_digest for metric in analysis.metrics)
         )
+        # 阈值对照与门禁:全过(0.75 >= 0.5) → threshold_met 全 True,
+        # score_gate 通过(3/3)。
+        self.assertTrue(all(metric.threshold == 0.5 for metric in analysis.metrics))
+        self.assertTrue(
+            all(metric.threshold_met is True for metric in analysis.metrics)
+        )
+        self.assertIsNotNone(analysis.score_gate)
+        assert analysis.score_gate is not None
+        self.assertTrue(analysis.score_gate.passed)
+        self.assertEqual(
+            (analysis.score_gate.passed_metrics, analysis.score_gate.evaluated_metrics),
+            (3, 3),
+        )
+
+    def test_score_gate_partial_threshold_failure(self) -> None:
+        case = _case()
+        judge = _FakeJudge(
+            {
+                DEEPEVAL_METRIC_NAMES[0]: 0.4,
+                DEEPEVAL_METRIC_NAMES[1]: 0.75,
+                DEEPEVAL_METRIC_NAMES[2]: 0.6,
+            }
+        )
+        analysis = analyze_deepeval_case(
+            case,
+            judge_model="fake-judge",
+            judge=judge,
+            timeout_seconds=None,
+        )
+        self.assertEqual(analysis.status, DeepEvalAnalysisStatus.COMPLETED)
+        self.assertEqual(
+            [m.threshold_met for m in analysis.metrics], [False, True, True]
+        )
+        self.assertIsNotNone(analysis.score_gate)
+        assert analysis.score_gate is not None
+        self.assertFalse(analysis.score_gate.passed)
+        self.assertEqual(
+            (analysis.score_gate.passed_metrics, analysis.score_gate.evaluated_metrics),
+            (2, 3),
+        )
+        self.assertIn("2 项达阈值", analysis.score_gate.reason)
+
+    def test_score_gate_none_when_no_completed_scores(self) -> None:
+        case = _case()
+        judge = _FakeJudge(
+            dict.fromkeys(DEEPEVAL_METRIC_NAMES, TimeoutError("judge timeout"))
+        )
+        analysis = analyze_deepeval_case(
+            case,
+            judge_model="fake-judge",
+            judge=judge,
+            timeout_seconds=None,
+        )
+        self.assertEqual(analysis.status, DeepEvalAnalysisStatus.TIMEOUT)
+        self.assertIsNone(analysis.score_gate)
+        self.assertTrue(
+            all(metric.threshold_met is False for metric in analysis.metrics)
+        )
 
     def test_partial_metric_failure_keeps_other_scores_and_redacts_reason(self) -> None:
         case = _case()
@@ -265,6 +323,32 @@ class TestDeepEvalAnalysis(unittest.TestCase):
         self.assertEqual(analysis.metrics[0].score, 0.8)
         self.assertIsNone(analysis.metrics[1].score)
         self.assertNotIn("sk-not-persisted", analysis.canonical_json())
+        # 失败指标仍带阈值但不可达(score 恒 None → threshold_met False)。
+        self.assertEqual(analysis.metrics[1].threshold, 0.5)
+        self.assertFalse(analysis.metrics[1].threshold_met)
+        # score_gate 只评估已评分指标:失败指标不计入,其余两项 0.8/0.6 均达阈值。
+        self.assertIsNotNone(analysis.score_gate)
+        assert analysis.score_gate is not None
+        self.assertTrue(analysis.score_gate.passed)
+        self.assertEqual(analysis.score_gate.evaluated_metrics, 2)
+        self.assertEqual(analysis.score_gate.passed_metrics, 2)
+
+    def test_analysis_records_agent_model_and_judge_fingerprint(self) -> None:
+        case = _case()
+        report = _report()
+        updated = analyze_verified_report(
+            report,
+            input_digest=case.input_digest,
+            trajectory=case.trajectory,
+            judge_model="judge-model-1",
+            judge=_FakeJudge(dict.fromkeys(DEEPEVAL_METRIC_NAMES, 0.5)),
+            timeout_seconds=None,
+            agent_model="agent-model-2",
+            judge_fingerprint="f" * 64,
+        )
+        self.assertEqual(updated.deepeval.judge_model, "judge-model-1")
+        self.assertEqual(updated.deepeval.agent_model, "agent-model-2")
+        self.assertEqual(updated.deepeval.judge_fingerprint, "f" * 64)
 
     def test_timeout_is_typed_and_does_not_change_report_task_result(self) -> None:
         case = _case()
