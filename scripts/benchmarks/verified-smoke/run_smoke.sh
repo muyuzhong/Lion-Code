@@ -87,10 +87,11 @@ MANIFEST="$WORK_DIR/manifest.$RUN_ID.json"
 OUTPUT_DIR="$WORK_DIR/run-$RUN_ID"
 
 # 6) 真实单题闭环(artifact -> Harbor -> 官方 Harness -> DeepEval -> Opik)
+TASK_ID="$("$PY" -c 'import json, sys; print(json.load(open(sys.argv[1]))["task_ids"][0])' "$MANIFEST")"
 "$PY" -m benchmarks.agent_e2e verified-run \
   --catalog "$WORK_DIR/catalog.json" \
   --manifest "$MANIFEST" \
-  --task-id verified-smoke-flask-5014 \
+  --task-id "$TASK_ID" \
   --commit "$(git rev-parse HEAD)" \
   --repository-root "$ROOT" \
   --output-dir "$OUTPUT_DIR" \
