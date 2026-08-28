@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import unittest
+from datetime import UTC, datetime
 
+from benchmarks.agent_e2e.models import VerifierOutcome
 from benchmarks.agent_e2e.trace import TraceRecorder, redact_text, sanitize_payload
 from benchmarks.agent_e2e.verifier import normalize_verifier_result
-from benchmarks.agent_e2e.models import VerifierOutcome
 
 
 class TestTraceRecorder(unittest.TestCase):
@@ -42,6 +43,45 @@ class TestTraceRecorder(unittest.TestCase):
         self.assertNotIn("用户的原始请求不应写入轨迹。", serialized)
         self.assertGreaterEqual(recorder.summary().redaction_count, 3)
         self.assertEqual(recorder.events[0].event_type, "ToolExecutionStartEvent")
+
+    def test_camel_case_tool_name_is_mapped(self) -> None:
+        recorder = TraceRecorder(trace_id="trace-camel")
+        recorder.record(
+            {
+                "event_type": "ToolExecutionEndEvent",
+                "toolName": "run_shell",
+                "args": {"command": "ls"},
+            }
+        )
+
+        self.assertEqual(recorder.events[0].tool_name, "run_shell")
+        self.assertIn("toolName=run_shell", recorder.events[0].summary)
+
+    def test_event_timestamps_come_from_message_or_recorded_at(self) -> None:
+        recorder = TraceRecorder(trace_id="trace-time")
+        message_timestamp_ms = 1_784_000_000_000
+        recorder.record(
+            {
+                "event_type": "MessageUpdateEvent",
+                "message": {"role": "assistant", "timestamp": message_timestamp_ms},
+            }
+        )
+        recorder.record(
+            {
+                "event_type": "ToolExecutionStartEvent",
+                "toolName": "run_shell",
+                "args": {"command": "ls"},
+            }
+        )
+
+        expected = datetime.fromtimestamp(
+            message_timestamp_ms / 1000, tz=UTC
+        )
+        self.assertEqual(recorder.events[0].started_at, expected)
+        self.assertEqual(recorder.events[0].finished_at, expected)
+        for event in recorder.events:
+            self.assertIsNotNone(event.started_at)
+            self.assertIsNotNone(event.finished_at)
 
     def test_three_identical_tool_calls_create_one_loop_candidate(self) -> None:
         recorder = TraceRecorder(trace_id="trace-loop")
