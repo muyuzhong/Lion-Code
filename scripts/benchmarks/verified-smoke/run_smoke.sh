@@ -20,6 +20,8 @@ HARBOR_BIN="${HARBOR_BIN:-$ROOT/.venv/bin/harbor}"
 RESULT_ROOT="${SMOKE_RESULT_ROOT:-$ROOT/benchmarks/agent_e2e/results}"
 WORK_DIR="$RESULT_ROOT/smoke-flask-5014"
 SMOKE_ENV_FILE="${SMOKE_ENV_FILE:-$SMOKE_TOOL_DIR/smoke.env}"
+# digest 寻迹账本(机器级;results/ 整体 gitignore,天然不入库)
+LEDGER_FILE="${SMOKE_LEDGER_FILE:-$RESULT_ROOT/digest-ledger.jsonl}"
 
 # 0) smoke.env 权限守卫(source 之前):属主必须为当前用户,权限强制 600;
 #    违反任一条件即拒绝启动(退出码 2 = 模板脚本自身配置错误)。
@@ -96,6 +98,8 @@ OUTPUT_DIR="$WORK_DIR/run-$RUN_ID"
   --harness-python "$PY" \
   --harbor "$HARBOR_BIN" \
   --deepeval-judge-model "$DEEPEVAL_JUDGE_MODEL" \
+  --deepeval-samples "${DEEPEVAL_SAMPLES:-3}" \
+  --digest-ledger "$LEDGER_FILE" \
   --opik-project lion-agent-e2e \
   --opik-workspace "$OPIK_WORKSPACE"
 EXIT_CODE=$?

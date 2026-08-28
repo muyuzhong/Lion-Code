@@ -35,6 +35,7 @@ chmod 600 smoke.env   # 脚本启动时也会自动强制 600 并校验属主
 | `DEEPEVAL_JUDGE_MODEL` | ✅ | 固定 judge 模型,独立于 agent 模型;避免 agent 换代导致分数不可比 |
 | `OPENAI_BASE_URL` | — | 非官方端点;与 DeepEval judge 端点同源 |
 | `OPIK_API_KEY` | — | Opik 凭证(未配置时观测走 unavailable 分支) |
+| `DEEPEVAL_SAMPLES` | — | judge 每指标采样次数(默认 3;score 取均值并记录范围) |
 
 ## 运行
 
@@ -56,7 +57,33 @@ chmod 600 smoke.env   # 脚本启动时也会自动强制 600 并校验属主
 |---|---|
 | `SMOKE_RESULT_ROOT` | `$ROOT/benchmarks/agent_e2e/results` |
 | `SMOKE_ENV_FILE` | 本目录 `smoke.env` |
+| `SMOKE_LEDGER_FILE` | `$RESULT_ROOT/digest-ledger.jsonl`(digest 寻迹账本) |
 | `PYTHON_BIN` / `HARBOR_BIN` | `$ROOT/.venv/bin/python` / `$ROOT/.venv/bin/harbor` |
+
+## 残留清理(仅本机运维)
+
+```bash
+./cleanup_smoke.sh                    # 删除可重建缓存(harbor-home/hf-home/xdg-cache)
+SMOKE_CLEAN_DRY_RUN=1 ./cleanup_smoke.sh   # 干跑:只打印将删除项
+SMOKE_CLEAN_IMAGES=1 ./cleanup_smoke.sh   # 额外删除 swebench/sweb.eval* 镜像(失败仅警告)
+```
+
+- 永不删除 `run-*` 证据目录;缓存删除后评测可无损重跑(缓存可重建)。
+- 路径守卫:结果根被越界指向时拒绝执行(exit 2)。
+- 镜像清理失败仅警告,不中断;`docker` 不可用时跳过。
+
+## digest 寻迹(digest → 脱敏摘要)
+
+每次运行把本次的 `input_digest`、`trajectory_digest` 与每个投影事件的
+payload/argument 摘要写入机器级账本 `$RESULT_ROOT/digest-ledger.jsonl`
+(只存脱敏摘要与元数据,不存原始正文;results/ 整体不入库)。
+
+```bash
+$ROOT/.venv/bin/python -m benchmarks.agent_e2e digest-lookup --ledger \
+  "$ROOT/benchmarks/agent_e2e/results/digest-ledger.jsonl" <sha256-digest...>
+```
+
+退出码:0 全部找到;1 存在未找到;2 账本缺失。
 
 ## 预检(不启动评测)
 
