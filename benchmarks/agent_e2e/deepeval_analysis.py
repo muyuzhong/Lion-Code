@@ -22,6 +22,7 @@ from .models import (
     DeepEvalAnalysisStatus,
     DeepEvalCase,
     DeepEvalMetricResult,
+    DeepEvalScoreGate,
     DeepEvalTrajectory,
     DeepEvalTrajectoryEvent,
     FailureSource,
@@ -39,6 +40,14 @@ DEEPEVAL_METRIC_NAMES = (
 # 投影前丢弃的高频流式快照：Core ``message_update`` 与 message_start/end
 # 冗余（携带的是增量快照而非新事实），对脱敏 judge 无增量价值。
 NOISE_EVENT_TYPES = frozenset({"message_update"})
+# 三指标统一阈值（≥0.5 视为达阈值）：中点判定、简单可解释；运行侧策略
+# 常量，演进只改此处与文档，不引入配置系统。score_gate 仅作观测，
+# 不参与 task_result 判定与 CLI 退出码。
+DEEPEVAL_METRIC_THRESHOLDS: Mapping[str, float] = {
+    "TaskCompletionMetric": 0.5,
+    "StepEfficiencyMetric": 0.5,
+    "TrajectoryQuality": 0.5,
+}
 _EMPTY_DIGEST = hashlib.sha256(b"").hexdigest()
 
 
@@ -145,6 +154,14 @@ def parse_deepeval_analysis(
             reason = reason or "DeepEval metric is missing score"
         if metric_status is not AdapterStatus.COMPLETED and not reason:
             reason = f"DeepEval metric status: {metric.status}"
+        threshold = DEEPEVAL_METRIC_THRESHOLDS.get(metric.name)
+        threshold_met = (
+            None
+            if threshold is None
+            else metric_status is AdapterStatus.COMPLETED
+            and metric.score is not None
+            and float(metric.score) >= threshold
+        )
         metrics.append(
             DeepEvalMetricResult(
                 name=metric.name,
@@ -155,6 +172,8 @@ def parse_deepeval_analysis(
                 model=fixture.judge_model,
                 input_digest=fixture.input_digest,
                 status=metric_status,
+                threshold=threshold,
+                threshold_met=threshold_met,
             )
         )
     if status is DeepEvalAnalysisStatus.COMPLETED and not metrics:
@@ -176,6 +195,7 @@ def parse_deepeval_analysis(
         input_digest=fixture.input_digest,
         trajectory_digest=fixture.trajectory_digest,
         metrics=tuple(metrics),
+        score_gate=_score_gate(tuple(metrics)),
         failure_source=failure_source,
         reason=safe_reason,
     )
@@ -187,6 +207,8 @@ def analyze_deepeval_case(
     judge_model: str,
     judge: DeepEvalJudge | None = None,
     timeout_seconds: float | None = 120.0,
+    agent_model: str | None = None,
+    judge_fingerprint: str | None = None,
 ) -> DeepEvalAnalysis:
     """对冻结 trajectory 做三项离线分析，绝不修改正式 task verdict。"""
 
@@ -203,18 +225,20 @@ def analyze_deepeval_case(
                 case,
                 judge_model=safe_model,
                 reason="DeepEval SDK is unavailable",
+                agent_model=agent_model,
+                judge_fingerprint=judge_fingerprint,
             )
         except Exception:
             return _unavailable_analysis(
                 case,
                 judge_model=safe_model,
                 reason="DeepEval judge cannot be initialized",
+                agent_model=agent_model,
+                judge_fingerprint=judge_fingerprint,
             )
 
     deadline = (
-        time.monotonic() + timeout_seconds
-        if timeout_seconds is not None
-        else None
+        time.monotonic() + timeout_seconds if timeout_seconds is not None else None
     )
     metric_results: list[DeepEvalMetricResult] = []
     for metric_name in DEEPEVAL_METRIC_NAMES:
@@ -248,6 +272,8 @@ def analyze_deepeval_case(
         case,
         judge_model=safe_model,
         metrics=tuple(metric_results),
+        agent_model=agent_model,
+        judge_fingerprint=judge_fingerprint,
     )
 
 
@@ -259,6 +285,8 @@ def analyze_verified_report(
     judge_model: str,
     judge: DeepEvalJudge | None = None,
     timeout_seconds: float | None = 120.0,
+    agent_model: str | None = None,
+    judge_fingerprint: str | None = None,
 ) -> VerifiedEvaluationReport:
     """将分析结果写回 report 的独立字段，保留原始正式结果对象。"""
 
@@ -276,6 +304,8 @@ def analyze_verified_report(
         judge_model=judge_model,
         judge=judge,
         timeout_seconds=timeout_seconds,
+        agent_model=agent_model,
+        judge_fingerprint=judge_fingerprint,
     )
     analysis = analysis.model_copy(
         update={
@@ -414,7 +444,16 @@ def _metric_result_from_observation(
     else:
         score = None
     if status is not AdapterStatus.COMPLETED:
+        score = None
         reason = reason or f"DeepEval metric status: {status.value}"
+    threshold = DEEPEVAL_METRIC_THRESHOLDS.get(metric_name)
+    threshold_met = (
+        None
+        if threshold is None
+        else status is AdapterStatus.COMPLETED
+        and score is not None
+        and float(score) >= threshold
+    )
     return DeepEvalMetricResult(
         name=metric_name,
         score=score,
@@ -422,6 +461,8 @@ def _metric_result_from_observation(
         model=model,
         input_digest=case.input_digest,
         status=status,
+        threshold=threshold,
+        threshold_met=threshold_met,
     )
 
 
@@ -430,6 +471,8 @@ def _analysis_from_metrics(
     *,
     judge_model: str,
     metrics: tuple[DeepEvalMetricResult, ...],
+    agent_model: str | None = None,
+    judge_fingerprint: str | None = None,
 ) -> DeepEvalAnalysis:
     statuses = tuple(metric.status for metric in metrics)
     if all(status is AdapterStatus.COMPLETED for status in statuses):
@@ -438,7 +481,9 @@ def _analysis_from_metrics(
         failure_source = None
     elif any(status is AdapterStatus.COMPLETED for status in statuses):
         status = DeepEvalAnalysisStatus.PARTIAL
-        reason = _first_metric_reason(metrics) or "DeepEval analysis contains failed metrics"
+        reason = (
+            _first_metric_reason(metrics) or "DeepEval analysis contains failed metrics"
+        )
         failure_source = FailureSource.DEEPEVAL
     elif all(
         status in {AdapterStatus.UNAVAILABLE, AdapterStatus.BLOCKED}
@@ -448,7 +493,8 @@ def _analysis_from_metrics(
         reason = _first_metric_reason(metrics) or "DeepEval analysis is unavailable"
         failure_source = FailureSource.DEEPEVAL
     elif all(
-        status in {
+        status
+        in {
             AdapterStatus.TIMEOUT,
             AdapterStatus.UNAVAILABLE,
             AdapterStatus.BLOCKED,
@@ -469,8 +515,36 @@ def _analysis_from_metrics(
         input_digest=case.input_digest,
         trajectory_digest=case.trajectory.trace_digest,
         metrics=metrics,
+        agent_model=agent_model,
+        judge_fingerprint=judge_fingerprint,
+        score_gate=_score_gate(metrics),
         failure_source=failure_source,
         reason=reason,
+    )
+
+
+def _score_gate(metrics: tuple[DeepEvalMetricResult, ...]) -> DeepEvalScoreGate | None:
+    """对已评分指标做阈值对照；无已评分指标(全失败/超时/不可用)返回 None。"""
+
+    scored = tuple(
+        metric
+        for metric in metrics
+        if metric.status is AdapterStatus.COMPLETED and metric.threshold is not None
+    )
+    if not scored:
+        return None
+    passed_metrics = sum(1 for metric in scored if metric.threshold_met is True)
+    threshold = scored[0].threshold
+    assert threshold is not None  # scored 成员已保证 threshold 非 None
+    return DeepEvalScoreGate(
+        passed=passed_metrics == len(scored),
+        passed_metrics=passed_metrics,
+        evaluated_metrics=len(scored),
+        reason=(
+            f"全部 {len(scored)} 项已评分指标达阈值(阈值 {threshold:.4g})"
+            if passed_metrics == len(scored)
+            else f"{len(scored)} 项已评分指标中 {passed_metrics} 项达阈值(阈值 {threshold:.4g})"
+        ),
     )
 
 
@@ -479,6 +553,8 @@ def _unavailable_analysis(
     *,
     judge_model: str,
     reason: str,
+    agent_model: str | None = None,
+    judge_fingerprint: str | None = None,
 ) -> DeepEvalAnalysis:
     metrics = tuple(
         DeepEvalMetricResult(
@@ -498,6 +574,8 @@ def _unavailable_analysis(
         input_digest=case.input_digest,
         trajectory_digest=case.trajectory.trace_digest,
         metrics=metrics,
+        agent_model=agent_model,
+        judge_fingerprint=judge_fingerprint,
         failure_source=FailureSource.DEEPEVAL,
         reason=reason,
     )
@@ -561,9 +639,7 @@ def build_deepeval_trajectory(
     if max_events < 1 or max_events > MAX_TRAJECTORY_EVENTS:
         raise ValueError(f"max_events must be between 1 and {MAX_TRAJECTORY_EVENTS}")
     visible = tuple(
-        event
-        for event in trace_events
-        if event.event_type not in NOISE_EVENT_TYPES
+        event for event in trace_events if event.event_type not in NOISE_EVENT_TYPES
     )[:max_events]
     projected: list[DeepEvalTrajectoryEvent] = []
     for event in visible:
@@ -668,6 +744,7 @@ def _digest_json(value: Any) -> str:
 
 __all__: Sequence[str] = (
     "DEEPEVAL_METRIC_NAMES",
+    "DEEPEVAL_METRIC_THRESHOLDS",
     "DEEPEVAL_RESULT_SCHEMA_VERSION",
     "NOISE_EVENT_TYPES",
     "DeepEvalJudge",

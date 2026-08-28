@@ -6,7 +6,11 @@ import json
 import math
 from typing import Any
 
-from .deepeval_analysis import DEEPEVAL_METRIC_NAMES, DeepEvalMetricObservation
+from .deepeval_analysis import (
+    DEEPEVAL_METRIC_NAMES,
+    DEEPEVAL_METRIC_THRESHOLDS,
+    DeepEvalMetricObservation,
+)
 from .models import DeepEvalCase
 from .trace import redact_text
 
@@ -45,13 +49,13 @@ def build_deepeval_metrics(*, judge_model: str) -> tuple[object, ...]:
     try:
         return (
             TaskCompletionMetric(
-                threshold=None,
+                threshold=DEEPEVAL_METRIC_THRESHOLDS["TaskCompletionMetric"],
                 model=judge_model,
                 include_reason=True,
                 async_mode=False,
             ),
             StepEfficiencyMetric(
-                threshold=None,
+                threshold=DEEPEVAL_METRIC_THRESHOLDS["StepEfficiencyMetric"],
                 model=judge_model,
                 include_reason=True,
                 async_mode=False,
@@ -63,7 +67,7 @@ def build_deepeval_metrics(*, judge_model: str) -> tuple[object, ...]:
                     SingleTurnParams.INPUT,
                     SingleTurnParams.ACTUAL_OUTPUT,
                 ],
-                threshold=None,
+                threshold=DEEPEVAL_METRIC_THRESHOLDS["TrajectoryQuality"],
                 model=judge_model,
                 async_mode=False,
             ),
@@ -164,7 +168,9 @@ def _evaluate_trajectory_metric(metric: object, case: DeepEvalCase) -> None:
         from deepeval.evaluate import AsyncConfig
         from deepeval.tracing import observe, update_current_trace
     except ImportError as error:
-        raise DeepEvalDependencyError("DeepEval trajectory API is unavailable") from error
+        raise DeepEvalDependencyError(
+            "DeepEval trajectory API is unavailable"
+        ) from error
 
     output = _trajectory_output(case)
     tools_called = [
