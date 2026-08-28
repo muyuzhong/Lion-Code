@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from .models import TraceSummary, VersionedModel
+from .models import TraceSummary, VersionedModel, utc_now
 
 REDACTED = "[REDACTED]"
 _SENSITIVE_KEY_PARTS = (
@@ -46,6 +47,8 @@ class TraceEvent(VersionedModel):
     tool_name: str | None = Field(default=None, max_length=160)
     argument_digest: str | None = Field(default=None, min_length=64, max_length=64)
     workspace_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 class LoopCandidate(VersionedModel):
@@ -93,7 +96,7 @@ class TraceRecorder:
         )
         safe_payload, redaction_count = sanitize_payload(raw_payload)
         self._redaction_count += redaction_count
-        tool_name = _find_text(safe_payload, "tool_name", "name")
+        tool_name = _find_text(safe_payload, "tool_name", "name", "toolName")
         arguments = _find_mapping(safe_payload, "arguments", "args", "input")
         workspace_value = _find_text(
             safe_payload,
@@ -116,6 +119,7 @@ class TraceRecorder:
                 argument_digest=argument_digest,
                 workspace_fingerprint=workspace_fingerprint,
             )
+        started_at, finished_at = _event_timestamps(raw_payload)
         self._events.append(
             TraceEvent(
                 sequence=len(self._events) + 1,
@@ -125,6 +129,8 @@ class TraceRecorder:
                 tool_name=tool_name,
                 argument_digest=argument_digest,
                 workspace_fingerprint=workspace_fingerprint,
+                started_at=started_at,
+                finished_at=finished_at,
             )
         )
 
@@ -146,6 +152,7 @@ class TraceRecorder:
             argument_digest=argument_digest,
             workspace_fingerprint=normalized_workspace,
         )
+        recorded_at = utc_now()
         self._events.append(
             TraceEvent(
                 sequence=len(self._events) + 1,
@@ -161,6 +168,8 @@ class TraceRecorder:
                 tool_name=tool_name,
                 argument_digest=argument_digest,
                 workspace_fingerprint=normalized_workspace,
+                started_at=recorded_at,
+                finished_at=recorded_at,
             )
         )
         return fingerprint
@@ -319,7 +328,7 @@ def _event_summary(event_type: str, payload: Any, max_preview: int) -> str:
     selected: list[str] = []
     # 不把任意 message/error 正文带进 trace：第三方事件可能把用户提示、工具输出
     # 或 provider 原文放在这些字段中。摘要只保留受控的流程元数据。
-    for key in ("tool_name", "name", "reason", "stop_reason"):
+    for key in ("tool_name", "name", "toolName", "reason", "stop_reason"):
         value = payload.get(key)
         if isinstance(value, (str, int, float, bool)):
             preview, _ = redact_text(str(value), max_length=max_preview)
@@ -327,6 +336,35 @@ def _event_summary(event_type: str, payload: Any, max_preview: int) -> str:
     if not selected:
         selected.append(f"fields={','.join(sorted(str(key) for key in payload)[:6])}")
     return f"{event_type}: {'; '.join(selected)}"[:320]
+
+
+def _event_timestamps(payload: Mapping[str, Any]) -> tuple[datetime, datetime]:
+    """从事件提取受控时间元数据；无消息时间戳时以记录时刻为准。
+
+    Core 事件自身没有时间字段：消息类事件（Message*/Turn*）带
+    ``message.timestamp``（Unix 毫秒），工具执行类事件不携带 message。
+    两者都是事件刚发生的时刻，统一作为 started/finished（事件级精度）。
+    """
+
+    timestamp_ms = _message_timestamp_ms(payload.get("message"))
+    if timestamp_ms is None:
+        recorded_at = utc_now()
+        return recorded_at, recorded_at
+    instant = _utc_from_ms(timestamp_ms)
+    return instant, instant
+
+
+def _message_timestamp_ms(value: Any) -> int | None:
+    if not isinstance(value, Mapping):
+        return None
+    timestamp = value.get("timestamp")
+    if isinstance(timestamp, int) and timestamp >= 0:
+        return timestamp
+    return None
+
+
+def _utc_from_ms(value: int) -> datetime:
+    return datetime.fromtimestamp(value / 1000, tz=UTC)
 
 
 def _find_text(payload: Any, *keys: str) -> str | None:

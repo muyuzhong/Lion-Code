@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -35,6 +36,9 @@ DEEPEVAL_METRIC_NAMES = (
     "StepEfficiencyMetric",
     "TrajectoryQuality",
 )
+# 投影前丢弃的高频流式快照：Core ``message_update`` 与 message_start/end
+# 冗余（携带的是增量快照而非新事实），对脱敏 judge 无增量价值。
+NOISE_EVENT_TYPES = frozenset({"message_update"})
 _EMPTY_DIGEST = hashlib.sha256(b"").hexdigest()
 
 
@@ -44,6 +48,10 @@ class DeepEvalResultError(ValueError):
 
 class DeepEvalSchemaError(DeepEvalResultError):
     """检测到版本漂移、未知字段或不完整的结果。"""
+
+
+class DeepEvalTelemetryError(DeepEvalResultError):
+    """离线分析不允许携带 Confident AI 上报凭证。"""
 
 
 class DeepEvalTimeoutError(TimeoutError):
@@ -254,6 +262,7 @@ def analyze_verified_report(
 ) -> VerifiedEvaluationReport:
     """将分析结果写回 report 的独立字段，保留原始正式结果对象。"""
 
+    _ensure_telemetry_off()
     if report.task_result.task_id != trajectory.task_id:
         raise ValueError("DeepEval trajectory task_id does not match the report")
     case = DeepEvalCase(
@@ -268,7 +277,34 @@ def analyze_verified_report(
         judge=judge,
         timeout_seconds=timeout_seconds,
     )
+    analysis = analysis.model_copy(
+        update={
+            "extensions": {**analysis.extensions, "telemetry": "off"},
+        }
+    )
     return report.model_copy(update={"deepeval": analysis})
+
+
+def _ensure_telemetry_off() -> None:
+    """显式关停 DeepEval 上报：任何路径都不得携带 Confident AI 凭证。
+
+    SDK 未配置 ``CONFIDENT_API_KEY`` 时 ``is_confident()`` 为 False、不会
+    POST，但这是环境巧合而非不变量；此处把"不上报"固化为入口断言。
+    """
+
+    if os.environ.get("CONFIDENT_API_KEY") is not None:
+        raise DeepEvalTelemetryError(
+            "CONFIDENT_API_KEY is set; offline analysis never uploads to Confident AI"
+        )
+    try:
+        from deepeval.confident.api import is_confident
+    except ImportError:
+        # SDK 未安装时不存在任何上报能力。
+        return
+    if is_confident():
+        raise DeepEvalTelemetryError(
+            "DeepEval Confident AI key is configured; offline analysis never uploads"
+        )
 
 
 def _evaluate_direct(
@@ -516,12 +552,21 @@ def build_deepeval_trajectory(
     trace_events: Sequence[TraceEvent],
     max_events: int = MAX_TRAJECTORY_EVENTS,
 ) -> DeepEvalTrajectory:
-    """从 TraceEvent 仅投影 digest/工具元数据，不复制 summary 或正文。"""
+    """从 TraceEvent 仅投影 digest/工具元数据，不复制 summary 或正文。
+
+    投影前先按事件类型升采样（丢弃 ``NOISE_EVENT_TYPES`` 的高频流式
+    快照），再截断到上限；过滤只改变 judge 所见序列，不触碰原始持久化。
+    """
 
     if max_events < 1 or max_events > MAX_TRAJECTORY_EVENTS:
         raise ValueError(f"max_events must be between 1 and {MAX_TRAJECTORY_EVENTS}")
+    visible = tuple(
+        event
+        for event in trace_events
+        if event.event_type not in NOISE_EVENT_TYPES
+    )[:max_events]
     projected: list[DeepEvalTrajectoryEvent] = []
-    for event in tuple(trace_events)[:max_events]:
+    for event in visible:
         tool_name = None
         if event.tool_name is not None:
             tool_name, _ = redact_text(event.tool_name, max_length=160)
@@ -624,12 +669,14 @@ def _digest_json(value: Any) -> str:
 __all__: Sequence[str] = (
     "DEEPEVAL_METRIC_NAMES",
     "DEEPEVAL_RESULT_SCHEMA_VERSION",
+    "NOISE_EVENT_TYPES",
     "DeepEvalJudge",
     "DeepEvalMetricFixture",
     "DeepEvalMetricObservation",
     "DeepEvalResultError",
     "DeepEvalResultFixture",
     "DeepEvalSchemaError",
+    "DeepEvalTelemetryError",
     "DeepEvalTimeoutError",
     "analyze_deepeval_case",
     "analyze_verified_report",
