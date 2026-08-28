@@ -89,7 +89,7 @@ class VerifiedExecutionRequest:
     input_digest: str | None = None
     deepeval_judge_model: str | None = None
     deepeval_judge: DeepEvalJudge | None = None
-    deepeval_timeout_seconds: float | None = 120.0
+    deepeval_timeout_seconds: float | None = 300.0
     deepeval_samples: int = 3
     digest_ledger_path: Path | None = None
     opik_client: Any | None = None

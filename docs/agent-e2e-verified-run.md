@@ -82,9 +82,11 @@ Harbor 侧仅过程证据。JSON 报告保留两段原始字段，分歧可由
 可选 env `DEEPEVAL_SAMPLES`），`score` 取成功采样均值，指标行同时
 给出采样次数与范围 `score_min–score_max`；部分采样失败在 reason 中
 标注"N 次采样失败"，全部失败仍沿用单次失败语义。采样在分析
-deadline（`--deepeval-timeout`）内逐样本计时，超时样本按 TIMEOUT
-计入。多次采样不保证同一 payload 输出完全一致（LLM 无 stable
-seed），但给出均值±范围，使漂移可见、可复核。
+deadline（`--deepeval-timeout`，默认 300 秒）内逐样本计时，超时样本
+按 TIMEOUT 计入；模型延迟高时 deadline 需随采样次数放大（实测单次
+judge 调用约 28 秒，3 次采样 × 3 指标 ≈ 255 秒）。多次采样不保证
+同一 payload 输出完全一致（LLM 无 stable seed），但给出均值±范围，
+使漂移可见、可复核。
 
 ### 运行残留清理
 
