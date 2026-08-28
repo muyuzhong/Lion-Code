@@ -60,6 +60,25 @@ chmod 600 smoke.env   # 脚本启动时也会自动强制 600 并校验属主
 | `SMOKE_LEDGER_FILE` | `$RESULT_ROOT/digest-ledger.jsonl`(digest 寻迹账本) |
 | `PYTHON_BIN` / `HARBOR_BIN` | `$ROOT/.venv/bin/python` / `$ROOT/.venv/bin/harbor` |
 
+## 批量运行(多实例逐题)
+
+```bash
+INSTANCES="psf__requests-5414,pytest-dev__pytest-6202" ./run_batch.sh
+# 或位置参数:./run_batch.sh psf__requests-5414 pytest-dev__pytest-6202
+```
+
+`run_batch.sh` 复用与 `run_smoke.sh` 相同的凭证与环境约定,差异在批量:
+一次生成多任务 catalog,每实例独立 manifest / run-id / 输出目录
+(`results/smoke-batch-<时间戳>/run-<实例>-<时间戳>/`),逐题串行闭环。
+实例 id 为 `SWE-bench_Verified` 数据集行;任务公开 id 按
+`verified-<org>-<repo>-<编号>` 稳定映射(`pallets__flask-5014` →
+`verified-pallets-flask-5014`),`--task-id` 与 manifest 中的
+`task_ids` 因此无需手工指定。任一实例失败不中断后续题目,批量结束时
+汇总失败标记(0 全过;1 存在失败;2 脚本自身配置/凭证错误)。
+
+`SMOKE_BATCH_DIR` 可覆写批量工作目录(默认 `results/smoke-batch-<时间戳>`);
+`SMOKE_CHECK_ONLY=1` 同样只做前置校验。
+
 ## 残留清理(仅本机运维)
 
 ```bash

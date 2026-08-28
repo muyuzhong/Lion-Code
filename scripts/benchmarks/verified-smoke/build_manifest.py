@@ -1,12 +1,14 @@
-"""生成冻结 ExperimentManifest(单题、repeats=1、正预算)。
+"""生成冻结 ExperimentManifest(单任务、repeats=1、正预算)。
 
 凭证只以环境变量名出现在 manifest;值绝不落盘。用法:
   python build_manifest.py --model <model> --provider <provider> \\
       --env OPENAI_API_KEY,OPENAI_BASE_URL --run-id <run-id> \\
-      [--output-dir <dir>] [--budget 2.0] [--timeout 1200] [--commit <sha>]
+      [--task-id <id>] [--output-dir <dir>] [--budget 2.0] [--timeout 1200] \\
+      [--commit <sha>]
 
---output-dir 缺省为脚本自身目录,内含 catalog.json/catalog.lock.json,
-manifest 亦写入该目录。模型名优先级:--model > 环境变量 LION_MODEL。
+--task-id 缺省为 catalog 中第一个任务。--output-dir 缺省为脚本自身目录,
+内含 catalog.json/catalog.lock.json,manifest 亦写入该目录。
+模型名优先级:--model > 环境变量 LION_MODEL。
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ def main() -> None:
         "--env", required=True, help="逗号分隔的 credential_env_vars 名"
     )
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--task-id", default=None, help="缺省取 catalog 第一个任务")
     parser.add_argument("--output-dir", default=str(Path(__file__).resolve().parent))
     parser.add_argument("--budget", type=float, default=2.0)
     parser.add_argument("--timeout", type=float, default=1200.0)
@@ -56,7 +59,11 @@ def main() -> None:
         raise SystemExit("catalog lock must be CatalogLock")
     if lock.catalog_sha256 != catalog_sha256(catalog):
         raise SystemExit("catalog/lock mismatch")
-    task = catalog.tasks[0]
+    task_ids = tuple(task.task_id for task in catalog.tasks)
+    selected = args.task_id or task_ids[0]
+    if selected not in task_ids:
+        raise SystemExit(f"task-id {selected!r} 不在 catalog 任务列表中: {task_ids!r}")
+    task = next(task for task in catalog.tasks if task.task_id == selected)
     credential_env_vars = tuple(
         name.strip() for name in args.env.split(",") if name.strip()
     )
@@ -88,7 +95,7 @@ def main() -> None:
         timeout_seconds=profile.timeout_seconds,
         budget_usd=profile.budget_usd,
         platform="linux-docker",
-        verifier_image_digest=_resolve_digest(),
+        verifier_image_digest=_resolve_digest(task.extensions.get("swebench_image")),
     )
     (output_dir / f"manifest.{args.run_id}.json").write_text(
         manifest.canonical_json() + "\n", encoding="utf-8"
@@ -109,10 +116,11 @@ def main() -> None:
     )
 
 
-def _resolve_digest() -> str:
+def _resolve_digest(image: str | None) -> str:
     import re
 
-    image = "swebench/sweb.eval.x86_64.pallets_1776_flask-5014:latest"
+    if not image:
+        raise SystemExit("catalog 任务缺少 swebench_image 扩展字段")
     digest = subprocess.check_output(
         ["docker", "inspect", "--format", "{{index .RepoDigests 0}}", image],
         text=True,
