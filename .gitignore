@@ -35,3 +35,6 @@ output/
 .claude/
 .codegraph/
 .deepeval/
+
+# 评测冒烟模板的本机凭证文件(值只走 env,绝不入库)
+scripts/benchmarks/verified-smoke/smoke.env

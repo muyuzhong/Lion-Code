@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "核对模板脚本与 verified-run 主链契约/退出码一致,未改动主链语义与 schema"}
+{"file": ".trellis/spec/backend/secret-boundary.md", "reason": "核对脱敏红线:模板/文档无密钥值、无个人字面量;smoke.env 权限不变量成立"}
