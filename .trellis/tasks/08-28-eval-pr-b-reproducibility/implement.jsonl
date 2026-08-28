@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/agent-e2e-evaluation.md", "reason": "verified-run 链路契约(§8-10)与退出码约定;模板脚本必须与之保持一致,不得改动主链语义"}
+{"file": ".trellis/spec/backend/secret-boundary.md", "reason": "凭证处理原则:密钥只走 env、不落盘、不进入输出;P0-4 权限守卫与 smoke.env.example 脱敏的依据"}
