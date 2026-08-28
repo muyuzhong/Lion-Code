@@ -31,8 +31,11 @@ export OPIK_WORKSPACE=...
 DeepEval 离线分析显式关停上报：不要设置 `CONFIDENT_API_KEY`（设置了会
 被分析入口拒绝并记录失败）；未设置时分析结果记
 `extensions.telemetry == "off"`。DeepEval SDK 收尾阶段打印的
-`deepeval view` / Confident AI 共享建议是 SDK 固定文案（无官方开关），
-属于已知输出，不表示发生上报。
+`deepeval view` / Confident AI 共享建议与 `All metrics errored ...
+Posting the run anyway ... Confident AI dashboard` 横幅均为 SDK 固定
+展示层文案（无官方开关）：横幅在 SDK 的 TestRun 未收集到 metric data
+时必然打印，即使三指标实际已 completed 且带分数——属于已知输出，
+不表示发生上报。
 
 ## 单题运行
 
