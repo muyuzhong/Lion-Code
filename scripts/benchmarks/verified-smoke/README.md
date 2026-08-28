@@ -25,13 +25,14 @@ cp smoke.env.example smoke.env
 chmod 600 smoke.env   # 脚本启动时也会自动强制 600 并校验属主
 ```
 
-填写三个必填变量与两个可选变量:
+填写四个必填变量与两个可选变量:
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `OPENAI_API_KEY` | ✅ | 模型 Provider 密钥(官方或 OpenAI-compatible 端点) |
 | `LION_MODEL` | ✅ | 模型名,写入 `manifest.profile.model` |
 | `OPIK_WORKSPACE` | ✅ | Opik 工作空间名 |
+| `DEEPEVAL_JUDGE_MODEL` | ✅ | 固定 judge 模型,独立于 agent 模型;避免 agent 换代导致分数不可比 |
 | `OPENAI_BASE_URL` | — | 非官方端点;与 DeepEval judge 端点同源 |
 | `OPIK_API_KEY` | — | Opik 凭证(未配置时观测走 unavailable 分支) |
 
@@ -44,7 +45,9 @@ chmod 600 smoke.env   # 脚本启动时也会自动强制 600 并校验属主
 脚本依次:校验/加固 `smoke.env`(600 + 属主) → source 凭证 → 重定向
 受限主目录与缓存(`HOME`/`HF_HOME`/`XDG_CACHE_HOME`)与 judge 端点
 (`LITELLM_API_BASE`) → 生成冻结 manifest → 执行真实单题闭环
-(artifact → Harbor → 官方 Harness → DeepEval → Opik)。
+(artifact → Harbor → 官方 Harness → DeepEval → Opik)。judge 模型经
+`--deepeval-judge-model "$DEEPEVAL_JUDGE_MODEL"` 显式传入,报告同时
+记录 agent 模型、judge 模型与 Judge 指纹(judge 模型 + 端点)。
 
 结果默认输出到 `$ROOT/benchmarks/agent_e2e/results/smoke-flask-5014/`。
 下述环境变量可覆写默认路径(均非必填):

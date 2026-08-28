@@ -48,6 +48,34 @@ DeepEval judge 经 litellm 访问自定义 OpenAI-compatible 端点：设置
 `export LITELLM_API_BASE=<endpoint>`（与 `OPENAI_BASE_URL` 同源；一键
 脚本在未显式设置时自动取 `OPENAI_BASE_URL` 的值）；不设置时走官方端点。
 
+### judge 独立配置与指纹
+
+judge 模型与 agent 模型解耦：直接 CLI 可传 `--deepeval-judge-model`
+显式指定（未传时默认跟随 `profile.model`，属显式可见的旧行为）；一键
+脚本要求 `DEEPEVAL_JUDGE_MODEL` 必填并显式传递，避免 agent 模型换代
+静默改变评分基准。`DeepEvalAnalysis` 同时记录 `agent_model`、
+`judge_model` 与 `judge_fingerprint`（SHA-256 于 judge 模型 +
+`LITELLM_API_BASE`，端点只进哈希不进报告原文）——换机或换代后可按
+指纹追溯评分基准是否一致。
+
+### 评分阈值与门禁语义
+
+三指标统一阈值 0.5（运行侧策略常量，≥0.5 视为达阈值）：
+`DeepEvalMetricResult` 记录 `threshold`/`threshold_met` 逐项对照，
+`DeepEvalAnalysis.score_gate` 给出已评分指标的阈值门禁结论。报告
+"门禁结论"行合并展示确定性判定（官方 Harness verdict，权威）与
+judge 评分门禁（观测）。judge 分数与 Harbor reward 一样不参与
+`task_result` 判定，也不影响 CLI 退出码约定。
+
+### Harbor 与官方结果分歧
+
+Harbor 例行 verifier 与官方 Harness 结论冲突时（如 verifier 因内部
+环境失败给 reward 0.0 而官方 `resolved=true`），Markdown 报告在官方
+Harness 段渲染"分歧标注"文字，明确失败归属：判定以官方 Harness 为准，
+Harbor 侧仅过程证据。JSON 报告保留两段原始字段，分歧可由
+`harbor.verifier_outcome`/`harbor.reward` 与 `harness.resolved`
+推导；reward 仍不参与判定。
+
 ### smoke.env 权限
 
 评测凭证文件 `smoke.env` 必须为 600 且属主为运行用户（

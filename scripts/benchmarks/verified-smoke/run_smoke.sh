@@ -2,6 +2,7 @@
 # flask-5014 真实单题评测(Linux Docker smoke)——脱敏模板,可换机复现。
 # 前置:同目录 smoke.env(从 smoke.env.example 复制并填写):
 #   OPENAI_API_KEY 必填;LION_MODEL 必填;OPIK_WORKSPACE 必填;
+#   DEEPEVAL_JUDGE_MODEL 必填(固定 judge 模型,独立于 agent 模型);
 #   OPENAI_BASE_URL/LITELLM_API_BASE/OPIK_API_KEY 可选。
 # smoke.env 权限要求:属主为运行用户且权限 600(脚本启动时自动强制,
 # 无法保证时拒绝启动)。
@@ -50,7 +51,7 @@ source "$SMOKE_ENV_FILE"
 set +a
 
 # 2) 必填项校验
-for var in OPENAI_API_KEY LION_MODEL OPIK_WORKSPACE; do
+for var in OPENAI_API_KEY LION_MODEL OPIK_WORKSPACE DEEPEVAL_JUDGE_MODEL; do
   if [ -z "${!var:-}" ]; then
     echo "错误:smoke.env 中未填写 $var" >&2
     exit 2
@@ -94,6 +95,7 @@ OUTPUT_DIR="$WORK_DIR/run-$RUN_ID"
   --python "$PY" \
   --harness-python "$PY" \
   --harbor "$HARBOR_BIN" \
+  --deepeval-judge-model "$DEEPEVAL_JUDGE_MODEL" \
   --opik-project lion-agent-e2e \
   --opik-workspace "$OPIK_WORKSPACE"
 EXIT_CODE=$?
