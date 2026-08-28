@@ -12,15 +12,15 @@
   "assignee": "zhangcx",
   "createdAt": "2026-08-28",
   "completedAt": null,
-  "branch": null,
+  "branch": "eval-fidelity-pr-a",
   "base_branch": "master",
   "worktree_path": null,
   "commit": null,
-  "pr_url": null,
+  "pr_url": "https://github.com/muyuzhong/Lion-Code/pull/129",
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "PR #129:p0-1/p1-1/p1-2。真实闭环重跑验收(flask-5014)待评测主机执行;验收通过后归档。",
   "meta": {}
 }
