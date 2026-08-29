@@ -243,13 +243,24 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   constructor parameters. The committed calibration fixtures
   (`tests/benchmarks/fixtures/agent_e2e/calibration/`) pin recall (violations detected) and
   precision (clean traces never vetoed).
-- `PairedExperiment` distinguishes two experiment kinds. `CONTROLLED` requires equal
-  `agent_code_sha` between baseline and candidate so only the declared Harness variable differs
-  (`custom_system_prompt` / filtered `tool_registry` are actually injected through
-  `VariantInjectionSpec`); its paired deltas may be attributed to the declared mechanism.
-  `REGRESSION` allows different agent code and only supports "this version regressed as a whole"
-  claims. `compression_version` remains a declared field with no runtime switch and must never
-  be attributed causally; this limitation is recorded in the profile, not hidden.
+- `PairedExperiment` distinguishes three experiment kinds. `CONTROLLED` requires equal
+  `agent_code_sha` between baseline and candidate **and verified treatment**: both sides must
+  carry `InjectionEvidence` (from `WorkerResult.injection_evidence` → `TaskResult.extensions`)
+  with resolved maps and distinct non-empty injection fingerprints — i.e. the declared variable
+  was actually injected (`custom_system_prompt` / filtered `tool_registry`), not just declared.
+  Its paired deltas may be attributed to the declared mechanism. `REGRESSION` allows different
+  agent code and only supports "this version regressed as a whole" claims.
+  `UNSUPPORTED_TREATMENT` covers same-code pairs where the variable has no runtime switch
+  (e.g. `compression_version`) or injection did not resolve (missing maps, identical
+  fingerprints, no evidence): the report must state the delta is not attributable to that
+  mechanism. `compression_version` remains a declared field with no runtime switch and must
+  never produce `CONTROLLED`; this limitation is recorded in the profile, not hidden.
+- `VariantInjectionSpec` travels with the `ExperimentManifest` (its `extensions`
+  `variant_injection_spec` key is part of the frozen manifest) from host to the Harbor
+  installed-agent, so `worker_entrypoint` resolves and applies the same mapping table on the
+  container side. `harbor_agent._SOURCE_FILES` must include every module the worker chain
+  imports (`evidence.py`, `variant_injection.py`); a `request_variant` Harbor run requires
+  both an injected spec and a manifest that carries it, else the run is invalid.
 - `classify_failure` consumes only redacted `TraceEvent` metadata and emits candidate labels plus
   event sequence offsets. Three consecutive identical tool/argument/workspace fingerprints are
   `loop`; typed context/compaction signals are `context_decay`; a disallowed tool or typed

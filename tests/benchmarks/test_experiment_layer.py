@@ -22,6 +22,9 @@ from benchmarks.agent_e2e.models import (
     EvaluationReport,
     ExperimentManifest,
     ExperimentProfile,
+    InjectionEvidence,
+    RequestedVariant,
+    ResolvedVariant,
     ResultValidity,
     TaskResult,
     TaskSpec,
@@ -56,9 +59,22 @@ def _result(
     attempt: int = 1,
     passed: bool,
     stop_reason: str = "completed",
+    injection_fingerprint: str | None = None,
+    prompt_hit: bool = False,
+    tool_policy_hit: bool = False,
 ) -> TaskResult:
     outcome = VerifierOutcome.PASSED if passed else VerifierOutcome.FAILED
     verdict = TaskVerdict.PASSED if passed else TaskVerdict.FAILED
+    extensions: dict = {}
+    if injection_fingerprint is not None:
+        extensions["injection_evidence"] = InjectionEvidence(
+            requested=RequestedVariant(),
+            resolved_variant=ResolvedVariant(
+                prompt_hit=prompt_hit,
+                tool_policy_hit=tool_policy_hit,
+            ),
+            injection_fingerprint=injection_fingerprint,
+        ).model_dump(mode="json")
     return TaskResult(
         task_id=task_id,
         attempt=attempt,
@@ -82,6 +98,7 @@ def _result(
             exit_code=0 if passed else 1,
             output_digest="d" * 64,
         ),
+        extensions=extensions,
     )
 
 
@@ -94,6 +111,9 @@ def _report(
     model: str = "fake-model",
     catalog_id: str = "pair-fixture",
     agent_code_sha: str = "abcdef0",
+    injection_fingerprint: str | None = None,
+    prompt_hit: bool = False,
+    tool_policy_hit: bool = False,
 ) -> EvaluationReport:
     tasks = tuple(_task(f"task-{index}") for index in range(1, len(outcomes) + 1))
     catalog = Catalog(catalog_id=catalog_id, catalog_version="v1", tasks=tasks)
@@ -130,7 +150,13 @@ def _report(
     return build_report(
         manifest=manifest,
         results=tuple(
-            _result(task.task_id, passed=passed)
+            _result(
+                task.task_id,
+                passed=passed,
+                injection_fingerprint=injection_fingerprint,
+                prompt_hit=prompt_hit,
+                tool_policy_hit=tool_policy_hit,
+            )
             for task, passed in zip(tasks, outcomes, strict=True)
         ),
     )
@@ -435,10 +461,55 @@ class TestPairedExperimentReport:
 
 
 class TestExperimentKind:
-    def test_same_agent_code_is_controlled(self) -> None:
+    def test_no_injection_evidence_is_unsupported_treatment(self) -> None:
+        # 同代码但没有任何注入证据(旧执行链):不得声称 CONTROLLED。
         experiment = PairedExperiment.build(
             _baseline(),
             _candidate(),
+            [ChangeKind.PROMPT],
+        )
+        assert experiment.experiment_kind is ExperimentKind.UNSUPPORTED_TREATMENT
+        report = experiment.to_report()
+        assert report.experiment_kind is ExperimentKind.UNSUPPORTED_TREATMENT
+        assert report.injection_fingerprint is None
+
+    def test_same_fingerprint_is_unsupported_treatment(self) -> None:
+        # 声明了不同版本但指纹相同 = 没有真正的 treatment。
+        experiment = PairedExperiment.build(
+            _report(
+                "run-baseline",
+                (True, False, True, False),
+                prompt_version="prompt-v1",
+                injection_fingerprint="h" * 64,
+                prompt_hit=True,
+            ),
+            _report(
+                "run-candidate",
+                (False, True, True, False),
+                prompt_version="prompt-v2",
+                injection_fingerprint="h" * 64,
+                prompt_hit=True,
+            ),
+            [ChangeKind.PROMPT],
+        )
+        assert experiment.experiment_kind is ExperimentKind.UNSUPPORTED_TREATMENT
+
+    def test_resolved_different_injections_is_controlled(self) -> None:
+        experiment = PairedExperiment.build(
+            _report(
+                "run-baseline",
+                (True, False, True, False),
+                prompt_version="prompt-v1",
+                injection_fingerprint="h1" + "a" * 62,
+                prompt_hit=True,
+            ),
+            _report(
+                "run-candidate",
+                (False, True, True, False),
+                prompt_version="prompt-v2",
+                injection_fingerprint="h2" + "b" * 62,
+                prompt_hit=True,
+            ),
             [ChangeKind.PROMPT],
         )
         assert experiment.experiment_kind is ExperimentKind.CONTROLLED
@@ -446,6 +517,29 @@ class TestExperimentKind:
         assert report.experiment_kind is ExperimentKind.CONTROLLED
         assert report.baseline_agent_code_sha == "abcdef0"
         assert report.candidate_agent_code_sha == "abcdef0"
+        assert report.injection_fingerprint is not None
+
+    def test_compression_declared_never_controlled(self) -> None:
+        experiment = PairedExperiment.build(
+            _report(
+                "run-baseline",
+                (True, False, True, False),
+                prompt_version="prompt-v1",
+                compression_version="compression-v1",
+                injection_fingerprint="h1" + "a" * 62,
+                prompt_hit=True,
+            ),
+            _report(
+                "run-candidate",
+                (False, True, True, False),
+                prompt_version="prompt-v1",
+                compression_version="compression-v2",
+                injection_fingerprint="h2" + "b" * 62,
+                prompt_hit=True,
+            ),
+            [ChangeKind.COMPRESSION],
+        )
+        assert experiment.experiment_kind is ExperimentKind.UNSUPPORTED_TREATMENT
 
     def test_different_agent_code_is_regression(self) -> None:
         other = _report(
@@ -497,10 +591,68 @@ class TestExperimentKind:
                 ),
             )
 
+    def test_report_rejects_controlled_without_fingerprint(self) -> None:
+        with pytest.raises(ValueError, match="injection fingerprint"):
+            PairedExperimentReport(
+                baseline_run_id="run-baseline",
+                candidate_run_id="run-candidate",
+                experiment_kind=ExperimentKind.CONTROLLED,
+                baseline_agent_code_sha="abcdef0",
+                candidate_agent_code_sha="abcdef0",
+                declared_changes=(ChangeKind.PROMPT,),
+                comparability_fingerprint="a" * 64,
+                trials=(),
+                counts=PairedCounts(
+                    fail_to_pass=0,
+                    pass_to_fail=0,
+                    pass_to_pass=0,
+                    fail_to_fail=0,
+                    invalid=0,
+                ),
+            )
+
+    def test_report_rejects_unsupported_with_different_code(self) -> None:
+        with pytest.raises(ValueError, match="identical agent code"):
+            PairedExperimentReport(
+                baseline_run_id="run-baseline",
+                candidate_run_id="run-candidate",
+                experiment_kind=ExperimentKind.UNSUPPORTED_TREATMENT,
+                baseline_agent_code_sha="abcdef0",
+                candidate_agent_code_sha="deadbee",
+                declared_changes=(ChangeKind.PROMPT,),
+                comparability_fingerprint="a" * 64,
+                trials=(),
+                counts=PairedCounts(
+                    fail_to_pass=0,
+                    pass_to_fail=0,
+                    pass_to_pass=0,
+                    fail_to_fail=0,
+                    invalid=0,
+                ),
+            )
+
     def test_markdown_distinguishes_kinds(self) -> None:
-        controlled = PairedExperiment.build(
+        unsupported = PairedExperiment.build(
             _baseline(),
             _candidate(),
+            [ChangeKind.PROMPT],
+        ).to_report()
+        assert "不可" in unsupported.render_markdown()
+        controlled = PairedExperiment.build(
+            _report(
+                "run-baseline",
+                (True, False, True, False),
+                prompt_version="prompt-v1",
+                injection_fingerprint="h1" + "a" * 62,
+                prompt_hit=True,
+            ),
+            _report(
+                "run-candidate",
+                (False, True, True, False),
+                prompt_version="prompt-v2",
+                injection_fingerprint="h2" + "b" * 62,
+                prompt_hit=True,
+            ),
             [ChangeKind.PROMPT],
         ).to_report()
         assert "受控实验" in controlled.render_markdown()
