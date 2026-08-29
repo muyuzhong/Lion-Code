@@ -46,6 +46,15 @@ from .deepeval_metrics import (
     build_deepeval_metrics,
     deepeval_case_to_test_case,
 )
+from .experiment import (
+    HarnessVariant,
+    PairedCounts,
+    PairedExperiment,
+    PairedExperimentError,
+    PairedExperimentReport,
+    PairedTrial,
+    PairedTrialOutcome,
+)
 from .external_anchor import (
     AnchorRunStatus,
     CalibrationPoint,
@@ -285,6 +294,7 @@ __all__ = [
     "HarnessResultError",
     "HarnessResultFixture",
     "HarnessSchemaError",
+    "HarnessVariant",
     "HistoricalPreflight",
     "OfficialEvaluationRecord",
     "OfficialRecordStatus",
@@ -299,6 +309,12 @@ __all__ = [
     "OpikFeedback",
     "OpikSpan",
     "OpikTracePayload",
+    "PairedCounts",
+    "PairedExperiment",
+    "PairedExperimentError",
+    "PairedExperimentReport",
+    "PairedTrial",
+    "PairedTrialOutcome",
     "PrivateEvidence",
     "RegressionGateDecision",
     "RegressionGateError",
