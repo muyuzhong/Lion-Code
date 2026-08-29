@@ -89,6 +89,19 @@ for INSTANCE in "${INSTANCES[@]}"; do
   IMAGE="$("$PY" -c 'import json, sys; c=json.load(open(sys.argv[1])); print(next(t for t in c["tasks"] if t["task_id"] == sys.argv[2])["extensions"]["swebench_image"])' "$WORK_DIR/catalog.json" "$TASK_ID")" || { echo "错误:[$INSTANCE] 读取镜像名失败" >&2; FAILED=1; continue; }
   echo "[$INSTANCE] 预拉取镜像 $IMAGE"
   docker pull -q "$IMAGE" >/dev/null 2>&1 || { echo "错误:[$INSTANCE] 镜像拉取失败" >&2; FAILED=1; continue; }
+  # 环境可判定性预检:gold patch 也判不过的实例剔除分母(默认开启,
+  # SMOKE_SKIP_GOLD_PREFLIGHT=1 关闭)。避免把环境漂移误算成 agent 失败。
+  if [ "${SMOKE_SKIP_GOLD_PREFLIGHT:-0}" != "1" ]; then
+    PREFLIGHT_OUT="$("$PY" "$SMOKE_TOOL_DIR/gold_preflight.py" "$INSTANCE" \
+      --work-dir "$WORK_DIR/gold-preflight-$RUN_ID" --harness-python "$PY" 2>/dev/null)"
+    PREFLIGHT_STATUS="$(printf '%s' "$PREFLIGHT_OUT" | "$PY" -c 'import json,sys; print(json.load(sys.stdin).get("status","error"))' 2>/dev/null || echo error)"
+    if [ "$PREFLIGHT_STATUS" = "unresolved" ]; then
+      echo "⚠️ [$INSTANCE] 环境不可判定(gold patch 亦未通过官方判定),剔除分母,跳过" >&2
+      FAILED=1
+      continue
+    fi
+    echo "[$INSTANCE] 预检通过:$PREFLIGHT_STATUS$PREFLIGHT_OUT"
+  fi
   if ! "$PY" "$SMOKE_TOOL_DIR/build_manifest.py" \
     --env OPENAI_API_KEY,OPENAI_BASE_URL --output-dir "$WORK_DIR" \
     --model "$LION_MODEL" --run-id "$RUN_ID" \

@@ -79,6 +79,25 @@ INSTANCES="psf__requests-5414,pytest-dev__pytest-6202" ./run_batch.sh
 `SMOKE_BATCH_DIR` 可覆写批量工作目录(默认 `results/smoke-batch-<时间戳>`);
 `SMOKE_CHECK_ONLY=1` 同样只做前置校验。
 
+### 环境可判定性预检(gold 预检)
+
+批量默认在每题 agent 运行前用官方 gold patch 做一次环境预检
+(`gold_preflight.py`):SWE-bench Verified 老镜像在 Python 3.11 下可能
+因 PASS_TO_PASS 环境回归导致连 gold patch 都判不过(如 requests-5414
+镜像内 4 项超时测试失败),这类实例会被标记 `unresolved` 并剔除分母,
+避免把环境漂移误算成 agent 失败。`SMOKE_SKIP_GOLD_PREFLIGHT=1` 可关闭。
+
+```bash
+# 单独预检一个实例
+HF_HOME=<hf-home> $ROOT/.venv/bin/python gold_preflight.py \
+  psf__requests-5414 --work-dir /tmp/gpf
+```
+
+此外,官方 Harness 报告中的测试明细(FAIL_TO_PASS / PASS_TO_PASS
+通过与失败计数)会随 `verified-report.json` 的 `harness.extensions.official_tests`
+保留;当 FAIL_TO_PASS 全部通过但 `resolved=False` 时,报告 md 会标注
+"⚠️ 环境回归疑似",提示该失败不归因于 agent。
+
 ## 残留清理(仅本机运维)
 
 ```bash
