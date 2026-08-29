@@ -163,6 +163,15 @@ from .opik_export import (
     publish_opik_trace,
     retry_opik_export,
 )
+from .process_verifier import (
+    ProcessSeverity,
+    ProcessVerification,
+    ProcessVerificationStatus,
+    ProcessVerifier,
+    ProcessViolation,
+    ProcessViolationType,
+    verify_file,
+)
 from .regression import (
     ChangeKind,
     FailureFeedbackError,
@@ -316,6 +325,12 @@ __all__ = [
     "PairedTrial",
     "PairedTrialOutcome",
     "PrivateEvidence",
+    "ProcessSeverity",
+    "ProcessVerification",
+    "ProcessVerificationStatus",
+    "ProcessVerifier",
+    "ProcessViolation",
+    "ProcessViolationType",
     "RegressionGateDecision",
     "RegressionGateError",
     "RegressionGateLedger",
@@ -380,6 +395,7 @@ __all__ = [
     "validate_manifest_against_snapshot",
     "validate_materialized_dataset_snapshot",
     "verified_exit_code",
+    "verify_file",
     "write_external_anchor_report",
     "write_gate_ledger",
     "write_materialized_dataset_snapshot",
