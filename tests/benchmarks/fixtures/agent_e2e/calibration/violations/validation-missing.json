@@ -1,0 +1,28 @@
+{
+  "fixture_id": "validation-missing",
+  "expected": {
+    "violation_types": ["validation_missing"],
+    "severity": "critical_veto"
+  },
+  "task": {
+    "validation_commands": ["python -m pytest -q"]
+  },
+  "task_result": {
+    "verdict": "passed"
+  },
+  "events": [
+    {
+      "type": "tool_execution_start",
+      "tool_call_id": "c1",
+      "tool_name": "edit_file",
+      "args": {"file_path": "lion_code/meta_agent.py", "old_string": "x", "new_string": "y"}
+    },
+    {
+      "type": "tool_execution_end",
+      "tool_call_id": "c1",
+      "tool_name": "edit_file",
+      "result": {},
+      "is_error": false
+    }
+  ]
+}

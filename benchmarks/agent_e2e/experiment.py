@@ -82,6 +82,19 @@ class PairedTrialOutcome(str, Enum):
     INVALID = "invalid"
 
 
+class ExperimentKind(str, Enum):
+    """配对实验的因果语义。
+
+    - ``CONTROLLED``:两侧 agent_code_sha 相同,差异仅限声明的
+      Harness 变量(经 worker 注入)→ 可以谈「该机制导致的变化」;
+    - ``REGRESSION``:Harness 代码版本不同 → 只能谈「版本整体是否
+      回归」,不能归因到具体机制。
+    """
+
+    CONTROLLED = "controlled"
+    REGRESSION = "regression"
+
+
 class HarnessVariant(VersionedModel):
     """一次实验中 Harness 的可变部分,作为评估的一等公民。
 
@@ -141,9 +154,9 @@ class PairedTrial(VersionedModel):
             raise ValueError("Baseline result does not match the trial key")
         if candidate_key != (self.task_id, self.attempt):
             raise ValueError("Candidate result does not match the trial key")
-        comparable = _is_comparable_result(self.baseline_result) and _is_comparable_result(
-            self.candidate_result
-        )
+        comparable = _is_comparable_result(
+            self.baseline_result
+        ) and _is_comparable_result(self.candidate_result)
         if comparable and self.outcome_delta is PairedTrialOutcome.INVALID:
             raise ValueError("Comparable trial pair cannot carry INVALID delta")
         if not comparable and self.outcome_delta is not PairedTrialOutcome.INVALID:
@@ -169,6 +182,12 @@ class PairedExperimentReport(VersionedModel):
 
     baseline_run_id: str = Field(min_length=1, max_length=128)
     candidate_run_id: str = Field(min_length=1, max_length=128)
+    experiment_kind: ExperimentKind
+    baseline_agent_code_sha: str = Field(min_length=7, max_length=128)
+    candidate_agent_code_sha: str = Field(min_length=7, max_length=128)
+    injection_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
     declared_changes: tuple[ChangeKind, ...] = Field(min_length=1)
     comparability_fingerprint: str = Field(min_length=64, max_length=64)
     trials: tuple[PairedTrial, ...] = ()
@@ -188,17 +207,38 @@ class PairedExperimentReport(VersionedModel):
             raise ValueError("Report counts do not match its trials")
         return self
 
+    @model_validator(mode="after")
+    def _validate_experiment_kind(self) -> PairedExperimentReport:
+        same_code = self.baseline_agent_code_sha == self.candidate_agent_code_sha
+        if self.experiment_kind is ExperimentKind.CONTROLLED and not same_code:
+            raise ValueError("Controlled experiments require identical agent code")
+        if self.experiment_kind is ExperimentKind.REGRESSION and same_code:
+            raise ValueError("Regression comparisons require different agent code")
+        return self
+
     def render_markdown(self) -> str:
-        """生成中文四格摘要报告,供人工快速复核。"""
+        """生成中文四格摘要报告,按实验语义区分结论措辞。"""
 
         changes = ", ".join(kind.value for kind in self.declared_changes)
+        if self.experiment_kind is ExperimentKind.CONTROLLED:
+            conclusion = (
+                "受控实验(两侧 agent 代码相同):配对差异可归因于声明"
+                f"变更 [{changes}] 的机制效果。"
+            )
+        else:
+            conclusion = (
+                "跨版本回归比较(agent 代码不同):配对差异只说明版本"
+                "整体回归,不可归因到具体机制。"
+            )
         lines = [
             "# 配对实验报告",
             "",
-            f"- baseline: `{self.baseline_run_id}`",
-            f"- candidate: `{self.candidate_run_id}`",
+            f"- baseline: `{self.baseline_run_id}` (agent {self.baseline_agent_code_sha})",
+            f"- candidate: `{self.candidate_run_id}` (agent {self.candidate_agent_code_sha})",
+            f"- 实验语义: {self.experiment_kind.value}",
             f"- 声明变更: {changes}",
             f"- comparability fingerprint: `{self.comparability_fingerprint}`",
+            f"- 结论: {conclusion}",
             "",
             "## 配对四格",
             "",
@@ -232,12 +272,16 @@ class PairedExperiment:
         declared_changes: tuple[ChangeKind, ...],
         trials: tuple[PairedTrial, ...],
         comparability_fingerprint: str,
+        experiment_kind: ExperimentKind,
+        injection_fingerprint: str | None = None,
     ) -> None:
         self.baseline = baseline
         self.candidate = candidate
         self.declared_changes = declared_changes
         self.trials = trials
         self.comparability_fingerprint = comparability_fingerprint
+        self.experiment_kind = experiment_kind
+        self.injection_fingerprint = injection_fingerprint
 
     @classmethod
     def build(
@@ -263,6 +307,7 @@ class PairedExperiment:
             declared_changes=changes,
             trials=trials,
             comparability_fingerprint=_comparability_fingerprint(baseline, candidate),
+            experiment_kind=_experiment_kind(baseline, candidate),
         )
 
     def to_report(self) -> PairedExperimentReport:
@@ -271,6 +316,10 @@ class PairedExperiment:
         return PairedExperimentReport(
             baseline_run_id=self.baseline.manifest.run_id,
             candidate_run_id=self.candidate.manifest.run_id,
+            experiment_kind=self.experiment_kind,
+            baseline_agent_code_sha=self.baseline.manifest.agent_code_sha,
+            candidate_agent_code_sha=self.candidate.manifest.agent_code_sha,
+            injection_fingerprint=self.injection_fingerprint,
             declared_changes=self.declared_changes,
             comparability_fingerprint=self.comparability_fingerprint,
             trials=self.trials,
@@ -287,6 +336,15 @@ def _normalize_changes(changes: Iterable[ChangeKind]) -> tuple[ChangeKind, ...]:
     return tuple(sorted(normalized, key=lambda kind: kind.value))
 
 
+def _experiment_kind(
+    baseline: EvaluationReport,
+    candidate: EvaluationReport,
+) -> ExperimentKind:
+    if baseline.manifest.agent_code_sha == candidate.manifest.agent_code_sha:
+        return ExperimentKind.CONTROLLED
+    return ExperimentKind.REGRESSION
+
+
 def _comparability_errors(
     baseline: EvaluationReport,
     candidate: EvaluationReport,
@@ -299,17 +357,22 @@ def _comparability_errors(
         errors.append("Baseline and candidate must use distinct run IDs")
     _compare_catalog_locks(baseline.manifest, candidate.manifest, errors)
     for field_name in _MANIFEST_INVARIANT_FIELDS:
-        if getattr(baseline.manifest, field_name) != getattr(candidate.manifest, field_name):
+        if getattr(baseline.manifest, field_name) != getattr(
+            candidate.manifest, field_name
+        ):
             errors.append(f"Manifest invariant field differs: {field_name}")
     baseline_profile = baseline.manifest.profile
     candidate_profile = candidate.manifest.profile
     for field_name in _PROFILE_INVARIANT_FIELDS:
-        if getattr(baseline_profile, field_name) != getattr(candidate_profile, field_name):
+        if getattr(baseline_profile, field_name) != getattr(
+            candidate_profile, field_name
+        ):
             errors.append(f"Profile invariant field differs: {field_name}")
     actual_changes = {
         kind
         for kind, field_name in _PROFILE_CHANGE_FIELDS.items()
-        if getattr(baseline_profile, field_name) != getattr(candidate_profile, field_name)
+        if getattr(baseline_profile, field_name)
+        != getattr(candidate_profile, field_name)
     }
     if actual_changes != set(declared_changes):
         errors.append("Declared change kinds do not match profile version differences")
@@ -350,7 +413,9 @@ def _is_comparable_result(result: TaskResult) -> bool:
 
 def _compare_catalog_locks(baseline: Any, candidate: Any, errors: list[str]) -> None:
     for field_name in _CATALOG_LOCK_FIELDS:
-        if getattr(baseline.catalog, field_name) != getattr(candidate.catalog, field_name):
+        if getattr(baseline.catalog, field_name) != getattr(
+            candidate.catalog, field_name
+        ):
             errors.append(f"Catalog lock field differs: {field_name}")
 
 
@@ -362,7 +427,9 @@ def _pair_trials(
         (result.task_id, result.attempt): result for result in candidate.results
     }
     trials: list[PairedTrial] = []
-    for baseline_result in sorted(baseline.results, key=lambda result: (result.task_id, result.attempt)):
+    for baseline_result in sorted(
+        baseline.results, key=lambda result: (result.task_id, result.attempt)
+    ):
         key = (baseline_result.task_id, baseline_result.attempt)
         candidate_result = candidate_by_key[key]
         trials.append(
@@ -442,7 +509,10 @@ def _comparability_snapshot(report: EvaluationReport) -> dict[str, Any]:
         },
         "profile": {
             field_name: getattr(profile, field_name)
-            for field_name in (*_PROFILE_INVARIANT_FIELDS, *_PROFILE_CHANGE_FIELDS.values())
+            for field_name in (
+                *_PROFILE_INVARIANT_FIELDS,
+                *_PROFILE_CHANGE_FIELDS.values(),
+            )
         },
     }
 

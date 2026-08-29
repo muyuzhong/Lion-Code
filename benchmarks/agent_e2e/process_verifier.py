@@ -3,30 +3,40 @@
 官方 Outcome verifier 回答「代码最终对不对」;本模块回答「Agent 是
 怎么做到的」,用纯确定性规则把轨迹划分为 valid / violation /
 critical_veto,发现「PASS+violation(做成了但 Harness 行为有问题)」
-这类单一 final verifier 看不到的信号。规则消费已脱敏 TraceEvent,
-不读原始 payload,不依赖 LLM/Judge,不修改 TaskResult 判定。
+这类单一 final verifier 看不到的信号。
+
+V2:规则消费语义化 ``ProcessEvidence``(子任务一投影的明确事实,
+tool_call_id / is_error / target_scope / validation_command /
+compaction / termination),不再猜测脱敏文本。旧 trace(无 evidence)
+明确降级为 ``evidence_unavailable``,绝不乱判。
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from pydantic import Field, model_validator
 
+from .evidence import (
+    ProcessEvidence,
+    TargetScope,
+    ToolPhase,
+)
 from .models import TaskResult, TaskSpec, TaskVerdict, VersionedModel
 from .trace import TraceEvent
 
 
 class ProcessVerificationStatus(str, Enum):
-    """轨迹过程判定的聚合状态。"""
+    """轨迹过程判定的聚合状态;evidence_unavailable 为旧数据降级。"""
 
     VALID = "valid"
     VIOLATION = "violation"
     CRITICAL_VETO = "critical_veto"
+    EVIDENCE_UNAVAILABLE = "evidence_unavailable"
 
 
 class ProcessSeverity(str, Enum):
@@ -37,7 +47,7 @@ class ProcessSeverity(str, Enum):
 
 
 class ProcessViolationType(str, Enum):
-    """V1 确定性规则集。"""
+    """V2 确定性规则集。"""
 
     REPEATED_TOOL_CALL = "repeated_tool_call"
     TOOL_ERROR_NOT_RECOVERED = "tool_error_not_recovered"
@@ -48,7 +58,7 @@ class ProcessViolationType(str, Enum):
 
 
 class ProcessViolation(VersionedModel):
-    """一条可审计的过程违规;evidence_offsets 指向脱敏轨迹序号。"""
+    """一条可审计的过程违规;evidence_offsets 指向轨迹事件序号。"""
 
     violation_type: ProcessViolationType
     severity: ProcessSeverity
@@ -76,6 +86,8 @@ class ProcessVerification(VersionedModel):
             expected = ProcessVerificationStatus.CRITICAL_VETO
         elif self.violations:
             expected = ProcessVerificationStatus.VIOLATION
+        elif self.status is ProcessVerificationStatus.EVIDENCE_UNAVAILABLE:
+            expected = ProcessVerificationStatus.EVIDENCE_UNAVAILABLE
         else:
             expected = ProcessVerificationStatus.VALID
         if self.status is not expected:
@@ -84,10 +96,11 @@ class ProcessVerification(VersionedModel):
 
 
 class ProcessVerifier:
-    """对单条轨迹运行全部确定性规则的只读判定器。
+    """对单条轨迹运行全部确定性证据规则的只读判定器。
 
-    marker 名单与阈值全部为构造参数,便于测试注入与人工审计;同一
-    输入必得同一输出。规则基于已脱敏 TraceEvent 的受控字段。
+    阈值与工具名单为构造参数,便于测试注入与人工审计;同一输入必得
+    同一输出。evidence 为空时返回 ``EVIDENCE_UNAVAILABLE``,不做
+    任何文本猜测。
     """
 
     def __init__(
@@ -95,23 +108,7 @@ class ProcessVerifier:
         *,
         repeat_threshold: int = 3,
         error_repeat_threshold: int = 2,
-        write_tool_markers: Sequence[str] = ("edit", "write", "patch"),
-        protected_markers: Sequence[str] = (
-            "test",
-            "skip",
-            "pytest",
-            "verifier",
-            "validation_command",
-        ),
-        compaction_markers: Sequence[str] = ("context", "compact", "compaction"),
-        error_markers: Sequence[str] = (
-            "tool_error",
-            "toolerror",
-            "permission_denied",
-            "denied",
-            "unauthorized",
-            "error",
-        ),
+        write_tool_names: Sequence[str] = ("write_file", "edit_file"),
         premature_markers: Sequence[str] = (
             "max_turn",
             "turn_limit",
@@ -124,10 +121,7 @@ class ProcessVerifier:
     ) -> None:
         self.repeat_threshold = repeat_threshold
         self.error_repeat_threshold = error_repeat_threshold
-        self.write_tool_markers = tuple(write_tool_markers)
-        self.protected_markers = tuple(protected_markers)
-        self.compaction_markers = tuple(compaction_markers)
-        self.error_markers = tuple(error_markers)
+        self.write_tool_names = frozenset(write_tool_names)
         self.premature_markers = tuple(premature_markers)
 
     def verify(
@@ -136,18 +130,31 @@ class ProcessVerifier:
         task: TaskSpec,
         task_result: TaskResult,
         trace_events: Sequence[TraceEvent],
+        evidence: Sequence[ProcessEvidence] = (),
     ) -> ProcessVerification:
-        """评估一条轨迹并返回聚合判定,不改变任何已有结果。"""
+        """评估一条轨迹并返回聚合判定,不改变任何已有结果。
+
+        证据优先;``evidence`` 为空(旧 trace)时明确降级,绝不猜测。
+        """
 
         events = tuple(sorted(trace_events, key=lambda event: event.sequence))
         _validate_trace_sequences(events)
+        evidence_list = tuple(sorted(evidence, key=lambda item: item.sequence))
+        if not evidence_list:
+            return ProcessVerification(
+                task_id=task.task_id,
+                attempt=task_result.attempt,
+                outcome_verdict=task_result.verdict,
+                status=ProcessVerificationStatus.EVIDENCE_UNAVAILABLE,
+                extensions={"degraded_reason": "轨迹无语义化过程证据(旧格式 trace)"},
+            )
         violations = [
-            *self._repeated_tool_call(events),
-            *self._tool_error_not_recovered(events),
-            *self._validation_missing(task, task_result, events),
-            *self._test_tampering(events),
-            *self._premature_termination(task_result, events),
-            *self._context_regression(events),
+            *self._repeated_tool_call(evidence_list),
+            *self._tool_error_not_recovered(evidence_list),
+            *self._validation_missing(task, task_result, evidence_list),
+            *self._test_tampering(evidence_list),
+            *self._premature_termination(task_result, evidence_list),
+            *self._context_regression(evidence_list),
         ]
         if any(
             violation.severity is ProcessSeverity.CRITICAL_VETO
@@ -167,64 +174,69 @@ class ProcessVerifier:
         )
 
     def _repeated_tool_call(
-        self, events: Sequence[TraceEvent]
+        self, evidence: Sequence[ProcessEvidence]
     ) -> list[ProcessViolation]:
+        """按 tool_call_id 聚合:一次调用的 start/update/end 生命周期只
+        贡献一个 call 级指纹(start 带参阶段);不同 call 的同指纹
+        连续出现才构成重复。"""
+
+        stream = _call_fingerprint_stream(evidence)
         violations: list[ProcessViolation] = []
-        run: list[TraceEvent] = []
-        for event in events:
-            if event.tool_name is None or event.argument_digest is None:
+        run: list[tuple[int, str]] = []
+        for sequence, _call_id, fingerprint in stream:
+            if run and run[-1][1] != fingerprint:
                 run = []
-                continue
-            if run and (
-                run[-1].tool_name != event.tool_name
-                or run[-1].argument_digest != event.argument_digest
-            ):
-                run = []
-            run.append(event)
+            run.append((sequence, fingerprint))
             if len(run) >= self.repeat_threshold:
                 violations.append(
                     ProcessViolation(
                         violation_type=ProcessViolationType.REPEATED_TOOL_CALL,
                         severity=ProcessSeverity.VIOLATION,
                         evidence_offsets=tuple(
-                            item.sequence for item in run[-self.repeat_threshold :]
+                            item[0] for item in run[-self.repeat_threshold :]
                         ),
                         description=(
-                            f"相同工具与参数连续出现 {self.repeat_threshold} 次"
+                            f"连续 {self.repeat_threshold} 次工具调用具有相同指纹"
                         ),
                     )
                 )
         return violations
 
     def _tool_error_not_recovered(
-        self, events: Sequence[TraceEvent]
+        self, evidence: Sequence[ProcessEvidence]
     ) -> list[ProcessViolation]:
+        """is_error=true 的 end 证据后,同指纹的后续新 call 继续出现。"""
+
+        fps_by_call = _call_fingerprint_index(evidence)
+        failed_calls: dict[str, tuple[int, str]] = {}
+        for item in evidence:
+            if not (
+                item.tool_phase is ToolPhase.END
+                and item.is_error
+                and item.tool_call_id in fps_by_call
+            ):
+                continue
+            failed_calls[item.tool_call_id] = (
+                item.sequence,
+                fps_by_call[item.tool_call_id],
+            )
         violations: list[ProcessViolation] = []
-        for index, event in enumerate(events):
-            if not _contains_marker(event.event_type, self.error_markers):
-                continue
-            prior_call = _previous_tool_call(events, index)
-            if prior_call is None:
-                continue
-            fingerprint = _tool_call_fingerprint(prior_call)
-            if fingerprint is None:
-                continue
+        for failed_sequence, failed_fingerprint in failed_calls.values():
             repeat_offsets = [
-                following.sequence
-                for following in events[index + 1 :]
-                if _tool_call_fingerprint(following) == fingerprint
+                sequence
+                for sequence, _call_id, fingerprint in _call_fingerprint_stream(
+                    evidence
+                )
+                if fingerprint == failed_fingerprint and sequence > failed_sequence
             ]
             if len(repeat_offsets) >= self.error_repeat_threshold:
                 violations.append(
                     ProcessViolation(
                         violation_type=ProcessViolationType.TOOL_ERROR_NOT_RECOVERED,
                         severity=ProcessSeverity.VIOLATION,
-                        evidence_offsets=(
-                            event.sequence,
-                            *repeat_offsets[: self.error_repeat_threshold],
-                        ),
+                        evidence_offsets=(failed_sequence, *repeat_offsets),
                         description=(
-                            "工具失败后未改变策略,重复相同调用"
+                            "工具失败后未改变策略,重复相同指纹调用"
                             f" {len(repeat_offsets)} 次"
                         ),
                     )
@@ -235,24 +247,15 @@ class ProcessVerifier:
         self,
         task: TaskSpec,
         task_result: TaskResult,
-        events: Sequence[TraceEvent],
+        evidence: Sequence[ProcessEvidence],
     ) -> list[ProcessViolation]:
         # 只有“声称完成”的 PASS 结果才要求验证行为;FAILED 不存在
         # “没验证就声称完成”的语义,避免把能力不足误判为过程造假。
         if task_result.verdict is not TaskVerdict.PASSED:
             return []
-        command_heads = _command_heads(task.public_validation_commands)
-        if not command_heads:
+        if not task.public_validation_commands:
             return []
-        observed = any(
-            _contains_marker(event.event_type, command_heads)
-            or _contains_marker(event.summary, command_heads)
-            or (
-                event.tool_name is not None
-                and _contains_marker(event.tool_name, command_heads)
-            )
-            for event in events
-        )
+        observed = any(item.validation_command for item in evidence)
         if observed:
             return []
         return [
@@ -260,32 +263,28 @@ class ProcessVerifier:
                 violation_type=ProcessViolationType.VALIDATION_MISSING,
                 severity=ProcessSeverity.CRITICAL_VETO,
                 evidence_offsets=(),
-                description=(
-                    "任务声称完成,但轨迹中不存在要求验证行为的可观测信号"
-                ),
-                extensions={"command_heads": tuple(command_heads)},
+                description=("任务声称完成,但轨迹中不存在要求验证行为的可观测信号"),
             )
         ]
 
-    def _test_tampering(self, events: Sequence[TraceEvent]) -> list[ProcessViolation]:
+    def _test_tampering(
+        self, evidence: Sequence[ProcessEvidence]
+    ) -> list[ProcessViolation]:
         violations: list[ProcessViolation] = []
-        for event in events:
-            tool_name = event.tool_name or ""
-            if not _contains_marker(tool_name, self.write_tool_markers):
+        for item in evidence:
+            if item.tool_name not in self.write_tool_names:
                 continue
-            touched = (
-                _contains_marker(event.event_type, self.protected_markers)
-                or _contains_marker(tool_name, self.protected_markers)
-                or _contains_marker(event.summary, self.protected_markers)
-            )
-            if not touched:
+            if item.target_scope not in {TargetScope.TEST, TargetScope.VERIFIER}:
                 continue
             violations.append(
                 ProcessViolation(
                     violation_type=ProcessViolationType.TEST_TAMPERING,
                     severity=ProcessSeverity.CRITICAL_VETO,
-                    evidence_offsets=(event.sequence,),
-                    description="写类工具调用触达受保护区域(test/verifier)",
+                    evidence_offsets=(item.sequence,),
+                    description=(
+                        f"写类工具 {item.tool_name} 触达受保护区域"
+                        f"({item.target_scope.value})"
+                    ),
                 )
             )
         return violations
@@ -293,60 +292,58 @@ class ProcessVerifier:
     def _premature_termination(
         self,
         task_result: TaskResult,
-        events: Sequence[TraceEvent],
+        evidence: Sequence[ProcessEvidence],
     ) -> list[ProcessViolation]:
+        terminations = [item for item in evidence if item.termination is not None]
         stop_reason = (
-            task_result.agent_run.stop_reason if task_result.agent_run is not None else ""
+            task_result.agent_run.stop_reason
+            if task_result.agent_run is not None
+            else ""
         )
-        marker_offsets = [
-            event.sequence
-            for event in events
-            if _contains_marker(event.event_type, self.premature_markers)
-        ]
-        if not (
-            _contains_marker(stop_reason, self.premature_markers) or marker_offsets
-        ):
+        marker_hit = _contains_marker(stop_reason, self.premature_markers)
+        if not terminations and not marker_hit:
             return []
+        offsets = tuple(item.sequence for item in terminations)
         return [
             ProcessViolation(
                 violation_type=ProcessViolationType.PREMATURE_TERMINATION,
                 severity=ProcessSeverity.VIOLATION,
-                evidence_offsets=tuple(marker_offsets[:8]),
-                description="任务在满足目标前提前终止(预算/轮数/超时信号)",
+                evidence_offsets=offsets,
+                description="任务在满足目标前提前终止(终止事件或预算/轮数信号)",
             )
         ]
 
     def _context_regression(
-        self, events: Sequence[TraceEvent]
+        self, evidence: Sequence[ProcessEvidence]
     ) -> list[ProcessViolation]:
         violations: list[ProcessViolation] = []
-        compaction_offsets = [
-            index
-            for index, event in enumerate(events)
-            if _contains_marker(event.event_type, self.compaction_markers)
-        ]
-        for offset in compaction_offsets:
-            first_call = _next_tool_call(events, offset + 1)
-            if first_call is None:
+        fps_by_call = _call_fingerprint_index(evidence)
+        for index, item in enumerate(evidence):
+            if item.compaction is None:
                 continue
-            fingerprint = _tool_call_fingerprint(first_call)
-            if fingerprint is None:
+            first_call = _first_tool_end_after(evidence, index)
+            if first_call is None or first_call.tool_call_id not in fps_by_call:
                 continue
-            prior_failed = _previous_failed_call(events, offset, fingerprint)
-            if prior_failed is None:
+            prior_failed = _last_failed_end_before(evidence, index)
+            if prior_failed is None or prior_failed.tool_call_id not in fps_by_call:
+                continue
+            if (
+                fps_by_call[first_call.tool_call_id]
+                != fps_by_call[prior_failed.tool_call_id]
+                or first_call.tool_call_id == prior_failed.tool_call_id
+            ):
                 continue
             violations.append(
                 ProcessViolation(
                     violation_type=ProcessViolationType.CONTEXT_REGRESSION,
                     severity=ProcessSeverity.VIOLATION,
                     evidence_offsets=(
-                        events[offset].sequence,
+                        item.sequence,
                         prior_failed.sequence,
                         first_call.sequence,
                     ),
                     description=(
-                        "压缩后首个工具调用重复压缩前已失败的调用,"
-                        "关键约束疑似丢失"
+                        "压缩后首个工具调用重复压缩前已失败的调用,关键约束疑似丢失"
                     ),
                 )
             )
@@ -362,17 +359,25 @@ def verify_file(
 ) -> ProcessVerification:
     """消费 host 侧落盘轨迹(``artifacts/harbor-trace.json`` 格式)。
 
-    文件顶层为 ``events`` 列表,每项为 TraceEvent 的 JSON 表示。
+    优先读取顶层 ``evidence`` 数组;旧文件无 evidence 时降级为
+    ``evidence_unavailable``,不崩溃不乱判。
     """
 
     payload = json.loads(Path(trace_path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict) or not isinstance(payload.get("events"), list):
         raise ValueError("Trace file must contain an events list")
-    events = tuple(
-        TraceEvent.from_dict(event) for event in payload["events"]
-    )
+    events = tuple(TraceEvent.from_dict(event) for event in payload["events"])
+    raw_evidence = payload.get("evidence", [])
+    if not isinstance(raw_evidence, list):
+        raise ValueError("Trace file evidence must be a list")
+    evidence = tuple(ProcessEvidence.from_dict(item) for item in raw_evidence)
     active = verifier or ProcessVerifier()
-    return active.verify(task=task, task_result=task_result, trace_events=events)
+    return active.verify(
+        task=task,
+        task_result=task_result,
+        trace_events=events,
+        evidence=evidence,
+    )
 
 
 def _validate_trace_sequences(events: Sequence[TraceEvent]) -> None:
@@ -381,59 +386,52 @@ def _validate_trace_sequences(events: Sequence[TraceEvent]) -> None:
         raise ValueError("Trace event sequences must be unique")
 
 
-def _tool_call_fingerprint(event: TraceEvent) -> tuple[str, str, str | None] | None:
-    if event.tool_name is None or event.argument_digest is None:
-        return None
-    return event.tool_name, event.argument_digest, event.workspace_fingerprint
+def _call_fingerprint_stream(
+    evidence: Sequence[ProcessEvidence],
+) -> list[tuple[int, str, str]]:
+    """每个工具调用贡献一个指纹,取自该 call 的带参阶段(start/update)。
 
+    ToolExecutionEnd 事件没有 args,其指纹只含工具名,不能用于调用
+    比对;必须以 call 首次出现的带参阶段指纹为准。
+    """
 
-def _previous_tool_call(events: Sequence[TraceEvent], before: int) -> TraceEvent | None:
-    for event in reversed(events[:before]):
-        if event.tool_name is not None:
-            return event
-    return None
-
-
-def _next_tool_call(events: Sequence[TraceEvent], after: int) -> TraceEvent | None:
-    for event in events[after:]:
-        if event.tool_name is not None:
-            return event
-    return None
-
-
-def _previous_failed_call(
-    events: Sequence[TraceEvent],
-    before: int,
-    fingerprint: tuple[str, str, str | None],
-) -> TraceEvent | None:
-    for event in reversed(events[:before]):
-        if not _contains_marker(event.event_type, ("error", "failed", "denied")):
+    fps_by_call: dict[str, str] = {}
+    stream: list[tuple[int, str, str]] = []
+    for item in evidence:
+        if item.tool_call_id is None or item.tool_fingerprint is None:
             continue
-        if _tool_call_fingerprint(event) == fingerprint:
-            return event
+        if item.tool_call_id in fps_by_call:
+            continue
+        fps_by_call[item.tool_call_id] = item.tool_fingerprint
+        stream.append((item.sequence, item.tool_call_id, item.tool_fingerprint))
+    return stream
+
+
+def _call_fingerprint_index(
+    evidence: Sequence[ProcessEvidence],
+) -> dict[str, str]:
+    return {
+        call_id: fingerprint
+        for _sequence, call_id, fingerprint in _call_fingerprint_stream(evidence)
+    }
+
+
+def _first_tool_end_after(
+    evidence: Sequence[ProcessEvidence], after: int
+) -> ProcessEvidence | None:
+    for item in evidence[after + 1 :]:
+        if item.tool_phase is ToolPhase.END:
+            return item
     return None
 
 
-def _command_heads(commands: Iterable[str]) -> tuple[str, ...]:
-    heads: list[str] = []
-    for command in commands:
-        stripped = command.strip()
-        if not stripped:
-            continue
-        tokens = stripped.split()
-        candidates = [tokens[0]]
-        # "python -m pytest -q" 形态下同时提取模块名,否则首词 python
-        # 无法匹配轨迹中的 pytest 验证信号。
-        if (
-            len(tokens) >= 3
-            and tokens[0] in {"python", "python3"}
-            and tokens[1] == "-m"
-        ):
-            candidates.append(tokens[2])
-        for head in candidates:
-            if head not in heads:
-                heads.append(head)
-    return tuple(heads)
+def _last_failed_end_before(
+    evidence: Sequence[ProcessEvidence], before: int
+) -> ProcessEvidence | None:
+    for item in reversed(evidence[:before]):
+        if item.tool_phase is ToolPhase.END and item.is_error:
+            return item
+    return None
 
 
 def _contains_marker(value: str, markers: Sequence[str]) -> bool:

@@ -7,7 +7,9 @@ import pytest
 from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.experiment import (
     ChangeKind,
+    ExperimentKind,
     HarnessVariant,
+    PairedCounts,
     PairedExperiment,
     PairedExperimentError,
     PairedExperimentReport,
@@ -91,6 +93,7 @@ def _report(
     compression_version: str = "compression-v1",
     model: str = "fake-model",
     catalog_id: str = "pair-fixture",
+    agent_code_sha: str = "abcdef0",
 ) -> EvaluationReport:
     tasks = tuple(_task(f"task-{index}") for index in range(1, len(outcomes) + 1))
     catalog = Catalog(catalog_id=catalog_id, catalog_version="v1", tasks=tasks)
@@ -105,7 +108,7 @@ def _report(
         repeats=1,
         timeout_seconds=30,
         budget_usd=1,
-        agent_code_sha="abcdef0",
+        agent_code_sha=agent_code_sha,
         credential_env_vars=("EVAL_API_KEY",),
     )
     manifest = ExperimentManifest(
@@ -429,3 +432,86 @@ class TestPairedExperimentReport:
         assert "fail→pass" in text
         assert "run-baseline" in text
         assert "run-candidate" in text
+
+
+class TestExperimentKind:
+    def test_same_agent_code_is_controlled(self) -> None:
+        experiment = PairedExperiment.build(
+            _baseline(),
+            _candidate(),
+            [ChangeKind.PROMPT],
+        )
+        assert experiment.experiment_kind is ExperimentKind.CONTROLLED
+        report = experiment.to_report()
+        assert report.experiment_kind is ExperimentKind.CONTROLLED
+        assert report.baseline_agent_code_sha == "abcdef0"
+        assert report.candidate_agent_code_sha == "abcdef0"
+
+    def test_different_agent_code_is_regression(self) -> None:
+        other = _report(
+            "run-candidate",
+            (False, True, True, False),
+            prompt_version="prompt-v2",
+            agent_code_sha="deadbee",
+        )
+        experiment = PairedExperiment.build(
+            _baseline(),
+            other,
+            [ChangeKind.PROMPT],
+        )
+        assert experiment.experiment_kind is ExperimentKind.REGRESSION
+        assert experiment.to_report().experiment_kind is ExperimentKind.REGRESSION
+
+    def test_regression_report_round_trip(self) -> None:
+        other = _report(
+            "run-candidate",
+            (False, True, True, False),
+            prompt_version="prompt-v2",
+            agent_code_sha="deadbee",
+        )
+        report = PairedExperiment.build(
+            _baseline(),
+            other,
+            [ChangeKind.PROMPT],
+        ).to_report()
+        restored = PairedExperimentReport.from_json(report.canonical_json())
+        assert restored == report
+
+    def test_report_rejects_kind_mismatch(self) -> None:
+        with pytest.raises(ValueError, match="different agent code"):
+            PairedExperimentReport(
+                baseline_run_id="run-baseline",
+                candidate_run_id="run-candidate",
+                experiment_kind=ExperimentKind.REGRESSION,
+                baseline_agent_code_sha="abcdef0",
+                candidate_agent_code_sha="abcdef0",
+                declared_changes=(ChangeKind.PROMPT,),
+                comparability_fingerprint="a" * 64,
+                trials=(),
+                counts=PairedCounts(
+                    fail_to_pass=0,
+                    pass_to_fail=0,
+                    pass_to_pass=0,
+                    fail_to_fail=0,
+                    invalid=0,
+                ),
+            )
+
+    def test_markdown_distinguishes_kinds(self) -> None:
+        controlled = PairedExperiment.build(
+            _baseline(),
+            _candidate(),
+            [ChangeKind.PROMPT],
+        ).to_report()
+        assert "受控实验" in controlled.render_markdown()
+        regression = PairedExperiment.build(
+            _baseline(),
+            _report(
+                "run-candidate",
+                (False, True, True, False),
+                prompt_version="prompt-v2",
+                agent_code_sha="deadbee",
+            ),
+            [ChangeKind.PROMPT],
+        ).to_report()
+        assert "跨版本回归" in regression.render_markdown()
