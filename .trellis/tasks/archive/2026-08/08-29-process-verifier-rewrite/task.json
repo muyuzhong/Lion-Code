@@ -1,0 +1,28 @@
+{
+  "id": "process-verifier-rewrite",
+  "name": "process-verifier-rewrite",
+  "title": "ProcessVerifier 重写: 消费语义化过程证据",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-29",
+  "completedAt": "2026-08-29",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-29-eval-fidelity",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "ProcessVerifier 重写——消费语义化过程证据"
+  }
+}

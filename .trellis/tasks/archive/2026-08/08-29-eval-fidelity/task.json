@@ -1,0 +1,33 @@
+{
+  "id": "eval-fidelity",
+  "name": "eval-fidelity",
+  "title": "Evaluation Fidelity: 过程证据投影与受控实验语义",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-29",
+  "completedAt": "2026-08-29",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-29-process-evidence-projection",
+    "08-29-process-verifier-rewrite",
+    "08-29-fidelity-calibration",
+    "08-29-controlled-vs-regression"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "Evaluation Fidelity——过程证据投影与受控实验语义"
+  }
+}

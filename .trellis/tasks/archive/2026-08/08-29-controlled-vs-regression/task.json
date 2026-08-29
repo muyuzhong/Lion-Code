@@ -1,0 +1,28 @@
+{
+  "id": "controlled-vs-regression",
+  "name": "controlled-vs-regression",
+  "title": "受控实验语义: Controlled vs Regression 区分",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-29",
+  "completedAt": "2026-08-29",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-29-eval-fidelity",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "受控实验语义(Controlled vs Regression 区分)"
+  }
+}
