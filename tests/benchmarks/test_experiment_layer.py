@@ -59,21 +59,26 @@ def _result(
     attempt: int = 1,
     passed: bool,
     stop_reason: str = "completed",
+    requested: RequestedVariant | None = None,
     injection_fingerprint: str | None = None,
     prompt_hit: bool = False,
     tool_policy_hit: bool = False,
+    prompt_sha256: str | None = None,
+    tool_policy_sha256: str | None = None,
 ) -> TaskResult:
     outcome = VerifierOutcome.PASSED if passed else VerifierOutcome.FAILED
     verdict = TaskVerdict.PASSED if passed else TaskVerdict.FAILED
     extensions: dict = {}
     if injection_fingerprint is not None:
         extensions["injection_evidence"] = InjectionEvidence(
-            requested=RequestedVariant(),
+            requested=requested or RequestedVariant(),
             resolved_variant=ResolvedVariant(
                 prompt_hit=prompt_hit,
                 tool_policy_hit=tool_policy_hit,
             ),
             injection_fingerprint=injection_fingerprint,
+            prompt_sha256=prompt_sha256,
+            tool_policy_sha256=tool_policy_sha256,
         ).model_dump(mode="json")
     return TaskResult(
         task_id=task_id,
@@ -108,12 +113,15 @@ def _report(
     *,
     prompt_version: str,
     compression_version: str = "compression-v1",
+    tool_policy_version: str = "tools-v1",
     model: str = "fake-model",
     catalog_id: str = "pair-fixture",
     agent_code_sha: str = "abcdef0",
     injection_fingerprint: str | None = None,
     prompt_hit: bool = False,
     tool_policy_hit: bool = False,
+    prompt_sha256: str | None = None,
+    tool_policy_sha256: str | None = None,
 ) -> EvaluationReport:
     tasks = tuple(_task(f"task-{index}") for index in range(1, len(outcomes) + 1))
     catalog = Catalog(catalog_id=catalog_id, catalog_version="v1", tasks=tasks)
@@ -123,7 +131,7 @@ def _report(
         provider="fake",
         prompt_version=prompt_version,
         compression_version=compression_version,
-        tool_policy_version="tools-v1",
+        tool_policy_version=tool_policy_version,
         seed=7,
         repeats=1,
         timeout_seconds=30,
@@ -153,9 +161,16 @@ def _report(
             _result(
                 task.task_id,
                 passed=passed,
+                requested=RequestedVariant(
+                    prompt_version=profile.prompt_version,
+                    tool_policy_version=profile.tool_policy_version,
+                    compression_version=profile.compression_version,
+                ),
                 injection_fingerprint=injection_fingerprint,
                 prompt_hit=prompt_hit,
                 tool_policy_hit=tool_policy_hit,
+                prompt_sha256=prompt_sha256,
+                tool_policy_sha256=tool_policy_sha256,
             )
             for task, passed in zip(tasks, outcomes, strict=True)
         ),
@@ -474,7 +489,7 @@ class TestExperimentKind:
         assert report.injection_fingerprint is None
 
     def test_same_fingerprint_is_unsupported_treatment(self) -> None:
-        # 声明了不同版本但指纹相同 = 没有真正的 treatment。
+        # 声明了不同版本但注入内容指纹相同 = 没有真正的 treatment。
         experiment = PairedExperiment.build(
             _report(
                 "run-baseline",
@@ -482,6 +497,7 @@ class TestExperimentKind:
                 prompt_version="prompt-v1",
                 injection_fingerprint="h" * 64,
                 prompt_hit=True,
+                prompt_sha256="p" * 64,
             ),
             _report(
                 "run-candidate",
@@ -489,6 +505,7 @@ class TestExperimentKind:
                 prompt_version="prompt-v2",
                 injection_fingerprint="h" * 64,
                 prompt_hit=True,
+                prompt_sha256="p" * 64,
             ),
             [ChangeKind.PROMPT],
         )
@@ -502,6 +519,7 @@ class TestExperimentKind:
                 prompt_version="prompt-v1",
                 injection_fingerprint="h1" + "a" * 62,
                 prompt_hit=True,
+                prompt_sha256="p1" + "a" * 62,
             ),
             _report(
                 "run-candidate",
@@ -509,6 +527,7 @@ class TestExperimentKind:
                 prompt_version="prompt-v2",
                 injection_fingerprint="h2" + "b" * 62,
                 prompt_hit=True,
+                prompt_sha256="p2" + "b" * 62,
             ),
             [ChangeKind.PROMPT],
         )
@@ -518,6 +537,205 @@ class TestExperimentKind:
         assert report.baseline_agent_code_sha == "abcdef0"
         assert report.candidate_agent_code_sha == "abcdef0"
         assert report.injection_fingerprint is not None
+        assert report.baseline_injection is not None
+        assert report.candidate_injection is not None
+        assert report.baseline_injection.result_count == 4
+        assert report.candidate_injection.result_count == 4
+        assert (
+            report.baseline_injection.prompt_sha256
+            != report.candidate_injection.prompt_sha256
+        )
+
+    def test_declared_prompt_requires_prompt_hit_on_both_sides(self) -> None:
+        # 两侧只命中了 tool_policy:prompt 维度没有 hit,不能因「发生过
+        # 某种注入」就认为 prompt treatment 被验证。
+        experiment = PairedExperiment.build(
+            _report(
+                "run-baseline",
+                (True, False, True, False),
+                prompt_version="prompt-v1",
+                injection_fingerprint="h1" + "a" * 62,
+                tool_policy_hit=True,
+                tool_policy_sha256="t1" + "a" * 62,
+            ),
+            _report(
+                "run-candidate",
+                (False, True, True, False),
+                prompt_version="prompt-v2",
+                injection_fingerprint="h2" + "b" * 62,
+                tool_policy_hit=True,
+                tool_policy_sha256="t2" + "b" * 62,
+            ),
+            [ChangeKind.PROMPT],
+        )
+        assert experiment.experiment_kind is ExperimentKind.UNSUPPORTED_TREATMENT
+
+    def test_declared_tool_policy_requires_tool_policy_hit_on_both_sides(
+        self,
+    ) -> None:
+        # 声明工具策略变化,但两侧只命中了 prompt:同样不可归因。
+        experiment = PairedExperiment.build(
+            _report(
+                "run-baseline",
+                (True, False, True, False),
+                prompt_version="prompt-v1",
+                tool_policy_version="tools-v1",
+                injection_fingerprint="h1" + "a" * 62,
+                prompt_hit=True,
+                prompt_sha256="p1" + "a" * 62,
+            ),
+            _report(
+                "run-candidate",
+                (False, True, True, False),
+                prompt_version="prompt-v1",
+                tool_policy_version="tools-v2",
+                injection_fingerprint="h2" + "b" * 62,
+                prompt_hit=True,
+                prompt_sha256="p2" + "b" * 62,
+            ),
+            [ChangeKind.TOOL_POLICY],
+        )
+        assert experiment.experiment_kind is ExperimentKind.UNSUPPORTED_TREATMENT
+
+    def test_both_declared_dimensions_verified_is_controlled(self) -> None:
+        # PROMPT + TOOL_POLICY 同时声明时,两个维度都必须命中且内容不同。
+        experiment = PairedExperiment.build(
+            _report(
+                "run-baseline",
+                (True, False, True, False),
+                prompt_version="prompt-v1",
+                tool_policy_version="tools-v1",
+                injection_fingerprint="h1" + "a" * 62,
+                prompt_hit=True,
+                tool_policy_hit=True,
+                prompt_sha256="p1" + "a" * 62,
+                tool_policy_sha256="t1" + "a" * 62,
+            ),
+            _report(
+                "run-candidate",
+                (False, True, True, False),
+                prompt_version="prompt-v2",
+                tool_policy_version="tools-v2",
+                injection_fingerprint="h2" + "b" * 62,
+                prompt_hit=True,
+                tool_policy_hit=True,
+                prompt_sha256="p2" + "b" * 62,
+                tool_policy_sha256="t2" + "b" * 62,
+            ),
+            [ChangeKind.PROMPT, ChangeKind.TOOL_POLICY],
+        )
+        assert experiment.experiment_kind is ExperimentKind.CONTROLLED
+
+    def test_partial_run_evidence_is_unsupported(self) -> None:
+        # 一个 task×attempt 缺失证据,整个 run 的注入一致性被破坏。
+        candidate = _report(
+            "run-candidate",
+            (False, True, True, False),
+            prompt_version="prompt-v2",
+            injection_fingerprint="h2" + "b" * 62,
+            prompt_hit=True,
+            prompt_sha256="p2" + "b" * 62,
+        )
+        incomplete = candidate.results[0].model_copy(update={"extensions": {}})
+        partial = build_report(
+            manifest=candidate.manifest,
+            results=(incomplete, *candidate.results[1:]),
+        )
+        experiment = PairedExperiment.build(
+            _report(
+                "run-baseline",
+                (True, False, True, False),
+                prompt_version="prompt-v1",
+                injection_fingerprint="h1" + "a" * 62,
+                prompt_hit=True,
+                prompt_sha256="p1" + "a" * 62,
+            ),
+            partial,
+            [ChangeKind.PROMPT],
+        )
+        assert experiment.experiment_kind is ExperimentKind.UNSUPPORTED_TREATMENT
+
+    def test_inconsistent_run_fingerprint_is_unsupported(self) -> None:
+        # run 内 fingerprint 不一致:不能用一条 TaskResult 代表整个 run。
+        candidate = _report(
+            "run-candidate",
+            (False, True, True, False),
+            prompt_version="prompt-v2",
+            injection_fingerprint="h2" + "b" * 62,
+            prompt_hit=True,
+            prompt_sha256="p2" + "b" * 62,
+        )
+        divergent = candidate.results[0].model_copy(
+            update={
+                "extensions": {
+                    "injection_evidence": InjectionEvidence(
+                        requested=candidate.results[0].extensions["injection_evidence"][
+                            "requested"
+                        ],
+                        resolved_variant=ResolvedVariant(prompt_hit=True),
+                        injection_fingerprint="h9" + "c" * 62,
+                        prompt_sha256="p9" + "c" * 62,
+                    ).model_dump(mode="json")
+                }
+            }
+        )
+        mixed = build_report(
+            manifest=candidate.manifest,
+            results=(divergent, *candidate.results[1:]),
+        )
+        experiment = PairedExperiment.build(
+            _report(
+                "run-baseline",
+                (True, False, True, False),
+                prompt_version="prompt-v1",
+                injection_fingerprint="h1" + "a" * 62,
+                prompt_hit=True,
+                prompt_sha256="p1" + "a" * 62,
+            ),
+            mixed,
+            [ChangeKind.PROMPT],
+        )
+        assert experiment.experiment_kind is ExperimentKind.UNSUPPORTED_TREATMENT
+
+    def test_requested_mismatch_against_profile_is_unsupported(self) -> None:
+        # evidence.requested 声称的版本与 manifest profile 不一致 = 伪造/错位证据。
+        candidate = _report(
+            "run-candidate",
+            (False, True, True, False),
+            prompt_version="prompt-v2",
+            injection_fingerprint="h2" + "b" * 62,
+            prompt_hit=True,
+            prompt_sha256="p2" + "b" * 62,
+        )
+        forged = candidate.results[0].model_copy(
+            update={
+                "extensions": {
+                    "injection_evidence": InjectionEvidence(
+                        requested=RequestedVariant(prompt_version="prompt-v9"),
+                        resolved_variant=ResolvedVariant(prompt_hit=True),
+                        injection_fingerprint="h2" + "b" * 62,
+                        prompt_sha256="p2" + "b" * 62,
+                    ).model_dump(mode="json")
+                }
+            }
+        )
+        mixed = build_report(
+            manifest=candidate.manifest,
+            results=(forged, *candidate.results[1:]),
+        )
+        experiment = PairedExperiment.build(
+            _report(
+                "run-baseline",
+                (True, False, True, False),
+                prompt_version="prompt-v1",
+                injection_fingerprint="h1" + "a" * 62,
+                prompt_hit=True,
+                prompt_sha256="p1" + "a" * 62,
+            ),
+            mixed,
+            [ChangeKind.PROMPT],
+        )
+        assert experiment.experiment_kind is ExperimentKind.UNSUPPORTED_TREATMENT
 
     def test_compression_declared_never_controlled(self) -> None:
         experiment = PairedExperiment.build(
@@ -645,6 +863,7 @@ class TestExperimentKind:
                 prompt_version="prompt-v1",
                 injection_fingerprint="h1" + "a" * 62,
                 prompt_hit=True,
+                prompt_sha256="p1" + "a" * 62,
             ),
             _report(
                 "run-candidate",
@@ -652,10 +871,13 @@ class TestExperimentKind:
                 prompt_version="prompt-v2",
                 injection_fingerprint="h2" + "b" * 62,
                 prompt_hit=True,
+                prompt_sha256="p2" + "b" * 62,
             ),
             [ChangeKind.PROMPT],
         ).to_report()
         assert "受控实验" in controlled.render_markdown()
+        assert "baseline 注入" in controlled.render_markdown()
+        assert "4 个结果一致" in controlled.render_markdown()
         regression = PairedExperiment.build(
             _baseline(),
             _report(

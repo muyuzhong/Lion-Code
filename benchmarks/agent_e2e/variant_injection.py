@@ -44,10 +44,14 @@ class PromptVariantMap(VersionedModel):
 
 
 class ToolPolicyVariantMap(VersionedModel):
-    """tool_policy 版本 → 工具集白名单的受控映射;空名单不注入。"""
+    """tool_policy 版本 → 工具集白名单的受控映射。
+
+    白名单至少一个工具;空名单没有任何可注入内容,会让
+    tool_policy_hit 变成「假注入」,直接拒绝。
+    """
 
     tool_policy_version: str = Field(min_length=1, max_length=128)
-    tool_names: tuple[str, ...] = ()
+    tool_names: tuple[str, ...] = Field(min_length=1)
     content_sha256: str = Field(min_length=64, max_length=64)
 
     @model_validator(mode="after")
@@ -83,6 +87,8 @@ class InjectionResolution(VersionedModel):
     injection_fingerprint: str | None = Field(
         default=None, min_length=64, max_length=64
     )
+    prompt_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    tool_policy_sha256: str | None = Field(default=None, min_length=64, max_length=64)
     requested: RequestedVariant = Field(default_factory=RequestedVariant)
     resolved_variant: ResolvedVariant = Field(default_factory=ResolvedVariant)
     extensions: dict[str, Any] = Field(default_factory=dict)
@@ -133,6 +139,8 @@ def resolve_injection(
             if fingerprint_parts
             else None
         ),
+        prompt_sha256=(prompt_map.content_sha256 if prompt_map is not None else None),
+        tool_policy_sha256=(tool_map.content_sha256 if tool_map is not None else None),
         requested=RequestedVariant(
             prompt_version=profile.prompt_version,
             tool_policy_version=profile.tool_policy_version,

@@ -2,20 +2,43 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 
+import pytest
+
+from benchmarks.agent_e2e.backend import (
+    AgentExecutionRequest,
+    IsolationReport,
+    VerifierExecutionRequest,
+)
+from benchmarks.agent_e2e.catalog import freeze_catalog
+from benchmarks.agent_e2e.controlled_runner import ControlledExperimentRunner
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task,
+)
 from benchmarks.agent_e2e.harbor_agent import LionInstalledAgent
 from benchmarks.agent_e2e.harbor_runner import (
     HarborExecutionRequest,
     HarborSingleTaskRunner,
 )
 from benchmarks.agent_e2e.models import (
+    AgentRunSummary,
+    Catalog,
     ExperimentManifest,
+    ExperimentProfile,
     InjectionEvidence,
     RequestedVariant,
     ResolvedVariant,
+    VerifierOutcome,
+    VerifierResult,
+    WorkerResult,
+    WorkerStatus,
 )
+from benchmarks.agent_e2e.orchestrator import SingleTaskOrchestrator
 from benchmarks.agent_e2e.variant_injection import (
     PromptVariantMap,
     ToolPolicyVariantMap,
@@ -187,7 +210,6 @@ class TestHarborVariantValidation:
             manifest=manifest,
             task=task,
             output_dir=tmp_path / "out",
-            injection_spec=_spec(),
             request_variant=True,
         )
         runner = HarborSingleTaskRunner()
@@ -195,3 +217,281 @@ class TestHarborVariantValidation:
         # 校验通过后应继续走预检(缺少 harbor),不报 injection 错误。
         assert result.result is not None
         assert "injection spec" not in result.result.reason
+
+
+def _pair_spec() -> VariantInjectionSpec:
+    """覆盖两侧 prompt 版本的共享映射表(两侧内容不同)。"""
+
+    baseline_prompt = "基线提示词"
+    candidate_prompt = "候选提示词"
+    return VariantInjectionSpec(
+        prompt_maps=(
+            PromptVariantMap(
+                prompt_version="prompt-v1",
+                system_prompt=baseline_prompt,
+                content_sha256=hashlib.sha256(
+                    baseline_prompt.encode("utf-8")
+                ).hexdigest(),
+            ),
+            PromptVariantMap(
+                prompt_version="prompt-v2",
+                system_prompt=candidate_prompt,
+                content_sha256=hashlib.sha256(
+                    candidate_prompt.encode("utf-8")
+                ).hexdigest(),
+            ),
+        )
+    )
+
+
+def _template() -> ExperimentManifest:
+    """两侧共享的冻结模板:两个任务、prompt-v1 的 baseline profile。"""
+
+    task_a = make_task(task_id="task-a", verifier_identity="hidden-v1")
+    task_b = make_task(task_id="task-b", verifier_identity="hidden-v1")
+    catalog = Catalog(catalog_id="runner", catalog_version="v1", tasks=(task_a, task_b))
+    profile = ExperimentProfile(
+        profile_id="baseline",
+        model="fake-model",
+        provider="fake",
+        prompt_version="prompt-v1",
+        compression_version="compression-v1",
+        tool_policy_version="tools-v1",
+        seed=7,
+        repeats=1,
+        timeout_seconds=30,
+        budget_usd=1,
+        agent_code_sha=AGENT_CODE_SHA,
+        credential_env_vars=("EVAL_API_KEY",),
+    )
+    return ExperimentManifest(
+        run_id="template-run",
+        agent_code_sha=profile.agent_code_sha,
+        evaluator_code_sha=EVALUATOR_CODE_SHA,
+        catalog=freeze_catalog(catalog),
+        profile=profile,
+        profile_fingerprint=profile.fingerprint(),
+        task_ids=(task_a.task_id, task_b.task_id),
+        seed=profile.seed,
+        repeats=profile.repeats,
+        timeout_seconds=profile.timeout_seconds,
+        budget_usd=profile.budget_usd,
+        platform="offline-test",
+    )
+
+
+class _OfficialFakeBackend:
+    """仅测试:支持正式分数的确定性 backend,worker 按 manifest 解析注入。"""
+
+    def __init__(self, outcomes: dict[str, bool]) -> None:
+        self.outcomes = outcomes
+        self.worker_requests: list[AgentExecutionRequest] = []
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def supports_official_scores(self) -> bool:
+        return True
+
+    @property
+    def unavailable_reason(self) -> None:
+        return None
+
+    async def inspect_isolation(
+        self,
+        request: AgentExecutionRequest,
+        *,
+        verifier_workspace: Path,
+    ) -> IsolationReport:
+        return IsolationReport(
+            agent_workspace=request.agent_workspace,
+            verifier_workspace=verifier_workspace,
+            private_assets_visible_to_agent=False,
+        )
+
+    async def run_agent(self, request: AgentExecutionRequest) -> WorkerResult:
+        self.worker_requests.append(request)
+        resolution = resolve_injection(
+            request.manifest.profile,
+            spec_from_manifest(request.manifest),
+        )
+        return WorkerResult(
+            status=WorkerStatus.COMPLETED,
+            agent_run=AgentRunSummary(
+                final_text_digest=hashlib.sha256(b"done").hexdigest(),
+                final_text_preview="done",
+                stop_reason="completed",
+                turns=1,
+                wall_time_seconds=1,
+                input_tokens=2,
+                output_tokens=3,
+                cache_read_tokens=0,
+                cost_usd=0,
+            ),
+            patch_sha256=hashlib.sha256(b"patch").hexdigest(),
+            patch_applied=True,
+            injection_evidence=InjectionEvidence(
+                requested=resolution.requested,
+                resolved_variant=resolution.resolved_variant,
+                injection_fingerprint=resolution.injection_fingerprint,
+                prompt_sha256=resolution.prompt_sha256,
+                tool_policy_sha256=resolution.tool_policy_sha256,
+            ),
+        )
+
+    async def run_verifier(
+        self,
+        request: VerifierExecutionRequest,
+    ) -> VerifierResult:
+        passed = self.outcomes.get(request.task.task_id, False)
+        return VerifierResult(
+            outcome=VerifierOutcome.PASSED if passed else VerifierOutcome.FAILED,
+            command_summary="hidden verifier",
+            exit_code=0 if passed else 1,
+            output_digest=hashlib.sha256(b"v").hexdigest(),
+        )
+
+    async def cleanup(self, *, run_id: str, task_id: str, attempt: int) -> None:
+        return None
+
+
+class TestControlledExperimentRunner:
+    def test_build_manifests_freezes_two_runs(self) -> None:
+        template = _template()
+        candidate_profile = template.profile.model_copy(
+            update={"profile_id": "candidate", "prompt_version": "prompt-v2"}
+        )
+        runner = ControlledExperimentRunner(injection_spec=_pair_spec())
+        baseline, candidate = runner.build_manifests(
+            template=template,
+            baseline_profile=template.profile,
+            candidate_profile=candidate_profile,
+            baseline_run_id="run-baseline",
+            candidate_run_id="run-candidate",
+        )
+        assert baseline.run_id == "run-baseline"
+        assert candidate.run_id == "run-candidate"
+        assert baseline.profile.prompt_version == "prompt-v1"
+        assert candidate.profile.prompt_version == "prompt-v2"
+        # 两侧挂载同一份映射表;模板本身不被修改。
+        assert spec_from_manifest(template) is None
+        assert spec_from_manifest(baseline) == _pair_spec()
+        assert spec_from_manifest(candidate) == _pair_spec()
+
+    def test_build_manifests_rejects_agent_code_change(self) -> None:
+        template = _template()
+        other_code = template.profile.model_copy(
+            update={"profile_id": "other", "agent_code_sha": "deadbee"}
+        )
+        runner = ControlledExperimentRunner()
+        with pytest.raises(ValueError, match="agent_code_sha"):
+            runner.build_manifests(
+                template=template,
+                baseline_profile=template.profile,
+                candidate_profile=other_code,
+                baseline_run_id="run-baseline",
+                candidate_run_id="run-candidate",
+            )
+
+    def test_run_pair_executes_both_sides_and_builds_controlled(
+        self, tmp_path: Path
+    ) -> None:
+        template = _template()
+        candidate_profile = template.profile.model_copy(
+            update={"profile_id": "candidate", "prompt_version": "prompt-v2"}
+        )
+        runner = ControlledExperimentRunner(injection_spec=_pair_spec())
+        baseline_manifest, candidate_manifest = runner.build_manifests(
+            template=template,
+            baseline_profile=template.profile,
+            candidate_profile=candidate_profile,
+            baseline_run_id="run-baseline",
+            candidate_run_id="run-candidate",
+        )
+        tasks = tuple(
+            make_task(task_id=task_id, verifier_identity="hidden-v1")
+            for task_id in ("task-a", "task-b")
+        )
+        backend = _OfficialFakeBackend(outcomes={"task-a": False, "task-b": True})
+        orchestrator = SingleTaskOrchestrator(backend=backend, work_root=tmp_path)
+        experiment = asyncio.run(
+            runner.run_pair(
+                orchestrator=orchestrator,
+                baseline_manifest=baseline_manifest,
+                candidate_manifest=candidate_manifest,
+                tasks=tasks,
+            )
+        )
+        # 全链路:runner → orchestrator → backend(worker 落盘证据)→ 配对判定。
+        assert experiment.experiment_kind.value == "controlled"
+        report = experiment.to_report()
+        assert report.baseline_run_id == "run-baseline"
+        assert report.candidate_run_id == "run-candidate"
+        assert report.baseline_injection is not None
+        assert report.candidate_injection is not None
+        assert report.baseline_injection.result_count == 2
+        assert report.candidate_injection.result_count == 2
+        assert (
+            report.baseline_injection.injection_fingerprint
+            != report.candidate_injection.injection_fingerprint
+        )
+        assert report.counts.fail_to_fail == 1
+        assert report.counts.pass_to_pass == 1
+        # 两侧各执行了 2 个 task×attempt。
+        assert len(backend.worker_requests) == 4
+
+    def test_run_pair_rejects_identical_profiles(self, tmp_path: Path) -> None:
+        template = _template()
+        runner = ControlledExperimentRunner()
+        baseline, candidate = runner.build_manifests(
+            template=template,
+            baseline_profile=template.profile,
+            candidate_profile=template.profile,
+            baseline_run_id="run-baseline",
+            candidate_run_id="run-candidate",
+        )
+        from benchmarks.agent_e2e.backend import UnavailableContainerBackend
+
+        orchestrator = SingleTaskOrchestrator(
+            backend=UnavailableContainerBackend(), work_root=tmp_path
+        )
+        with pytest.raises(ValueError, match="gate-controlled"):
+            asyncio.run(
+                runner.run_pair(
+                    orchestrator=orchestrator,
+                    baseline_manifest=baseline,
+                    candidate_manifest=candidate,
+                    tasks=(),
+                )
+            )
+
+    def test_run_pair_rejects_missing_tasks(self, tmp_path: Path) -> None:
+        template = _template()
+        candidate_profile = template.profile.model_copy(
+            update={"profile_id": "candidate", "prompt_version": "prompt-v2"}
+        )
+        runner = ControlledExperimentRunner(injection_spec=_pair_spec())
+        baseline, candidate = runner.build_manifests(
+            template=template,
+            baseline_profile=template.profile,
+            candidate_profile=candidate_profile,
+            baseline_run_id="run-baseline",
+            candidate_run_id="run-candidate",
+        )
+        from benchmarks.agent_e2e.backend import UnavailableContainerBackend
+
+        orchestrator = SingleTaskOrchestrator(
+            backend=UnavailableContainerBackend(), work_root=tmp_path
+        )
+        partial_tasks = (make_task(task_id="task-a", verifier_identity="hidden-v1"),)
+        with pytest.raises(ValueError, match="missing from the task list"):
+            asyncio.run(
+                runner.run_pair(
+                    orchestrator=orchestrator,
+                    baseline_manifest=baseline,
+                    candidate_manifest=candidate,
+                    tasks=partial_tasks,
+                )
+            )

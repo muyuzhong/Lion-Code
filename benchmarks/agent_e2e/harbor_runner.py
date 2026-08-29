@@ -29,7 +29,6 @@ from .models import (
 from .swebench_verified import parse_harbor_result
 from .trace import redact_text
 from .variant_injection import (
-    VariantInjectionSpec,
     spec_from_manifest,
 )
 
@@ -56,7 +55,8 @@ class HarborExecutionRequest:
     harbor_executable: str = "harbor"
     dataset: str = HARBOR_DATASET
     agent_import_path: str = HARBOR_AGENT_IMPORT_PATH
-    injection_spec: VariantInjectionSpec | None = None
+    # 注入映射表只随冻结 manifest 传递(单一事实来源);
+    # request_variant=True 表示声明「这是受控实验的 run」并要求 manifest 携带映射表。
     request_variant: bool = False
 
 
@@ -583,14 +583,8 @@ def _validate_request(
             reason="Harbor task is not selected by manifest",
         )
     if request.request_variant:
-        if request.injection_spec is None:
-            return _unavailable(
-                request,
-                status=AdapterStatus.INVALID,
-                execution_status=TrialExecutionStatus.INFRA_FAILED,
-                failure_source=FailureSource.SCHEMA,
-                reason="Variant experiment requires an injection spec",
-            )
+        # 映射表只从 manifest 读取:worker 端同样以 manifest 为唯一来源,
+        # 双数据源会让「请求的 spec」与「执行的 spec」可能不一致。
         if spec_from_manifest(request.manifest) is None:
             return _unavailable(
                 request,

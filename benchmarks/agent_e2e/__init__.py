@@ -9,6 +9,7 @@ from .artifact import (
 )
 from .calibration import CalibrationOutcome, CalibrationSummary, run_calibration
 from .catalog import CatalogValidationError, freeze_catalog, validate_catalog
+from .controlled_runner import ControlledExperimentRunner
 from .corpus import (
     CorpusAdmissionError,
     HistoricalPreflight,
@@ -150,6 +151,7 @@ from .models import (
     OpikSpan,
     OpikTracePayload,
     ResultValidity,
+    RunInjectionEvidence,
     TaskResult,
     TaskSpec,
     TaskSplit,
@@ -276,6 +278,7 @@ __all__ = [
     "CommitArtifact",
     "CommitArtifactBuilder",
     "CompactionState",
+    "ControlledExperimentRunner",
     "CorpusAdmissionError",
     "DeepEvalAnalysis",
     "DeepEvalAnalysisStatus",
@@ -371,6 +374,7 @@ __all__ = [
     "RequestedVariant",
     "ResolvedVariant",
     "ResultValidity",
+    "RunInjectionEvidence",
     "SubprocessOfficialSWEbenchLiveRunner",
     "TargetScope",
     "TaskResult",

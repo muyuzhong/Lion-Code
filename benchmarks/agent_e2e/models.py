@@ -544,13 +544,38 @@ class ResolvedVariant(VersionedModel):
 
 
 class InjectionEvidence(VersionedModel):
-    """一次执行的注入证据;fingerprint 非空 = 真的注入了。"""
+    """一次执行的注入证据;fingerprint 非空 = 真的注入了。
+
+    ``prompt_sha256`` / ``tool_policy_sha256`` 是各维度注入内容的摘要,
+    供 run 级校验按声明维度精确核对(而不只看复合指纹)。
+    """
 
     requested: RequestedVariant = Field(default_factory=RequestedVariant)
     resolved_variant: ResolvedVariant = Field(default_factory=ResolvedVariant)
     injection_fingerprint: str | None = Field(
         default=None, min_length=64, max_length=64
     )
+    prompt_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    tool_policy_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunInjectionEvidence(VersionedModel):
+    """一次 run(全部 task×attempt)的注入证据聚合。
+
+    只有整个 run 的 requested / resolved / fingerprint 完全一致时才存在,
+    用来证明「这条 run 的每一次执行都经历了同一个 treatment」;任一
+    结果缺失或不一致,整个 run 视为没有可用的注入证据。
+    """
+
+    requested: RequestedVariant = Field(default_factory=RequestedVariant)
+    resolved_variant: ResolvedVariant = Field(default_factory=ResolvedVariant)
+    injection_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
+    prompt_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    tool_policy_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    result_count: int = Field(ge=1)
     extensions: dict[str, Any] = Field(default_factory=dict)
 
 
