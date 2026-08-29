@@ -19,7 +19,6 @@ class UsageSnapshot:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     turns: int = 0
-    responses: int = 0
     last_prompt_tokens: int = 0
     last_response_at: float | None = None
     cost_usd: float = 0.0
@@ -72,7 +71,6 @@ class UsageLedger:
         "_last_prompt_tokens",
         "_last_response_at",
         "_output_tokens",
-        "_responses",
         "_turns",
     )
 
@@ -82,7 +80,6 @@ class UsageLedger:
         self._cache_read_tokens = 0
         self._cache_write_tokens = 0
         self._turns = 0
-        self._responses = 0
         self._last_prompt_tokens = 0
         self._last_response_at: float | None = None
 
@@ -98,7 +95,6 @@ class UsageLedger:
         self._output_tokens += usage.output
         self._cache_read_tokens += usage.cache_read
         self._cache_write_tokens += usage.cache_write
-        self._responses += 1
         self._last_prompt_tokens = usage.total_tokens or (
             usage.input + usage.cache_read + usage.cache_write + usage.output
         )
@@ -123,7 +119,6 @@ class UsageLedger:
         self._cache_read_tokens = 0
         self._cache_write_tokens = 0
         self._turns = 0
-        self._responses = 0
         self._last_prompt_tokens = 0
         self._last_response_at = None
 
@@ -141,7 +136,6 @@ class UsageLedger:
             cache_read_tokens=self._cache_read_tokens,
             cache_write_tokens=self._cache_write_tokens,
             turns=self._turns,
-            responses=self._responses,
             last_prompt_tokens=self._last_prompt_tokens,
             last_response_at=self._last_response_at,
             cost_usd=(

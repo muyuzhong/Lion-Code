@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from lion_code.core.types import JSONValue
 
@@ -27,10 +27,6 @@ class OpenAICompatibleConfig:
     api: str = "openai-completions"
     max_tokens: int | None = None
     reasoning_effort: str | None = None
-    reasoning_effort_parameter: str = "reasoning_effort"
-    thinking_format: str = "openai"
-    compat: Mapping[str, JSONValue] = field(default_factory=dict)
-    include_reasoning_effort_none: bool = False
     provider_name: str = "OpenAI-compatible provider"
 
 

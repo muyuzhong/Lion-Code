@@ -6,7 +6,7 @@ from .permission import ToolPermissionStrategy
 from .registry import ToolRegistry
 from .runtime import ToolRuntime
 from .selection import ToolSelectionPolicy, select_tools
-from .snapshot import RestoreResult, SnapshotId, WorkspaceSnapshot
+from .snapshot import SnapshotId, WorkspaceSnapshot
 from .types import JSONValue, LionTool, ToolCapabilities, ToolCommand, ToolResult
 
 __all__ = [
@@ -16,7 +16,6 @@ __all__ = [
     "JSONValue",
     "LionTool",
     "LocalCommandExecutionBackend",
-    "RestoreResult",
     "SnapshotId",
     "ToolCapabilities",
     "ToolCommand",

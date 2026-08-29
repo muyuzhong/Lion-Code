@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from tests.benchmarks.fixtures.verified_task_1 import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task as make_verified_task,
+)
 from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.external_anchor import (
     CalibrationPoint,
@@ -46,18 +51,13 @@ from benchmarks.agent_e2e.trace import TraceEvent
 
 
 def _task(task_id: str, *, split: TaskSplit = TaskSplit.REGRESSION) -> TaskSpec:
-    return TaskSpec(
+    return make_verified_task(
         task_id=task_id,
-        family="bugfix",
         split=split,
-        repository="lion",
-        base_revision="abcdef0",
-        public_prompt="修复公开问题。",
+        verifier_identity="hidden-v1",
+        difficulty=1,
         public_setup=("python -m pip install -e .",),
         public_validation_commands=("python -m pytest -q",),
-        verifier_identity="hidden-v1",
-        gold_evidence_hash="a" * 64,
-        difficulty=2,
         involved_files=("lion_code/meta_agent.py",),
     )
 
@@ -82,13 +82,13 @@ def _report(
         repeats=1,
         timeout_seconds=30,
         budget_usd=1,
-        agent_code_sha="abcdef0",
+        agent_code_sha=AGENT_CODE_SHA,
         credential_env_vars=("EVAL_API_KEY",),
     )
     manifest = ExperimentManifest(
         run_id=run_id,
         agent_code_sha=profile.agent_code_sha,
-        evaluator_code_sha="1234567",
+        evaluator_code_sha=EVALUATOR_CODE_SHA,
         catalog=freeze_catalog(catalog),
         profile=profile,
         profile_fingerprint=profile.fingerprint(),

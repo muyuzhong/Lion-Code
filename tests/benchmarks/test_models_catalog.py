@@ -6,6 +6,11 @@ import unittest
 
 from pydantic import ValidationError
 
+from tests.benchmarks.fixtures.verified_task_1 import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task as make_verified_task,
+)
 from benchmarks.agent_e2e.catalog import (
     CatalogValidationError,
     freeze_catalog,
@@ -30,18 +35,13 @@ from benchmarks.agent_e2e.models import (
 
 
 def make_task(*, task_id: str = "task-1", split: TaskSplit = TaskSplit.REGRESSION) -> TaskSpec:
-    return TaskSpec(
+    return make_verified_task(
         task_id=task_id,
-        family="bugfix",
         split=split,
-        repository="lion",
-        base_revision="abcdef0",
-        public_prompt="修复公开问题。",
+        verifier_identity="hidden-v1",
+        difficulty=1,
         public_setup=("python -m pip install -e .",),
         public_validation_commands=("python -m pytest -q",),
-        verifier_identity="hidden-v1",
-        gold_evidence_hash="a" * 64,
-        difficulty=2,
         involved_files=("lion_code/meta_agent.py",),
     )
 
@@ -58,7 +58,7 @@ def make_profile() -> ExperimentProfile:
         repeats=1,
         timeout_seconds=30,
         budget_usd=0,
-        agent_code_sha="abcdef0",
+        agent_code_sha=AGENT_CODE_SHA,
     )
 
 
@@ -69,8 +69,8 @@ def make_manifest(task: TaskSpec | None = None) -> tuple[Catalog, ExperimentMani
     profile = make_profile()
     return catalog, ExperimentManifest(
         run_id="offline-run",
-        agent_code_sha="abcdef0",
-        evaluator_code_sha="1234567",
+        agent_code_sha=AGENT_CODE_SHA,
+        evaluator_code_sha=EVALUATOR_CODE_SHA,
         catalog=lock,
         profile=profile,
         profile_fingerprint=profile.fingerprint(),

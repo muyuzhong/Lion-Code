@@ -13,7 +13,6 @@ async def _execute(_context, _tool_call_id, _arguments, _on_update):
 def _tool(*, mode="parallel", **capabilities):
     return LionTool(
         name="tool",
-        label="tool",
         description="tool",
         parameters={"type": "object", "properties": {}},
         execute_fn=_execute,

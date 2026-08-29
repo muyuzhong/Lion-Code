@@ -127,7 +127,6 @@ async def test_zero_extension_zero_tool_smoke(tmp_path, monkeypatch) -> None:
     assert provider.received_tools == [[]]
     assert provider.received_systems == ["You are a helpful assistant."]
     assert not hasattr(agent, "_capability_registry")
-    assert agent.usage.responses == 1
     assert agent.budget.max_cost_usd is None
     await agent.close()
 

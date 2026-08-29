@@ -44,7 +44,6 @@ def _tool(
 
     return LionTool(
         name=name,
-        label=name,
         description=name,
         parameters={"type": "object", "properties": {}},
         execute_fn=execute_fn or _noop,

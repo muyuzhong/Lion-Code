@@ -12,6 +12,11 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from tests.benchmarks.fixtures.verified_task_1 import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task,
+)
 from benchmarks.agent_e2e.artifact import CommitArtifact, CommitArtifactBuilder
 from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.harbor_runner import (
@@ -68,18 +73,7 @@ def _git_repository(root: Path) -> str:
 
 
 def _task() -> TaskSpec:
-    return TaskSpec(
-        task_id="verified-task-1",
-        family="bugfix",
-        split=TaskSplit.REGRESSION,
-        repository="lion",
-        base_revision="abcdef0",
-        public_prompt="修复公开问题。",
-        verifier_identity="verified/v1",
-        gold_evidence_hash="a" * 64,
-        difficulty=1,
-        extensions={"harbor_task_name": "swebench-task-1"},
-    )
+    return make_task(extensions={"harbor_task_name": "swebench-task-1"})
 
 
 def _manifest(task: TaskSpec, *, budget_usd: float = 1.0) -> ExperimentManifest:
@@ -94,7 +88,7 @@ def _manifest(task: TaskSpec, *, budget_usd: float = 1.0) -> ExperimentManifest:
         repeats=1,
         timeout_seconds=30,
         budget_usd=budget_usd,
-        agent_code_sha="abcdef0",
+        agent_code_sha=AGENT_CODE_SHA,
         credential_env_vars=("TEST_PROVIDER_KEY",) if budget_usd else (),
     )
     from benchmarks.agent_e2e.models import Catalog
@@ -103,7 +97,7 @@ def _manifest(task: TaskSpec, *, budget_usd: float = 1.0) -> ExperimentManifest:
     return ExperimentManifest(
         run_id="verified-run-1",
         agent_code_sha=profile.agent_code_sha,
-        evaluator_code_sha="1234567",
+        evaluator_code_sha=EVALUATOR_CODE_SHA,
         catalog=freeze_catalog(catalog),
         profile=profile,
         profile_fingerprint=profile.fingerprint(),

@@ -18,7 +18,6 @@ async def _execute(_context, _tool_call_id, _arguments, _on_update):
 def _tool(name: str) -> LionTool:
     return LionTool(
         name=name,
-        label=name,
         description=name,
         parameters={"type": "object", "properties": {}},
         execute_fn=_execute,
@@ -90,7 +89,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "skill result")
         usage = parent.agent.usage
         self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
-        self.assertEqual((usage.responses, usage.turns), (0, 0))
+        self.assertEqual(usage.turns, 0)
         self.assertIs(
             child_registry.resolve(custom_name), parent.composition.tooling.registry.resolve(custom_name)
         )
@@ -270,7 +269,7 @@ class TestSkillRegistryView(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["system_prompt"], skill_result["prompt"])
         usage = parent.agent.usage
         self.assertEqual((usage.input_tokens, usage.output_tokens), (1, 2))
-        self.assertEqual((usage.responses, usage.turns), (0, 0))
+        self.assertEqual(usage.turns, 0)
         _ChildAgent.last_instance.close.assert_awaited_once_with()
 
 

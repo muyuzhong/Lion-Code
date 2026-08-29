@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from .prompt_templates import PromptTemplate
 from .skills import Skill
 
 
@@ -34,9 +33,6 @@ class CommandSession(Protocol):
 
     @property
     def skills(self) -> Sequence[Skill]: ...
-
-    @property
-    def prompt_templates(self) -> Sequence[PromptTemplate]: ...
 
     @property
     def thinking_level(self) -> str: ...

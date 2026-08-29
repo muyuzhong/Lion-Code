@@ -32,7 +32,6 @@ def _web_fetch_tool() -> LionTool:
 
     return LionTool(
         name="web_fetch",
-        label="web_fetch",
         description="web_fetch",
         parameters={"type": "object", "properties": {}},
         execute_fn=execute,
@@ -46,7 +45,6 @@ def _shell_tool() -> LionTool:
 
     return LionTool(
         name="run_shell",
-        label="run_shell",
         description="run_shell",
         parameters={"type": "object", "properties": {}},
         execute_fn=execute,
@@ -218,7 +216,6 @@ class TestLevelB(unittest.TestCase):
 
         read_tool = LionTool(
             name="read_file",
-            label="read_file",
             description="read_file",
             parameters={"type": "object", "properties": {}},
             execute_fn=execute,

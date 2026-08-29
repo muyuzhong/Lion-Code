@@ -11,6 +11,11 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from tests.benchmarks.fixtures.verified_task_1 import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task,
+)
 from benchmarks.agent_e2e.deepeval_analysis import (
     DeepEvalSchemaError,
     build_deepeval_trajectory,
@@ -67,17 +72,7 @@ def _digest(value: str) -> str:
 
 
 def _task() -> TaskSpec:
-    return TaskSpec(
-        task_id="verified-task-1",
-        family="bugfix",
-        split=TaskSplit.REGRESSION,
-        repository="lion",
-        base_revision="abcdef0",
-        public_prompt="修复公开问题。",
-        verifier_identity="verified/v1",
-        gold_evidence_hash="a" * 64,
-        difficulty=1,
-    )
+    return make_task()
 
 
 def _manifest() -> ExperimentManifest:
@@ -93,7 +88,7 @@ def _manifest() -> ExperimentManifest:
         repeats=1,
         timeout_seconds=10,
         budget_usd=0,
-        agent_code_sha="abcdef0",
+        agent_code_sha=AGENT_CODE_SHA,
     )
     from benchmarks.agent_e2e.catalog import freeze_catalog
     from benchmarks.agent_e2e.models import Catalog
@@ -101,8 +96,8 @@ def _manifest() -> ExperimentManifest:
     lock = freeze_catalog(Catalog(catalog_id="c", catalog_version="v1", tasks=(task,)))
     return ExperimentManifest(
         run_id="run-1",
-        agent_code_sha="abcdef0",
-        evaluator_code_sha="1234567",
+        agent_code_sha=AGENT_CODE_SHA,
+        evaluator_code_sha=EVALUATOR_CODE_SHA,
         catalog=lock,
         profile=profile,
         profile_fingerprint=profile.fingerprint(),

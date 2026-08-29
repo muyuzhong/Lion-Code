@@ -392,11 +392,7 @@ _PUBLIC_TASKS: tuple[TaskSpec, ...] = (
 _GOLD_REVISIONS: Mapping[str, str] = {
     "lion-cross-file-refactor-01": "46f9dfe60d20f0ad7a99aecd9a0521c6e24b6a05",
     "lion-cross-file-refactor-02": "3370351f2cfc4a30927e79a50f0ab9276880e6ef",
-    "lion-cross-file-refactor-03": "1f95fb02ac9afc546b3b3f44705d86ce1607a43b",
-    "lion-cross-file-refactor-04": "9e92d09f9619d3985a31bf54878c487e1a268d0c",
     "lion-cross-file-refactor-05": "64e25b6c21a5876866decf5a17799d9acf8d4447",
-    "lion-cross-file-refactor-06": "517fde844aedc4c8fb0cae4199c093e39c4d48c3",
-    "lion-cross-file-refactor-07": "0b3aa4d0b69b88243b18e31964b2039ce4795d66",
     "lion-cross-file-refactor-08": "43d0819ae64eaca71cad93aa87f982066ee8b7a4",
     "lion-cross-file-refactor-09": "047c1875c64c0788ddd73201c3fab2edd580eabb",
     "lion-cross-file-refactor-10": "44718f1338e0a7913042004f33f5021a365b8d19",

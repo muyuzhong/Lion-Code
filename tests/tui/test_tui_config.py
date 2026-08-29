@@ -14,19 +14,16 @@ from lion_code.tui.config import (
     tui_settings_path,
 )
 
-
 def test_tui_settings_path_uses_lion_home(tmp_path: Path) -> None:
     home = tmp_path / ".lion-code"
 
     assert tui_settings_path(home) == home / "tui.json"
-
 
 def test_load_tui_settings_returns_defaults_when_file_is_missing(tmp_path: Path) -> None:
     home = tmp_path / ".lion-code"
 
     assert load_tui_settings(home) == TuiSettings()
     assert load_tui_settings(home).keybindings.quit == "ctrl+d"
-
 
 def test_load_tui_settings_reads_keybindings(tmp_path: Path) -> None:
     home = tmp_path / ".lion-code"
@@ -66,7 +63,6 @@ def test_load_tui_settings_reads_keybindings(tmp_path: Path) -> None:
     assert settings.theme == "high-contrast"
     assert settings.resolved_theme == HIGH_CONTRAST_THEME
 
-
 def test_save_tui_settings_writes_json(tmp_path: Path) -> None:
     home = tmp_path / ".lion-code"
 
@@ -74,7 +70,6 @@ def test_save_tui_settings_writes_json(tmp_path: Path) -> None:
 
     assert path == home / "tui.json"
     assert load_tui_settings(home).theme == "tau-light"
-
 
 def test_tui_settings_ignores_removed_message_selection_keybindings() -> None:
     settings = tui_settings_from_json(
@@ -88,7 +83,6 @@ def test_tui_settings_ignores_removed_message_selection_keybindings() -> None:
 
     assert settings == TuiSettings()
 
-
 def test_tui_settings_ignore_unknown_fields() -> None:
     settings = tui_settings_from_json(
         {
@@ -98,7 +92,6 @@ def test_tui_settings_ignore_unknown_fields() -> None:
     )
 
     assert settings.theme == "tau-light"
-
 
 def test_tui_keybindings_ignore_unknown_actions() -> None:
     settings = tui_settings_from_json(
@@ -112,7 +105,6 @@ def test_tui_keybindings_ignore_unknown_actions() -> None:
 
     assert settings.keybindings.quit == "f12"
 
-
 def test_tui_keybindings_reject_duplicate_keys() -> None:
     with pytest.raises(TuiConfigError, match="assigned to both"):
         tui_settings_from_json(
@@ -124,13 +116,11 @@ def test_tui_keybindings_reject_duplicate_keys() -> None:
             }
         )
 
-
 def test_tui_settings_accept_unknown_theme_and_fall_back_when_resolving() -> None:
     settings = tui_settings_from_json({"theme": "solarized"})
 
     assert settings.theme == "solarized"
     assert settings.resolved_theme == get_tui_theme("tau-dark")
-
 
 def test_tui_settings_reject_non_string_theme() -> None:
     with pytest.raises(TuiConfigError, match="theme"):
@@ -138,26 +128,12 @@ def test_tui_settings_reject_non_string_theme() -> None:
     with pytest.raises(TuiConfigError, match="theme"):
         tui_settings_from_json({"theme": "  "})
 
-
 def test_tui_settings_accept_light_theme() -> None:
     settings = tui_settings_from_json({"theme": "tau-light"})
 
     assert settings.theme == "tau-light"
     assert settings.resolved_theme.screen_background == "#ffffff"
     assert settings.resolved_theme.syntax_theme == "ansi_light"
-
-
-def test_tui_settings_load_auto_copy_selection() -> None:
-    settings = tui_settings_from_json({"auto_copy_selection": True})
-
-    assert settings.auto_copy_selection is True
-    assert settings.to_json()["auto_copy_selection"] is True
-
-
-def test_tui_settings_reject_invalid_auto_copy_selection() -> None:
-    with pytest.raises(TuiConfigError, match="auto_copy_selection"):
-        tui_settings_from_json({"auto_copy_selection": "yes"})
-
 
 def test_tui_keybindings_serialize_to_json() -> None:
     settings = TuiSettings(
@@ -184,26 +160,21 @@ def test_tui_keybindings_serialize_to_json() -> None:
     assert settings.to_json()["keybindings"]["model_cycle"] == "f6"
     assert settings.to_json()["keybindings"]["copy_message"] == "ctrl+b"
     assert settings.to_json()["theme"] == "high-contrast"
-    assert settings.to_json()["auto_copy_selection"] is False
-
 
 def test_get_tui_theme_returns_builtin_theme() -> None:
     assert get_tui_theme("high-contrast").prompt_border == "#00ff66"
     assert get_tui_theme("tau-light").prompt_border == "#2563eb"
     assert get_tui_theme("tau-dark").screen_background == "#000000"
 
-
 def test_tui_turn_notification_defaults_to_desktop() -> None:
     assert TuiSettings().turn_notification == "desktop"
     assert tui_settings_from_json({}).turn_notification == "desktop"
-
 
 def test_tui_turn_notification_roundtrips() -> None:
     for value in ("off", "bell", "desktop"):
         settings = tui_settings_from_json({"turn_notification": value})
         assert settings.turn_notification == value
         assert settings.to_json()["turn_notification"] == value
-
 
 def test_tui_turn_notification_rejects_invalid_value() -> None:
     with pytest.raises(TuiConfigError, match="turn_notification"):
@@ -212,22 +183,3 @@ def test_tui_turn_notification_rejects_invalid_value() -> None:
     with pytest.raises(TuiConfigError, match="turn_notification"):
         tui_settings_from_json({"turn_notification": True})
 
-
-def test_tui_sidebar_position_defaults_to_right() -> None:
-    assert TuiSettings().sidebar_position == "right"
-    assert tui_settings_from_json({}).sidebar_position == "right"
-
-
-def test_tui_sidebar_position_roundtrips() -> None:
-    for value in ("left", "right", "off"):
-        settings = tui_settings_from_json({"sidebar_position": value})
-        assert settings.sidebar_position == value
-        assert settings.to_json()["sidebar_position"] == value
-
-
-def test_tui_sidebar_position_rejects_invalid() -> None:
-    with pytest.raises(TuiConfigError, match="sidebar_position"):
-        tui_settings_from_json({"sidebar_position": "top"})
-
-    with pytest.raises(TuiConfigError, match="sidebar_position"):
-        tui_settings_from_json({"sidebar_position": 123})

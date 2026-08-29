@@ -33,9 +33,8 @@
 
 ### 2. Session 会话回放与恢复 (`AgentRuntime.restore`)
 ```
-1. 仓库加载与回放 (SessionState.from_entries(entries, leaf_id=...))
-   ├─ 默认模式：按存储顺序（Storage Order）线性回放全部 Entry。
-   ├─ 分支模式：若显式传入 leaf_id，则仅沿 root-to-leaf path 进行路径回放。
+1. 仓库加载与回放 (SessionState.from_entries(entries))
+   ├─ 回放模式：按存储顺序（Storage Order）线性回放全部 Entry。
    └─ 压缩折叠：遇到 CompactionEntry 时，将 replaces_entry_ids 中的旧消息
       折叠替换为一条 UserMessage("Previous conversation summary:\n<summary>")。
 

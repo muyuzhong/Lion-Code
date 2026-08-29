@@ -7,6 +7,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.benchmarks.fixtures.verified_task_1 import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task as make_verified_task,
+)
 from benchmarks.agent_e2e.backend import (
     FakeContainerBackend,
     IsolationReport,
@@ -31,17 +36,7 @@ from benchmarks.agent_e2e.report import build_report, render_chinese_markdown
 
 
 def make_task() -> TaskSpec:
-    return TaskSpec(
-        task_id="task-1",
-        family="bugfix",
-        split=TaskSplit.REGRESSION,
-        repository="lion",
-        base_revision="abcdef0",
-        public_prompt="修复问题。",
-        verifier_identity="hidden-v1",
-        gold_evidence_hash="a" * 64,
-        difficulty=1,
-    )
+    return make_verified_task(task_id="task-1", verifier_identity="hidden-v1")
 
 
 def make_manifest(task: TaskSpec) -> ExperimentManifest:
@@ -57,12 +52,12 @@ def make_manifest(task: TaskSpec) -> ExperimentManifest:
         repeats=1,
         timeout_seconds=30,
         budget_usd=0,
-        agent_code_sha="abcdef0",
+        agent_code_sha=AGENT_CODE_SHA,
     )
     return ExperimentManifest(
         run_id="offline-run",
         agent_code_sha=profile.agent_code_sha,
-        evaluator_code_sha="1234567",
+        evaluator_code_sha=EVALUATOR_CODE_SHA,
         catalog=freeze_catalog(catalog),
         profile=profile,
         profile_fingerprint=profile.fingerprint(),

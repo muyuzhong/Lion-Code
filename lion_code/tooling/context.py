@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from ..runtime.session_identity import SessionView
     from .audit import ExecutionAuditLog
     from .registry import ToolRegistry
-    from .snapshot import WorkspaceSnapshot
     from .types import LionTool
 
 
@@ -39,5 +38,4 @@ class ToolContext:
         ]
         | None
     ) = None
-    workspace_snapshot: WorkspaceSnapshot | None = None
     audit_log: ExecutionAuditLog | None = None

@@ -114,7 +114,7 @@ layers:
    实际含 Kernel + Harness + Capability[Plan/SubAgent] + Supervisor 重试。
 4. Plan 事务（`tests/test_plan_runtime.py`、`tests/tooling/test_agent_runtime.py` plan-mode 部分）
    → **capability[Plan]**。clear-and-execute 的 pending context reset 与
-   `apply_plan_context_reset` 已随 PR3 从 Kernel/Runtime 移除，集成测试标记 skip 待 re-home。
+   对应的 Plan 上下文重置方法已随 PR3 从 Kernel/Runtime 移除，相关集成测试已删除。
    PR4 进一步移除 Plan 与 Permission 的耦合：PermissionMode 不含 plan/auto，
    ToolContext 无 plan / auto_permission_fn，PermissionMiddleware/Policy 无 plan/auto 特判，
    PlanRuntime 不再写 PermissionController；产品策略（PlanRestrictedPolicy /

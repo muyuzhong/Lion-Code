@@ -28,7 +28,6 @@ def _tool(name: str, capabilities: ToolCapabilities, executed: list[str]) -> Lio
 
     return LionTool(
         name=name,
-        label=name,
         description=name,
         parameters={"type": "object", "properties": {}},
         execute_fn=execute,

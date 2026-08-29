@@ -12,24 +12,11 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 SnapshotId = str
 _DEFAULT_RETENTION_WINDOW_SECONDS = 30 * 24 * 60 * 60
-
-
-@dataclass(frozen=True, slots=True)
-class RestoreResult:
-    """一次恢复操作的结果；恢复失败时保留可重试的前置快照。"""
-
-    restored: bool
-    snapshot_id: SnapshotId
-    pre_restore_snapshot_id: SnapshotId | None = None
-    restored_paths: tuple[str, ...] = ()
-    error: str | None = None
-
 
 def is_sensitive_path(path: str | Path) -> bool:
     """判断路径是否属于不应保存内容的敏感路径。"""
@@ -38,7 +25,6 @@ def is_sensitive_path(path: str | Path) -> bool:
         part in {".credentials", ".secrets"} or part.startswith(".env")
         for part in parts
     )
-
 
 class WorkspaceSnapshot:
     """在工作区外保存文件树，并提供可逆的文件系统恢复。"""
@@ -113,69 +99,6 @@ class WorkspaceSnapshot:
             except Exception:
                 shutil.rmtree(temporary, ignore_errors=True)
                 raise
-
-    def restore(self, snapshot_id: SnapshotId) -> RestoreResult:
-        """先保存当前状态，再恢复指定快照中的普通非敏感文件。"""
-        with self._lock:
-            try:
-                pre_restore_snapshot_id = self._create(protected=(snapshot_id,))
-            except Exception as exc:
-                return RestoreResult(
-                    restored=False,
-                    snapshot_id=snapshot_id,
-                    error=f"pre-restore snapshot failed: {exc}",
-                )
-
-            try:
-                manifest = self._load_manifest(snapshot_id)
-                target_entries = {
-                    entry["path"]: entry
-                    for entry in manifest["entries"]
-                    if entry.get("exists")
-                    and not entry.get("sensitive")
-                    and not entry.get("ignored")
-                }
-                current_entries = self._capture_entries()
-                restored_paths: list[str] = []
-                for entry in current_entries:
-                    path = entry["path"]
-                    if (
-                        entry["exists"]
-                        and not entry["sensitive"]
-                        and not entry["ignored"]
-                        and path not in target_entries
-                    ):
-                        self._remove_entry(
-                            self.workspace_root / self._safe_relative(path)
-                        )
-                self._prune_empty_directories()
-
-                snapshot_data = self.storage_dir / snapshot_id / "data"
-                for path, entry in target_entries.items():
-                    relative = self._safe_relative(path)
-                    destination = self.workspace_root / relative
-                    source = snapshot_data / Path(entry["content"])
-                    self._materialize_entry(
-                        source,
-                        destination,
-                        entry["kind"],
-                        int(entry.get("mode", 0o600)),
-                    )
-                    restored_paths.append(path)
-                self._gc(protected={pre_restore_snapshot_id})
-                return RestoreResult(
-                    restored=True,
-                    snapshot_id=snapshot_id,
-                    pre_restore_snapshot_id=pre_restore_snapshot_id,
-                    restored_paths=tuple(sorted(restored_paths)),
-                )
-            except Exception as exc:
-                return RestoreResult(
-                    restored=False,
-                    snapshot_id=snapshot_id,
-                    pre_restore_snapshot_id=pre_restore_snapshot_id,
-                    error=f"restore failed: {exc}",
-                )
 
     def _capture_entries(self) -> list[dict[str, Any]]:
         git_paths = self._git_paths()
@@ -316,22 +239,6 @@ class WorkspaceSnapshot:
                     paths.add(path.relative_to(self.workspace_root).as_posix())
         return paths
 
-    def _load_manifest(self, snapshot_id: SnapshotId) -> dict[str, Any]:
-        if not snapshot_id or Path(snapshot_id).name != snapshot_id:
-            raise ValueError("invalid snapshot id")
-        manifest_path = self.storage_dir / snapshot_id / "manifest.json"
-        if not self._is_within(manifest_path, self.storage_dir):
-            raise ValueError("snapshot path escapes storage")
-        with manifest_path.open(encoding="utf-8") as stream:
-            manifest = json.load(stream)
-        if manifest.get("snapshot_id") != snapshot_id:
-            raise ValueError("snapshot id does not match manifest")
-        for entry in manifest.get("entries", []):
-            self._safe_relative(str(entry["path"]))
-            if entry.get("content"):
-                self._safe_relative(str(entry["content"]))
-        return manifest
-
     def _copy_entry(self, source: Path, destination: Path, kind: str) -> None:
         if kind == "symlink":
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -339,66 +246,6 @@ class WorkspaceSnapshot:
         else:
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination, follow_symlinks=False)
-
-    def _materialize_entry(
-        self,
-        source: Path,
-        destination: Path,
-        kind: str,
-        mode: int,
-    ) -> None:
-        self._assert_workspace_path(destination)
-        if destination.exists() or destination.is_symlink():
-            self._remove_entry(destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if kind == "symlink":
-            destination.symlink_to(os.readlink(source))
-        else:
-            shutil.copy2(source, destination, follow_symlinks=False)
-            try:
-                destination.chmod(mode or 0o600)
-            except OSError:
-                pass
-
-    def _remove_entry(self, path: Path) -> None:
-        self._assert_workspace_path(path)
-        try:
-            file_stat = path.lstat()
-        except FileNotFoundError:
-            return
-        if stat_module.S_ISLNK(file_stat.st_mode) or stat_module.S_ISREG(
-            file_stat.st_mode
-        ):
-            path.unlink()
-            return
-        if stat_module.S_ISDIR(file_stat.st_mode):
-            try:
-                path.rmdir()
-            except OSError as exc:
-                raise IsADirectoryError(
-                    f"refusing to remove non-empty directory: {path}"
-                ) from exc
-            return
-        raise OSError(f"refusing to remove unsupported workspace entry: {path}")
-
-    def _prune_empty_directories(self) -> None:
-        for root, directories, _ in os.walk(
-            self.workspace_root, topdown=False, followlinks=False
-        ):
-            directories[:] = [
-                directory for directory in directories if directory != ".git"
-            ]
-            for name in directories:
-                directory = Path(root) / name
-                if directory.is_symlink():
-                    continue
-                relative = directory.relative_to(self.workspace_root).as_posix()
-                if is_sensitive_path(relative) or self._is_ignored_path(relative):
-                    continue
-                try:
-                    self._remove_entry(directory)
-                except (OSError, ValueError):
-                    continue
 
     def _safe_relative(self, relative: str) -> str:
         normalized = relative.replace("\\", "/")
@@ -413,17 +260,6 @@ class WorkspaceSnapshot:
         ):
             raise ValueError(f"unsafe workspace path: {relative}")
         return path.as_posix()
-
-    def _assert_workspace_path(self, path: Path) -> None:
-        absolute = Path(os.path.abspath(path))
-        try:
-            relative = absolute.relative_to(self.workspace_root)
-        except ValueError:
-            raise ValueError("workspace path escapes root")
-        if not relative.parts or ".git" in relative.parts:
-            raise ValueError(".git is protected")
-        if not self._is_within(absolute.parent.resolve(), self.workspace_root):
-            raise ValueError("workspace path escapes root")
 
     def _gc(self, *, protected: set[str]) -> None:
         snapshots: list[tuple[int, Path]] = []
@@ -461,7 +297,6 @@ class WorkspaceSnapshot:
             return False
         return True
 
-
 def _split_git_paths(output: bytes) -> set[str]:
     return {
         item.decode("utf-8", errors="surrogateescape")
@@ -469,18 +304,15 @@ def _split_git_paths(output: bytes) -> set[str]:
         if item
     }
 
-
 def _default_storage_dir(workspace_root: Path) -> Path:
     workspace_key = hashlib.sha256(os.fsencode(str(workspace_root))).hexdigest()[:16]
     return Path.home() / ".lion_code" / "snapshots" / workspace_key
-
 
 def _chmod_private(path: Path) -> None:
     try:
         path.chmod(0o700)
     except OSError:
         pass
-
 
 def _write_private_json(path: Path, value: object) -> None:
     path.write_text(
@@ -491,7 +323,6 @@ def _write_private_json(path: Path, value: object) -> None:
         path.chmod(0o600)
     except OSError:
         pass
-
 
 def _chmod_private_tree(root: Path) -> None:
     for path in root.rglob("*"):

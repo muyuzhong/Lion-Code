@@ -34,7 +34,6 @@ class UsageSnapshot:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     turns: int = 0
-    responses: int = 0
     last_prompt_tokens: int = 0
     last_response_at: float | None = None
     cost_usd: float = 0.0
@@ -84,13 +83,13 @@ calls `record_model_usage()` exactly once. It owns no token, response, timestamp
 cost, or synchronization state.
 
 `record_model_usage()` adds input, output, cache-read and cache-write,
-increments responses, and replaces the latest prompt size and response time.
+and replaces the latest prompt size and response time.
 `last_prompt_tokens` uses `Usage.total_tokens` when provided, otherwise
 input + cache-read + cache-write + output.
 
 Child-agent and Skill completion paths call `record_child_usage()`.
 That command adds only input and output tokens. It must preserve cache fields,
-responses, turns, `last_prompt_tokens`, and `last_response_at`; child totals may
+turns, `last_prompt_tokens`, and `last_response_at`; child totals may
 never overwrite already aggregated parent usage.
 
 ### Cost and budget decisions
@@ -124,7 +123,7 @@ final-text responses and queued follow-ups, rather than Core tool boundaries.
 ### Reset and observer lifecycle
 
 Session clear and successful restore call `reset()`: every token field, turn,
-response, timestamp and prompt tracker returns to its zero/None default. Context compaction and Plan clear-and-execute call only
+timestamp and prompt tracker returns to its zero/None default. Context compaction and Plan clear-and-execute call only
 `reset_context_tracking()`, so they clear `last_prompt_tokens` while preserving
 all cumulative usage and `last_response_at`.
 
@@ -175,8 +174,8 @@ counters, observer totals, or a second cost calculation.
 
 Good aggregation: a parent terminal response records 10 input and 4 output,
 then a child returns 3 input and 2 output. The snapshot reports 13 input and 6
-output while responses, turns, latest prompt, and response time still describe
-the parent path.
+output while turns, latest prompt, and response time still describe the parent
+path.
 
 Base session: a new or fully reset Ledger returns `UsageSnapshot()` exactly.
 Snapshots are immutable values and remain unchanged after later Ledger writes.
@@ -187,7 +186,7 @@ both exact cost and turn limits reached, the decision kind is `max_cost`.
 
 Good context transition: compaction or Plan clear-and-execute changes only
 `last_prompt_tokens` to zero. The next model response continues cumulative
-tokens, responses, turns, and cost from the same Ledger.
+tokens, turns, and cost from the same Ledger.
 
 Bad ownership: aliasing `UsageLedger` as `Ledger`, assigning it to `Owner`, and
 constructing `Owner()` outside the Agent composition root is still a duplicate

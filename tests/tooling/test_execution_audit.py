@@ -15,7 +15,6 @@ def _tool(name: str, *, executes_process: bool = False) -> LionTool:
 
     return LionTool(
         name=name,
-        label=name,
         description=name,
         parameters={"type": "object", "properties": {}},
         execute_fn=execute,

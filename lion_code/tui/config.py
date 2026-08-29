@@ -88,16 +88,12 @@ class TuiSettings:
 
     keybindings: TuiKeybindings = field(default_factory=TuiKeybindings)
     theme: TuiThemeName = "tau-dark"
-    auto_copy_selection: bool = False
-    sidebar_position: Literal["left", "right", "off"] = "right"
     turn_notification: TurnNotificationMode = "desktop"
 
     def to_json(self) -> dict[str, Any]:
         """Serialize these settings to JSON-compatible data."""
         return {
-            "auto_copy_selection": self.auto_copy_selection,
             "keybindings": self.keybindings.to_json(),
-            "sidebar_position": self.sidebar_position,
             "theme": self.theme,
             "turn_notification": self.turn_notification,
         }
@@ -147,9 +143,6 @@ def tui_settings_from_json(data: dict[str, Any]) -> TuiSettings:
     keybindings_data = data.get("keybindings", {})
     if not isinstance(keybindings_data, dict):
         raise TuiConfigError("TUI keybindings must be a JSON object")
-    raw_sidebar = data.get("sidebar_position", "right")
-    if not isinstance(raw_sidebar, str) or raw_sidebar not in {"left", "right", "off"}:
-        raise TuiConfigError("sidebar_position must be 'left', 'right', or 'off'")
     raw_notification = data.get("turn_notification", "desktop")
     if not isinstance(raw_notification, str) or raw_notification not in {
         "off",
@@ -160,19 +153,10 @@ def tui_settings_from_json(data: dict[str, Any]) -> TuiSettings:
     return TuiSettings(
         keybindings=_keybindings_from_json(keybindings_data),
         theme=_theme_name(data.get("theme", "tau-dark")),
-        auto_copy_selection=_bool_setting(
-            data.get("auto_copy_selection", False),
-            "auto_copy_selection",
-        ),
-        sidebar_position=cast(Literal["left", "right", "off"], raw_sidebar),
         turn_notification=cast(TurnNotificationMode, raw_notification),
     )
 
 
-def _bool_setting(value: object, field_name: str) -> bool:
-    if isinstance(value, bool):
-        return value
-    raise TuiConfigError(f"TUI setting must be a boolean: {field_name}")
 
 
 def _keybindings_from_json(data: dict[str, Any]) -> TuiKeybindings:

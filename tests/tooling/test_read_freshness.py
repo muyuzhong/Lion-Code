@@ -18,7 +18,6 @@ from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 def _tool(name, capabilities, execute):
     return LionTool(
         name=name,
-        label=name,
         description=name,
         parameters={"type": "object", "properties": {}},
         execute_fn=execute,

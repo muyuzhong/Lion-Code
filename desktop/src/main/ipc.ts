@@ -1,6 +1,6 @@
 /** 固定 IPC allowlist；每次调用都校验 sender 与当前窗口身份。 */
 
-import { app, dialog, ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
+import { dialog, ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 
 import { BOOTSTRAP_STATE_CHANNEL } from "../shared/types";
 import { isTrustedIpcSender } from "./ipc-contract";
@@ -34,10 +34,8 @@ export function registerDesktopIpc(deps: DesktopIpcDependencies): () => void {
     });
   };
 
-  handle("desktop:get-app-info", () => ({ appName: app.name, appVersion: app.getVersion() }));
   handle("desktop:get-bootstrap-state", () => deps.sidecar.getState());
   handle("desktop:get-recent-workspaces", () => deps.workspaces.listRecent());
-  handle("desktop:get-backend", () => deps.sidecar.getEndpoint());
   handle("desktop:select-workspace", async () => {
     const window = deps.getWindow();
     if (window === null) return null;
@@ -67,8 +65,8 @@ export function registerDesktopIpc(deps: DesktopIpcDependencies): () => void {
     deps.getWindow()?.webContents.send(BOOTSTRAP_STATE_CHANNEL, state);
   });
   const channels = [
-    "desktop:get-app-info", "desktop:get-bootstrap-state", "desktop:get-recent-workspaces",
-    "desktop:get-backend", "desktop:select-workspace", "desktop:connect-workspace", "desktop:disconnect",
+    "desktop:get-bootstrap-state", "desktop:get-recent-workspaces",
+    "desktop:select-workspace", "desktop:connect-workspace", "desktop:disconnect",
   ];
   return () => {
     unsubscribe();

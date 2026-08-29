@@ -8,7 +8,6 @@ from pathlib import Path
 
 from lion_code.tooling.snapshot import WorkspaceSnapshot
 
-
 def _git(root: Path, *args: str) -> None:
     subprocess.run(
         ["git", *args],
@@ -18,45 +17,12 @@ def _git(root: Path, *args: str) -> None:
         text=True,
     )
 
-
 def _git_repository(root: Path) -> None:
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "snapshot-tests@example.com")
     _git(root, "config", "user.name", "Snapshot Tests")
 
-
 class TestWorkspaceSnapshot(unittest.TestCase):
-    def test_tracked_and_untracked_files_restore(self) -> None:
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            tempfile.TemporaryDirectory() as storage_directory,
-        ):
-            root = Path(directory)
-            storage = Path(storage_directory)
-            _git_repository(root)
-            tracked = root / "tracked.txt"
-            tracked.write_text("before\n", encoding="utf-8")
-            _git(root, "add", "tracked.txt")
-            _git(root, "commit", "-qm", "base")
-
-            untracked = root / "new.txt"
-            untracked.write_text("new file\n", encoding="utf-8")
-            snapshot = WorkspaceSnapshot(root, storage)
-            snapshot_id = snapshot.create()
-
-            tracked.write_text("destructive change\n", encoding="utf-8")
-            untracked.unlink()
-            (root / "created-after-snapshot.txt").write_text(
-                "remove me\n", encoding="utf-8"
-            )
-
-            result = snapshot.restore(snapshot_id)
-
-            self.assertTrue(result.restored)
-            self.assertEqual(tracked.read_text(encoding="utf-8"), "before\n")
-            self.assertEqual(untracked.read_text(encoding="utf-8"), "new file\n")
-            self.assertFalse((root / "created-after-snapshot.txt").exists())
-            self.assertTrue((root / ".git" / "HEAD").exists())
 
     def test_ignored_and_sensitive_files_store_metadata_only(self) -> None:
         with (
@@ -105,33 +71,6 @@ class TestWorkspaceSnapshot(unittest.TestCase):
             self.assertNotIn(b"credential-body", stored_bytes)
             self.assertNotIn(b"secret-body", stored_bytes)
 
-    def test_restore_pre_snapshot_can_undo_a_bad_restore(self) -> None:
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            tempfile.TemporaryDirectory() as storage_directory,
-        ):
-            root = Path(directory)
-            storage = Path(storage_directory)
-            _git_repository(root)
-            original = root / "state.txt"
-            original.write_text("original", encoding="utf-8")
-            snapshot = WorkspaceSnapshot(root, storage)
-            target_id = snapshot.create()
-
-            original.write_text("state before restore", encoding="utf-8")
-            first_restore = snapshot.restore(target_id)
-
-            self.assertTrue(first_restore.restored)
-            self.assertIsNotNone(first_restore.pre_restore_snapshot_id)
-            self.assertEqual(original.read_text(encoding="utf-8"), "original")
-
-            recovery = snapshot.restore(first_restore.pre_restore_snapshot_id)
-
-            self.assertTrue(recovery.restored)
-            self.assertEqual(
-                original.read_text(encoding="utf-8"), "state before restore"
-            )
-
     def test_gc_keeps_newest_configured_number(self) -> None:
         with (
             tempfile.TemporaryDirectory() as directory,
@@ -177,7 +116,6 @@ class TestWorkspaceSnapshot(unittest.TestCase):
 
             self.assertFalse((storage / first).exists())
             self.assertTrue((storage / second).exists())
-
 
 if __name__ == "__main__":
     unittest.main()

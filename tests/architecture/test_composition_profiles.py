@@ -72,7 +72,6 @@ async def _noop_execute(_context, _tool_call_id, _arguments, _on_update):
 def _tool(name: str) -> LionTool:
     return LionTool(
         name=name,
-        label=name,
         description=name,
         parameters={"type": "object", "properties": {}},
         execute_fn=_noop_execute,
