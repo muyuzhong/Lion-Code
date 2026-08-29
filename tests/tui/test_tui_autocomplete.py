@@ -73,7 +73,6 @@ def test_skill_completion_filters_by_prefix() -> None:
     assert "/test-gen" not in displays
 
 
-
 def test_command_completion_suggests_registered_commands() -> None:
     state = build_completion_state(
         "/sess",
@@ -107,7 +106,6 @@ def test_command_completion_prioritizes_direct_matches_over_search_terms() -> No
     assert state.selected.apply("/res") == "/resume"
 
 
-
 def test_builtin_command_completion_hides_after_completed_command_space() -> None:
     trailing_space_state = build_completion_state(
         "/compact ",
@@ -130,8 +128,6 @@ def test_builtin_command_argument_completion_wins_over_completed_command_hide() 
     )
 
     assert [item.display for item in state.items] == ["fake-model"]
-
-
 
 
 def test_completion_selection_wraps() -> None:

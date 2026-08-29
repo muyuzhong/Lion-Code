@@ -157,8 +157,6 @@ def tui_settings_from_json(data: dict[str, Any]) -> TuiSettings:
     )
 
 
-
-
 def _keybindings_from_json(data: dict[str, Any]) -> TuiKeybindings:
     defaults = TuiKeybindings()
     # Future versions may add actions to this nested object. Read only actions

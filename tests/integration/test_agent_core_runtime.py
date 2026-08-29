@@ -39,8 +39,10 @@ from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 from lion_code.usage import UsageSnapshot
 
+
 def _structured_summary(content: str) -> str:
     return "\n\n".join(f"{heading}\n{content}" for heading in SUMMARY_HEADINGS)
+
 
 class _LimitsFakeProvider(FakeProvider):
     def __init__(self, events: list, limits: RuntimeModelLimits) -> None:
@@ -51,6 +53,7 @@ class _LimitsFakeProvider(FakeProvider):
     async def discover_model_limits(self, model: str) -> RuntimeModelLimits | None:
         self.discovered_models.append(model)
         return self.limits
+
 
 def _echo_lion_tool() -> LionTool:
     async def execute(_ctx, _id, arguments, _on_update):
@@ -69,6 +72,7 @@ def _echo_lion_tool() -> LionTool:
         execution_mode="parallel",
     )
 
+
 def _named_lion_tool(name: str) -> LionTool:
     async def execute(_ctx, _id, _args, _on_update):
         return ToolResult(content=f"{name}-result")
@@ -81,6 +85,7 @@ def _named_lion_tool(name: str) -> LionTool:
         capabilities=ToolCapabilities(read_only=True, concurrency_safe=True),
         execution_mode="parallel",
     )
+
 
 def _snippable_lion_tool() -> LionTool:
     async def execute(_ctx, _id, arguments, _on_update):
@@ -103,6 +108,7 @@ def _snippable_lion_tool() -> LionTool:
         execution_mode="parallel",
     )
 
+
 def _tooluse_event(
     call_id: str = "c1", usage: Usage | None = None
 ) -> AssistantDoneEvent:
@@ -116,6 +122,7 @@ def _tooluse_event(
         ),
     )
 
+
 def _stop_event(text: str = "done", usage: Usage | None = None) -> AssistantDoneEvent:
     return AssistantDoneEvent(
         reason="stop",
@@ -127,6 +134,7 @@ def _stop_event(text: str = "done", usage: Usage | None = None) -> AssistantDone
         ),
     )
 
+
 def _error_event(message: str = "provider failed") -> AssistantErrorEvent:
     return AssistantErrorEvent(
         reason="error",
@@ -137,6 +145,7 @@ def _error_event(message: str = "provider failed") -> AssistantErrorEvent:
             error_message=message,
         ),
     )
+
 
 def _many_tooluse_event(count: int, usage: Usage) -> AssistantDoneEvent:
     return AssistantDoneEvent(
@@ -155,6 +164,7 @@ def _many_tooluse_event(count: int, usage: Usage) -> AssistantDoneEvent:
             usage=usage,
         ),
     )
+
 
 class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
@@ -1141,6 +1151,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         )
         await agent.agent.chat("hello")
         self.assertEqual(fake.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

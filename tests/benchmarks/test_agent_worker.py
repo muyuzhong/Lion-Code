@@ -8,20 +8,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.benchmarks.fixtures.verified_task_1 import (
+from benchmarks.agent_e2e.agent_worker import run_agent_worker
+from benchmarks.agent_e2e.backend import AgentExecutionRequest
+from benchmarks.agent_e2e.catalog import freeze_catalog
+from benchmarks.agent_e2e.fixtures import (
     AGENT_CODE_SHA,
     EVALUATOR_CODE_SHA,
     make_task,
 )
-from benchmarks.agent_e2e.agent_worker import run_agent_worker
-from benchmarks.agent_e2e.backend import AgentExecutionRequest
-from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.models import (
     Catalog,
     ExperimentManifest,
     ExperimentProfile,
     TaskSpec,
-    TaskSplit,
     WorkerStatus,
 )
 from lion_code.adapters.coding_session_backend import CodingSessionBackendAdapter

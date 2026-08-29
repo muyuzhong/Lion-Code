@@ -4,11 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from tests.benchmarks.fixtures.verified_task_1 import (
-    AGENT_CODE_SHA,
-    EVALUATOR_CODE_SHA,
-    make_task as make_verified_task,
-)
 from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.external_anchor import (
     CalibrationPoint,
@@ -16,6 +11,13 @@ from benchmarks.agent_e2e.external_anchor import (
     CalibrationReport,
     ExternalAnchorEnvironment,
     ExternalImage,
+)
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+)
+from benchmarks.agent_e2e.fixtures import (
+    make_task as make_verified_task,
 )
 from benchmarks.agent_e2e.models import (
     AgentRunSummary,
@@ -218,7 +220,9 @@ def _accepted_calibration(
             external_success_rate=(20 - index * 2) / 20,
             environment=environment,
         )
-        for index, (fingerprint, kind) in enumerate(zip(fingerprints, kinds, strict=True))
+        for index, (fingerprint, kind) in enumerate(
+            zip(fingerprints, kinds, strict=True)
+        )
     )
     return CalibrationReport(
         points=points,
@@ -403,5 +407,7 @@ def test_deduplication_and_holdout_feedback_retirement() -> None:
         retired_holdout_task_ids=("holdout-source",),
     )
     assert admission.failure.feedback_split is TaskSplit.REGRESSION
-    assert admission.source_task_id not in admission.active_holdout_task_ids_after_feedback
+    assert (
+        admission.source_task_id not in admission.active_holdout_task_ids_after_feedback
+    )
     assert admission.failure.holdout_exclusion_reason is not None

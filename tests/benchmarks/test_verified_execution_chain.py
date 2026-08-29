@@ -12,13 +12,13 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.benchmarks.fixtures.verified_task_1 import (
+from benchmarks.agent_e2e.artifact import CommitArtifact, CommitArtifactBuilder
+from benchmarks.agent_e2e.catalog import freeze_catalog
+from benchmarks.agent_e2e.fixtures import (
     AGENT_CODE_SHA,
     EVALUATOR_CODE_SHA,
     make_task,
 )
-from benchmarks.agent_e2e.artifact import CommitArtifact, CommitArtifactBuilder
-from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.harbor_runner import (
     HARBOR_AGENT_IMPORT_PATH,
     HARBOR_DATASET,
@@ -39,7 +39,6 @@ from benchmarks.agent_e2e.models import (
     ExperimentProfile,
     FailureSource,
     TaskSpec,
-    TaskSplit,
     TaskVerdict,
     VerifierOutcome,
 )

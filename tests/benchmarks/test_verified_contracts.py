@@ -11,15 +11,15 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from tests.benchmarks.fixtures.verified_task_1 import (
-    AGENT_CODE_SHA,
-    EVALUATOR_CODE_SHA,
-    make_task,
-)
 from benchmarks.agent_e2e.deepeval_analysis import (
     DeepEvalSchemaError,
     build_deepeval_trajectory,
     parse_deepeval_analysis,
+)
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task,
 )
 from benchmarks.agent_e2e.harness import (
     HarnessSchemaError,
@@ -43,7 +43,6 @@ from benchmarks.agent_e2e.models import (
     ResultValidity,
     TaskResult,
     TaskSpec,
-    TaskSplit,
     TaskVerdict,
     TrialExecution,
     TrialExecutionStatus,

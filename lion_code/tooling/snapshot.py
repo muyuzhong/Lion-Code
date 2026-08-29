@@ -18,6 +18,7 @@ from typing import Any
 SnapshotId = str
 _DEFAULT_RETENTION_WINDOW_SECONDS = 30 * 24 * 60 * 60
 
+
 def is_sensitive_path(path: str | Path) -> bool:
     """判断路径是否属于不应保存内容的敏感路径。"""
     parts = PurePosixPath(str(path).replace("\\", "/")).parts
@@ -25,6 +26,7 @@ def is_sensitive_path(path: str | Path) -> bool:
         part in {".credentials", ".secrets"} or part.startswith(".env")
         for part in parts
     )
+
 
 class WorkspaceSnapshot:
     """在工作区外保存文件树，并提供可逆的文件系统恢复。"""
@@ -297,6 +299,7 @@ class WorkspaceSnapshot:
             return False
         return True
 
+
 def _split_git_paths(output: bytes) -> set[str]:
     return {
         item.decode("utf-8", errors="surrogateescape")
@@ -304,15 +307,18 @@ def _split_git_paths(output: bytes) -> set[str]:
         if item
     }
 
+
 def _default_storage_dir(workspace_root: Path) -> Path:
     workspace_key = hashlib.sha256(os.fsencode(str(workspace_root))).hexdigest()[:16]
     return Path.home() / ".lion_code" / "snapshots" / workspace_key
+
 
 def _chmod_private(path: Path) -> None:
     try:
         path.chmod(0o700)
     except OSError:
         pass
+
 
 def _write_private_json(path: Path, value: object) -> None:
     path.write_text(
@@ -323,6 +329,7 @@ def _write_private_json(path: Path, value: object) -> None:
         path.chmod(0o600)
     except OSError:
         pass
+
 
 def _chmod_private_tree(root: Path) -> None:
     for path in root.rglob("*"):

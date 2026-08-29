@@ -8,6 +8,7 @@ from pathlib import Path
 
 from lion_code.tooling.snapshot import WorkspaceSnapshot
 
+
 def _git(root: Path, *args: str) -> None:
     subprocess.run(
         ["git", *args],
@@ -17,13 +18,14 @@ def _git(root: Path, *args: str) -> None:
         text=True,
     )
 
+
 def _git_repository(root: Path) -> None:
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "snapshot-tests@example.com")
     _git(root, "config", "user.name", "Snapshot Tests")
 
-class TestWorkspaceSnapshot(unittest.TestCase):
 
+class TestWorkspaceSnapshot(unittest.TestCase):
     def test_ignored_and_sensitive_files_store_metadata_only(self) -> None:
         with (
             tempfile.TemporaryDirectory() as directory,
@@ -116,6 +118,7 @@ class TestWorkspaceSnapshot(unittest.TestCase):
 
             self.assertFalse((storage / first).exists())
             self.assertTrue((storage / second).exists())
+
 
 if __name__ == "__main__":
     unittest.main()

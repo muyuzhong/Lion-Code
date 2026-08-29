@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Mapping
 from json import dumps
-from typing import Any, Protocol
+from typing import Any
 
 import httpx
 

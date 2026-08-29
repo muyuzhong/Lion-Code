@@ -20,6 +20,7 @@ from lion_code.core.session.jsonl import (
 )
 from lion_code.core.session.memory import SessionState
 from lion_code.core.session.storage import JsonlSessionStorage, SessionStorage
+
 __all__ = [
     "BaseSessionEntry",
     "CompactionEntry",

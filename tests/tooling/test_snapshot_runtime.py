@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import subprocess
 import tempfile
 import unittest
@@ -16,6 +15,7 @@ from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
 from lion_code.tooling.snapshot import WorkspaceSnapshot
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
+
 
 def _context(
     root: Path,
@@ -33,6 +33,7 @@ def _context(
         audit_log=audit,
     )
 
+
 def _tool(
     name: str,
     capabilities: ToolCapabilities,
@@ -45,6 +46,7 @@ def _tool(
         execute_fn=execute_fn,
         capabilities=capabilities,
     )
+
 
 class TestSnapshotRuntime(unittest.IsolatedAsyncioTestCase):
     async def test_write_and_shell_tools_get_pre_execution_snapshot_ids(self) -> None:
@@ -126,6 +128,7 @@ class TestSnapshotRuntime(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.details, {})
             self.assertEqual((root / "normal.txt").read_text(encoding="utf-8"), "ok")
             self.assertFalse((root / ".lion-code").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

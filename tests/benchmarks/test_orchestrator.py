@@ -7,11 +7,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.benchmarks.fixtures.verified_task_1 import (
-    AGENT_CODE_SHA,
-    EVALUATOR_CODE_SHA,
-    make_task as make_verified_task,
-)
 from benchmarks.agent_e2e.backend import (
     FakeContainerBackend,
     IsolationReport,
@@ -19,6 +14,13 @@ from benchmarks.agent_e2e.backend import (
 )
 from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.checkpoint import InMemoryCheckpointStore
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+)
+from benchmarks.agent_e2e.fixtures import (
+    make_task as make_verified_task,
+)
 from benchmarks.agent_e2e.models import (
     AgentRunSummary,
     Catalog,
@@ -26,7 +28,6 @@ from benchmarks.agent_e2e.models import (
     ExperimentProfile,
     ResultValidity,
     TaskSpec,
-    TaskSplit,
     TaskVerdict,
     WorkerResult,
     WorkerStatus,
@@ -105,8 +106,12 @@ class TestSingleTaskOrchestrator(unittest.IsolatedAsyncioTestCase):
             work_root=self.temp_dir.name,
         )
 
-    async def test_fake_success_runs_worker_verifier_cleanup_but_stays_offline(self) -> None:
-        backend = FakeContainerBackend(worker_handler=lambda _request: _return(completed_worker()))
+    async def test_fake_success_runs_worker_verifier_cleanup_but_stays_offline(
+        self,
+    ) -> None:
+        backend = FakeContainerBackend(
+            worker_handler=lambda _request: _return(completed_worker())
+        )
         result = await self._orchestrator(backend).run_task(
             manifest=self.manifest,
             task=self.task,
@@ -124,7 +129,9 @@ class TestSingleTaskOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("task_resolved", report.canonical_json())
         self.assertNotIn("task_resolved", render_chinese_markdown(report))
 
-    async def test_unavailable_backend_is_blocked_without_worker_or_verifier(self) -> None:
+    async def test_unavailable_backend_is_blocked_without_worker_or_verifier(
+        self,
+    ) -> None:
         backend = UnavailableContainerBackend("Docker daemon is unavailable")
         result = await self._orchestrator(backend).run_task(
             manifest=self.manifest,
@@ -137,7 +144,9 @@ class TestSingleTaskOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(backend.cleanup_calls), 1)
         self.assertNotIn("task_resolved", result.canonical_json())
 
-    async def test_timeout_worker_exception_verifier_exception_and_cleanup_failure_are_invalid(self) -> None:
+    async def test_timeout_worker_exception_verifier_exception_and_cleanup_failure_are_invalid(
+        self,
+    ) -> None:
         timeout_backend = FakeContainerBackend(
             worker_handler=lambda _request: _return(
                 WorkerResult(status=WorkerStatus.TIMEOUT, error_summary="timed out")
@@ -194,7 +203,9 @@ class TestSingleTaskOrchestrator(unittest.IsolatedAsyncioTestCase):
 
     async def test_checkpoint_restores_without_rerunning_backend(self) -> None:
         checkpoints = InMemoryCheckpointStore()
-        backend = FakeContainerBackend(worker_handler=lambda _request: _return(completed_worker()))
+        backend = FakeContainerBackend(
+            worker_handler=lambda _request: _return(completed_worker())
+        )
         orchestrator = self._orchestrator(backend, checkpoints)
 
         first = await orchestrator.run_task(manifest=self.manifest, task=self.task)

@@ -6,15 +6,17 @@ import unittest
 
 from pydantic import ValidationError
 
-from tests.benchmarks.fixtures.verified_task_1 import (
-    AGENT_CODE_SHA,
-    EVALUATOR_CODE_SHA,
-    make_task as make_verified_task,
-)
 from benchmarks.agent_e2e.catalog import (
     CatalogValidationError,
     freeze_catalog,
     validate_catalog,
+)
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+)
+from benchmarks.agent_e2e.fixtures import (
+    make_task as make_verified_task,
 )
 from benchmarks.agent_e2e.models import (
     Catalog,
@@ -34,7 +36,9 @@ from benchmarks.agent_e2e.models import (
 )
 
 
-def make_task(*, task_id: str = "task-1", split: TaskSplit = TaskSplit.REGRESSION) -> TaskSpec:
+def make_task(
+    *, task_id: str = "task-1", split: TaskSplit = TaskSplit.REGRESSION
+) -> TaskSpec:
     return make_verified_task(
         task_id=task_id,
         split=split,
@@ -96,7 +100,9 @@ class TestVersionedModels(unittest.TestCase):
         with self.assertRaises(SchemaVersionError):
             ExperimentManifest.from_dict(wrong_version)
 
-    def test_explicit_extensions_preserve_future_fields_without_opening_top_level(self) -> None:
+    def test_explicit_extensions_preserve_future_fields_without_opening_top_level(
+        self,
+    ) -> None:
         _catalog, manifest = make_manifest()
         report = EvaluationReport(
             manifest=manifest,
@@ -179,7 +185,9 @@ class TestCatalogValidation(unittest.TestCase):
     def test_catalog_lock_round_trip_and_selection(self) -> None:
         first = make_task(task_id="task-1")
         second = make_task(task_id="task-2", split=TaskSplit.HOLDOUT)
-        catalog = Catalog(catalog_id="local", catalog_version="v1", tasks=(first, second))
+        catalog = Catalog(
+            catalog_id="local", catalog_version="v1", tasks=(first, second)
+        )
         lock = freeze_catalog(catalog, task_ids=("task-2",))
 
         validation = validate_catalog(catalog, lock=lock)

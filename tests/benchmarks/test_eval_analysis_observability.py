@@ -7,11 +7,6 @@ import os
 import unittest
 from datetime import UTC, datetime, timedelta
 
-from tests.benchmarks.fixtures.verified_task_1 import (
-    AGENT_CODE_SHA,
-    EVALUATOR_CODE_SHA,
-    make_task,
-)
 from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.deepeval_analysis import (
     DEEPEVAL_METRIC_NAMES,
@@ -20,6 +15,11 @@ from benchmarks.agent_e2e.deepeval_analysis import (
     analyze_deepeval_case,
     analyze_verified_report,
     build_deepeval_trajectory,
+)
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task,
 )
 from benchmarks.agent_e2e.models import (
     Catalog,
@@ -34,8 +34,6 @@ from benchmarks.agent_e2e.models import (
     ReportStatus,
     ResultValidity,
     TaskResult,
-    TaskSpec,
-    TaskSplit,
     TaskVerdict,
     VerifiedEvaluationReport,
 )

@@ -9,8 +9,6 @@ LionTool -> ToolResultMessage -> provider final response.
 
 from __future__ import annotations
 
-import subprocess
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -32,6 +30,7 @@ from lion_code.tooling.context import ToolContext
 from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.runtime import ToolRuntime
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
+
 
 class _Controller:
     pass
@@ -167,4 +166,3 @@ class TestCoreToolRuntimeIntegration(unittest.IsolatedAsyncioTestCase):
         tool_result = harness.messages[2]
         self.assertTrue(tool_result.is_error)
         self.assertIn("denied", tool_result.text.lower())
-

@@ -12,11 +12,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.benchmarks.fixtures.verified_task_1 import (
-    AGENT_CODE_SHA,
-    EVALUATOR_CODE_SHA,
-    make_task,
-)
 from benchmarks.agent_e2e.artifact import CommitArtifact
 from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.cli import main
@@ -24,6 +19,11 @@ from benchmarks.agent_e2e.deepeval_analysis import (
     DEEPEVAL_METRIC_NAMES,
     DeepEvalCase,
     DeepEvalMetricObservation,
+)
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task,
 )
 from benchmarks.agent_e2e.harbor_runner import (
     HarborExecutionOutput,
@@ -46,7 +46,6 @@ from benchmarks.agent_e2e.models import (
     ResultValidity,
     TaskResult,
     TaskSpec,
-    TaskSplit,
     TaskVerdict,
     TrialExecutionStatus,
     VerifiedEvaluationReport,
