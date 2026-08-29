@@ -15,6 +15,7 @@ from .backend import AgentExecutionRequest
 from .evidence import ProcessEvidenceProjector
 from .models import WorkerResult, WorkerStatus
 from .trace import TraceRecorder, redact_text
+from .variant_injection import spec_from_manifest
 
 REQUEST_PATH = Path("/installed-agent/request.json")
 LOG_ROOT = Path("/logs/agent")
@@ -51,7 +52,14 @@ def main() -> int:
             validation_commands=task.public_validation_commands,
         )
     )
-    result = asyncio.run(run_agent_worker(request, trace_recorder=recorder))
+    injection_spec = spec_from_manifest(manifest)
+    result = asyncio.run(
+        run_agent_worker(
+            request,
+            trace_recorder=recorder,
+            injection_spec=injection_spec,
+        )
+    )
     try:
         # 以任务卡片的 base_revision 为 diff 基准:兼容 Agent 既未提交
         # 又已自行 git commit 的两种改动形态(官方 Harness 在 base 上应用 patch)。

@@ -12,12 +12,20 @@ PR #143 审查问题二:worker 从未把 prompt_version / tool_policy_version
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Sequence
 from typing import Any
 
 from pydantic import Field, model_validator
 
-from .models import ExperimentProfile, VersionedModel
+from .models import (
+    ExperimentManifest,
+    ExperimentProfile,
+    InjectionEvidence,
+    RequestedVariant,
+    ResolvedVariant,
+    VersionedModel,
+)
 
 
 class PromptVariantMap(VersionedModel):
@@ -63,7 +71,11 @@ class VariantInjectionSpec(VersionedModel):
 
 
 class InjectionResolution(VersionedModel):
-    """解析结果:命中映射时给出注入值;未命中时 resolved=False。"""
+    """解析结果:命中映射时给出注入值;未命中时 resolved=False。
+
+    同时携带完整执行证据(requested/resolved/fingerprint),供
+    worker 落盘为可复核的 InjectionEvidence。
+    """
 
     resolved: bool = False
     custom_system_prompt: str | None = None
@@ -71,6 +83,8 @@ class InjectionResolution(VersionedModel):
     injection_fingerprint: str | None = Field(
         default=None, min_length=64, max_length=64
     )
+    requested: RequestedVariant = Field(default_factory=RequestedVariant)
+    resolved_variant: ResolvedVariant = Field(default_factory=ResolvedVariant)
     extensions: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -119,7 +133,45 @@ def resolve_injection(
             if fingerprint_parts
             else None
         ),
+        requested=RequestedVariant(
+            prompt_version=profile.prompt_version,
+            tool_policy_version=profile.tool_policy_version,
+            compression_version=profile.compression_version,
+        ),
+        resolved_variant=ResolvedVariant(
+            prompt_hit=prompt_map is not None,
+            tool_policy_hit=tool_map is not None,
+        ),
     )
+
+
+def attach_injection_spec(
+    manifest: ExperimentManifest,
+    spec: VariantInjectionSpec,
+) -> ExperimentManifest:
+    """把注入映射表写入 manifest.extensions(可比性不变量,两侧共享)。
+
+    manifest 是 frozen 模型,返回新实例;仅写入受控 JSON 对象,
+    不含敏感内容。
+    """
+
+    extensions = dict(manifest.extensions)
+    extensions["variant_injection_spec"] = json.loads(spec.canonical_json())
+    return manifest.model_copy(update={"extensions": extensions})
+
+
+def spec_from_manifest(
+    manifest: ExperimentManifest,
+) -> VariantInjectionSpec | None:
+    """从 manifest.extensions 读取注入映射表;缺失或畸形返回 None。"""
+
+    raw = manifest.extensions.get("variant_injection_spec")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return VariantInjectionSpec.from_dict(raw)
+    except Exception:
+        return None
 
 
 def build_filtered_registry(tool_names: Sequence[str]) -> Any:
@@ -144,10 +196,15 @@ def build_filtered_registry(tool_names: Sequence[str]) -> Any:
 
 
 __all__ = [
+    "InjectionEvidence",
     "InjectionResolution",
     "PromptVariantMap",
+    "RequestedVariant",
+    "ResolvedVariant",
     "ToolPolicyVariantMap",
     "VariantInjectionSpec",
+    "attach_injection_spec",
     "build_filtered_registry",
     "resolve_injection",
+    "spec_from_manifest",
 ]

@@ -214,8 +214,11 @@ from .swebench_verified import (
     parse_harbor_result,
 )
 from .variant_injection import (
+    InjectionEvidence,
     InjectionResolution,
     PromptVariantMap,
+    RequestedVariant,
+    ResolvedVariant,
     ToolPolicyVariantMap,
     VariantInjectionSpec,
     build_filtered_registry,
@@ -328,6 +331,7 @@ __all__ = [
     "HarnessSchemaError",
     "HarnessVariant",
     "HistoricalPreflight",
+    "InjectionEvidence",
     "InjectionResolution",
     "OfficialEvaluationRecord",
     "OfficialRecordStatus",
@@ -364,6 +368,8 @@ __all__ = [
     "RegressionGateLedger",
     "RegressionGatePolicy",
     "ReproductionStatus",
+    "RequestedVariant",
+    "ResolvedVariant",
     "ResultValidity",
     "SubprocessOfficialSWEbenchLiveRunner",
     "TargetScope",

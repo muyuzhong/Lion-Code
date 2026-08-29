@@ -28,6 +28,10 @@ from .models import (
 )
 from .swebench_verified import parse_harbor_result
 from .trace import redact_text
+from .variant_injection import (
+    VariantInjectionSpec,
+    spec_from_manifest,
+)
 
 HARBOR_VERSION = "0.22.0"
 HARBOR_DATASET = "swebench-verified"
@@ -52,6 +56,8 @@ class HarborExecutionRequest:
     harbor_executable: str = "harbor"
     dataset: str = HARBOR_DATASET
     agent_import_path: str = HARBOR_AGENT_IMPORT_PATH
+    injection_spec: VariantInjectionSpec | None = None
+    request_variant: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -576,6 +582,23 @@ def _validate_request(
             failure_source=FailureSource.SCHEMA,
             reason="Harbor task is not selected by manifest",
         )
+    if request.request_variant:
+        if request.injection_spec is None:
+            return _unavailable(
+                request,
+                status=AdapterStatus.INVALID,
+                execution_status=TrialExecutionStatus.INFRA_FAILED,
+                failure_source=FailureSource.SCHEMA,
+                reason="Variant experiment requires an injection spec",
+            )
+        if spec_from_manifest(request.manifest) is None:
+            return _unavailable(
+                request,
+                status=AdapterStatus.INVALID,
+                execution_status=TrialExecutionStatus.INFRA_FAILED,
+                failure_source=FailureSource.SCHEMA,
+                reason="Variant experiment manifest must carry the injection spec",
+            )
     return None
 
 

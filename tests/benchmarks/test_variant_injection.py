@@ -159,6 +159,7 @@ class TestWorkerInjection:
         from tests.benchmarks.test_agent_worker import _manifest, _task
 
         captured: dict = {}
+        evidence_holder: dict = {}
 
         class FakeAdapter:
             def __init__(self, **kwargs) -> None:
@@ -204,7 +205,7 @@ class TestWorkerInjection:
                         tool_policy_version="tools-v2",
                         tool_names=("read_file", "edit_file"),
                         content_sha256=hashlib.sha256(
-                            "\n".join(("read_file", "edit_file")).encode("utf-8")
+                            "\n".join(("read_file", "edit_file")).encode()
                         ).hexdigest(),
                     ),
                 ),
@@ -220,11 +221,12 @@ class TestWorkerInjection:
                     agent_workspace=workspace,
                     session_root=root / "sessions",
                 )
-                await run_agent_worker(
+                worker_result = await run_agent_worker(
                     request,
                     agent_factory=lambda **kwargs: FakeAdapter(**kwargs),
                     injection_spec=spec,
                 )
+                evidence_holder["evidence"] = worker_result.injection_evidence
 
         asyncio.run(main())
         assert captured.get("custom_system_prompt") == "受控提示词"
@@ -233,6 +235,12 @@ class TestWorkerInjection:
         names = {tool.name for tool in registry.active_tools()}
         assert "read_file" in names
         assert "run_shell" not in names
+        evidence = evidence_holder["evidence"]
+        assert evidence is not None
+        assert evidence.requested.prompt_version == "prompt-v2"
+        assert evidence.resolved_variant.prompt_hit is True
+        assert evidence.resolved_variant.tool_policy_hit is True
+        assert evidence.injection_fingerprint is not None
 
     def test_no_spec_keeps_default_injection(self) -> None:
         import asyncio
