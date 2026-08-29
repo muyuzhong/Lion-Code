@@ -1,0 +1,28 @@
+{
+  "id": "controlled-closure",
+  "name": "controlled-closure",
+  "title": "Controlled Experiment Closure: 让受控注入真正进入评测协议",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-29",
+  "completedAt": "2026-08-30",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "Controlled Experiment Closure——受控注入进入评测协议、受控判定收紧"
+  }
+}
