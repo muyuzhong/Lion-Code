@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from .evidence import ProcessEvidence, ProcessEvidenceProjector
 from .models import TraceSummary, VersionedModel, utc_now
 
 REDACTED = "[REDACTED]"
@@ -62,10 +63,18 @@ class LoopCandidate(VersionedModel):
 class TraceRecorder:
     """订阅 typed Core event 的同步监听器，绝不把原始内容当日志保存。"""
 
-    def __init__(self, *, trace_id: str | None = None, max_preview: int = 240) -> None:
+    def __init__(
+        self,
+        *,
+        trace_id: str | None = None,
+        max_preview: int = 240,
+        projector: ProcessEvidenceProjector | None = None,
+    ) -> None:
         self.trace_id = trace_id or uuid4().hex
         self._max_preview = max_preview
         self._events: list[TraceEvent] = []
+        self._evidence: list[ProcessEvidence] = []
+        self._projector = projector or ProcessEvidenceProjector()
         self._redaction_count = 0
         self._loop_candidates: list[LoopCandidate] = []
         self._last_loop_fingerprint: str | None = None
@@ -77,6 +86,12 @@ class TraceRecorder:
         """返回不可变事件快照，供 worker 写入其受控结果。"""
 
         return tuple(self._events)
+
+    @property
+    def evidence(self) -> tuple[ProcessEvidence, ...]:
+        """返回过程证据快照（与被投影 TraceEvent 的 sequence 对齐）。"""
+
+        return tuple(self._evidence)
 
     @property
     def loop_candidates(self) -> tuple[LoopCandidate, ...]:
@@ -120,9 +135,10 @@ class TraceRecorder:
                 workspace_fingerprint=workspace_fingerprint,
             )
         started_at, finished_at = _event_timestamps(raw_payload)
+        sequence = len(self._events) + 1
         self._events.append(
             TraceEvent(
-                sequence=len(self._events) + 1,
+                sequence=sequence,
                 event_type=event_type,
                 summary=_event_summary(event_type, safe_payload, self._max_preview),
                 payload_digest=_digest(safe_payload),
@@ -133,6 +149,9 @@ class TraceRecorder:
                 finished_at=finished_at,
             )
         )
+        evidence = self._projector.project(event, sequence=sequence)
+        if evidence is not None:
+            self._evidence.append(evidence)
 
     def record_tool_call(
         self,
@@ -153,9 +172,10 @@ class TraceRecorder:
             workspace_fingerprint=normalized_workspace,
         )
         recorded_at = utc_now()
+        sequence = len(self._events) + 1
         self._events.append(
             TraceEvent(
-                sequence=len(self._events) + 1,
+                sequence=sequence,
                 event_type="ToolCall",
                 summary=_event_summary(
                     "ToolCall",
@@ -172,6 +192,15 @@ class TraceRecorder:
                 finished_at=recorded_at,
             )
         )
+        synthetic = {
+            "type": "tool_execution_end",
+            "tool_name": tool_name,
+            "args": dict(arguments),
+            "is_error": False,
+        }
+        evidence = self._projector.project(synthetic, sequence=sequence)
+        if evidence is not None:
+            self._evidence.append(evidence)
         return fingerprint
 
     def summary(self) -> TraceSummary:
@@ -199,6 +228,9 @@ class TraceRecorder:
             "schema_version": "agent-e2e/v1",
             "trace_id": self.trace_id,
             "events": [event.model_dump(mode="json") for event in self._events],
+            "evidence": [
+                evidence.model_dump(mode="json") for evidence in self._evidence
+            ],
             "loop_candidates": [
                 candidate.model_dump(mode="json")
                 for candidate in self._loop_candidates

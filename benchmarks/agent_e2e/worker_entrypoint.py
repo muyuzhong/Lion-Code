@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .agent_worker import run_agent_worker
 from .backend import AgentExecutionRequest
+from .evidence import ProcessEvidenceProjector
 from .models import WorkerResult, WorkerStatus
 from .trace import TraceRecorder, redact_text
 
@@ -45,7 +46,11 @@ def main() -> int:
         agent_workspace=Path.cwd(),
         session_root=Path("/tmp/lion-e2e-sessions"),
     )
-    recorder = TraceRecorder()
+    recorder = TraceRecorder(
+        projector=ProcessEvidenceProjector(
+            validation_commands=task.public_validation_commands,
+        )
+    )
     result = asyncio.run(run_agent_worker(request, trace_recorder=recorder))
     try:
         # 以任务卡片的 base_revision 为 diff 基准:兼容 Agent 既未提交
