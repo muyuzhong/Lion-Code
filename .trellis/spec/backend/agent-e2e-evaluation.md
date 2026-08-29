@@ -273,9 +273,17 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 - `ControlledExperimentRunner` is the formal host entry that creates a controlled
   experiment: one shared `VariantInjectionSpec` plus a frozen template and two profiles
   (`build_manifests`) produce the two frozen manifests, and `run_pair` executes both runs
-  through `SingleTaskOrchestrator` before handing them to `PairedExperiment.build`. It
-  derives declared changes from the actual profile version differences, so a run that does
-  not change any gate-controlled version fails before execution.
+  by reusing the **Verified official chain** (`run_verified_evaluation`: artifact → Harbor
+  → SWE-bench Harness), looping every `task × attempt` and handing the assembled reports to
+  `PairedExperiment.build`. It does not depend on the foundation
+  `SingleTaskOrchestrator`/`ContainerBackend`; there is a single official execution chain.
+  The Verified chain forwards `WorkerResult.injection_evidence` into
+  `TaskResult.extensions["injection_evidence"]` (via `_merge_worker_result`) and sets
+  `request_variant=True` on the Harbor request whenever the manifest carries
+  `variant_injection_spec`, so real Harbor runs surface the evidence and the variant
+  declaration that `PairedExperiment` consumes. `run_pair` derives declared changes from
+  the actual profile version differences, so a run that does not change any
+  gate-controlled version fails before execution.
 - `classify_failure` consumes only redacted `TraceEvent` metadata and emits candidate labels plus
   event sequence offsets. Three consecutive identical tool/argument/workspace fingerprints are
   `loop`; typed context/compaction signals are `context_decay`; a disallowed tool or typed

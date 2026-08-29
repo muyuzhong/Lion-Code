@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 from pathlib import Path
 
 import pytest
 
-from benchmarks.agent_e2e.backend import (
-    AgentExecutionRequest,
-    IsolationReport,
-    VerifierExecutionRequest,
-)
+from benchmarks.agent_e2e.artifact import CommitArtifact
 from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.controlled_runner import ControlledExperimentRunner
 from benchmarks.agent_e2e.fixtures import (
@@ -22,23 +17,31 @@ from benchmarks.agent_e2e.fixtures import (
 )
 from benchmarks.agent_e2e.harbor_agent import LionInstalledAgent
 from benchmarks.agent_e2e.harbor_runner import (
+    HarborExecutionOutput,
     HarborExecutionRequest,
+    HarborRoutineVerifierResult,
     HarborSingleTaskRunner,
 )
+from benchmarks.agent_e2e.harness_runner import (
+    HarnessExecutionOutput,
+    HarnessExecutionRequest,
+)
 from benchmarks.agent_e2e.models import (
+    AdapterStatus,
     AgentRunSummary,
     Catalog,
     ExperimentManifest,
     ExperimentProfile,
+    HarnessRecheckResult,
     InjectionEvidence,
     RequestedVariant,
     ResolvedVariant,
+    TaskSpec,
+    TrialExecutionStatus,
     VerifierOutcome,
-    VerifierResult,
     WorkerResult,
     WorkerStatus,
 )
-from benchmarks.agent_e2e.orchestrator import SingleTaskOrchestrator
 from benchmarks.agent_e2e.variant_injection import (
     PromptVariantMap,
     ToolPolicyVariantMap,
@@ -47,6 +50,7 @@ from benchmarks.agent_e2e.variant_injection import (
     resolve_injection,
     spec_from_manifest,
 )
+from benchmarks.agent_e2e.verified_runner import VerifiedExecutionRequest
 from tests.benchmarks.test_agent_worker import _manifest, _task
 
 
@@ -280,44 +284,45 @@ def _template() -> ExperimentManifest:
     )
 
 
-class _OfficialFakeBackend:
-    """仅测试:支持正式分数的确定性 backend,worker 按 manifest 解析注入。"""
+class _FakeVerifiedArtifactBuilder:
+    """仅测试:确定性 CommitArtifact,与 Verified 主链的注入点一致。"""
+
+    def build(self, commit_sha: str, output_dir: Path) -> CommitArtifact:
+        wheel = output_dir / "lion_code-0.0.0-py3-none-any.whl"
+        wheel.parent.mkdir(parents=True, exist_ok=True)
+        wheel.write_bytes(b"wheel")
+        return CommitArtifact(
+            commit_sha=commit_sha,
+            tree_sha="b" * 40,
+            wheel_path=wheel,
+            wheel_sha256=hashlib.sha256(b"wheel").hexdigest(),
+            wheel_size_bytes=5,
+            source_tree_sha256="c" * 64,
+            repository_fingerprint="d" * 64,
+            python_version="3.12.10",
+            platform="linux",
+        )
+
+
+class _FakeVerifiedHarbor:
+    """仅测试:Harbor 的确定性替身,按 manifest 解析注入并落盘证据。"""
 
     def __init__(self, outcomes: dict[str, bool]) -> None:
         self.outcomes = outcomes
-        self.worker_requests: list[AgentExecutionRequest] = []
+        self.requests: list[HarborExecutionRequest] = []
 
-    @property
-    def available(self) -> bool:
-        return True
-
-    @property
-    def supports_official_scores(self) -> bool:
-        return True
-
-    @property
-    def unavailable_reason(self) -> None:
-        return None
-
-    async def inspect_isolation(
-        self,
-        request: AgentExecutionRequest,
-        *,
-        verifier_workspace: Path,
-    ) -> IsolationReport:
-        return IsolationReport(
-            agent_workspace=request.agent_workspace,
-            verifier_workspace=verifier_workspace,
-            private_assets_visible_to_agent=False,
-        )
-
-    async def run_agent(self, request: AgentExecutionRequest) -> WorkerResult:
-        self.worker_requests.append(request)
+    def run(self, request: HarborExecutionRequest) -> HarborExecutionOutput:
+        self.requests.append(request)
+        output_dir = request.output_dir
+        patch_path = output_dir / "artifacts" / "lion.patch"
+        patch_path.parent.mkdir(parents=True, exist_ok=True)
+        patch_bytes = f"patch-{request.task.task_id}".encode()
+        patch_path.write_bytes(patch_bytes)
         resolution = resolve_injection(
             request.manifest.profile,
             spec_from_manifest(request.manifest),
         )
-        return WorkerResult(
+        worker = WorkerResult(
             status=WorkerStatus.COMPLETED,
             agent_run=AgentRunSummary(
                 final_text_digest=hashlib.sha256(b"done").hexdigest(),
@@ -330,7 +335,7 @@ class _OfficialFakeBackend:
                 cache_read_tokens=0,
                 cost_usd=0,
             ),
-            patch_sha256=hashlib.sha256(b"patch").hexdigest(),
+            patch_sha256=hashlib.sha256(patch_bytes).hexdigest(),
             patch_applied=True,
             injection_evidence=InjectionEvidence(
                 requested=resolution.requested,
@@ -340,21 +345,47 @@ class _OfficialFakeBackend:
                 tool_policy_sha256=resolution.tool_policy_sha256,
             ),
         )
-
-    async def run_verifier(
-        self,
-        request: VerifierExecutionRequest,
-    ) -> VerifierResult:
         passed = self.outcomes.get(request.task.task_id, False)
-        return VerifierResult(
-            outcome=VerifierOutcome.PASSED if passed else VerifierOutcome.FAILED,
-            command_summary="hidden verifier",
-            exit_code=0 if passed else 1,
-            output_digest=hashlib.sha256(b"v").hexdigest(),
+        return HarborExecutionOutput(
+            result=HarborRoutineVerifierResult(
+                task_id=request.task.task_id,
+                job_id=f"job-{request.task.task_id}",
+                status=AdapterStatus.COMPLETED,
+                execution_status=TrialExecutionStatus.COMPLETED,
+                verifier_outcome=(
+                    VerifierOutcome.PASSED if passed else VerifierOutcome.FAILED
+                ),
+                reward=1.0 if passed else 0.0,
+                patch_sha256=worker.patch_sha256,
+                patch_applied=True,
+                output_digest="h" * 64,
+                command_summary="fake Harbor verifier",
+                wall_time_seconds=1.0,
+            ),
+            patch_path=patch_path,
+            worker_result=worker,
         )
 
-    async def cleanup(self, *, run_id: str, task_id: str, attempt: int) -> None:
-        return None
+
+class _FakeVerifiedHarness:
+    """仅测试:SWE-bench Harness 的确定性替身,按 task_id 给 resolved。"""
+
+    def __init__(self, outcomes: dict[str, bool]) -> None:
+        self.outcomes = outcomes
+
+    def run(self, request: HarnessExecutionRequest) -> HarnessExecutionOutput:
+        resolved = self.outcomes.get(request.instance_id, False)
+        return HarnessExecutionOutput(
+            result=HarnessRecheckResult(
+                task_id=request.instance_id,
+                status=AdapterStatus.COMPLETED,
+                resolved=resolved,
+                patch_sha256=request.patch_sha256,
+                output_digest="f" * 64,
+                evaluator_revision="swebench-5.0.1",
+                image_digest="sha256:" + "b" * 64,
+            )
+        )
 
 
 class TestControlledExperimentRunner:
@@ -414,17 +445,24 @@ class TestControlledExperimentRunner:
             make_task(task_id=task_id, verifier_identity="hidden-v1")
             for task_id in ("task-a", "task-b")
         )
-        backend = _OfficialFakeBackend(outcomes={"task-a": False, "task-b": True})
-        orchestrator = SingleTaskOrchestrator(backend=backend, work_root=tmp_path)
-        experiment = asyncio.run(
-            runner.run_pair(
-                orchestrator=orchestrator,
-                baseline_manifest=baseline_manifest,
-                candidate_manifest=candidate_manifest,
-                tasks=tasks,
-            )
+        baseline_request = _verified_request(
+            baseline_manifest, tasks[0], tmp_path / "verified"
         )
-        # 全链路:runner → orchestrator → backend(worker 落盘证据)→ 配对判定。
+        candidate_request = _verified_request(
+            candidate_manifest, tasks[0], tmp_path / "verified"
+        )
+        outcomes = {"task-a": False, "task-b": True}
+        harbor = _FakeVerifiedHarbor(outcomes)
+        experiment = runner.run_pair(
+            baseline_request=baseline_request,
+            candidate_request=candidate_request,
+            tasks=tasks,
+            artifact_builder=_FakeVerifiedArtifactBuilder(),
+            harbor_runner=harbor,
+            harness_runner=_FakeVerifiedHarness(outcomes),
+        )
+        # 全链路:runner → Verified 官方原语(artifact→Harbor→Harness)→
+        # TaskResult+InjectionEvidence → run 级校验 → 配对判定。
         assert experiment.experiment_kind.value == "controlled"
         report = experiment.to_report()
         assert report.baseline_run_id == "run-baseline"
@@ -439,8 +477,14 @@ class TestControlledExperimentRunner:
         )
         assert report.counts.fail_to_fail == 1
         assert report.counts.pass_to_pass == 1
-        # 两侧各执行了 2 个 task×attempt。
-        assert len(backend.worker_requests) == 4
+        # Verified 链把 worker 注入证据透传进 TaskResult.extensions。
+        assert all(
+            "injection_evidence" in result.extensions
+            for result in (*experiment.baseline.results, *experiment.candidate.results)
+        )
+        # 两侧各执行了 2 个 Harbor 单题请求;manifest 带 spec 时声明受控。
+        assert len(harbor.requests) == 4
+        assert all(request.request_variant for request in harbor.requests)
 
     def test_run_pair_rejects_identical_profiles(self, tmp_path: Path) -> None:
         template = _template()
@@ -452,19 +496,16 @@ class TestControlledExperimentRunner:
             baseline_run_id="run-baseline",
             candidate_run_id="run-candidate",
         )
-        from benchmarks.agent_e2e.backend import UnavailableContainerBackend
-
-        orchestrator = SingleTaskOrchestrator(
-            backend=UnavailableContainerBackend(), work_root=tmp_path
-        )
+        tasks = (make_task(task_id="task-a", verifier_identity="hidden-v1"),)
         with pytest.raises(ValueError, match="gate-controlled"):
-            asyncio.run(
-                runner.run_pair(
-                    orchestrator=orchestrator,
-                    baseline_manifest=baseline,
-                    candidate_manifest=candidate,
-                    tasks=(),
-                )
+            runner.run_pair(
+                baseline_request=_verified_request(
+                    baseline, tasks[0], tmp_path / "verified"
+                ),
+                candidate_request=_verified_request(
+                    candidate, tasks[0], tmp_path / "verified"
+                ),
+                tasks=tasks,
             )
 
     def test_run_pair_rejects_missing_tasks(self, tmp_path: Path) -> None:
@@ -480,18 +521,32 @@ class TestControlledExperimentRunner:
             baseline_run_id="run-baseline",
             candidate_run_id="run-candidate",
         )
-        from benchmarks.agent_e2e.backend import UnavailableContainerBackend
-
-        orchestrator = SingleTaskOrchestrator(
-            backend=UnavailableContainerBackend(), work_root=tmp_path
-        )
         partial_tasks = (make_task(task_id="task-a", verifier_identity="hidden-v1"),)
         with pytest.raises(ValueError, match="missing from the task list"):
-            asyncio.run(
-                runner.run_pair(
-                    orchestrator=orchestrator,
-                    baseline_manifest=baseline,
-                    candidate_manifest=candidate,
-                    tasks=partial_tasks,
-                )
+            runner.run_pair(
+                baseline_request=_verified_request(
+                    baseline, partial_tasks[0], tmp_path / "verified"
+                ),
+                candidate_request=_verified_request(
+                    candidate, partial_tasks[0], tmp_path / "verified"
+                ),
+                tasks=partial_tasks,
             )
+
+
+def _verified_request(
+    manifest: ExperimentManifest,
+    task: TaskSpec,
+    output_root: Path,
+) -> VerifiedExecutionRequest:
+    """构建 Verified 官方执行请求;task/output_dir 每单位由 runner 派生。"""
+
+    return VerifiedExecutionRequest(
+        repository_root=output_root,
+        commit_sha=AGENT_CODE_SHA,
+        manifest=manifest,
+        task=task,
+        output_dir=output_root,
+        python_executable="python",
+        harness_python="python",
+    )
