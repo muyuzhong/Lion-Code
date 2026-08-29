@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -532,6 +533,53 @@ class TestControlledExperimentRunner:
                 ),
                 tasks=partial_tasks,
             )
+
+    def test_run_pair_rejects_execution_context_drift(self, tmp_path: Path) -> None:
+        # manifest code_sha 相同 + 合法证据,仍可能被宿主执行输入漂移掩盖;
+        # 任何执行输入不一致都在执行前拒绝,不做假因果的 CONTROLLED。
+        template = _template()
+        candidate_profile = template.profile.model_copy(
+            update={"profile_id": "candidate", "prompt_version": "prompt-v2"}
+        )
+        runner = ControlledExperimentRunner(injection_spec=_pair_spec())
+        baseline_manifest, candidate_manifest = runner.build_manifests(
+            template=template,
+            baseline_profile=template.profile,
+            candidate_profile=candidate_profile,
+            baseline_run_id="run-baseline",
+            candidate_run_id="run-candidate",
+        )
+        tasks = (make_task(task_id="task-a", verifier_identity="hidden-v1"),)
+        baseline_request = _verified_request(
+            baseline_manifest, tasks[0], tmp_path / "verified"
+        )
+        drifts = (
+            ("commit_sha", "feedbee"),
+            ("repository_root", tmp_path / "elsewhere"),
+            ("python_executable", "python3.13"),
+            ("harness_python", "python3.13"),
+            ("harbor_executable", "harbor-next"),
+        )
+        for field_name, drifted in drifts:
+            candidate_request = replace(
+                _verified_request(candidate_manifest, tasks[0], tmp_path / "verified"),
+                **{field_name: drifted},
+            )
+            harbor = _FakeVerifiedHarbor({})
+            with pytest.raises(
+                ValueError,
+                match=f"Execution context differs.*{field_name}",
+            ):
+                runner.run_pair(
+                    baseline_request=baseline_request,
+                    candidate_request=candidate_request,
+                    tasks=tasks,
+                    artifact_builder=_FakeVerifiedArtifactBuilder(),
+                    harbor_runner=harbor,
+                    harness_runner=_FakeVerifiedHarness({}),
+                )
+            # 校验发生在任何执行之前。
+            assert harbor.requests == []
 
 
 def _verified_request(

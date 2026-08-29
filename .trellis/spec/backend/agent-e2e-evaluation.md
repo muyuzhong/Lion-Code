@@ -281,9 +281,14 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   `TaskResult.extensions["injection_evidence"]` (via `_merge_worker_result`) and sets
   `request_variant=True` on the Harbor request whenever the manifest carries
   `variant_injection_spec`, so real Harbor runs surface the evidence and the variant
-  declaration that `PairedExperiment` consumes. `run_pair` derives declared changes from
-  the actual profile version differences, so a run that does not change any
-  gate-controlled version fails before execution.
+  declaration that `PairedExperiment` consumes. `run_pair` validates the **execution
+  context invariant** before running: `commit_sha`, `repository_root`,
+  `python_executable`, `harness_python`, and `harbor_executable` must be identical
+  between baseline and candidate (manifest comparability alone only constrains the
+  declared surface, and `agent_code_sha` is a 7-char prefix match — drifting host inputs
+  would otherwise mask fake causality behind identical code + valid evidence). `run_pair`
+  derives declared changes from the actual profile version differences, so a run that
+  does not change any gate-controlled version fails before execution.
 - `classify_failure` consumes only redacted `TraceEvent` metadata and emits candidate labels plus
   event sequence offsets. Three consecutive identical tool/argument/workspace fingerprints are
   `loop`; typed context/compaction signals are `context_decay`; a disallowed tool or typed

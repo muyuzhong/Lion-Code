@@ -77,6 +77,7 @@ class ControlledExperimentRunner:
         失败即抛出,不做半成品配对。
         """
 
+        _validate_execution_context(baseline_request, candidate_request)
         changes = _declared_changes(
             baseline_request.manifest, candidate_request.manifest
         )
@@ -179,6 +180,33 @@ def _declared_changes(
         candidate.profile, variant_id="candidate"
     )
     return baseline_variant.change_kinds(candidate_variant)
+
+
+# 受控实验必须逐项一致的宿主执行输入:manifest 可比性只约束声明面,
+# 这些字段漂移会让「同 code_sha + 合法证据」掩盖「执行输入不同」的假因果。
+_EXECUTION_CONTEXT_FIELDS = (
+    "commit_sha",
+    "repository_root",
+    "python_executable",
+    "harness_python",
+    "harbor_executable",
+)
+
+
+def _validate_execution_context(
+    baseline_request: VerifiedExecutionRequest,
+    candidate_request: VerifiedExecutionRequest,
+) -> None:
+    """两侧宿主执行上下文必须完全一致,否则不做配对实验。"""
+
+    for field_name in _EXECUTION_CONTEXT_FIELDS:
+        if getattr(baseline_request, field_name) != getattr(
+            candidate_request, field_name
+        ):
+            raise PairedExperimentError(
+                "Execution context differs between baseline and candidate: "
+                + field_name
+            )
 
 
 __all__ = ["ControlledExperimentRunner"]
