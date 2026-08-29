@@ -46,6 +46,15 @@ from .deepeval_metrics import (
     build_deepeval_metrics,
     deepeval_case_to_test_case,
 )
+from .experiment import (
+    HarnessVariant,
+    PairedCounts,
+    PairedExperiment,
+    PairedExperimentError,
+    PairedExperimentReport,
+    PairedTrial,
+    PairedTrialOutcome,
+)
 from .external_anchor import (
     AnchorRunStatus,
     CalibrationPoint,
@@ -153,6 +162,15 @@ from .opik_export import (
     parse_opik_export_result,
     publish_opik_trace,
     retry_opik_export,
+)
+from .process_verifier import (
+    ProcessSeverity,
+    ProcessVerification,
+    ProcessVerificationStatus,
+    ProcessVerifier,
+    ProcessViolation,
+    ProcessViolationType,
+    verify_file,
 )
 from .regression import (
     ChangeKind,
@@ -285,6 +303,7 @@ __all__ = [
     "HarnessResultError",
     "HarnessResultFixture",
     "HarnessSchemaError",
+    "HarnessVariant",
     "HistoricalPreflight",
     "OfficialEvaluationRecord",
     "OfficialRecordStatus",
@@ -299,7 +318,19 @@ __all__ = [
     "OpikFeedback",
     "OpikSpan",
     "OpikTracePayload",
+    "PairedCounts",
+    "PairedExperiment",
+    "PairedExperimentError",
+    "PairedExperimentReport",
+    "PairedTrial",
+    "PairedTrialOutcome",
     "PrivateEvidence",
+    "ProcessSeverity",
+    "ProcessVerification",
+    "ProcessVerificationStatus",
+    "ProcessVerifier",
+    "ProcessViolation",
+    "ProcessViolationType",
     "RegressionGateDecision",
     "RegressionGateError",
     "RegressionGateLedger",
@@ -364,6 +395,7 @@ __all__ = [
     "validate_manifest_against_snapshot",
     "validate_materialized_dataset_snapshot",
     "verified_exit_code",
+    "verify_file",
     "write_external_anchor_report",
     "write_gate_ledger",
     "write_materialized_dataset_snapshot",

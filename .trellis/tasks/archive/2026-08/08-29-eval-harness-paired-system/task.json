@@ -1,0 +1,33 @@
+{
+  "id": "eval-harness-paired-system",
+  "name": "eval-harness-paired-system",
+  "title": "评估体系收敛为 Harness 配对实验系统",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-29",
+  "completedAt": "2026-08-29",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-29-paired-experiment-layer",
+    "08-29-process-verifier",
+    "08-29-paired-comparison-gate-v2",
+    "08-29-regression-probes"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "PRD: 评估体系收敛为 Harness 配对实验系统"
+  }
+}

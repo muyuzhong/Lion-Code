@@ -209,6 +209,29 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   threshold and covers the baseline and candidate profile fingerprints. It may then be labelled
   `external_calibrated`; no calibration or a non-covering calibration cannot support a
   generalization claim.
+- `PairedExperiment.build` pairs two complete official reports on `(task_id, attempt)` — the
+  attempt is the seed dimension under the manifest-level seed/repeats contract, no per-task seed
+  mechanism. Comparability before pairing reuses the gate's invariant fields sets: distinct run
+  IDs, identical catalog locks, identical manifest/profile invariants, and the actual profile
+  variation differences must equal the declared `ChangeKind` set. A broken pair, missing task,
+  or non-official result is an `invalid` trial, never a half-built pairing. `PairedTrialOutcome`
+  is the five-cell fail→pass / pass→fail / pass→pass / fail→fail / invalid mapping; statistical
+  significance (bootstrap / McNemar) is a later layer, not part of the report.
+- `HarnessVariant` is the first-class changeable surface of a Harness configuration: prompt,
+  compression, and tool-policy versions only. Model, provider, seed, budget, and environment
+  invariants are deliberately outside its surface; `from_profile` extracts exactly the three
+  changeable fields.
+- `ProcessVerifier` runs deterministically on every trace, including passed ones, and consumes
+  only redacted `TraceEvent` metadata plus the task card's `public_validation_commands`. It is a
+  separate judging layer: it never changes `TaskResult.verdict` and does not call
+  `classify_failure`. `ProcessVerification.status` aggregates to `critical_veto` when any
+  violation is critical (validation missing / test tampering), else `violation` when any rule
+  fires, else `valid`. V1 rules are `repeated_tool_call`, `tool_error_not_recovered`,
+  `validation_missing` (only for `PASSED` results with non-empty validation commands),
+  `test_tampering`, `premature_termination`, and `context_regression` (first tool call after a
+  compaction marker repeating a pre-compaction failed fingerprint). Marker lists and thresholds
+  are constructor parameters; `verify_file` consumes the host-side
+  `artifacts/harbor-trace.json` layout offline.
 - `classify_failure` consumes only redacted `TraceEvent` metadata and emits candidate labels plus
   event sequence offsets. Three consecutive identical tool/argument/workspace fingerprints are
   `loop`; typed context/compaction signals are `context_decay`; a disallowed tool or typed
