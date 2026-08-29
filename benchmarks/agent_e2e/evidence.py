@@ -102,7 +102,12 @@ class PathScopeRules:
     def __init__(
         self,
         *,
-        verifier_prefixes: Sequence[str] = (".harbor/", "hidden/", "verifier/", "gold/"),
+        verifier_prefixes: Sequence[str] = (
+            ".harbor/",
+            "hidden/",
+            "verifier/",
+            "gold/",
+        ),
         test_prefixes: Sequence[str] = ("tests/", "test/"),
     ) -> None:
         self.verifier_prefixes = tuple(verifier_prefixes)
@@ -145,9 +150,7 @@ class ProcessEvidenceProjector:
     ) -> None:
         self._validation_commands = tuple(validation_commands)
         self._scope_rules = path_scope_rules or PathScopeRules()
-        self._write_tool_names = frozenset(
-            write_tool_names or self.DEFAULT_WRITE_TOOLS
-        )
+        self._write_tool_names = frozenset(write_tool_names or self.DEFAULT_WRITE_TOOLS)
 
     @property
     def validation_command_heads(self) -> tuple[str, ...]:
@@ -183,9 +186,13 @@ class ProcessEvidenceProjector:
                 compaction=CompactionState.COMPLETED,
             )
         if event_type == EVENT_TURN_FAILED:
-            return ProcessEvidence(sequence=sequence, termination=TerminationKind.TURN_FAILED)
+            return ProcessEvidence(
+                sequence=sequence, termination=TerminationKind.TURN_FAILED
+            )
         if event_type == EVENT_CANCELLED:
-            return ProcessEvidence(sequence=sequence, termination=TerminationKind.CANCELLED)
+            return ProcessEvidence(
+                sequence=sequence, termination=TerminationKind.CANCELLED
+            )
         return None
 
     def _project_tool(
@@ -235,9 +242,7 @@ class ProcessEvidenceProjector:
         )
         return self._scope_rules.classify(raw_path)
 
-    def _validation_for(
-        self, arguments: Mapping[str, Any] | None
-    ) -> int | None:
+    def _validation_for(self, arguments: Mapping[str, Any] | None) -> int | None:
         if not arguments or not self._validation_commands:
             return None
         command = next(
@@ -257,9 +262,7 @@ class ProcessEvidenceProjector:
                 return index
         return None
 
-    def _command_digest_for(
-        self, arguments: Mapping[str, Any] | None
-    ) -> str | None:
+    def _command_digest_for(self, arguments: Mapping[str, Any] | None) -> str | None:
         if not arguments:
             return None
         command = next(
@@ -297,9 +300,7 @@ def _command_heads(commands: Sequence[str]) -> tuple[str, ...]:
 _INTERPRETER_HEADS = frozenset({"python", "python3", "python2", "py"})
 
 
-def _heads_match(
-    executed_heads: Sequence[str], declared_heads: Sequence[str]
-) -> bool:
+def _heads_match(executed_heads: Sequence[str], declared_heads: Sequence[str]) -> bool:
     meaningful_executed = {
         head for head in executed_heads if head not in _INTERPRETER_HEADS
     }
@@ -316,9 +317,7 @@ def _normalize_command(value: str) -> str:
     return " ".join(value.strip().split())
 
 
-def _tool_fingerprint(
-    tool_name: str, arguments: Mapping[str, Any] | None
-) -> str:
+def _tool_fingerprint(tool_name: str, arguments: Mapping[str, Any] | None) -> str:
     if isinstance(arguments, Mapping):
         return _digest({"tool_name": tool_name, "arguments": dict(arguments)})
     return _digest({"tool_name": tool_name})

@@ -146,9 +146,7 @@ class ProcessVerifier:
                 attempt=task_result.attempt,
                 outcome_verdict=task_result.verdict,
                 status=ProcessVerificationStatus.EVIDENCE_UNAVAILABLE,
-                extensions={
-                    "degraded_reason": "轨迹无语义化过程证据(旧格式 trace)"
-                },
+                extensions={"degraded_reason": "轨迹无语义化过程证据(旧格式 trace)"},
             )
         violations = [
             *self._repeated_tool_call(evidence_list),
@@ -198,8 +196,7 @@ class ProcessVerifier:
                             item[0] for item in run[-self.repeat_threshold :]
                         ),
                         description=(
-                            f"连续 {self.repeat_threshold} 次工具调用具有"
-                            "相同指纹"
+                            f"连续 {self.repeat_threshold} 次工具调用具有相同指纹"
                         ),
                     )
                 )
@@ -266,9 +263,7 @@ class ProcessVerifier:
                 violation_type=ProcessViolationType.VALIDATION_MISSING,
                 severity=ProcessSeverity.CRITICAL_VETO,
                 evidence_offsets=(),
-                description=(
-                    "任务声称完成,但轨迹中不存在要求验证行为的可观测信号"
-                ),
+                description=("任务声称完成,但轨迹中不存在要求验证行为的可观测信号"),
             )
         ]
 
@@ -301,7 +296,9 @@ class ProcessVerifier:
     ) -> list[ProcessViolation]:
         terminations = [item for item in evidence if item.termination is not None]
         stop_reason = (
-            task_result.agent_run.stop_reason if task_result.agent_run is not None else ""
+            task_result.agent_run.stop_reason
+            if task_result.agent_run is not None
+            else ""
         )
         marker_hit = _contains_marker(stop_reason, self.premature_markers)
         if not terminations and not marker_hit:
@@ -346,8 +343,7 @@ class ProcessVerifier:
                         first_call.sequence,
                     ),
                     description=(
-                        "压缩后首个工具调用重复压缩前已失败的调用,"
-                        "关键约束疑似丢失"
+                        "压缩后首个工具调用重复压缩前已失败的调用,关键约束疑似丢失"
                     ),
                 )
             )

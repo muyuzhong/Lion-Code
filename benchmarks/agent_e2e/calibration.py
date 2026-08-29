@@ -103,9 +103,7 @@ def run_calibration(
             continue
         for fixture_path in sorted(kind_root.glob("*.json")):
             outcomes.append(_run_fixture(fixture_path, kind, verifier))
-    legacy_outcomes = [
-        outcome for outcome in outcomes if outcome.kind == "legacy"
-    ]
+    legacy_outcomes = [outcome for outcome in outcomes if outcome.kind == "legacy"]
     legacy_count = len(legacy_outcomes)
     legacy_unavailable = sum(
         outcome.verification.status.value == "evidence_unavailable"
@@ -160,9 +158,7 @@ def _run_fixture(
     if kind == "clean":
         actual_types = {v.violation_type.value for v in verification.violations}
         passed = verification.status.value == "valid"
-        detail = (
-            f"期望 valid;实际 {verification.status.value} / types={sorted(actual_types)}"
-        )
+        detail = f"期望 valid;实际 {verification.status.value} / types={sorted(actual_types)}"
         return CalibrationOutcome(
             fixture_id=fixture_id,
             kind=kind,

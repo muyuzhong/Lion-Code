@@ -154,9 +154,9 @@ class PairedTrial(VersionedModel):
             raise ValueError("Baseline result does not match the trial key")
         if candidate_key != (self.task_id, self.attempt):
             raise ValueError("Candidate result does not match the trial key")
-        comparable = _is_comparable_result(self.baseline_result) and _is_comparable_result(
-            self.candidate_result
-        )
+        comparable = _is_comparable_result(
+            self.baseline_result
+        ) and _is_comparable_result(self.candidate_result)
         if comparable and self.outcome_delta is PairedTrialOutcome.INVALID:
             raise ValueError("Comparable trial pair cannot carry INVALID delta")
         if not comparable and self.outcome_delta is not PairedTrialOutcome.INVALID:
@@ -209,9 +209,7 @@ class PairedExperimentReport(VersionedModel):
 
     @model_validator(mode="after")
     def _validate_experiment_kind(self) -> PairedExperimentReport:
-        same_code = (
-            self.baseline_agent_code_sha == self.candidate_agent_code_sha
-        )
+        same_code = self.baseline_agent_code_sha == self.candidate_agent_code_sha
         if self.experiment_kind is ExperimentKind.CONTROLLED and not same_code:
             raise ValueError("Controlled experiments require identical agent code")
         if self.experiment_kind is ExperimentKind.REGRESSION and same_code:
@@ -342,10 +340,7 @@ def _experiment_kind(
     baseline: EvaluationReport,
     candidate: EvaluationReport,
 ) -> ExperimentKind:
-    if (
-        baseline.manifest.agent_code_sha
-        == candidate.manifest.agent_code_sha
-    ):
+    if baseline.manifest.agent_code_sha == candidate.manifest.agent_code_sha:
         return ExperimentKind.CONTROLLED
     return ExperimentKind.REGRESSION
 
@@ -362,17 +357,22 @@ def _comparability_errors(
         errors.append("Baseline and candidate must use distinct run IDs")
     _compare_catalog_locks(baseline.manifest, candidate.manifest, errors)
     for field_name in _MANIFEST_INVARIANT_FIELDS:
-        if getattr(baseline.manifest, field_name) != getattr(candidate.manifest, field_name):
+        if getattr(baseline.manifest, field_name) != getattr(
+            candidate.manifest, field_name
+        ):
             errors.append(f"Manifest invariant field differs: {field_name}")
     baseline_profile = baseline.manifest.profile
     candidate_profile = candidate.manifest.profile
     for field_name in _PROFILE_INVARIANT_FIELDS:
-        if getattr(baseline_profile, field_name) != getattr(candidate_profile, field_name):
+        if getattr(baseline_profile, field_name) != getattr(
+            candidate_profile, field_name
+        ):
             errors.append(f"Profile invariant field differs: {field_name}")
     actual_changes = {
         kind
         for kind, field_name in _PROFILE_CHANGE_FIELDS.items()
-        if getattr(baseline_profile, field_name) != getattr(candidate_profile, field_name)
+        if getattr(baseline_profile, field_name)
+        != getattr(candidate_profile, field_name)
     }
     if actual_changes != set(declared_changes):
         errors.append("Declared change kinds do not match profile version differences")
@@ -413,7 +413,9 @@ def _is_comparable_result(result: TaskResult) -> bool:
 
 def _compare_catalog_locks(baseline: Any, candidate: Any, errors: list[str]) -> None:
     for field_name in _CATALOG_LOCK_FIELDS:
-        if getattr(baseline.catalog, field_name) != getattr(candidate.catalog, field_name):
+        if getattr(baseline.catalog, field_name) != getattr(
+            candidate.catalog, field_name
+        ):
             errors.append(f"Catalog lock field differs: {field_name}")
 
 
@@ -425,7 +427,9 @@ def _pair_trials(
         (result.task_id, result.attempt): result for result in candidate.results
     }
     trials: list[PairedTrial] = []
-    for baseline_result in sorted(baseline.results, key=lambda result: (result.task_id, result.attempt)):
+    for baseline_result in sorted(
+        baseline.results, key=lambda result: (result.task_id, result.attempt)
+    ):
         key = (baseline_result.task_id, baseline_result.attempt)
         candidate_result = candidate_by_key[key]
         trials.append(
@@ -505,7 +509,10 @@ def _comparability_snapshot(report: EvaluationReport) -> dict[str, Any]:
         },
         "profile": {
             field_name: getattr(profile, field_name)
-            for field_name in (*_PROFILE_INVARIANT_FIELDS, *_PROFILE_CHANGE_FIELDS.values())
+            for field_name in (
+                *_PROFILE_INVARIANT_FIELDS,
+                *_PROFILE_CHANGE_FIELDS.values(),
+            )
         },
     }
 

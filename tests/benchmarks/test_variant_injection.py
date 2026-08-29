@@ -40,7 +40,9 @@ def _profile(
     )
 
 
-def _prompt_map(version: str = "prompt-v2", text: str = "你是一个编码助手") -> PromptVariantMap:
+def _prompt_map(
+    version: str = "prompt-v2", text: str = "你是一个编码助手"
+) -> PromptVariantMap:
     return PromptVariantMap(
         prompt_version=version,
         system_prompt=text,
@@ -142,6 +144,7 @@ class TestBuildFilteredRegistry:
     def test_empty_whitelist_yields_empty_registry(self) -> None:
         registry = build_filtered_registry(())
         assert list(registry.active_tools()) == []
+
 
 class TestWorkerInjection:
     """run_agent_worker 把解析出的注入真正传给 factory。"""

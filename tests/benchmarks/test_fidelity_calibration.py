@@ -6,21 +6,14 @@ from pathlib import Path
 
 from benchmarks.agent_e2e.calibration import run_calibration
 
-FIXTURES_ROOT = (
-    Path(__file__).parent
-    / "fixtures"
-    / "agent_e2e"
-    / "calibration"
-)
+FIXTURES_ROOT = Path(__file__).parent / "fixtures" / "agent_e2e" / "calibration"
 
 
 class TestCalibrationFixtures:
     def test_all_fixtures_pass(self) -> None:
         summary = run_calibration(FIXTURES_ROOT)
         assert summary.outcomes, "calibration fixtures must exist"
-        assert summary.passed_count == len(summary.outcomes), (
-            summary.render_markdown()
-        )
+        assert summary.passed_count == len(summary.outcomes), summary.render_markdown()
 
     def test_violation_recall_covers_all_six_types(self) -> None:
         summary = run_calibration(FIXTURES_ROOT)

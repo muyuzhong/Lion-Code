@@ -62,9 +62,7 @@ class TestToolEvidence:
         assert evidence.is_error is None
 
     def test_end_evidence_has_is_error(self) -> None:
-        evidence = ProcessEvidenceProjector().project(
-            _end(is_error=True), sequence=4
-        )
+        evidence = ProcessEvidenceProjector().project(_end(is_error=True), sequence=4)
         assert evidence is not None
         assert evidence.tool_phase is ToolPhase.END
         assert evidence.is_error is True
@@ -80,7 +78,9 @@ class TestToolEvidence:
 class TestPathScope:
     def test_source_path(self) -> None:
         evidence = ProcessEvidenceProjector().project(
-            _start(tool_name="edit_file", args={"file_path": "lion_code/meta_agent.py"}),
+            _start(
+                tool_name="edit_file", args={"file_path": "lion_code/meta_agent.py"}
+            ),
             sequence=1,
         )
         assert evidence is not None
@@ -171,9 +171,7 @@ class TestValidationCommand:
         projector = ProcessEvidenceProjector(
             validation_commands=("python -m pytest -q",)
         )
-        evidence = projector.project(
-            _start(args={"command": "git status"}), sequence=1
-        )
+        evidence = projector.project(_start(args={"command": "git status"}), sequence=1)
         assert evidence is not None
         assert evidence.validation_command is False
         assert evidence.validation_command_id is None
@@ -233,16 +231,16 @@ class TestCompactionAndTermination:
         assert evidence.termination is TerminationKind.TURN_FAILED
 
     def test_cancelled(self) -> None:
-        evidence = ProcessEvidenceProjector().project(
-            CancelledEvent(), sequence=10
-        )
+        evidence = ProcessEvidenceProjector().project(CancelledEvent(), sequence=10)
         assert evidence is not None
         assert evidence.termination is TerminationKind.CANCELLED
 
 
 class TestUnknownAndRecorder:
     def test_unknown_event_returns_none_without_error(self) -> None:
-        assert ProcessEvidenceProjector().project({"type": "mystery"}, sequence=1) is None
+        assert (
+            ProcessEvidenceProjector().project({"type": "mystery"}, sequence=1) is None
+        )
 
     def test_recorder_produces_evidence_alongside_events(self) -> None:
         recorder = TraceRecorder()

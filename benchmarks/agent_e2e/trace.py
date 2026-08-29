@@ -47,7 +47,9 @@ class TraceEvent(VersionedModel):
     payload_digest: str = Field(min_length=64, max_length=64)
     tool_name: str | None = Field(default=None, max_length=160)
     argument_digest: str | None = Field(default=None, min_length=64, max_length=64)
-    workspace_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
+    workspace_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
     started_at: datetime | None = None
     finished_at: datetime | None = None
 
@@ -120,9 +122,7 @@ class TraceRecorder:
             "cwd",
             "path",
         )
-        argument_digest = (
-            _digest(arguments) if arguments is not None else None
-        )
+        argument_digest = _digest(arguments) if arguments is not None else None
         workspace_fingerprint = (
             _normalize_workspace_fingerprint(workspace_value)
             if workspace_value is not None
@@ -232,8 +232,7 @@ class TraceRecorder:
                 evidence.model_dump(mode="json") for evidence in self._evidence
             ],
             "loop_candidates": [
-                candidate.model_dump(mode="json")
-                for candidate in self._loop_candidates
+                candidate.model_dump(mode="json") for candidate in self._loop_candidates
             ],
         }
         destination.write_text(
