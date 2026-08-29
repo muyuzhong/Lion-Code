@@ -14,6 +14,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .harness import parse_harness_result
 from .models import (
@@ -316,7 +317,62 @@ def _parse_official_report(
     )
     if result.output_digest != output_digest:
         result = result.model_copy(update={"output_digest": output_digest})
+    result = result.model_copy(
+        update={
+            "extensions": {
+                **result.extensions,
+                "official_tests": _tests_status(instance),
+            }
+        }
+    )
     return result
+
+
+def _tests_status(instance: Mapping[str, Any]) -> dict[str, Any]:
+    """捕获官方报告测试明细，并标记'修复通过但环境回归'的判定陷阱。
+
+    官方 resolved=False 可能因环境漂移（如旧项目在 Python 3.11 镜像下
+    PASS_TO_PASS 超时）而非修复失败；当 FAIL_TO_PASS 全部通过但
+    resolved=False 时，标注 ``env_regression_suspect``，避免把环境回归
+    误判为 agent 失败。
+    """
+
+    tests = instance.get("tests_status")
+    if not isinstance(tests, Mapping):
+        return {"status": "not_reported"}
+    fail_to_pass = tests.get("FAIL_TO_PASS")
+    pass_to_pass = tests.get("PASS_TO_PASS")
+    ftp = _bucket_counts(fail_to_pass) if isinstance(fail_to_pass, Mapping) else {}
+    ptp = _bucket_counts(pass_to_pass) if isinstance(pass_to_pass, Mapping) else {}
+    resolved = instance.get("resolved")
+    suspect = bool(
+        resolved is False
+        and ftp.get("total", 0) > 0
+        and ftp.get("failed", 0) == 0
+        and (ftp.get("passed", 0) == ftp.get("total", 0))
+    )
+    return {
+        "status": "reported",
+        "fail_to_pass": ftp,
+        "pass_to_pass": ptp,
+        "resolved": resolved,
+        "infra_failure": bool(instance.get("infra_failure")),
+        "env_regression_suspect": suspect,
+    }
+
+
+def _bucket_counts(bucket: Mapping[str, Any]) -> dict[str, int]:
+    passed = bucket.get("success")
+    failed = bucket.get("failure")
+    return {
+        "passed": len(passed) if isinstance(passed, list) else 0,
+        "failed": len(failed) if isinstance(failed, list) else 0,
+        "total": (
+            len(passed) + len(failed)
+            if isinstance(passed, list) and isinstance(failed, list)
+            else 0
+        ),
+    }
 
 
 def _instance_report_path(

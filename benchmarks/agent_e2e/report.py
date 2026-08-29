@@ -211,6 +211,20 @@ def _append_harness(lines: list[str], report: VerifiedEvaluationReport) -> None:
     divergence = _harbor_harness_divergence(report)
     if divergence is not None:
         lines.append(f"  - 分歧标注：{divergence}")
+    tests = harness.extensions.get("official_tests")
+    if isinstance(tests, dict) and tests.get("status") == "reported":
+        ftp = tests.get("fail_to_pass") or {}
+        ptp = tests.get("pass_to_pass") or {}
+        lines.append(
+            f"  - 官方测试明细：FAIL_TO_PASS {ftp.get('passed', 0)}/{ftp.get('total', 0)} 通过；"
+            f"PASS_TO_PASS {ptp.get('failed', 0)} 项失败"
+        )
+        if tests.get("env_regression_suspect"):
+            lines.append(
+                "  - ⚠️ 环境回归疑似：FAIL_TO_PASS 全部通过但官方 resolved=False，"
+                "多为镜像环境漂移（旧项目在新 Python 下 PASS_TO_PASS 失败），"
+                "不应判为 agent 修复失败"
+            )
 
 
 def _harbor_harness_divergence(report: VerifiedEvaluationReport) -> str | None:
