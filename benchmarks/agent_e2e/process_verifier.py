@@ -179,19 +179,13 @@ class ProcessVerifier:
         self, evidence: Sequence[ProcessEvidence]
     ) -> list[ProcessViolation]:
         """按 tool_call_id 聚合:一次调用的 start/update/end 生命周期只
-        贡献一个 call 级指纹;不同 call 的同指纹连续出现才构成重复。"""
+        贡献一个 call 级指纹(start 带参阶段);不同 call 的同指纹
+        连续出现才构成重复。"""
 
-        call_fingerprints: list[tuple[int, str]] = []
-        seen_calls: dict[str, str] = {}
-        for item in evidence:
-            if item.tool_call_id is None or item.tool_fingerprint is None:
-                continue
-            if item.tool_call_id not in seen_calls:
-                seen_calls[item.tool_call_id] = item.tool_fingerprint
-                call_fingerprints.append((item.sequence, item.tool_fingerprint))
+        stream = _call_fingerprint_stream(evidence)
         violations: list[ProcessViolation] = []
         run: list[tuple[int, str]] = []
-        for sequence, fingerprint in call_fingerprints:
+        for sequence, _call_id, fingerprint in stream:
             if run and run[-1][1] != fingerprint:
                 run = []
             run.append((sequence, fingerprint))
@@ -216,24 +210,34 @@ class ProcessVerifier:
     ) -> list[ProcessViolation]:
         """is_error=true 的 end 证据后,同指纹的后续新 call 继续出现。"""
 
+        fps_by_call = _call_fingerprint_index(evidence)
+        failed_calls: dict[str, tuple[int, str]] = {}
+        for item in evidence:
+            if not (
+                item.tool_phase is ToolPhase.END
+                and item.is_error
+                and item.tool_call_id in fps_by_call
+            ):
+                continue
+            failed_calls[item.tool_call_id] = (
+                item.sequence,
+                fps_by_call[item.tool_call_id],
+            )
         violations: list[ProcessViolation] = []
-        for index, item in enumerate(evidence):
-            if item.tool_phase is not ToolPhase.END or not item.is_error:
-                continue
-            if item.tool_fingerprint is None:
-                continue
+        for failed_sequence, failed_fingerprint in failed_calls.values():
             repeat_offsets = [
-                following.sequence
-                for following in evidence[index + 1 :]
-                if following.tool_fingerprint == item.tool_fingerprint
-                and following.tool_call_id != item.tool_call_id
+                sequence
+                for sequence, _call_id, fingerprint in _call_fingerprint_stream(
+                    evidence
+                )
+                if fingerprint == failed_fingerprint and sequence > failed_sequence
             ]
             if len(repeat_offsets) >= self.error_repeat_threshold:
                 violations.append(
                     ProcessViolation(
                         violation_type=ProcessViolationType.TOOL_ERROR_NOT_RECOVERED,
                         severity=ProcessSeverity.VIOLATION,
-                        evidence_offsets=(item.sequence, *repeat_offsets),
+                        evidence_offsets=(failed_sequence, *repeat_offsets),
                         description=(
                             "工具失败后未改变策略,重复相同指纹调用"
                             f" {len(repeat_offsets)} 次"
@@ -316,20 +320,19 @@ class ProcessVerifier:
         self, evidence: Sequence[ProcessEvidence]
     ) -> list[ProcessViolation]:
         violations: list[ProcessViolation] = []
-        compaction_indexes = [
-            index
-            for index, item in enumerate(evidence)
-            if item.compaction is not None
-        ]
-        for compaction_index in compaction_indexes:
-            first_call = _first_tool_end_after(evidence, compaction_index)
-            if first_call is None or first_call.tool_fingerprint is None:
+        fps_by_call = _call_fingerprint_index(evidence)
+        for index, item in enumerate(evidence):
+            if item.compaction is None:
                 continue
-            prior_failed = _last_failed_end_before(evidence, compaction_index)
-            if prior_failed is None or prior_failed.tool_fingerprint is None:
+            first_call = _first_tool_end_after(evidence, index)
+            if first_call is None or first_call.tool_call_id not in fps_by_call:
+                continue
+            prior_failed = _last_failed_end_before(evidence, index)
+            if prior_failed is None or prior_failed.tool_call_id not in fps_by_call:
                 continue
             if (
-                first_call.tool_fingerprint != prior_failed.tool_fingerprint
+                fps_by_call[first_call.tool_call_id]
+                != fps_by_call[prior_failed.tool_call_id]
                 or first_call.tool_call_id == prior_failed.tool_call_id
             ):
                 continue
@@ -338,7 +341,7 @@ class ProcessVerifier:
                     violation_type=ProcessViolationType.CONTEXT_REGRESSION,
                     severity=ProcessSeverity.VIOLATION,
                     evidence_offsets=(
-                        evidence[compaction_index].sequence,
+                        item.sequence,
                         prior_failed.sequence,
                         first_call.sequence,
                     ),
@@ -385,6 +388,36 @@ def _validate_trace_sequences(events: Sequence[TraceEvent]) -> None:
     sequences = [event.sequence for event in events]
     if len(set(sequences)) != len(sequences):
         raise ValueError("Trace event sequences must be unique")
+
+
+def _call_fingerprint_stream(
+    evidence: Sequence[ProcessEvidence],
+) -> list[tuple[int, str, str]]:
+    """每个工具调用贡献一个指纹,取自该 call 的带参阶段(start/update)。
+
+    ToolExecutionEnd 事件没有 args,其指纹只含工具名,不能用于调用
+    比对;必须以 call 首次出现的带参阶段指纹为准。
+    """
+
+    fps_by_call: dict[str, str] = {}
+    stream: list[tuple[int, str, str]] = []
+    for item in evidence:
+        if item.tool_call_id is None or item.tool_fingerprint is None:
+            continue
+        if item.tool_call_id in fps_by_call:
+            continue
+        fps_by_call[item.tool_call_id] = item.tool_fingerprint
+        stream.append((item.sequence, item.tool_call_id, item.tool_fingerprint))
+    return stream
+
+
+def _call_fingerprint_index(
+    evidence: Sequence[ProcessEvidence],
+) -> dict[str, str]:
+    return {
+        call_id: fingerprint
+        for _sequence, call_id, fingerprint in _call_fingerprint_stream(evidence)
+    }
 
 
 def _first_tool_end_after(
