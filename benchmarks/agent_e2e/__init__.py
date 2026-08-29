@@ -7,6 +7,7 @@ from .artifact import (
     CommitArtifactBuilder,
     build_commit_artifact,
 )
+from .calibration import CalibrationOutcome, CalibrationSummary, run_calibration
 from .catalog import CatalogValidationError, freeze_catalog, validate_catalog
 from .corpus import (
     CorpusAdmissionError,
@@ -56,6 +57,7 @@ from .evidence import (
     ToolPhase,
 )
 from .experiment import (
+    ExperimentKind,
     HarnessVariant,
     PairedCounts,
     PairedExperiment,
@@ -211,6 +213,14 @@ from .swebench_verified import (
     map_harbor_status,
     parse_harbor_result,
 )
+from .variant_injection import (
+    InjectionResolution,
+    PromptVariantMap,
+    ToolPolicyVariantMap,
+    VariantInjectionSpec,
+    build_filtered_registry,
+    resolve_injection,
+)
 from .verified_runner import (
     VERIFIED_EXIT_COMPLETED,
     VERIFIED_EXIT_INFRA_FAILED,
@@ -251,9 +261,11 @@ __all__ = [
     "AdapterStatus",
     "AnchorRunStatus",
     "ArtifactBuildError",
+    "CalibrationOutcome",
     "CalibrationPoint",
     "CalibrationProfileKind",
     "CalibrationReport",
+    "CalibrationSummary",
     "Catalog",
     "CatalogLock",
     "CatalogValidationError",
@@ -279,6 +291,7 @@ __all__ = [
     "DeepEvalTimeoutError",
     "DeepEvalTrajectory",
     "DeepEvalTrajectoryEvent",
+    "ExperimentKind",
     "ExperimentManifest",
     "ExperimentProfile",
     "ExternalAnchorDriftError",
@@ -315,6 +328,7 @@ __all__ = [
     "HarnessSchemaError",
     "HarnessVariant",
     "HistoricalPreflight",
+    "InjectionResolution",
     "OfficialEvaluationRecord",
     "OfficialRecordStatus",
     "OfficialSWEbenchHarnessRunner",
@@ -344,6 +358,7 @@ __all__ = [
     "ProcessVerifier",
     "ProcessViolation",
     "ProcessViolationType",
+    "PromptVariantMap",
     "RegressionGateDecision",
     "RegressionGateError",
     "RegressionGateLedger",
@@ -358,9 +373,11 @@ __all__ = [
     "TaskVerdict",
     "TerminationKind",
     "ToolPhase",
+    "ToolPolicyVariantMap",
     "TrialExecution",
     "TrialExecutionStatus",
     "UnavailableOfficialSWEbenchLiveRunner",
+    "VariantInjectionSpec",
     "VerifiedEvaluationReport",
     "VerifiedExecutionOutput",
     "VerifiedExecutionRequest",
@@ -371,6 +388,7 @@ __all__ = [
     "build_commit_artifact",
     "build_deepeval_metrics",
     "build_deepeval_trajectory",
+    "build_filtered_registry",
     "build_opik_trace_payload",
     "bundled_catalog",
     "bundled_private_evidence",
@@ -398,7 +416,9 @@ __all__ = [
     "parse_opik_export_result",
     "publish_opik_trace",
     "require_comparable_external_reports",
+    "resolve_injection",
     "retry_opik_export",
+    "run_calibration",
     "run_external_anchor_evaluation",
     "run_gold_preflight",
     "run_historical_preflight",

@@ -18,6 +18,11 @@ from lion_code.session_runtime import SessionRepository
 from .backend import AgentExecutionRequest
 from .models import AgentRunSummary, WorkerResult, WorkerStatus
 from .trace import TraceRecorder, redact_text
+from .variant_injection import (
+    VariantInjectionSpec,
+    build_filtered_registry,
+    resolve_injection,
+)
 
 AgentFactory = Callable[..., CodingSessionBackendAdapter]
 
@@ -27,6 +32,7 @@ async def run_agent_worker(
     *,
     agent_factory: AgentFactory = build_full_coding_backend,
     trace_recorder: TraceRecorder | None = None,
+    injection_spec: VariantInjectionSpec | None = None,
 ) -> WorkerResult:
     """在 Agent workspace 中运行一次根 Agent，并返回不含 session/凭证的结果。
 
@@ -53,11 +59,12 @@ async def run_agent_worker(
         credential_kwargs["anthropic_base_url"] = (
             credentials["api_base"] if not credentials["use_openai"] else None
         )
-    agent: Agent | None = None
+    agent: CodingSessionBackendAdapter | None = None
     unsubscribe: Callable[[], None] | None = None
     result: WorkerResult | None = None
     try:
         with _working_directory(workspace):
+            injection = resolve_injection(request.manifest.profile, injection_spec)
             agent = agent_factory(
                 permission_mode=request.manifest.profile.permission_mode,
                 model=request.manifest.profile.model,
@@ -67,6 +74,12 @@ async def run_agent_worker(
                     else None
                 ),
                 max_turns=request.manifest.profile.max_turns,
+                custom_system_prompt=injection.custom_system_prompt,
+                tool_registry=(
+                    build_filtered_registry(injection.tool_names)
+                    if injection.tool_names
+                    else None
+                ),
                 confirm_fn=_auto_confirm,
                 session_repository=session_repository,
                 terminal_output=False,
