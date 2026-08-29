@@ -16,7 +16,12 @@ from lion_code.config import resolve_api_credentials
 from lion_code.session_runtime import SessionRepository
 
 from .backend import AgentExecutionRequest
-from .models import AgentRunSummary, WorkerResult, WorkerStatus
+from .models import (
+    AgentRunSummary,
+    InjectionEvidence,
+    WorkerResult,
+    WorkerStatus,
+)
 from .trace import TraceRecorder, redact_text
 from .variant_injection import (
     VariantInjectionSpec,
@@ -62,9 +67,17 @@ async def run_agent_worker(
     agent: CodingSessionBackendAdapter | None = None
     unsubscribe: Callable[[], None] | None = None
     result: WorkerResult | None = None
+    injection_evidence: InjectionEvidence | None = None
     try:
         with _working_directory(workspace):
             injection = resolve_injection(request.manifest.profile, injection_spec)
+            injection_evidence = InjectionEvidence(
+                requested=injection.requested,
+                resolved_variant=injection.resolved_variant,
+                injection_fingerprint=injection.injection_fingerprint,
+                prompt_sha256=injection.prompt_sha256,
+                tool_policy_sha256=injection.tool_policy_sha256,
+            )
             agent = agent_factory(
                 permission_mode=request.manifest.profile.permission_mode,
                 model=request.manifest.profile.model,
@@ -77,7 +90,7 @@ async def run_agent_worker(
                 custom_system_prompt=injection.custom_system_prompt,
                 tool_registry=(
                     build_filtered_registry(injection.tool_names)
-                    if injection.tool_names
+                    if injection.resolved_variant.tool_policy_hit
                     else None
                 ),
                 confirm_fn=_auto_confirm,
@@ -94,6 +107,7 @@ async def run_agent_worker(
             status=WorkerStatus.COMPLETED,
             agent_run=_agent_run_summary(run_result),
             trace_summary=recorder.summary(),
+            injection_evidence=injection_evidence,
         )
     except asyncio.CancelledError:
         raise

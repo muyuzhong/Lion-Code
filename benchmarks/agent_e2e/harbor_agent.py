@@ -38,8 +38,10 @@ class LionInstalledAgent(BaseInstalledAgent):
     _SOURCE_FILES = (
         "agent_worker.py",
         "backend.py",
+        "evidence.py",
         "models.py",
         "trace.py",
+        "variant_injection.py",
         "worker_entrypoint.py",
     )
 

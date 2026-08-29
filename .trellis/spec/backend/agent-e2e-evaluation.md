@@ -243,13 +243,52 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   constructor parameters. The committed calibration fixtures
   (`tests/benchmarks/fixtures/agent_e2e/calibration/`) pin recall (violations detected) and
   precision (clean traces never vetoed).
-- `PairedExperiment` distinguishes two experiment kinds. `CONTROLLED` requires equal
-  `agent_code_sha` between baseline and candidate so only the declared Harness variable differs
-  (`custom_system_prompt` / filtered `tool_registry` are actually injected through
-  `VariantInjectionSpec`); its paired deltas may be attributed to the declared mechanism.
-  `REGRESSION` allows different agent code and only supports "this version regressed as a whole"
-  claims. `compression_version` remains a declared field with no runtime switch and must never
-  be attributed causally; this limitation is recorded in the profile, not hidden.
+- `PairedExperiment` distinguishes three experiment kinds. `CONTROLLED` requires equal
+  `agent_code_sha` between baseline and candidate **and verified treatment at run
+  granularity**: each side must validate as a single consistent `RunInjectionEvidence`
+  (every `task × attempt` carries `InjectionEvidence` whose `requested` matches the
+  manifest profile and whose `resolved_variant`/fingerprint are identical across the
+  run — one missing or divergent result invalidates the whole run), and **every declared
+  `ChangeKind`** must be hit on both sides with different injected content (per-dimension
+  `prompt_sha256` / `tool_policy_sha256`). A declared `PROMPT` change is not verified by a
+  `tool_policy` hit; the evidence must prove the declared treatment, not merely that some
+  injection happened. Its paired deltas may be attributed to the declared mechanism.
+  `REGRESSION` allows different agent code and only supports "this version regressed as a
+  whole" claims. `UNSUPPORTED_TREATMENT` covers same-code pairs where the variable has no
+  runtime switch (e.g. `compression_version`), injection did not resolve (missing maps,
+  identical fingerprints, no evidence), or run-level evidence is inconsistent: the report
+  must state the delta is not attributable to that mechanism. `compression_version` remains
+  a declared field with no runtime switch and must never produce `CONTROLLED`; this
+  limitation is recorded in the profile, not hidden.
+- `VariantInjectionSpec` travels with the `ExperimentManifest` (its `extensions`
+  `variant_injection_spec` key is part of the frozen manifest) from host to the Harbor
+  installed-agent, so `worker_entrypoint` resolves and applies the same mapping table on the
+  container side. The manifest is the **single source of truth** for the spec:
+  `HarborExecutionRequest` does not carry a separate `injection_spec` (no dual source);
+  `request_variant=True` only asserts that the manifest carries one. A
+  `ToolPolicyVariantMap` must name at least one tool (`tool_names` is non-empty), so a hit
+  always means a real registry filter — empty whitelists that claim a hit without injecting
+  are rejected at construction. `harbor_agent._SOURCE_FILES` must include every module the
+  worker chain imports (`evidence.py`, `variant_injection.py`).
+- `ControlledExperimentRunner` is the formal host entry that creates a controlled
+  experiment: one shared `VariantInjectionSpec` plus a frozen template and two profiles
+  (`build_manifests`) produce the two frozen manifests, and `run_pair` executes both runs
+  by reusing the **Verified official chain** (`run_verified_evaluation`: artifact → Harbor
+  → SWE-bench Harness), looping every `task × attempt` and handing the assembled reports to
+  `PairedExperiment.build`. It does not depend on the foundation
+  `SingleTaskOrchestrator`/`ContainerBackend`; there is a single official execution chain.
+  The Verified chain forwards `WorkerResult.injection_evidence` into
+  `TaskResult.extensions["injection_evidence"]` (via `_merge_worker_result`) and sets
+  `request_variant=True` on the Harbor request whenever the manifest carries
+  `variant_injection_spec`, so real Harbor runs surface the evidence and the variant
+  declaration that `PairedExperiment` consumes. `run_pair` validates the **execution
+  context invariant** before running: `commit_sha`, `repository_root`,
+  `python_executable`, `harness_python`, and `harbor_executable` must be identical
+  between baseline and candidate (manifest comparability alone only constrains the
+  declared surface, and `agent_code_sha` is a 7-char prefix match — drifting host inputs
+  would otherwise mask fake causality behind identical code + valid evidence). `run_pair`
+  derives declared changes from the actual profile version differences, so a run that
+  does not change any gate-controlled version fails before execution.
 - `classify_failure` consumes only redacted `TraceEvent` metadata and emits candidate labels plus
   event sequence offsets. Three consecutive identical tool/argument/workspace fingerprints are
   `loop`; typed context/compaction signals are `context_decay`; a disallowed tool or typed

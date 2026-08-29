@@ -19,8 +19,11 @@ from pydantic import Field, model_validator
 from .models import (
     EvaluationReport,
     ExperimentProfile,
+    InjectionEvidence,
     ReportStatus,
+    RequestedVariant,
     ResultValidity,
+    RunInjectionEvidence,
     TaskResult,
     TaskVerdict,
     VersionedModel,
@@ -85,14 +88,19 @@ class PairedTrialOutcome(str, Enum):
 class ExperimentKind(str, Enum):
     """配对实验的因果语义。
 
-    - ``CONTROLLED``:两侧 agent_code_sha 相同,差异仅限声明的
-      Harness 变量(经 worker 注入)→ 可以谈「该机制导致的变化」;
+    - ``CONTROLLED``:两侧 agent_code_sha 相同、injection 证据证明
+      声明的每个维度在两侧都真实命中且注入了不同内容 →
+      可以谈「该机制导致的变化」;
     - ``REGRESSION``:Harness 代码版本不同 → 只能谈「版本整体是否
-      回归」,不能归因到具体机制。
+      回归」,不能归因到具体机制;
+    - ``UNSUPPORTED_TREATMENT``:声明了变量但无真实运行开关或注入
+      未发生(如 compression、未命中映射、run 级证据不一致)→
+      配对差异不可归因。
     """
 
     CONTROLLED = "controlled"
     REGRESSION = "regression"
+    UNSUPPORTED_TREATMENT = "unsupported_treatment"
 
 
 class HarnessVariant(VersionedModel):
@@ -188,6 +196,8 @@ class PairedExperimentReport(VersionedModel):
     injection_fingerprint: str | None = Field(
         default=None, min_length=64, max_length=64
     )
+    baseline_injection: RunInjectionEvidence | None = None
+    candidate_injection: RunInjectionEvidence | None = None
     declared_changes: tuple[ChangeKind, ...] = Field(min_length=1)
     comparability_fingerprint: str = Field(min_length=64, max_length=64)
     trials: tuple[PairedTrial, ...] = ()
@@ -214,6 +224,24 @@ class PairedExperimentReport(VersionedModel):
             raise ValueError("Controlled experiments require identical agent code")
         if self.experiment_kind is ExperimentKind.REGRESSION and same_code:
             raise ValueError("Regression comparisons require different agent code")
+        if (
+            self.experiment_kind is ExperimentKind.CONTROLLED
+            and self.injection_fingerprint is None
+        ):
+            raise ValueError("Controlled experiments require an injection fingerprint")
+        if self.experiment_kind is ExperimentKind.CONTROLLED and (
+            self.baseline_injection is None or self.candidate_injection is None
+        ):
+            raise ValueError(
+                "Controlled experiments require run injection evidence on both sides"
+            )
+        if (
+            self.experiment_kind is ExperimentKind.UNSUPPORTED_TREATMENT
+            and not same_code
+        ):
+            raise ValueError(
+                "Unsupported-treatment comparisons require identical agent code"
+            )
         return self
 
     def render_markdown(self) -> str:
@@ -222,8 +250,14 @@ class PairedExperimentReport(VersionedModel):
         changes = ", ".join(kind.value for kind in self.declared_changes)
         if self.experiment_kind is ExperimentKind.CONTROLLED:
             conclusion = (
-                "受控实验(两侧 agent 代码相同):配对差异可归因于声明"
-                f"变更 [{changes}] 的机制效果。"
+                "受控实验(两侧 agent 代码相同且注入已验证生效):配对"
+                f"差异可归因于声明变更 [{changes}] 的机制效果。"
+            )
+        elif self.experiment_kind is ExperimentKind.UNSUPPORTED_TREATMENT:
+            conclusion = (
+                "同代码但声明变量无真实运行开关或注入未生效"
+                f"([{changes}] 未验证 treatment):配对差异"
+                "**不可**归因于该机制;仅可视为 declared-only 观察。"
             )
         else:
             conclusion = (
@@ -238,6 +272,9 @@ class PairedExperimentReport(VersionedModel):
             f"- 实验语义: {self.experiment_kind.value}",
             f"- 声明变更: {changes}",
             f"- comparability fingerprint: `{self.comparability_fingerprint}`",
+            f"- injection fingerprint: `{self.injection_fingerprint or 'N/A'}`",
+            f"- baseline 注入: {_render_run_injection(self.baseline_injection)}",
+            f"- candidate 注入: {_render_run_injection(self.candidate_injection)}",
             f"- 结论: {conclusion}",
             "",
             "## 配对四格",
@@ -274,6 +311,8 @@ class PairedExperiment:
         comparability_fingerprint: str,
         experiment_kind: ExperimentKind,
         injection_fingerprint: str | None = None,
+        baseline_injection: RunInjectionEvidence | None = None,
+        candidate_injection: RunInjectionEvidence | None = None,
     ) -> None:
         self.baseline = baseline
         self.candidate = candidate
@@ -282,6 +321,8 @@ class PairedExperiment:
         self.comparability_fingerprint = comparability_fingerprint
         self.experiment_kind = experiment_kind
         self.injection_fingerprint = injection_fingerprint
+        self.baseline_injection = baseline_injection
+        self.candidate_injection = candidate_injection
 
     @classmethod
     def build(
@@ -301,13 +342,26 @@ class PairedExperiment:
         if errors:
             raise PairedExperimentError(_controlled_reason(errors))
         trials = _pair_trials(baseline, candidate)
+        baseline_injection = _validate_run_injection(baseline)
+        candidate_injection = _validate_run_injection(candidate)
         return cls(
             baseline=baseline,
             candidate=candidate,
             declared_changes=changes,
             trials=trials,
             comparability_fingerprint=_comparability_fingerprint(baseline, candidate),
-            experiment_kind=_experiment_kind(baseline, candidate),
+            experiment_kind=_experiment_kind(
+                baseline,
+                candidate,
+                baseline_injection,
+                candidate_injection,
+                changes,
+            ),
+            injection_fingerprint=_injection_fingerprint(
+                baseline_injection, candidate_injection
+            ),
+            baseline_injection=baseline_injection,
+            candidate_injection=candidate_injection,
         )
 
     def to_report(self) -> PairedExperimentReport:
@@ -320,6 +374,8 @@ class PairedExperiment:
             baseline_agent_code_sha=self.baseline.manifest.agent_code_sha,
             candidate_agent_code_sha=self.candidate.manifest.agent_code_sha,
             injection_fingerprint=self.injection_fingerprint,
+            baseline_injection=self.baseline_injection,
+            candidate_injection=self.candidate_injection,
             declared_changes=self.declared_changes,
             comparability_fingerprint=self.comparability_fingerprint,
             trials=self.trials,
@@ -339,10 +395,149 @@ def _normalize_changes(changes: Iterable[ChangeKind]) -> tuple[ChangeKind, ...]:
 def _experiment_kind(
     baseline: EvaluationReport,
     candidate: EvaluationReport,
+    baseline_injection: RunInjectionEvidence | None,
+    candidate_injection: RunInjectionEvidence | None,
+    declared_changes: tuple[ChangeKind, ...],
 ) -> ExperimentKind:
-    if baseline.manifest.agent_code_sha == candidate.manifest.agent_code_sha:
-        return ExperimentKind.CONTROLLED
-    return ExperimentKind.REGRESSION
+    """判断配对实验的因果语义,要求声明的每个维度真的发生 treatment。
+
+    CONTROLLED 需要同时满足:
+    - 两侧 agent 代码相同;
+    - 声明变更不含 compression(compression 无真实运行开关);
+    - 两侧都有可用的 run 级注入证据;
+    - 每个声明维度都在两侧命中(hit)且注入内容摘要不同。
+    否则降级为 UNSUPPORTED_TREATMENT(同代码但 treatment 未发生)
+    或 REGRESSION(跨代码版本)。
+    """
+
+    same_code = baseline.manifest.agent_code_sha == candidate.manifest.agent_code_sha
+    if not same_code:
+        return ExperimentKind.REGRESSION
+    if ChangeKind.COMPRESSION in declared_changes:
+        # compression 只有声明没有运行开关,永不进入受控因果实验。
+        return ExperimentKind.UNSUPPORTED_TREATMENT
+    if baseline_injection is None or candidate_injection is None:
+        return ExperimentKind.UNSUPPORTED_TREATMENT
+    for kind in declared_changes:
+        if not _dimension_verified(kind, baseline_injection, candidate_injection):
+            # 声明的维度没有在两侧同时命中且注入不同内容 =
+            # 该 treatment 未被验证,不能归因。
+            return ExperimentKind.UNSUPPORTED_TREATMENT
+    return ExperimentKind.CONTROLLED
+
+
+def _dimension_verified(
+    kind: ChangeKind,
+    baseline: RunInjectionEvidence,
+    candidate: RunInjectionEvidence,
+) -> bool:
+    """单个声明维度是否在两侧都真的注入了不同的配置。"""
+
+    if kind is ChangeKind.PROMPT:
+        return (
+            baseline.resolved_variant.prompt_hit
+            and candidate.resolved_variant.prompt_hit
+            and baseline.prompt_sha256 is not None
+            and candidate.prompt_sha256 is not None
+            and baseline.prompt_sha256 != candidate.prompt_sha256
+        )
+    if kind is ChangeKind.TOOL_POLICY:
+        return (
+            baseline.resolved_variant.tool_policy_hit
+            and candidate.resolved_variant.tool_policy_hit
+            and baseline.tool_policy_sha256 is not None
+            and candidate.tool_policy_sha256 is not None
+            and baseline.tool_policy_sha256 != candidate.tool_policy_sha256
+        )
+    return False
+
+
+def _validate_run_injection(
+    report: EvaluationReport,
+) -> RunInjectionEvidence | None:
+    """校验整个 run 的注入证据一致,返回 run 级证据聚合。
+
+    任一 task × attempt 缺失/畸形证据、requested 与 manifest profile
+    声明不一致、或 resolved/fingerprint 与其他结果不一致,整个 run
+    视为没有可用的注入证据(返回 None)。
+    """
+
+    expected_requested = RequestedVariant(
+        prompt_version=report.manifest.profile.prompt_version,
+        tool_policy_version=report.manifest.profile.tool_policy_version,
+        compression_version=report.manifest.profile.compression_version,
+    )
+    agreed: RunInjectionEvidence | None = None
+    for result in report.results:
+        evidence = _evidence_of_result(result)
+        if evidence is None or evidence.requested != expected_requested:
+            return None
+        if agreed is None:
+            agreed = RunInjectionEvidence(
+                requested=evidence.requested,
+                resolved_variant=evidence.resolved_variant,
+                injection_fingerprint=evidence.injection_fingerprint,
+                prompt_sha256=evidence.prompt_sha256,
+                tool_policy_sha256=evidence.tool_policy_sha256,
+                result_count=1,
+            )
+            continue
+        if (
+            evidence.resolved_variant != agreed.resolved_variant
+            or evidence.injection_fingerprint != agreed.injection_fingerprint
+            or evidence.prompt_sha256 != agreed.prompt_sha256
+            or evidence.tool_policy_sha256 != agreed.tool_policy_sha256
+        ):
+            return None
+        agreed = agreed.model_copy(update={"result_count": agreed.result_count + 1})
+    return agreed
+
+
+def _evidence_of_result(result: TaskResult) -> InjectionEvidence | None:
+    """读取单条 task result 携带的注入证据;缺失或畸形返回 None。"""
+
+    raw = result.extensions.get("injection_evidence")
+    if isinstance(raw, InjectionEvidence):
+        return raw
+    if isinstance(raw, dict):
+        try:
+            return InjectionEvidence.from_dict(raw)
+        except Exception:
+            return None
+    return None
+
+
+def _injection_fingerprint(
+    baseline_injection: RunInjectionEvidence | None,
+    candidate_injection: RunInjectionEvidence | None,
+) -> str | None:
+    """两侧注入指纹不同时返回复合指纹;否则 None(未发生 treatment)。"""
+
+    if baseline_injection is None or candidate_injection is None:
+        return None
+    baseline_fp = baseline_injection.injection_fingerprint
+    candidate_fp = candidate_injection.injection_fingerprint
+    if baseline_fp is None or candidate_fp is None or baseline_fp == candidate_fp:
+        return None
+    return _digest({"baseline": baseline_fp, "candidate": candidate_fp})
+
+
+def _render_run_injection(evidence: RunInjectionEvidence | None) -> str:
+    """报告里展示 run 级注入证据的可读摘要。"""
+
+    if evidence is None:
+        return "无有效注入证据(UNSUPPORTED)"
+    hits: list[str] = []
+    if evidence.prompt_sha256 is not None:
+        hits.append("prompt")
+    if evidence.tool_policy_sha256 is not None:
+        hits.append("tool_policy")
+    injected = ", ".join(hits) if hits else "无"
+    fingerprint = evidence.injection_fingerprint or "N/A"
+    return (
+        f"命中 [{injected}],fingerprint `{fingerprint}`,"
+        f"{evidence.result_count} 个结果一致"
+    )
 
 
 def _comparability_errors(

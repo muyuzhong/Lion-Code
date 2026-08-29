@@ -12,12 +12,20 @@ PR #143 审查问题二:worker 从未把 prompt_version / tool_policy_version
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Sequence
 from typing import Any
 
 from pydantic import Field, model_validator
 
-from .models import ExperimentProfile, VersionedModel
+from .models import (
+    ExperimentManifest,
+    ExperimentProfile,
+    InjectionEvidence,
+    RequestedVariant,
+    ResolvedVariant,
+    VersionedModel,
+)
 
 
 class PromptVariantMap(VersionedModel):
@@ -36,10 +44,14 @@ class PromptVariantMap(VersionedModel):
 
 
 class ToolPolicyVariantMap(VersionedModel):
-    """tool_policy 版本 → 工具集白名单的受控映射;空名单不注入。"""
+    """tool_policy 版本 → 工具集白名单的受控映射。
+
+    白名单至少一个工具;空名单没有任何可注入内容,会让
+    tool_policy_hit 变成「假注入」,直接拒绝。
+    """
 
     tool_policy_version: str = Field(min_length=1, max_length=128)
-    tool_names: tuple[str, ...] = ()
+    tool_names: tuple[str, ...] = Field(min_length=1)
     content_sha256: str = Field(min_length=64, max_length=64)
 
     @model_validator(mode="after")
@@ -63,7 +75,11 @@ class VariantInjectionSpec(VersionedModel):
 
 
 class InjectionResolution(VersionedModel):
-    """解析结果:命中映射时给出注入值;未命中时 resolved=False。"""
+    """解析结果:命中映射时给出注入值;未命中时 resolved=False。
+
+    同时携带完整执行证据(requested/resolved/fingerprint),供
+    worker 落盘为可复核的 InjectionEvidence。
+    """
 
     resolved: bool = False
     custom_system_prompt: str | None = None
@@ -71,6 +87,10 @@ class InjectionResolution(VersionedModel):
     injection_fingerprint: str | None = Field(
         default=None, min_length=64, max_length=64
     )
+    prompt_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    tool_policy_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    requested: RequestedVariant = Field(default_factory=RequestedVariant)
+    resolved_variant: ResolvedVariant = Field(default_factory=ResolvedVariant)
     extensions: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -119,7 +139,47 @@ def resolve_injection(
             if fingerprint_parts
             else None
         ),
+        prompt_sha256=(prompt_map.content_sha256 if prompt_map is not None else None),
+        tool_policy_sha256=(tool_map.content_sha256 if tool_map is not None else None),
+        requested=RequestedVariant(
+            prompt_version=profile.prompt_version,
+            tool_policy_version=profile.tool_policy_version,
+            compression_version=profile.compression_version,
+        ),
+        resolved_variant=ResolvedVariant(
+            prompt_hit=prompt_map is not None,
+            tool_policy_hit=tool_map is not None,
+        ),
     )
+
+
+def attach_injection_spec(
+    manifest: ExperimentManifest,
+    spec: VariantInjectionSpec,
+) -> ExperimentManifest:
+    """把注入映射表写入 manifest.extensions(可比性不变量,两侧共享)。
+
+    manifest 是 frozen 模型,返回新实例;仅写入受控 JSON 对象,
+    不含敏感内容。
+    """
+
+    extensions = dict(manifest.extensions)
+    extensions["variant_injection_spec"] = json.loads(spec.canonical_json())
+    return manifest.model_copy(update={"extensions": extensions})
+
+
+def spec_from_manifest(
+    manifest: ExperimentManifest,
+) -> VariantInjectionSpec | None:
+    """从 manifest.extensions 读取注入映射表;缺失或畸形返回 None。"""
+
+    raw = manifest.extensions.get("variant_injection_spec")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return VariantInjectionSpec.from_dict(raw)
+    except Exception:
+        return None
 
 
 def build_filtered_registry(tool_names: Sequence[str]) -> Any:
@@ -144,10 +204,15 @@ def build_filtered_registry(tool_names: Sequence[str]) -> Any:
 
 
 __all__ = [
+    "InjectionEvidence",
     "InjectionResolution",
     "PromptVariantMap",
+    "RequestedVariant",
+    "ResolvedVariant",
     "ToolPolicyVariantMap",
     "VariantInjectionSpec",
+    "attach_injection_spec",
     "build_filtered_registry",
     "resolve_injection",
+    "spec_from_manifest",
 ]

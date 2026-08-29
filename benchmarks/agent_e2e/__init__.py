@@ -9,6 +9,7 @@ from .artifact import (
 )
 from .calibration import CalibrationOutcome, CalibrationSummary, run_calibration
 from .catalog import CatalogValidationError, freeze_catalog, validate_catalog
+from .controlled_runner import ControlledExperimentRunner
 from .corpus import (
     CorpusAdmissionError,
     HistoricalPreflight,
@@ -150,6 +151,7 @@ from .models import (
     OpikSpan,
     OpikTracePayload,
     ResultValidity,
+    RunInjectionEvidence,
     TaskResult,
     TaskSpec,
     TaskSplit,
@@ -214,8 +216,11 @@ from .swebench_verified import (
     parse_harbor_result,
 )
 from .variant_injection import (
+    InjectionEvidence,
     InjectionResolution,
     PromptVariantMap,
+    RequestedVariant,
+    ResolvedVariant,
     ToolPolicyVariantMap,
     VariantInjectionSpec,
     build_filtered_registry,
@@ -273,6 +278,7 @@ __all__ = [
     "CommitArtifact",
     "CommitArtifactBuilder",
     "CompactionState",
+    "ControlledExperimentRunner",
     "CorpusAdmissionError",
     "DeepEvalAnalysis",
     "DeepEvalAnalysisStatus",
@@ -328,6 +334,7 @@ __all__ = [
     "HarnessSchemaError",
     "HarnessVariant",
     "HistoricalPreflight",
+    "InjectionEvidence",
     "InjectionResolution",
     "OfficialEvaluationRecord",
     "OfficialRecordStatus",
@@ -364,7 +371,10 @@ __all__ = [
     "RegressionGateLedger",
     "RegressionGatePolicy",
     "ReproductionStatus",
+    "RequestedVariant",
+    "ResolvedVariant",
     "ResultValidity",
+    "RunInjectionEvidence",
     "SubprocessOfficialSWEbenchLiveRunner",
     "TargetScope",
     "TaskResult",

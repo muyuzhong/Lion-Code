@@ -67,12 +67,16 @@ class TestResolveInjection:
         result = resolve_injection(_profile(prompt_version="prompt-v2"), spec)
         assert result.resolved is True
         assert result.custom_system_prompt == "你是一个编码助手"
+        assert result.prompt_sha256 == spec.prompt_maps[0].content_sha256
+        assert result.tool_policy_sha256 is None
 
     def test_tool_policy_hit_returns_tool_names(self) -> None:
         spec = VariantInjectionSpec(tool_policy_maps=(_tool_map(),))
         result = resolve_injection(_profile(tool_policy_version="tools-v2"), spec)
         assert result.resolved is True
         assert result.tool_names == ("read_file", "edit_file", "run_shell")
+        assert result.tool_policy_sha256 == spec.tool_policy_maps[0].content_sha256
+        assert result.prompt_sha256 is None
 
     def test_no_hit_keeps_defaults(self) -> None:
         result = resolve_injection(_profile(), VariantInjectionSpec())
@@ -125,6 +129,16 @@ class TestVariantMapValidation:
                 content_sha256="b" * 64,
             )
 
+    def test_empty_tool_whitelist_is_rejected(self) -> None:
+        # 空白名单会产生「tool_policy_hit=True 但实际未注入」的假注入,
+        # 直接禁止,而不是让证据撒谎。
+        with pytest.raises(ValueError, match="at least 1"):
+            ToolPolicyVariantMap(
+                tool_policy_version="tools-v2",
+                tool_names=(),
+                content_sha256=hashlib.sha256(b"").hexdigest(),
+            )
+
     def test_maps_round_trip(self) -> None:
         spec = VariantInjectionSpec(
             prompt_maps=(_prompt_map(),),
@@ -159,6 +173,7 @@ class TestWorkerInjection:
         from tests.benchmarks.test_agent_worker import _manifest, _task
 
         captured: dict = {}
+        evidence_holder: dict = {}
 
         class FakeAdapter:
             def __init__(self, **kwargs) -> None:
@@ -204,7 +219,7 @@ class TestWorkerInjection:
                         tool_policy_version="tools-v2",
                         tool_names=("read_file", "edit_file"),
                         content_sha256=hashlib.sha256(
-                            "\n".join(("read_file", "edit_file")).encode("utf-8")
+                            "\n".join(("read_file", "edit_file")).encode()
                         ).hexdigest(),
                     ),
                 ),
@@ -220,11 +235,12 @@ class TestWorkerInjection:
                     agent_workspace=workspace,
                     session_root=root / "sessions",
                 )
-                await run_agent_worker(
+                worker_result = await run_agent_worker(
                     request,
                     agent_factory=lambda **kwargs: FakeAdapter(**kwargs),
                     injection_spec=spec,
                 )
+                evidence_holder["evidence"] = worker_result.injection_evidence
 
         asyncio.run(main())
         assert captured.get("custom_system_prompt") == "受控提示词"
@@ -233,6 +249,12 @@ class TestWorkerInjection:
         names = {tool.name for tool in registry.active_tools()}
         assert "read_file" in names
         assert "run_shell" not in names
+        evidence = evidence_holder["evidence"]
+        assert evidence is not None
+        assert evidence.requested.prompt_version == "prompt-v2"
+        assert evidence.resolved_variant.prompt_hit is True
+        assert evidence.resolved_variant.tool_policy_hit is True
+        assert evidence.injection_fingerprint is not None
 
     def test_no_spec_keeps_default_injection(self) -> None:
         import asyncio

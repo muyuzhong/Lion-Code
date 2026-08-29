@@ -67,6 +67,7 @@ from .opik_export import (
 )
 from .report import render_verified_markdown
 from .trace import TraceEvent, redact_text
+from .variant_injection import spec_from_manifest
 
 VERIFIED_EXIT_COMPLETED = 0
 VERIFIED_EXIT_SUBJECT_FAILED = 1
@@ -164,6 +165,9 @@ def run_verified_evaluation(
             task=request.task,
             output_dir=output_dir,
             harbor_executable=request.harbor_executable,
+            # manifest 携带注入映射表时声明这是受控实验 run;
+            # spec 本身仍只随 manifest 传递(单一事实来源)。
+            request_variant=spec_from_manifest(request.manifest) is not None,
         )
     )
     harness_result: HarnessRecheckResult | None = None
@@ -439,7 +443,7 @@ def _merge_worker_result(
     result: TaskResult,
     worker: WorkerResult | None,
 ) -> TaskResult:
-    """把一次 Agent 的受控 usage/patch 摘要补回 Harness 结果。"""
+    """把一次 Agent 的受控 usage/patch/注入证据补回 Harness 结果。"""
 
     if worker is None:
         return result
@@ -457,6 +461,13 @@ def _merge_worker_result(
         updates["patch_applied"] = worker.patch_applied
     if worker.trace_summary is not None:
         updates["trace_summary"] = worker.trace_summary
+    if worker.injection_evidence is not None:
+        # 注入证据必须进入 TaskResult.extensions,否则真实链上
+        # PairedExperiment 收不到证据,受控实验永远降级为 UNSUPPORTED。
+        updates["extensions"] = {
+            **result.extensions,
+            "injection_evidence": worker.injection_evidence.model_dump(mode="json"),
+        }
     return result.model_copy(update=updates) if updates else result
 
 
