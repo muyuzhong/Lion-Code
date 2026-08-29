@@ -193,14 +193,28 @@ class TestPairedTrialOutcome:
                 _report("r1", (baseline_passed,), prompt_version="p1"),
                 _report("r2", (candidate_passed,), prompt_version="p2"),
                 [ChangeKind.PROMPT],
-            ).trials[0].outcome_delta,
+            )
+            .trials[0]
+            .outcome_delta,
         )
 
     def test_winning_and_losing_deltas(self) -> None:
-        assert self._trial(baseline_passed=False, candidate_passed=True).outcome_delta is PairedTrialOutcome.FAIL_TO_PASS
-        assert self._trial(baseline_passed=True, candidate_passed=False).outcome_delta is PairedTrialOutcome.PASS_TO_FAIL
-        assert self._trial(baseline_passed=True, candidate_passed=True).outcome_delta is PairedTrialOutcome.PASS_TO_PASS
-        assert self._trial(baseline_passed=False, candidate_passed=False).outcome_delta is PairedTrialOutcome.FAIL_TO_FAIL
+        assert (
+            self._trial(baseline_passed=False, candidate_passed=True).outcome_delta
+            is PairedTrialOutcome.FAIL_TO_PASS
+        )
+        assert (
+            self._trial(baseline_passed=True, candidate_passed=False).outcome_delta
+            is PairedTrialOutcome.PASS_TO_FAIL
+        )
+        assert (
+            self._trial(baseline_passed=True, candidate_passed=True).outcome_delta
+            is PairedTrialOutcome.PASS_TO_PASS
+        )
+        assert (
+            self._trial(baseline_passed=False, candidate_passed=False).outcome_delta
+            is PairedTrialOutcome.FAIL_TO_FAIL
+        )
 
     def test_incomparable_pair_requires_invalid_delta(self) -> None:
         blocked = TaskResult(
@@ -259,13 +273,25 @@ class TestPairedExperimentBuild:
             PairedExperiment.build(report, report, [ChangeKind.PROMPT])
 
     def test_build_rejects_catalog_mismatch(self) -> None:
-        other = _report("run-candidate", (False, True, True, False), prompt_version="prompt-v2", catalog_id="other-catalog")
+        other = _report(
+            "run-candidate",
+            (False, True, True, False),
+            prompt_version="prompt-v2",
+            catalog_id="other-catalog",
+        )
         with pytest.raises(PairedExperimentError, match="Catalog lock field differs"):
             PairedExperiment.build(_baseline(), other, [ChangeKind.PROMPT])
 
     def test_build_rejects_profile_invariant_mismatch(self) -> None:
-        other = _report("run-candidate", (False, True, True, False), prompt_version="prompt-v2", model="other-model")
-        with pytest.raises(PairedExperimentError, match="Profile invariant field differs: model"):
+        other = _report(
+            "run-candidate",
+            (False, True, True, False),
+            prompt_version="prompt-v2",
+            model="other-model",
+        )
+        with pytest.raises(
+            PairedExperimentError, match="Profile invariant field differs: model"
+        ):
             PairedExperiment.build(_baseline(), other, [ChangeKind.PROMPT])
 
     def test_build_rejects_declaration_mismatch(self) -> None:
@@ -279,8 +305,12 @@ class TestPairedExperimentBuild:
             PairedExperiment.build(_baseline(), other, [ChangeKind.PROMPT])
 
     def test_build_rejects_no_actual_change(self) -> None:
-        other = _report("run-candidate", (True, False, True, False), prompt_version="prompt-v1")
-        with pytest.raises(PairedExperimentError, match="does not change a gate-controlled"):
+        other = _report(
+            "run-candidate", (True, False, True, False), prompt_version="prompt-v1"
+        )
+        with pytest.raises(
+            PairedExperimentError, match="does not change a gate-controlled"
+        ):
             PairedExperiment.build(_baseline(), other, [ChangeKind.PROMPT])
 
     def test_build_rejects_empty_declaration(self) -> None:

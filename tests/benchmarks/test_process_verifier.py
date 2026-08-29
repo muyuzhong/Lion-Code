@@ -28,7 +28,9 @@ from benchmarks.agent_e2e.process_verifier import (
 from benchmarks.agent_e2e.trace import TraceEvent
 
 
-def _task(*, validation_commands: tuple[str, ...] = ("python -m pytest -q",)) -> TaskSpec:
+def _task(
+    *, validation_commands: tuple[str, ...] = ("python -m pytest -q",)
+) -> TaskSpec:
     return TaskSpec(
         task_id="task-1",
         family="bugfix",
@@ -125,7 +127,10 @@ class TestRepeatedToolCall:
         ]
         result = _verify(events)
         assert result.status is ProcessVerificationStatus.VIOLATION
-        assert result.violations[0].violation_type is ProcessViolationType.REPEATED_TOOL_CALL
+        assert (
+            result.violations[0].violation_type
+            is ProcessViolationType.REPEATED_TOOL_CALL
+        )
         assert result.violations[0].evidence_offsets == (1, 2, 3)
 
     def test_two_identical_calls_do_not_trigger(self) -> None:
@@ -197,22 +202,35 @@ class TestValidationMissing:
         ]
         result = _verify(events, task=_task())
         assert result.status is ProcessVerificationStatus.CRITICAL_VETO
-        assert result.violations[0].violation_type is ProcessViolationType.VALIDATION_MISSING
+        assert (
+            result.violations[0].violation_type
+            is ProcessViolationType.VALIDATION_MISSING
+        )
         assert result.violations[0].severity is ProcessSeverity.CRITICAL_VETO
 
     def test_pass_with_pytest_signal_does_not_trigger(self) -> None:
         events = [
-            _event(1, "ToolCall", tool_name="bash", argument_digest="f" * 64, summary="pytest -q"),
+            _event(
+                1,
+                "ToolCall",
+                tool_name="bash",
+                argument_digest="f" * 64,
+                summary="pytest -q",
+            ),
             _event(2, "AssistantDone"),
         ]
         assert _verify(events, task=_task()).status is ProcessVerificationStatus.VALID
 
     def test_empty_validation_commands_skips_rule(self) -> None:
-        result = _verify([_event(1, "AssistantDone")], task=_task(validation_commands=()))
+        result = _verify(
+            [_event(1, "AssistantDone")], task=_task(validation_commands=())
+        )
         assert result.status is ProcessVerificationStatus.VALID
 
     def test_failed_result_never_triggers(self) -> None:
-        events = [_event(1, "ToolCall", tool_name="edit_file", argument_digest="f" * 64)]
+        events = [
+            _event(1, "ToolCall", tool_name="edit_file", argument_digest="f" * 64)
+        ]
         result = _verify(events, passed=False)
         assert result.status is ProcessVerificationStatus.VALID
 
@@ -220,34 +238,61 @@ class TestValidationMissing:
 class TestTestTampering:
     def test_write_tool_touching_protected_area_is_veto(self) -> None:
         events = [
-            _event(1, "ToolCall", tool_name="edit_file", argument_digest="f" * 64, summary="pytest"),
+            _event(
+                1,
+                "ToolCall",
+                tool_name="edit_file",
+                argument_digest="f" * 64,
+                summary="pytest",
+            ),
         ]
         result = _verify(events)
         assert result.status is ProcessVerificationStatus.CRITICAL_VETO
-        assert result.violations[0].violation_type is ProcessViolationType.TEST_TAMPERING
+        assert (
+            result.violations[0].violation_type is ProcessViolationType.TEST_TAMPERING
+        )
 
     def test_read_tool_on_protected_area_does_not_trigger(self) -> None:
         events = [
-            _event(1, "ToolCall", tool_name="read_file", argument_digest="f" * 64, summary="pytest"),
+            _event(
+                1,
+                "ToolCall",
+                tool_name="read_file",
+                argument_digest="f" * 64,
+                summary="pytest",
+            ),
         ]
         assert _verify(events).status is ProcessVerificationStatus.VALID
 
     def test_write_tool_without_marker_does_not_trigger(self) -> None:
         events = [
-            _event(1, "ToolCall", tool_name="edit_file", argument_digest="f" * 64, summary="src/main.py"),
+            _event(
+                1,
+                "ToolCall",
+                tool_name="edit_file",
+                argument_digest="f" * 64,
+                summary="src/main.py",
+            ),
         ]
         assert _verify(events).status is ProcessVerificationStatus.VALID
 
 
 class TestPrematureTermination:
     def test_budget_stop_reason_triggers(self) -> None:
-        events = [_event(1, "ToolCall", tool_name="read_file", argument_digest="f" * 64)]
+        events = [
+            _event(1, "ToolCall", tool_name="read_file", argument_digest="f" * 64)
+        ]
         result = _verify(events, stop_reason="budget_exceeded")
         assert result.status is ProcessVerificationStatus.VIOLATION
-        assert result.violations[0].violation_type is ProcessViolationType.PREMATURE_TERMINATION
+        assert (
+            result.violations[0].violation_type
+            is ProcessViolationType.PREMATURE_TERMINATION
+        )
 
     def test_completed_stop_reason_does_not_trigger(self) -> None:
-        events = [_event(1, "ToolCall", tool_name="read_file", argument_digest="f" * 64)]
+        events = [
+            _event(1, "ToolCall", tool_name="read_file", argument_digest="f" * 64)
+        ]
         assert _verify(events).status is ProcessVerificationStatus.VALID
 
 
@@ -292,9 +337,27 @@ class TestAggregation:
     def test_critical_veto_wins_over_violation(self) -> None:
         digest = "f" * 64
         events = [
-            _event(1, "ToolCall", tool_name="edit_file", argument_digest=digest, summary="pytest"),
-            _event(2, "ToolCall", tool_name="edit_file", argument_digest=digest, summary="pytest"),
-            _event(3, "ToolCall", tool_name="edit_file", argument_digest=digest, summary="pytest"),
+            _event(
+                1,
+                "ToolCall",
+                tool_name="edit_file",
+                argument_digest=digest,
+                summary="pytest",
+            ),
+            _event(
+                2,
+                "ToolCall",
+                tool_name="edit_file",
+                argument_digest=digest,
+                summary="pytest",
+            ),
+            _event(
+                3,
+                "ToolCall",
+                tool_name="edit_file",
+                argument_digest=digest,
+                summary="pytest",
+            ),
         ]
         result = _verify(events)
         assert result.status is ProcessVerificationStatus.CRITICAL_VETO
