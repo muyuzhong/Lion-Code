@@ -45,10 +45,8 @@ from lion_code.core.messages import (
 )
 from lion_code.core.session import (
     CompactionEntry,
-    CustomEntry,
     JsonlSessionStorage,
     LabelEntry,
-    LeafEntry,
     MessageEntry,
     ModelChangeEntry,
     SessionEntry,

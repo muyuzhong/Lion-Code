@@ -22,7 +22,6 @@ async def _execute(_context, _tool_call_id, _arguments, _on_update):
 def _tool(policy: str) -> LionTool:
     return LionTool(
         name="large_output",
-        label="large_output",
         description="large output",
         parameters={"type": "object", "properties": {}},
         execute_fn=_execute,
@@ -78,7 +77,6 @@ class TestResultStore(unittest.IsolatedAsyncioTestCase):
 
         tool = LionTool(
             name="runtime_output",
-            label="runtime_output",
             description="runtime output",
             parameters={"type": "object", "properties": {}},
             execute_fn=execute,

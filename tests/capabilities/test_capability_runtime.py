@@ -33,7 +33,6 @@ class _FullCapability:
         return (
             LionTool(
                 name=f"{self._name}_tool",
-                label=self._name,
                 description="test capability tool",
                 parameters={"type": "object"},
                 execute_fn=execute,

@@ -222,7 +222,6 @@ class _MemoryToolSource:
         properties["refs"] = {"type": "array", "items": {"type": _STRING}}
         return LionTool(
             name="remember_task",
-            label="Remember task",
             description="Create or update one current-project task at a significant milestone.",
             parameters=_schema(
                 properties,
@@ -269,7 +268,6 @@ class _MemoryToolSource:
 
         return LionTool(
             name="recall_tasks",
-            label="Recall tasks",
             description="List bounded current-project tasks without reading old sessions.",
             parameters=_schema(
                 {
@@ -343,7 +341,6 @@ class _MemoryToolSource:
             required.insert(1, "trigger")
         return LionTool(
             name=name,
-            label=f"Remember {kind}",
             description=(
                 "Store a durable definition (what something is) with typed evidence."
                 if kind == "definition"
@@ -391,7 +388,6 @@ class _MemoryToolSource:
 
         return LionTool(
             name="recall_memory",
-            label="Recall memory",
             description="Exact-key or bounded literal recall from reviewed active memory.",
             parameters=_schema({"query": {"type": _STRING}}, ("query",)),
             execute_fn=execute,
@@ -426,7 +422,6 @@ class _MemoryToolSource:
 
         return LionTool(
             name="review_memory",
-            label="Review memory",
             description="List bounded needs-review, archived, or pinned-overflow ids.",
             parameters=_schema(
                 {
@@ -582,7 +577,6 @@ class _MemoryToolSource:
         }
         return LionTool(
             name="manage_memory",
-            label="Manage memory",
             description="Archive/restore/validate semantic memory or complete/reopen/archive/restore tasks.",
             parameters=_schema(properties, ("target", "id", "action")),
             execute_fn=execute,
@@ -610,7 +604,6 @@ class _MemoryToolSource:
 
         return LionTool(
             name="set_memory_pinned",
-            label="Set memory pinned",
             description="Pin or unpin one semantic memory entry.",
             parameters=_schema(
                 {"id": {"type": "integer"}, "pinned": {"type": "boolean"}},
@@ -646,7 +639,6 @@ class _MemoryToolSource:
 
         return LionTool(
             name="purge_memory",
-            label="Purge memory",
             description="Physically delete one task or semantic entry.",
             parameters=_schema(
                 {

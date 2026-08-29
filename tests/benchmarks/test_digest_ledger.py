@@ -34,7 +34,7 @@ class TestDigestLedger(unittest.TestCase):
             kind="input",
             task_id="task-1",
             run_id="run-1",
-            preview="公开任务",
+            preview="任务预览",
             last_seen_at=datetime(2026, 8, 28, 1, 0, tzinfo=UTC),
         )
         second = DigestLedgerEntry(
@@ -42,7 +42,7 @@ class TestDigestLedger(unittest.TestCase):
             kind="input",
             task_id="task-1",
             run_id="run-2",
-            preview="公开任务",
+            preview="任务预览",
             last_seen_at=datetime(2026, 8, 28, 2, 0, tzinfo=UTC),
         )
         ledger.append([first])

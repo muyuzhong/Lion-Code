@@ -73,11 +73,11 @@ Next Agent Turn (模型接收 ToolResultMessage 作为上下文继续决策)
 | 组件 | 所属层级 | 核心职责 |
 |---|---|---|
 | **`ToolRegistry`** | `tooling/` | 管理工具定义集合与实例激活状态 (`_active` 集合)；支持延迟工具 (`deferred=True`) 注册与通过 `tool_search` 动态激活。 |
-| **`ToolRuntime`** | `tooling/` | 组装并驱动前置/后置中间件链；提供统一的异常隔离屏障；提供 `rollback(snapshot_id)` 回滚能力。 |
+| **`ToolRuntime`** | `tooling/` | 组装并驱动前置/后置中间件链；提供统一的异常隔离屏障。 |
 | **`adapt_lion_tool`** | `adapters/` | 窄腰适配器：将复杂的策略感知 `LionTool` 抹平为纯净的 Core `AgentTool`；防止 Harness 重复执行中间件。 |
 | **`PermissionMiddleware`** | `tooling/` | 集中决策只读/写权限、模式匹配与用户交互确认；对接 `PermissionController` 维护已确认缓存。 |
 | **`OutputSanitizerMiddleware`** | `tooling/` | 位于 Post 链首位，在工具输出写入 `ResultStore` 或 `ExecutionAuditLog` 前强制脱敏，保证凭证不落盘、不进模型。 |
-| **`WorkspaceSnapshot`** | `tooling/` | 在写操作前基于 Git 或临时文件建立文件系统快照，为失败/错误操作提供单步回滚凭证。 |
+| **`WorkspaceSnapshot`** | `tooling/` | 在写操作前基于 Git 或临时文件建立文件系统快照，为审计与后续恢复能力保留凭证。 |
 
 ## Tool 层与 Kernel 的严格边界
 

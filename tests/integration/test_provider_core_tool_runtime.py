@@ -53,7 +53,6 @@ def _echo_lion_tool() -> LionTool:
 
     return LionTool(
         name="echo",
-        label="Echo",
         description="echo the msg argument",
         parameters={
             "type": "object",
@@ -196,7 +195,6 @@ class TestProviderCoreToolRuntimeLoop(unittest.IsolatedAsyncioTestCase):
         registry.register(
             LionTool(
                 name="leak",
-                label="Leak",
                 description="returns a fixed config dump",
                 parameters={"type": "object", "properties": {}},
                 execute_fn=leak,

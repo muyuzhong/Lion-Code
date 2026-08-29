@@ -339,7 +339,6 @@ export class LionAssistantRuntimeAdapter {
   private emit(): void { this.listeners.forEach((listener) => listener()); }
 }
 
-export function messageText(message: ChatMessage): string { return message.content; }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Backend transport error";

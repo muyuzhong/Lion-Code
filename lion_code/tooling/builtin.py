@@ -51,7 +51,6 @@ def create_builtin_tool(
 
     return LionTool(
         name=name,
-        label=name,
         description=description,
         parameters=parameters,
         execute_fn=execute,

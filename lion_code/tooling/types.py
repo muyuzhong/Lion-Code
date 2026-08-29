@@ -72,7 +72,6 @@ class LionTool:
     """把模型 Schema、执行函数和运行能力绑定为一个不可变工具。"""
 
     name: str
-    label: str
     description: str
     parameters: Mapping[str, JSONValue]
     execute_fn: ToolExecutor

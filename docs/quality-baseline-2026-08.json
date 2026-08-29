@@ -186,7 +186,7 @@
         "lion_code/session_runtime/legacy.py:156:28:arg-type",
         "lion_code/session_runtime/legacy.py:185:32:arg-type",
         "lion_code/tools.py:115:8:var-annotated",
-        "lion_code/tui/app.py:1335:55:attr-defined",
+        "lion_code/tui/app.py:1334:55:attr-defined",
         "lion_code/tui/app.py:206:11:assignment",
         "lion_code/tui/app.py:211:24:operator",
         "lion_code/tui/app.py:213:24:operator",
@@ -197,7 +197,7 @@
         "lion_code/tui/app.py:419:12:attr-defined",
         "lion_code/tui/app.py:423:12:attr-defined",
         "lion_code/tui/app.py:427:12:attr-defined",
-        "lion_code/tui/app.py:864:39:arg-type",
+        "lion_code/tui/app.py:863:39:arg-type",
         "lion_code/ui.py:21:4:union-attr"
       ]
     },
@@ -211,14 +211,14 @@
         "F"
       ],
       "fingerprints": [
-        "lion_code/application/session.py:324:LionCodingSession._drive:D:28",
+        "lion_code/application/session.py:319:LionCodingSession._drive:D:28",
         "lion_code/core/loop.py:68:run_agent_loop:F:44",
         "lion_code/core/session/jsonl.py:59:_migrate_message:D:24",
         "lion_code/providers/anthropic.py:154:_AnthropicStreamParser.feed:D:24",
         "lion_code/providers/stream.py:95:canonicalize_provider_stream:D:29",
         "lion_code/session_runtime/legacy.py:123:_anthropic_messages:D:24",
         "lion_code/tui/adapter.py:24:TuiEventAdapter.apply:D:21",
-        "lion_code/tui/app.py:1040:LionTuiApp._apply_streaming_transcript_event:E:32",
+        "lion_code/tui/app.py:1039:LionTuiApp._apply_streaming_transcript_event:E:32",
         "lion_code/__main__.py:222:main:D:25"
       ]
     },

@@ -78,7 +78,6 @@ _USAGE_LEDGER_FIELDS = frozenset(
         "_last_prompt_tokens",
         "_last_response_at",
         "_output_tokens",
-        "_responses",
         "_turns",
     }
 )
@@ -1720,7 +1719,6 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
         "    ledger._input_tokens = 1\n"
         "    alias._turns += 1\n"
         "    write = object.__setattr__\n"
-        "    write(alias, '_responses', 2)\n"
         "    remove = delattr\n"
         "    remove(alias, '_last_prompt_tokens')\n"
         "    bound_write = alias.__setattr__\n"
@@ -1795,7 +1793,6 @@ def test_scanners_reject_reintroduced_boundary_patterns() -> None:
             "_turns",
             "delattr:_last_prompt_tokens",
             "setattr:_output_tokens",
-            "setattr:_responses",
         }
     )
     assert _named_constructor_count(constructor_alias, "UsageLedger") == 1

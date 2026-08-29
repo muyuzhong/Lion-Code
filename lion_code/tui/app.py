@@ -832,7 +832,6 @@ class LionTuiApp(App):
         return build_completion_state(
             text,
             command_registry=self.session.command_registry,
-            prompt_templates=self.session.prompt_templates,
             model_names=model_names,
             theme_names=available_tui_theme_names(),
             cwd=self.session.cwd,

@@ -39,11 +39,6 @@ from lion_code.tooling.registry import ToolRegistry
 from lion_code.tooling.types import LionTool, ToolCapabilities, ToolResult
 from lion_code.usage import UsageSnapshot
 
-_PLAN_REHOME = (
-    "PR3 Kernel 不含 Plan：clear-and-execute 上下文清空 + 自动 continue 的增强"
-    "依赖 Kernel 对 Plan 的特判，已随 Runtime 移除；待 Capability re-home PR 恢复"
-)
-
 
 def _structured_summary(content: str) -> str:
     return "\n\n".join(f"{heading}\n{content}" for heading in SUMMARY_HEADINGS)
@@ -66,7 +61,6 @@ def _echo_lion_tool() -> LionTool:
 
     return LionTool(
         name="echo",
-        label="Echo",
         description="echo the msg argument",
         parameters={
             "type": "object",
@@ -85,7 +79,6 @@ def _named_lion_tool(name: str) -> LionTool:
 
     return LionTool(
         name=name,
-        label=name,
         description=name,
         parameters={"type": "object"},
         execute_fn=execute,
@@ -100,7 +93,6 @@ def _snippable_lion_tool() -> LionTool:
 
     return LionTool(
         name="snippable",
-        label="Snippable",
         description="return a rereadable result",
         parameters={
             "type": "object",
@@ -488,7 +480,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         usage = agent.agent.usage
         self.assertEqual(usage.last_prompt_tokens, 0)
         self.assertEqual(usage.input_tokens, 160_000)
-        self.assertEqual(usage.responses, 3)
         self.assertFalse(agent.composition.runtime.context.compaction_required)
         self.assertEqual(
             [
@@ -624,7 +615,7 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
 
         async def cancel_after_first_turn(event) -> None:
             if not cancelled["done"] and isinstance(event, TurnEndEvent):
-                agent.composition.runtime.conversation.cancel()
+                agent.agent.cancel()
                 cancelled["done"] = True
 
         agent.composition.runtime.conversation.subscribe(cancel_after_first_turn)
@@ -858,89 +849,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sessions), 1)
         self.assertEqual(sessions[0]["format"], "jsonl")
 
-    @unittest.skip(_PLAN_REHOME)
-    async def test_plan_clear_and_execute_compacts_without_deleting_history(
-        self,
-    ) -> None:
-        fake = FakeProvider(
-            [
-                AssistantDoneEvent(
-                    reason="toolUse",
-                    message=AssistantMessage(
-                        model="fake",
-                        content=[
-                            ToolCall(
-                                id="exit-plan",
-                                name="exit_plan_mode",
-                                arguments={},
-                            )
-                        ],
-                        stop_reason="toolUse",
-                        usage=Usage(input=11, output=2, total_tokens=13),
-                    ),
-                ),
-                _stop_event(
-                    "implemented",
-                    Usage(input=7, output=3, total_tokens=10),
-                ),
-            ]
-        )
-        plan_path = Path(self._temp_dir.name) / "approved-plan.md"
-        plan_path.write_text("1. change code\n2. run tests", encoding="utf-8")
-        with (
-            patch("full_agent.create_provider", return_value=fake),
-            patch(
-                "lion_code.capabilities.plan.runtime.PlanRuntime._generate_file_path",
-                return_value=plan_path,
-            ),
-        ):
-            agent = build_full_agent_harness(
-                api_base="https://example.test/v1",
-                api_key="test-key",
-                custom_system_prompt="test",
-                session_repository=self._session_repository,
-                terminal_output=False,
-            )
-        agent.composition.capabilities.plan.toggle()
-        permission = agent.composition.tooling.context.permission
-        agent.composition.tooling.registry.activate("exit_plan_mode")
-
-        async def approve(_plan: str) -> dict:
-            return {"choice": "clear-and-execute"}
-
-        agent.composition.capabilities.plan.set_approval_fn(approve)
-        await agent.agent.chat("prepare the change")
-
-        self.assertEqual(fake.call_count, 2)
-        self.assertEqual(len(fake.received_messages[1]), 1)
-        self.assertIn("Approved plan", fake.received_messages[1][0].text)
-        self.assertEqual(
-            [
-                message.role
-                for message in agent.composition.runtime.conversation.messages
-            ],
-            ["user", "assistant"],
-        )
-        self.assertEqual(
-            agent.composition.runtime.conversation.messages[-1].text, "implemented"
-        )
-        self.assertIs(agent.composition.tooling.context.permission, permission)
-        self.assertEqual(permission.mode, "default")
-        self.assertEqual(agent.agent.permission_mode, "default")
-        usage = agent.agent.usage
-        self.assertEqual((usage.input_tokens, usage.output_tokens), (18, 5))
-        self.assertEqual(usage.responses, 2)
-        self.assertEqual(usage.last_prompt_tokens, 10)
-
-        state = await self._session_repository.load(agent.agent.session_id)
-        self.assertEqual(
-            [message.role for message in state.messages],
-            ["user", "assistant"],
-        )
-        self.assertEqual(len(state.compaction_entries), 1)
-        self.assertEqual(len(state.compaction_entries[0].replaces_entry_ids), 3)
-        self.assertGreater(len(state.entries), len(state.messages))
-
     async def test_plan_clear_and_execute_degrades_to_execute(self) -> None:
         """clear-and-execute 不再清空上下文：同一上下文继续；权限模式不受 Plan 影响。"""
 
@@ -1009,54 +917,6 @@ class TestAgentCoreRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(permission.mode, "default")
         state = await self._session_repository.load(agent.agent.session_id)
         self.assertEqual(len(state.compaction_entries), 0)
-
-    @unittest.skip(_PLAN_REHOME)
-    async def test_plan_context_reset_failure_keeps_pending_command(self) -> None:
-        fake = FakeProvider([])
-        plan_path = Path(self._temp_dir.name) / "failing-reset-plan.md"
-        plan_path.write_text("keep this plan", encoding="utf-8")
-        with (
-            patch("full_agent.create_provider", return_value=fake),
-            patch(
-                "lion_code.capabilities.plan.runtime.PlanRuntime._generate_file_path",
-                return_value=plan_path,
-            ),
-        ):
-            agent = build_full_agent_harness(
-                permission_mode="plan",
-                api_base="https://example.test/v1",
-                api_key="test-key",
-                custom_system_prompt="test",
-                session_repository=self._session_repository,
-                terminal_output=False,
-            )
-
-        async def approve(_plan: str) -> dict:
-            return {"choice": "clear-and-execute"}
-
-        agent.composition.capabilities.plan.set_approval_fn(approve)
-        outcome = await agent.composition.tooling.runtime.execute(
-            tool_call_id="exit-plan",
-            name="exit_plan_mode",
-            arguments={},
-        )
-        self.assertTrue(outcome.terminate)
-        pending = agent.composition.capabilities.plan.pending_context_reset
-        self.assertIsNotNone(pending)
-        await agent.composition.runtime.agent.ensure_ready()
-
-        with patch.object(
-            agent.composition.runtime.conversation,
-            "reset_active_context",
-            AsyncMock(side_effect=RuntimeError("reset failed")),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "reset failed"):
-                await agent.composition.runtime.agent.apply_plan_context_reset()
-
-        self.assertEqual(
-            agent.composition.capabilities.plan.pending_context_reset, pending
-        )
-        await agent.agent.close()
 
     async def test_configure_api_replaces_provider_in_existing_runtime(self) -> None:
         """换 key/base 原位替换 Provider，并保留 Harness 与 canonical history。"""

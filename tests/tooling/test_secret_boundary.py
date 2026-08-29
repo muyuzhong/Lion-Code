@@ -34,7 +34,6 @@ def _tool(name: str, content: str) -> LionTool:
 
     return LionTool(
         name=name,
-        label=name,
         description=name,
         parameters={"type": "object", "properties": {}},
         execute_fn=execute,
@@ -240,7 +239,6 @@ class TestEdgeCaseRedaction(unittest.TestCase):
 
             return LionTool(
                 name="custom",
-                label="custom",
                 description="custom",
                 parameters={"type": "object", "properties": {}},
                 execute_fn=execute,

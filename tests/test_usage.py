@@ -41,7 +41,6 @@ class TestUsageLedger(unittest.TestCase):
         self.assertEqual(usage.output_tokens, 23)
         self.assertEqual(usage.cache_read_tokens, 15)
         self.assertEqual(usage.cache_write_tokens, 7)
-        self.assertEqual(usage.responses, 2)
         self.assertEqual(usage.last_prompt_tokens, 17)
         self.assertEqual(usage.last_response_at, 20.0)
 
@@ -64,7 +63,6 @@ class TestUsageLedger(unittest.TestCase):
 
         self.assertEqual(child.input_tokens, 13)
         self.assertEqual(child.output_tokens, 6)
-        self.assertEqual(child.responses, before_child.responses)
         self.assertEqual(child.turns, before_child.turns)
         self.assertEqual(child.last_prompt_tokens, before_child.last_prompt_tokens)
         self.assertEqual(child.last_response_at, before_child.last_response_at)
@@ -86,7 +84,6 @@ class TestUsageLedger(unittest.TestCase):
         self.assertEqual(usage.input_tokens, 10)
         self.assertEqual(usage.output_tokens, 2)
         self.assertEqual(usage.turns, 1)
-        self.assertEqual(usage.responses, 1)
         self.assertEqual(usage.last_response_at, 3.0)
 
     def test_session_reset_clears_all_usage(self) -> None:

@@ -9,7 +9,6 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from lion_code.core.messages import AgentMessage
-from lion_code.core.types import JSONValue
 
 
 def new_entry_id() -> str:
@@ -68,13 +67,6 @@ class LabelEntry(BaseSessionEntry):
     label: str
 
 
-class LeafEntry(BaseSessionEntry):
-    """The active branch leaf pointer entry."""
-
-    type: Literal["leaf"] = "leaf"
-    entry_id: str | None = None
-
-
 class SessionInfoEntry(BaseSessionEntry):
     """Basic session metadata entry."""
 
@@ -84,22 +76,12 @@ class SessionInfoEntry(BaseSessionEntry):
     title: str | None = None
 
 
-class CustomEntry(BaseSessionEntry):
-    """Extension/application-owned session data."""
-
-    type: Literal["custom"] = "custom"
-    namespace: str
-    data: dict[str, JSONValue] = Field(default_factory=dict)
-
-
 type SessionEntry = Annotated[
     MessageEntry
     | ModelChangeEntry
     | ThinkingLevelChangeEntry
     | CompactionEntry
     | LabelEntry
-    | LeafEntry
-    | SessionInfoEntry
-    | CustomEntry,
+    | SessionInfoEntry,
     Field(discriminator="type"),
 ]

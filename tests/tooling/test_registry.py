@@ -13,7 +13,6 @@ async def _execute(_context, _tool_call_id, _arguments, _on_update):
 def _tool(name: str, *, deferred: bool = False) -> LionTool:
     return LionTool(
         name=name,
-        label=name,
         description=f"{name} description",
         parameters={"type": "object", "properties": {}},
         execute_fn=_execute,
@@ -68,7 +67,6 @@ class TestToolRegistry(unittest.TestCase):
         registry.register(_tool("read_file"))
         described = LionTool(
             name="fetch",
-            label="fetch",
             description="Download a WEB page",
             parameters={"type": "object", "properties": {}},
             execute_fn=_execute,

@@ -333,7 +333,6 @@ def build_agent_composition(
         get_system=tooling_graph.prompt_composer.get_system,
         tool_runtime=tooling_graph.tool_runtime,
         cancellation=execution.cancellation,
-        cancel_callback=execution.cancel,
         prepare_context=context.prepare_context,
     )
     if foundation.bindings.session.context_compactor is None:
@@ -778,7 +777,6 @@ def _build_tooling_graph(
         hooks=foundation.hooks_loader(),
         confirm_hook_trust=foundation.confirmation.confirm_hook_trust,
         audit_fn=record_audit if audit_log is not None else None,
-        workspace_snapshot=workspace_snapshot,
         audit_log=audit_log,
     )
     permission_policy = PermissionPolicy(cwd=foundation.cwd)

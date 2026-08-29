@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from lion_code.application.commands import CommandRegistry, SlashCommand
-from lion_code.application.prompt_templates import PromptTemplate
 
 IGNORED_FILE_COMPLETION_DIRS = frozenset(
     {
@@ -89,7 +88,6 @@ def build_completion_state(
     text: str,
     *,
     command_registry: CommandRegistry,
-    prompt_templates: Sequence[PromptTemplate],
     model_names: Sequence[str] = (),
     provider_names: Sequence[str] = (),
     thinking_levels: Sequence[str] = (),
@@ -127,10 +125,7 @@ def build_completion_state(
     if argument_completions is not None:
         return CompletionState(argument_completions)
 
-    if has_argument_text and (
-        _matches_prompt_template_command(token, prompt_templates)
-        or _matches_registered_command(token, command_registry)
-    ):
+    if has_argument_text and _matches_registered_command(token, command_registry):
         return CompletionState()
 
     return CompletionState(
@@ -138,7 +133,6 @@ def build_completion_state(
             token=token,
             token_end=token_end,
             registry=command_registry,
-            prompt_templates=prompt_templates,
             skill_names=skill_names,
         )
     )
@@ -308,13 +302,6 @@ def _parse_shell_path_token(token: str) -> tuple[str, str, str] | None:
     return parent_text, name_prefix, replacement_prefix
 
 
-def _matches_prompt_template_command(
-    token: str, prompt_templates: Sequence[PromptTemplate]
-) -> bool:
-    command_name = token.removeprefix("/").lower()
-    return any(template.name.lower() == command_name for template in prompt_templates)
-
-
 def _matches_registered_command(token: str, registry: CommandRegistry) -> bool:
     command_name = token.removeprefix("/").lower()
     return registry.get(command_name) is not None
@@ -325,7 +312,6 @@ def _command_completions(
     token: str,
     token_end: int,
     registry: CommandRegistry,
-    prompt_templates: Sequence[PromptTemplate],
     skill_names: Sequence[str] = (),
 ) -> tuple[CompletionItem, ...]:
     prefix = token.removeprefix("/").lower()
@@ -334,18 +320,6 @@ def _command_completions(
         command_suggestions.extend(
             _command_alias_completions(command, prefix=prefix, token_end=token_end)
         )
-    prompt_suggestions = [
-        CompletionItem(
-            display=f"/{template.name}",
-            replacement=f"/{template.name}",
-            start=0,
-            end=token_end,
-            description=template.description or "Prompt template",
-            category="Custom prompts",
-        )
-        for template in prompt_templates
-        if template.name.lower().startswith(prefix)
-    ]
     skill_suggestions = [
         CompletionItem(
             display=f"/{name}",
@@ -361,7 +335,6 @@ def _command_completions(
     return (
         *sorted(command_suggestions, key=lambda item: _command_completion_sort_key(item, prefix)),
         *sorted(skill_suggestions, key=lambda item: _command_completion_sort_key(item, prefix)),
-        *sorted(prompt_suggestions, key=lambda item: _command_completion_sort_key(item, prefix)),
     )
 
 

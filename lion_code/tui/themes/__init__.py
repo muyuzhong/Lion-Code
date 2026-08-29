@@ -1,18 +1,15 @@
-"""JSON-defined TUI themes for Tau.
+"""JSON-defined TUI themes for Lion.
 
 Themes are data, not code. The built-in themes ship as JSON files next to this
-module and load through the same parser as user themes, which live in
-``~/.tau/themes/*.json`` and ``<project>/.tau/themes/*.json``.
+module and load through the same parser.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from functools import cache
 from importlib.resources import files
-from json import JSONDecodeError, loads
-from pathlib import Path
+from json import loads
 from typing import Literal, get_args
 
 from rich.color import Color, ColorParseError
@@ -20,8 +17,6 @@ from rich.errors import StyleSyntaxError
 from rich.style import Style
 from textual.color import Color as TextualColor
 from textual.color import ColorParseError as TextualColorParseError
-
-from lion_code.application.resources import ResourceDiagnostic
 
 
 class TuiThemeError(ValueError):
@@ -380,79 +375,11 @@ _BUILTIN_THEMES: dict[str, TuiTheme] = {
 }
 BUILTIN_TUI_THEME_NAMES: tuple[TuiThemeName, ...] = tuple(_BUILTIN_THEMES)
 
-_custom_themes: dict[str, TuiTheme] = {}
-
-
-def set_custom_tui_themes(themes: Mapping[str, TuiTheme]) -> None:
-    """Replace the registered custom themes."""
-    _custom_themes.clear()
-    _custom_themes.update(themes)
-
-
 def available_tui_theme_names() -> tuple[TuiThemeName, ...]:
-    """Return built-in theme names followed by sorted custom theme names."""
-    return (*BUILTIN_TUI_THEME_NAMES, *sorted(_custom_themes))
+    """Return built-in theme names."""
+    return BUILTIN_TUI_THEME_NAMES
 
 
 def get_tui_theme(name: TuiThemeName = "tau-dark") -> TuiTheme:
-    """Return a built-in or registered custom theme by name."""
-    if name in _BUILTIN_THEMES:
-        return _BUILTIN_THEMES[name]
-    return _custom_themes[name]
-
-
-def load_custom_tui_themes(
-    theme_dirs: Sequence[Path],
-) -> tuple[dict[str, TuiTheme], list[ResourceDiagnostic]]:
-    """Load custom themes from directories given in increasing precedence order.
-
-    Invalid files are skipped with a diagnostic; on duplicate names the theme
-    from the higher-precedence directory (or earlier file within one directory)
-    wins and the loser is reported as a collision.
-    """
-    themes: dict[str, TuiTheme] = {}
-    diagnostics: list[ResourceDiagnostic] = []
-    for directory in reversed(list(theme_dirs)):
-        if not directory.is_dir():
-            continue
-        for path in sorted(directory.glob("*.json")):
-            try:
-                data = loads(path.read_text(encoding="utf-8"))
-            except (OSError, JSONDecodeError, UnicodeDecodeError) as error:
-                diagnostics.append(
-                    ResourceDiagnostic(
-                        kind="invalid-theme",
-                        message=f"could not parse theme JSON: {error}",
-                        path=path,
-                    )
-                )
-                continue
-            try:
-                theme = parse_tui_theme_json(data)
-            except TuiThemeError as error:
-                diagnostics.append(
-                    ResourceDiagnostic(kind="invalid-theme", message=str(error), path=path)
-                )
-                continue
-            if theme.name in _BUILTIN_THEMES:
-                diagnostics.append(
-                    ResourceDiagnostic(
-                        kind="collision",
-                        message=f"theme {theme.name!r} shadows a built-in theme and was ignored",
-                        path=path,
-                        name=theme.name,
-                    )
-                )
-                continue
-            if theme.name in themes:
-                diagnostics.append(
-                    ResourceDiagnostic(
-                        kind="collision",
-                        message=f"theme {theme.name!r} is already defined with higher precedence",
-                        path=path,
-                        name=theme.name,
-                    )
-                )
-                continue
-            themes[theme.name] = theme
-    return themes, diagnostics
+    """Return a built-in theme by name."""
+    return _BUILTIN_THEMES[name]

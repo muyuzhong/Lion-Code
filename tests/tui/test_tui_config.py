@@ -21,7 +21,9 @@ def test_tui_settings_path_uses_lion_home(tmp_path: Path) -> None:
     assert tui_settings_path(home) == home / "tui.json"
 
 
-def test_load_tui_settings_returns_defaults_when_file_is_missing(tmp_path: Path) -> None:
+def test_load_tui_settings_returns_defaults_when_file_is_missing(
+    tmp_path: Path,
+) -> None:
     home = tmp_path / ".lion-code"
 
     assert load_tui_settings(home) == TuiSettings()
@@ -147,18 +149,6 @@ def test_tui_settings_accept_light_theme() -> None:
     assert settings.resolved_theme.syntax_theme == "ansi_light"
 
 
-def test_tui_settings_load_auto_copy_selection() -> None:
-    settings = tui_settings_from_json({"auto_copy_selection": True})
-
-    assert settings.auto_copy_selection is True
-    assert settings.to_json()["auto_copy_selection"] is True
-
-
-def test_tui_settings_reject_invalid_auto_copy_selection() -> None:
-    with pytest.raises(TuiConfigError, match="auto_copy_selection"):
-        tui_settings_from_json({"auto_copy_selection": "yes"})
-
-
 def test_tui_keybindings_serialize_to_json() -> None:
     settings = TuiSettings(
         keybindings=TuiKeybindings(
@@ -184,7 +174,6 @@ def test_tui_keybindings_serialize_to_json() -> None:
     assert settings.to_json()["keybindings"]["model_cycle"] == "f6"
     assert settings.to_json()["keybindings"]["copy_message"] == "ctrl+b"
     assert settings.to_json()["theme"] == "high-contrast"
-    assert settings.to_json()["auto_copy_selection"] is False
 
 
 def test_get_tui_theme_returns_builtin_theme() -> None:
@@ -211,23 +200,3 @@ def test_tui_turn_notification_rejects_invalid_value() -> None:
 
     with pytest.raises(TuiConfigError, match="turn_notification"):
         tui_settings_from_json({"turn_notification": True})
-
-
-def test_tui_sidebar_position_defaults_to_right() -> None:
-    assert TuiSettings().sidebar_position == "right"
-    assert tui_settings_from_json({}).sidebar_position == "right"
-
-
-def test_tui_sidebar_position_roundtrips() -> None:
-    for value in ("left", "right", "off"):
-        settings = tui_settings_from_json({"sidebar_position": value})
-        assert settings.sidebar_position == value
-        assert settings.to_json()["sidebar_position"] == value
-
-
-def test_tui_sidebar_position_rejects_invalid() -> None:
-    with pytest.raises(TuiConfigError, match="sidebar_position"):
-        tui_settings_from_json({"sidebar_position": "top"})
-
-    with pytest.raises(TuiConfigError, match="sidebar_position"):
-        tui_settings_from_json({"sidebar_position": 123})

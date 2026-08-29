@@ -16,6 +16,11 @@ from benchmarks.agent_e2e.deepeval_analysis import (
     analyze_verified_report,
     build_deepeval_trajectory,
 )
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task,
+)
 from benchmarks.agent_e2e.models import (
     Catalog,
     DeepEvalAnalysisStatus,
@@ -29,8 +34,6 @@ from benchmarks.agent_e2e.models import (
     ReportStatus,
     ResultValidity,
     TaskResult,
-    TaskSpec,
-    TaskSplit,
     TaskVerdict,
     VerifiedEvaluationReport,
 )
@@ -199,17 +202,7 @@ class _FakeOpikClient:
 
 
 def _report() -> VerifiedEvaluationReport:
-    task = TaskSpec(
-        task_id="verified-task-1",
-        family="bugfix",
-        split=TaskSplit.REGRESSION,
-        repository="lion",
-        base_revision="abcdef0",
-        public_prompt="公开任务",
-        verifier_identity="verified/v1",
-        gold_evidence_hash="a" * 64,
-        difficulty=1,
-    )
+    task = make_task()
     profile = ExperimentProfile(
         profile_id="offline",
         model="fake",
@@ -221,15 +214,15 @@ def _report() -> VerifiedEvaluationReport:
         repeats=1,
         timeout_seconds=10,
         budget_usd=0,
-        agent_code_sha="abcdef0",
+        agent_code_sha=AGENT_CODE_SHA,
     )
     catalog = freeze_catalog(
         Catalog(catalog_id="c", catalog_version="v1", tasks=(task,))
     )
     manifest = ExperimentManifest(
         run_id="run-1",
-        agent_code_sha="abcdef0",
-        evaluator_code_sha="1234567",
+        agent_code_sha=AGENT_CODE_SHA,
+        evaluator_code_sha=EVALUATOR_CODE_SHA,
         catalog=catalog,
         profile=profile,
         profile_fingerprint=profile.fingerprint(),

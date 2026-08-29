@@ -21,7 +21,6 @@ def _tool(
 ) -> LionTool:
     return LionTool(
         name=name,
-        label=name,
         description=name,
         parameters={"type": "object", "properties": {}},
         execute_fn=_execute,

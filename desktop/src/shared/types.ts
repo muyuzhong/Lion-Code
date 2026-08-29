@@ -1,8 +1,5 @@
 /** Main / Preload / Renderer 三端共享的桌面契约类型。 */
 
-export const DESKTOP_APP_ORIGIN = "lion://app";
-export const READY_PROTOCOL_VERSION = 1;
-
 /** sidecar 经 stdout 交付的唯一 ready 记录（严格 schema，见 parseReadyLine）。 */
 export interface SidecarReadyRecord {
   type: "ready";
@@ -44,25 +41,17 @@ export type BootstrapState =
   | { phase: "failed"; workspacePath: string; failure: BootstrapFailure }
   | { phase: "exited"; workspacePath: string; failure: BootstrapFailure };
 
-export interface DesktopInfo {
-  appName: string;
-  appVersion: string;
-}
-
 /**
  * Preload 暴露给 Renderer 的最小能力面。
  * 固定 channel、固定参数 schema；不含 ipcRenderer、文件系统或进程执行。
  */
 export interface DesktopBridge {
-  getAppInfo(): Promise<DesktopInfo>;
   getBootstrapState(): Promise<BootstrapState>;
   onBootstrapStateChange(listener: (state: BootstrapState) => void): () => void;
   selectWorkspace(): Promise<string | null>;
   getRecentWorkspaces(): Promise<string[]>;
   connectWorkspace(path: string): Promise<void>;
   disconnect(): Promise<void>;
-  /** ready 态返回 endpoint；其余态返回 null。 */
-  getBackendEndpoint(): Promise<BackendEndpoint | null>;
 }
 
 /** Main → Renderer 状态推送 channel（preload 内部使用，不暴露给页面）。 */

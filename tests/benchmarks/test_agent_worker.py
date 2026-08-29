@@ -11,12 +11,16 @@ from unittest.mock import patch
 from benchmarks.agent_e2e.agent_worker import run_agent_worker
 from benchmarks.agent_e2e.backend import AgentExecutionRequest
 from benchmarks.agent_e2e.catalog import freeze_catalog
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task,
+)
 from benchmarks.agent_e2e.models import (
     Catalog,
     ExperimentManifest,
     ExperimentProfile,
     TaskSpec,
-    TaskSplit,
     WorkerStatus,
 )
 from lion_code.adapters.coding_session_backend import CodingSessionBackendAdapter
@@ -42,17 +46,7 @@ class _SingleEventProvider:
 
 
 def _task() -> TaskSpec:
-    return TaskSpec(
-        task_id="worker-task",
-        family="bugfix",
-        split=TaskSplit.REGRESSION,
-        repository="lion",
-        base_revision="abcdef0",
-        public_prompt="修复公开问题。",
-        verifier_identity="hidden-v1",
-        gold_evidence_hash="a" * 64,
-        difficulty=1,
-    )
+    return make_task(task_id="worker-task", verifier_identity="hidden-v1")
 
 
 def _manifest(task: TaskSpec) -> ExperimentManifest:
@@ -68,12 +62,12 @@ def _manifest(task: TaskSpec) -> ExperimentManifest:
         repeats=1,
         timeout_seconds=30,
         budget_usd=0,
-        agent_code_sha="abcdef0",
+        agent_code_sha=AGENT_CODE_SHA,
     )
     return ExperimentManifest(
         run_id="worker-run",
         agent_code_sha=profile.agent_code_sha,
-        evaluator_code_sha="1234567",
+        evaluator_code_sha=EVALUATOR_CODE_SHA,
         catalog=freeze_catalog(catalog),
         profile=profile,
         profile_fingerprint=profile.fingerprint(),

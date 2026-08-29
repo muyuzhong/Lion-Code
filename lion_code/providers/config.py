@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-
-from lion_code.core.types import JSONValue
+from dataclasses import dataclass
 
 DEFAULT_OPENAI_COMPATIBLE_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
@@ -27,10 +25,6 @@ class OpenAICompatibleConfig:
     api: str = "openai-completions"
     max_tokens: int | None = None
     reasoning_effort: str | None = None
-    reasoning_effort_parameter: str = "reasoning_effort"
-    thinking_format: str = "openai"
-    compat: Mapping[str, JSONValue] = field(default_factory=dict)
-    include_reasoning_effort_none: bool = False
     provider_name: str = "OpenAI-compatible provider"
 
 
