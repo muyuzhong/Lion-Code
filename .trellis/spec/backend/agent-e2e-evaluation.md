@@ -321,6 +321,28 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   decision. Outcome IMPROVED with process regression → NEUTRAL (fails the "process not
   degraded" precondition). The decision is `GateDecision` ∈
   {IMPROVED, NEUTRAL, REGRESSED, BLOCKED}, wrapped with reasons in `GateV2Result`.
+- `first_error.attribute_first_error` locates the first causally meaningful deviation on a
+  pair of trajectories (baseline/candidate `ProcessEvidence[]`). It aggregates evidence
+  into **call-level** records (fingerprint taken from the first argument-carrying
+  start/update phase), aligns by `(tool_name, fingerprint)` common prefix to find the first
+  divergence, then promotes it to a first error only when candidate-side failure evidence
+  exists. It reuses `ProcessVerifier` on the candidate evidence and picks the strongest
+  violation by a fixed priority: critical veto (test tampering) → `PROCESS_VIOLATION`,
+  unrecovered tool error → `ERROR_RECOVERY`, validation missing → `VALIDATION`, compaction
+  regression → `CONTEXT`, premature termination → `TERMINATION`, behavior divergence →
+  `TOOL_SELECTION`/`TOOL_ARGUMENT`/`UNKNOWN`. Confidence is 1.0 for a candidate-only
+  violation (0.7 if baseline has the same kind), and a bare divergence without any
+  violation only yields a low-confidence candidate (0.6) when baseline PASSES while the
+  candidate FAILS — a PASS→PASS divergence is a different implementation path, **not** a
+  first error, and returns `None` so harmless tool-selection differences never pollute the
+  regression corpus. Evidence aggregation sorts by `sequence`
+  before building calls (order-independent), and empty evidence on either side (legacy /
+  unavailable trace) returns an explicit `evidence_available=False` attribution with
+  confidence 0 instead of fabricating an insertion/deletion divergence. The output carries
+  a short redacted causal snippet (`baseline_events`/`candidate_events`; sequence + tool +
+  phase + fp-prefix + error/validation/termination markers only — no paths or command
+  text, and tool-bearing validation events keep their `validation` marker) that the next
+  `regression_probe` layer can minimize.
 - `classify_failure` consumes only redacted `TraceEvent` metadata and emits candidate labels plus
   event sequence offsets. Three consecutive identical tool/argument/workspace fingerprints are
   `loop`; typed context/compaction signals are `context_decay`; a disallowed tool or typed

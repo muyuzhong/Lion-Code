@@ -110,6 +110,7 @@ from .external_anchor import (
     write_external_anchor_report,
     write_materialized_dataset_snapshot,
 )
+from .first_error import FirstErrorAttribution, FirstErrorKind, attribute_first_error
 from .gate import (
     GateDecision,
     GateV2Result,
@@ -339,6 +340,8 @@ __all__ = [
     "FailureSource",
     "FailureTriage",
     "FeedbackAdmission",
+    "FirstErrorAttribution",
+    "FirstErrorKind",
     "GateDecision",
     "GateLedgerEntry",
     "GateResult",
@@ -429,6 +432,7 @@ __all__ = [
     "admit_failure_to_regression",
     "analyze_deepeval_case",
     "analyze_verified_report",
+    "attribute_first_error",
     "build_commit_artifact",
     "build_deepeval_metrics",
     "build_deepeval_trajectory",
