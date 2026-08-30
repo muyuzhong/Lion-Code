@@ -293,10 +293,14 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   `OutcomeComparison` consumes the four-grid: `net_improvement = fail→pass − pass→fail`,
   `delta_success_rate = net / valid_pairs`, a McNemar **exact** two-sided p-value on the
   discordant cells, and a deterministic-seed paired-bootstrap percentile CI for the delta.
-  The outcome signal fires from **deterministic catastrophe rules first** (winning
-  discordant cell ≥ `min_discordant` and margin ≥ `min_discordant`, e.g. `fail→pass=4,
-  pass→fail=0` → IMPROVED) and only then from McNemar `p < alpha` with a clear direction;
-  `p` is never the sole gate criterion because small samples make it meaningless.
+  The signal is **asymmetric**: regression is caught sensitively by a deterministic
+  catastrophe rule (winning discordant cell ≥ `min_discordant` and margin ≥
+  `min_discordant`, e.g. `pass→fail=6, fail→pass=1` → REGRESSED) or McNemar `p < alpha`;
+  improvement requires **statistical evidence only** — McNemar `p < alpha` with `fail→pass`
+  dominating (the bootstrap CI is reported as effect size, never a standalone IMPROVED
+  trigger, so tiny samples like `fail→pass=4, pass→fail=0` stay a positive-signal NEUTRAL
+  instead of claiming IMPROVED). `p` is never the sole gate criterion for regression
+  because small samples make it meaningless.
   `ProcessComparison` consumes `#144`'s `ProcessVerification` supplied by the caller as
   `(task_id, attempt)` maps (the execution chain does **not** persist it on `TaskResult`;
   comparison does not extend the chain). Severity order VALID < VIOLATION < CRITICAL_VETO;
@@ -308,11 +312,14 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   +200~300%) to BLOCKED. It never claims "fewer tool calls = better".
 - `gate.py` applies the fixed `GateV2` priority to a `ComparisonResult`:
   (1) `UNSUPPORTED_TREATMENT` → BLOCKED (not attributable); (2) any new critical process
-  veto → BLOCKED; (3) clear outcome regression → REGRESSED; (4) outcome IMPROVED and no
-  process-regressed pair → IMPROVED; (5) otherwise NEUTRAL, upgraded to BLOCKED only if
-  the efficiency guardrail is BLOCKED (WARN is recorded, never changes the decision).
-  Outcome IMPROVED with process regression → NEUTRAL (fails the "process not degraded"
-  precondition). The decision is `GateDecision` ∈
+  veto → BLOCKED; (3) clear outcome regression → REGRESSED; (4) process-not-degraded with
+  an efficiency BLOCKED guardrail → BLOCKED (an efficiency catastrophe must not be
+  bypassed by outcome improvement); (5) outcome IMPROVED **and process fully comparable**
+  (gated, `unavailable == 0`, no regressed pair) → IMPROVED — process missing or partially
+  unavailable downgrades to NEUTRAL, because "no degradation observed" is not "not
+  tested"; (6) otherwise NEUTRAL, with efficiency WARN recorded but never changing the
+  decision. Outcome IMPROVED with process regression → NEUTRAL (fails the "process not
+  degraded" precondition). The decision is `GateDecision` ∈
   {IMPROVED, NEUTRAL, REGRESSED, BLOCKED}, wrapped with reasons in `GateV2Result`.
 - `classify_failure` consumes only redacted `TraceEvent` metadata and emits candidate labels plus
   event sequence offsets. Three consecutive identical tool/argument/workspace fingerprints are

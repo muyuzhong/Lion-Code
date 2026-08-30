@@ -18,6 +18,7 @@ from benchmarks.agent_e2e.process_verifier import ProcessViolationType
 from tests.benchmarks.test_comparison import (
     _process_map,
     _report,
+    _verification,
 )
 
 # 验收用例 1/3 的「明显改善」四格:f2p=8, p2f=1, p2p=10, f2f=5。
@@ -184,12 +185,48 @@ class TestPriorityEdges:
         result = run_gate_v2(report)
         assert result.decision is GateDecision.REGRESSED
 
-    def test_ungated_process_allows_improved(self) -> None:
-        # 未提供 process 校验时按「无退化」处理(调用方选择不 gate 过程)。
+    def test_ungated_process_not_improved(self) -> None:
+        # Process 完全没测 → 不得给出发布级 IMPROVED(「没有发现退化」
+        # 与「没有测」不是一回事)。
         report = _report(_IMPROVED_PAIRS)
         result = run_gate_v2(report)
-        assert result.decision is GateDecision.IMPROVED
+        assert result.decision is GateDecision.NEUTRAL
         assert result.comparison.process.gated is False
+        assert "未完整可比" in result.reasons[0]
+
+    def test_partial_process_not_improved(self) -> None:
+        # Process 部分缺失(unavailable>0)→ 同样不能 IMPROVED。
+        report = _report(_IMPROVED_PAIRS)
+        baseline = _process_map(report.trials, {})
+        candidate = {
+            (trial.task_id, trial.attempt): _verification()
+            for trial in report.trials[: len(report.trials) - 1]
+        }
+        result = run_gate_v2(
+            report,
+            baseline_process=baseline,
+            candidate_process=candidate,
+        )
+        assert result.decision is GateDecision.NEUTRAL
+        assert result.comparison.process.unavailable == 1
+        assert "未完整可比" in result.reasons[0]
+
+    def test_improved_outcome_with_efficiency_block_blocks(self) -> None:
+        # 效率灾难不能被 Outcome 改善提前绕过:cost +300% → BLOCKED。
+        report = _report(
+            _IMPROVED_PAIRS,
+            baseline_run={"cost": 1.0},
+            candidate_run={"cost": 4.0},
+        )
+        baseline, candidate = _valid_process(report)
+        result = run_gate_v2(
+            report,
+            baseline_process=baseline,
+            candidate_process=candidate,
+        )
+        assert result.decision is GateDecision.BLOCKED
+        assert result.comparison.efficiency.guardrail is GuardrailLevel.BLOCKED
+        assert result.comparison.outcome.signal is ComparisonSignal.IMPROVED
 
 
 class TestGateV2Result:

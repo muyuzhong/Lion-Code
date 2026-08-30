@@ -273,18 +273,36 @@ class TestComputeOutcome:
         assert outcome.delta_ci_high is None
         assert outcome.signal is ComparisonSignal.NEUTRAL
 
-    def test_deterministic_improvement_small_sample(self) -> None:
-        # fail→pass=4, pass→fail=0:样本小但明显积极,确定性规则直接判 IMPROVED。
+    def test_small_sample_improvement_is_neutral_with_signal(self) -> None:
+        # fail→pass=4, pass→fail=0:小样本积极信号但统计证据不足 →
+        # 只记 positive signal,不直接判 IMPROVED(阻止过早相信变好)。
         outcome = compute_outcome(
             PairedCounts(
                 fail_to_pass=4,
                 pass_to_fail=0,
-                pass_to_pass=5,
-                fail_to_fail=5,
+                pass_to_pass=10,
+                fail_to_fail=0,
                 invalid=0,
             )
         )
-        assert outcome.signal is ComparisonSignal.IMPROVED
+        assert outcome.signal is ComparisonSignal.NEUTRAL
+        assert "正向倾向" in outcome.reasons[0]
+
+    def test_tiny_sample_improvement_not_improved(self) -> None:
+        # b=3, c=0:McNemar p=0.25 不显著,CI 全为正也不判 IMPROVED
+        # ——3 个样本不足以宣称变好,只记 positive signal。
+        outcome = compute_outcome(
+            PairedCounts(
+                fail_to_pass=3,
+                pass_to_fail=0,
+                pass_to_pass=0,
+                fail_to_fail=0,
+                invalid=0,
+            )
+        )
+        assert outcome.mcnemar_p_value == 0.25
+        assert outcome.signal is ComparisonSignal.NEUTRAL
+        assert "正向倾向" in outcome.reasons[0]
 
     def test_deterministic_regression_small_sample(self) -> None:
         # pass→fail=3, fail→pass=0:确定性灾难规则直接判 REGRESSED。
@@ -294,6 +312,19 @@ class TestComputeOutcome:
                 pass_to_fail=3,
                 pass_to_pass=5,
                 fail_to_fail=5,
+                invalid=0,
+            )
+        )
+        assert outcome.signal is ComparisonSignal.REGRESSED
+
+    def test_regression_sensitive_with_one_counter_improvement(self) -> None:
+        # fail→pass=1, pass→fail=6:回归侧敏感,确定性规则仍捕获。
+        outcome = compute_outcome(
+            PairedCounts(
+                fail_to_pass=1,
+                pass_to_fail=6,
+                pass_to_pass=5,
+                fail_to_fail=3,
                 invalid=0,
             )
         )

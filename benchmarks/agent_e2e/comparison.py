@@ -199,6 +199,7 @@ def compute_outcome(
         c,
         mcnemar_p=p_value,
         mcnemar_alpha=mcnemar_alpha,
+        ci_low=ci_low,
         min_discordant=min_discordant,
     )
     return OutcomeComparison(
@@ -450,31 +451,42 @@ def _outcome_signal(
     *,
     mcnemar_p: float | None,
     mcnemar_alpha: float,
+    ci_low: float | None,
     min_discordant: int,
 ) -> tuple[ComparisonSignal, tuple[str, ...]]:
-    """确定性灾难规则优先;统计规则其次;否则 NEUTRAL。"""
+    """回归侧敏感、改善侧保守的非对称判定。
 
-    if b >= min_discordant and (b - c) >= min_discordant:
-        return ComparisonSignal.IMPROVED, (
-            f"确定性规则:fail→pass={b} ≥ {min_discordant} 且差 {b - c} ≥ "
-            f"{min_discordant}",
-        )
+    回归:确定性灾难规则(pass→fail 明显占优)或 McNemar 显著;
+    改善:必须 McNemar 显著(bootstrap CI 只作效应量上报)——小样本
+    积极信号(如 fail→pass=4, pass→fail=0)只进 reasons,不判 IMPROVED,
+    发布门禁要阻止过早相信「变好了」。
+    """
+
     if c >= min_discordant and (c - b) >= min_discordant:
         return ComparisonSignal.REGRESSED, (
-            f"确定性规则:pass→fail={c} ≥ {min_discordant} 且差 {c - b} ≥ "
+            f"确定性回归规则:pass→fail={c} ≥ {min_discordant} 且差 {c - b} ≥ "
             f"{min_discordant}",
         )
-    if mcnemar_p is not None and mcnemar_p < mcnemar_alpha:
-        if b > c:
+    if c > b and mcnemar_p is not None and mcnemar_p < mcnemar_alpha:
+        return ComparisonSignal.REGRESSED, (
+            f"McNemar exact p={mcnemar_p:.4f} < {mcnemar_alpha},方向 pass→fail",
+        )
+    if b > c:
+        if mcnemar_p is not None and mcnemar_p < mcnemar_alpha:
             return ComparisonSignal.IMPROVED, (
                 f"McNemar exact p={mcnemar_p:.4f} < {mcnemar_alpha},方向 fail→pass",
             )
-        if c > b:
-            return ComparisonSignal.REGRESSED, (
-                f"McNemar exact p={mcnemar_p:.4f} < {mcnemar_alpha},方向 pass→fail",
-            )
+        ci_note = f"(CI 下界 {ci_low:.4f})" if ci_low is not None else ""
+        return ComparisonSignal.NEUTRAL, (
+            f"存在正向倾向(fail→pass 占优{ci_note})但 McNemar 未达显著,"
+            "只记 positive signal,不判 IMPROVED",
+        )
+    if c > b:
+        return ComparisonSignal.NEUTRAL, (
+            "存在负向倾向(pass→fail 占优)但未达灾难/显著阈值,不判 REGRESSED",
+        )
     return ComparisonSignal.NEUTRAL, (
-        "无显著不一致方向(确定性规则与 McNemar 均未触发)",
+        "无显著不一致方向(确定性回归规则与统计检验均未触发)",
     )
 
 

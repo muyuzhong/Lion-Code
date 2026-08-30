@@ -48,9 +48,11 @@ def decide_gate(comparison: ComparisonResult) -> GateV2Result:
     1. 实验不可归因(UNSUPPORTED_TREATMENT)→ BLOCKED;
     2. 新增 critical process veto → BLOCKED;
     3. 明确 Outcome 回归 → REGRESSED;
-    4. Outcome 改善且 Process 不退化(无退化 pair)→ IMPROVED;
-    5. 其余:效率灾难性恶化(BLOCKED guardrail)升级为 BLOCKED,否则
-       NEUTRAL(效率 WARN 只记录在原因里)。
+    4. Process 无退化且效率灾难性恶化(BLOCKED guardrail)→ BLOCKED
+       (效率灾难不能被 Outcome 改善提前绕过);
+    5. Outcome 改善且 Process 完整可比(已测、无缺失、无退化)→ IMPROVED;
+    6. 其余 → NEUTRAL(效率 WARN 只记录;Process 未提供/部分缺失
+       不得给出发布级 IMPROVED)。
     """
 
     # 1. 实验不可归因
@@ -88,13 +90,41 @@ def decide_gate(comparison: ComparisonResult) -> GateV2Result:
             comparison=comparison,
         )
 
-    # 4. Outcome 改善且 Process 不退化
+    # 4. Process 无退化 + 效率灾难 → BLOCKED(优先于 Outcome 改善)
+    if (
+        comparison.process.regressed_pairs == 0
+        and comparison.efficiency.guardrail is GuardrailLevel.BLOCKED
+    ):
+        return GateV2Result(
+            decision=GateDecision.BLOCKED,
+            reasons=(
+                "Outcome 未回归且 Process 无退化,但效率灾难性恶化"
+                "(BLOCKED guardrail),禁止发布",
+            ),
+            comparison=comparison,
+        )
+
+    # 5. Outcome 改善且 Process 完整可比且无退化 → IMPROVED
     if comparison.outcome.signal is ComparisonSignal.IMPROVED:
-        if comparison.process.regressed_pairs == 0:
+        if (
+            comparison.process.gated
+            and comparison.process.unavailable == 0
+            and comparison.process.regressed_pairs == 0
+        ):
             return GateV2Result(
                 decision=GateDecision.IMPROVED,
                 reasons=(
-                    f"Outcome 改善且 Process 无退化:{comparison.outcome.reasons[0]}",
+                    f"Outcome 改善({comparison.outcome.reasons[0]})且 "
+                    "Process 完整可比、无退化",
+                ),
+                comparison=comparison,
+            )
+        if not comparison.process.gated or comparison.process.unavailable > 0:
+            return GateV2Result(
+                decision=GateDecision.NEUTRAL,
+                reasons=(
+                    "Outcome 改善但 Process 未完整可比(未测或部分缺失),"
+                    "不能给出发布级 IMPROVED",
                 ),
                 comparison=comparison,
             )
@@ -107,13 +137,7 @@ def decide_gate(comparison: ComparisonResult) -> GateV2Result:
             comparison=comparison,
         )
 
-    # 5. 其余:效率灾难升级;否则 NEUTRAL
-    if comparison.efficiency.guardrail is GuardrailLevel.BLOCKED:
-        return GateV2Result(
-            decision=GateDecision.BLOCKED,
-            reasons=("Outcome 无方向但效率灾难性恶化(BLOCKED guardrail),禁止发布",),
-            comparison=comparison,
-        )
+    # 6. 其余 → NEUTRAL(效率 WARN 只记录)
     note = ""
     if comparison.efficiency.guardrail is GuardrailLevel.WARN:
         note = "效率指标存在 WARN(仅记录,不改变结论)"
