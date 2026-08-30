@@ -380,7 +380,7 @@ def _replay_case(
         actual_violations=actual_violations,
         expected_status=case.expected_status,
         actual_status=verification.status,
-        reason="expected violation 或 expected status 未复现(Harness 行为已变化)",
+        reason="expected violation 或 expected status 未复现(检测规则行为已变化)",
     )
 
 
