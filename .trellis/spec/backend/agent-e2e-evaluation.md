@@ -321,6 +321,22 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   decision. Outcome IMPROVED with process regression → NEUTRAL (fails the "process not
   degraded" precondition). The decision is `GateDecision` ∈
   {IMPROVED, NEUTRAL, REGRESSED, BLOCKED}, wrapped with reasons in `GateV2Result`.
+- `first_error.attribute_first_error` locates the first causally meaningful deviation on a
+  pair of trajectories (baseline/candidate `ProcessEvidence[]`). It aggregates evidence
+  into **call-level** records (fingerprint taken from the first argument-carrying
+  start/update phase), aligns by `(tool_name, fingerprint)` common prefix to find the first
+  divergence, then promotes it to a first error only when candidate-side failure evidence
+  exists. It reuses `ProcessVerifier` on the candidate evidence and picks the strongest
+  violation by a fixed priority: critical veto (test tampering) → `PROCESS_VIOLATION`,
+  unrecovered tool error → `ERROR_RECOVERY`, validation missing → `VALIDATION`, compaction
+  regression → `CONTEXT`, premature termination → `TERMINATION`, behavior divergence →
+  `TOOL_SELECTION`/`TOOL_ARGUMENT`/`UNKNOWN`. Confidence is 1.0 for a candidate-only
+  violation (0.7 if baseline has the same kind), 0.6 for a bare divergence combined with
+  baseline-pass→candidate-fail, 0.4 for a harmless divergence, and `None` when the call
+  sequences are identical with no violation. The output carries a short redacted causal
+  snippet (`baseline_events`/`candidate_events`; sequence + tool + phase + fp-prefix +
+  error/validation/termination markers only — no paths or command text) that the next
+  `regression_probe` layer can minimize.
 - `classify_failure` consumes only redacted `TraceEvent` metadata and emits candidate labels plus
   event sequence offsets. Three consecutive identical tool/argument/workspace fingerprints are
   `loop`; typed context/compaction signals are `context_decay`; a disallowed tool or typed
