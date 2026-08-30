@@ -108,12 +108,8 @@ class LionCodingSession:
         return self._backend.session_id
 
     @property
-    def provider_readiness(self) -> ProviderReadinessPort:
-        return self._backend.provider_readiness
-
-    @property
     def api_configured(self) -> bool:
-        return self.provider_readiness.ready
+        return self._backend.provider_readiness.ready
 
     # ─── 状态 ────────────────────────────────────────────────
 
@@ -470,6 +466,10 @@ class LionCodingSession:
                 # 任务真正结束时归位 is_running,并取回异常避免 asyncio 告警。
                 task.add_done_callback(self._finalize_orphaned_run)
         yield AgentSettledEvent()
+
+    @property
+    def provider_readiness(self) -> ProviderReadinessPort:
+        return self._backend.provider_readiness
 
     def _map_event(
         self,

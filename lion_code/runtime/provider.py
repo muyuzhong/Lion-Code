@@ -63,9 +63,7 @@ class ProviderConfigurationProjection:
         state = self._state
         ready = self._provider_ready or bool(
             state.api_key
-            and (
-                state.provider_kind == "anthropic" or bool(state.openai_base_url)
-            )
+            and (state.provider_kind == "anthropic" or bool(state.openai_base_url))
         )
         return ProviderReadiness(
             ready=ready,

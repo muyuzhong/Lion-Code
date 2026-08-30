@@ -29,8 +29,8 @@ from lion_code.core.provider_events import (
     AssistantErrorEvent,
     AssistantMessageEvent,
 )
-from lion_code.session_runtime import SessionRepository
 from lion_code.runtime.provider import ProviderReadiness
+from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.builtin import create_builtin_tools
 from lion_code.tooling.execution import LocalCommandExecutionBackend
 

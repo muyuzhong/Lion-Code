@@ -67,9 +67,7 @@ class FakeCodingSessionBackend:
             self.provider_readiness = ProviderReadiness(
                 ready=self.api_configured,
                 blocker_code=(
-                    None
-                    if self.api_configured
-                    else "provider_configuration_required"
+                    None if self.api_configured else "provider_configuration_required"
                 ),
             )
         self._listeners: list[EventListener] = []
