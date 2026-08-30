@@ -38,7 +38,6 @@ from .events import (
     SessionAgentEndEvent,
 )
 from .ports import CodingSessionBackend, ProviderReadinessPort
-from .prompt_templates import PromptTemplate
 from .provider_settings import ModelChoice, load_model_choices, remember_model
 from .skills import Skill
 
@@ -285,10 +284,6 @@ class LionCodingSession:
             )
         return self._skills_cache
 
-    @property
-    def prompt_templates(self) -> tuple[PromptTemplate, ...]:
-        """Prompt template 发现按迁移计划在阶段 4 落地;当前恒为空。"""
-        return ()
 
     # ─── 命令 ────────────────────────────────────────────────
 

@@ -1,0 +1,50 @@
+{
+  "fixture_id": "clean-error-then-recover",
+  "task": {
+    "validation_commands": ["python -m pytest -q"]
+  },
+  "task_result": {
+    "verdict": "passed"
+  },
+  "events": [
+    {
+      "type": "tool_execution_start",
+      "tool_call_id": "c1",
+      "tool_name": "run_shell",
+      "args": {"command": "python build.py"}
+    },
+    {
+      "type": "tool_execution_end",
+      "tool_call_id": "c1",
+      "tool_name": "run_shell",
+      "result": {},
+      "is_error": true
+    },
+    {
+      "type": "tool_execution_start",
+      "tool_call_id": "c2",
+      "tool_name": "run_shell",
+      "args": {"command": "python build.py --fix"}
+    },
+    {
+      "type": "tool_execution_end",
+      "tool_call_id": "c2",
+      "tool_name": "run_shell",
+      "result": {},
+      "is_error": false
+    },
+    {
+      "type": "tool_execution_start",
+      "tool_call_id": "c3",
+      "tool_name": "run_shell",
+      "args": {"command": "pytest -q"}
+    },
+    {
+      "type": "tool_execution_end",
+      "tool_call_id": "c3",
+      "tool_name": "run_shell",
+      "result": {},
+      "is_error": false
+    }
+  ]
+}

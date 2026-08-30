@@ -51,7 +51,6 @@ def _echo_lion_tool() -> LionTool:
 
     return LionTool(
         name="echo",
-        label="Echo",
         description="echo the msg argument",
         parameters={
             "type": "object",
@@ -70,7 +69,6 @@ def _named_lion_tool(name: str) -> LionTool:
 
     return LionTool(
         name=name,
-        label=name,
         description=name,
         parameters={"type": "object"},
         execute_fn=execute,
@@ -233,7 +231,7 @@ class TestConversationRuntimeLoop(unittest.IsolatedAsyncioTestCase):
 
         async def cancel_after_first_turn(event) -> None:
             if not cancelled["done"] and isinstance(event, TurnEndEvent):
-                runtime.cancel()
+                runtime.harness.cancel()
                 cancelled["done"] = True
 
         runtime.subscribe(cancel_after_first_turn)

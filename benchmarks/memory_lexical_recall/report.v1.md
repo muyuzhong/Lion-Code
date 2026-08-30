@@ -1,6 +1,6 @@
 # Memory lexical 召回离线原型报告
 
-夹具 SHA-256：`9217d40b5c16054b5b1d7d0ea760faa3eb36b2485fddc8a7b091f03499de94f7`
+夹具 SHA-256：`dc19ba7bd3c4a0ed88a0669daad59fe5f5960d8189737e32d330f1eab43a1ef0`
 
 复现命令：`python benchmarks/memory_lexical_recall/benchmark.py`
 

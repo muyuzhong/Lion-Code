@@ -8,7 +8,9 @@
       "stable_key": "ci-merge-gate",
       "content": "合并 PR 前必须等待持续集成完成并确认全部检查通过。",
       "trigger": "准备合并拉取请求时",
-      "paths": [".github/workflows/ci.yml"]
+      "paths": [
+        ".github/workflows/ci.yml"
+      ]
     },
     {
       "id": "recall-noise",
@@ -26,7 +28,9 @@
       "stable_key": "sqlite-first-open-lock",
       "content": "Concurrent SQLite initialization may raise database is locked.",
       "trigger": "",
-      "paths": ["lion_code/capabilities/memory/store.py"]
+      "paths": [
+        "lion_code/capabilities/memory/store.py"
+      ]
     },
     {
       "id": "memory-open-owner",
@@ -35,7 +39,9 @@
       "stable_key": "memory-open-owner",
       "content": "MemoryStore.ensure_open lazily initializes the memory database.",
       "trigger": "",
-      "paths": ["lion_code/capabilities/memory/store.py"]
+      "paths": [
+        "lion_code/capabilities/memory/store.py"
+      ]
     },
     {
       "id": "ci-watch-command",
@@ -53,7 +59,9 @@
       "stable_key": "memory-store-path",
       "content": "The semantic store lives in lion_code/capabilities/memory/store.py.",
       "trigger": "",
-      "paths": ["lion_code/capabilities/memory/store.py"]
+      "paths": [
+        "lion_code/capabilities/memory/store.py"
+      ]
     },
     {
       "id": "release-checklist-lion",
@@ -80,7 +88,7 @@
       "stable_key": "typed-evidence",
       "content": "Evidence types are user_request, source, test, and command.",
       "trigger": "",
-      "paths": ["lion_code/capabilities/memory/models.py"]
+      "paths": []
     },
     {
       "id": "active-archived",
@@ -107,7 +115,9 @@
       "stable_key": "sqlite-first-open-lock",
       "content": "Concurrent SQLite initialization may raise database is locked.",
       "trigger": "",
-      "paths": ["src/memory/store.ts"]
+      "paths": [
+        "src/memory/store.ts"
+      ]
     }
   ],
   "queries": [
@@ -116,70 +126,92 @@
       "category": "zh_two_char",
       "query": "等待",
       "project_key": "github.com/muyuzhong/lion-code",
-      "expected_ids": ["ci-merge-gate"]
+      "expected_ids": [
+        "ci-merge-gate"
+      ]
     },
     {
       "id": "zh-natural-language",
       "category": "zh_natural_language",
       "query": "引入噪声",
       "project_key": "github.com/muyuzhong/lion-code",
-      "expected_ids": ["recall-noise"]
+      "expected_ids": [
+        "recall-noise"
+      ]
     },
     {
       "id": "english-error",
       "category": "english_error",
       "query": "database is locked",
       "project_key": "github.com/muyuzhong/lion-code",
-      "expected_ids": ["sqlite-lock"]
+      "expected_ids": [
+        "sqlite-lock"
+      ]
     },
     {
       "id": "code-symbol",
       "category": "code_symbol",
       "query": "MemoryStore.ensure_open",
       "project_key": "github.com/muyuzhong/lion-code",
-      "expected_ids": ["memory-open-owner"]
+      "expected_ids": [
+        "memory-open-owner"
+      ]
     },
     {
       "id": "command",
       "category": "command",
       "query": "gh run watch --exit-status",
       "project_key": "github.com/muyuzhong/lion-code",
-      "expected_ids": ["ci-watch-command"]
+      "expected_ids": [
+        "ci-watch-command"
+      ]
     },
     {
       "id": "path",
       "category": "path",
       "query": "lion_code/capabilities/memory/store.py",
       "project_key": "github.com/muyuzhong/lion-code",
-      "expected_ids": ["memory-open-owner", "memory-store-path", "sqlite-lock"]
+      "expected_ids": [
+        "memory-open-owner",
+        "memory-store-path",
+        "sqlite-lock"
+      ]
     },
     {
       "id": "project-isolation-positive",
       "category": "project_isolation",
       "query": "release checklist",
       "project_key": "github.com/muyuzhong/lion-code",
-      "expected_ids": ["release-checklist-lion"]
+      "expected_ids": [
+        "release-checklist-lion"
+      ]
     },
     {
       "id": "long-term-visible",
       "category": "long_term",
       "query": "python -m pytest -q",
       "project_key": "github.com/muyuzhong/lion-code",
-      "expected_ids": ["pytest-command"]
+      "expected_ids": [
+        "pytest-command"
+      ]
     },
     {
       "id": "typed-evidence",
       "category": "code_term",
       "query": "user_request",
       "project_key": "github.com/muyuzhong/lion-code",
-      "expected_ids": ["typed-evidence"]
+      "expected_ids": [
+        "typed-evidence"
+      ]
     },
     {
       "id": "lifecycle",
       "category": "english",
       "query": "active and archived",
       "project_key": "github.com/muyuzhong/lion-code",
-      "expected_ids": ["active-archived"]
+      "expected_ids": [
+        "active-archived"
+      ]
     },
     {
       "id": "negative-ci-bypass",

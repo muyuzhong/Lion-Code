@@ -66,7 +66,6 @@ def _echo_lion_tool(gate: asyncio.Event | None = None) -> LionTool:
 
     return LionTool(
         name="echo",
-        label="Echo",
         description="echo the msg argument",
         parameters={
             "type": "object",
@@ -188,7 +187,6 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
             usage_observer = harness.composition.runtime.agent._usage_observer
             self.assertIsNotNone(recorder)
             self.assertTrue(recorder.initialized)
-            self.assertEqual(usage.snapshot().responses, 1)
 
             session = LionCodingSession(agent)
             self.assertIs(harness.composition.runtime.agent.session.recorder, recorder)
@@ -207,7 +205,6 @@ class TestLionCodingSession(unittest.IsolatedAsyncioTestCase):
         ).read_all()
         self.assertEqual(sum(entry.type == "session_info" for entry in entries), 1)
         self.assertEqual(sum(entry.type == "message" for entry in entries), 4)
-        self.assertEqual(usage.snapshot().responses, 2)
         await session.aclose()
 
     async def test_unconfigured_agent_reports_error_through_session_notice(

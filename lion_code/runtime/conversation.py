@@ -44,13 +44,11 @@ class ConversationRuntime:
         get_system: Callable[[], str],
         tool_runtime: ToolRuntime,
         cancellation: CancellationView | None = None,
-        cancel_callback: Callable[[], None] | None = None,
         prepare_context: PrepareContext | None = None,
         before_tool_calls: BeforeToolCalls | None = None,
     ) -> None:
         self._provider = provider
         self._tool_runtime = tool_runtime
-        self._cancel_callback = cancel_callback
         self._output_buffer: list[str] | None = None
         self._captured_assistant_text: str | None = None
         self._retired_provider_tasks: set[asyncio.Task[object]] = set()
@@ -166,18 +164,6 @@ class ConversationRuntime:
             steering=tuple(message_text(message) for message in queued.steering),
             follow_up=tuple(message_text(message) for message in queued.follow_up),
         )
-
-    def cancel(self) -> None:
-        """请求取消当前正在进行的模型流。"""
-        if self._cancel_callback is not None:
-            self._cancel_callback()
-            return
-        self.harness.cancel()
-
-    @property
-    def cancelled(self) -> bool:
-        """返回运行协调器的取消视图。"""
-        return self.harness._cancellation.is_cancelled()
 
     @property
     def messages(self) -> tuple[AgentMessage, ...]:

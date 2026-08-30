@@ -1,0 +1,30 @@
+{
+  "fixture_id": "premature-budget-cancel",
+  "expected": {
+    "violation_types": ["premature_termination"],
+    "severity": "violation"
+  },
+  "task": {
+    "validation_commands": ["python -m pytest -q"]
+  },
+  "task_result": {
+    "verdict": "failed",
+    "stop_reason": "budget_exceeded"
+  },
+  "events": [
+    {
+      "type": "tool_execution_start",
+      "tool_call_id": "c1",
+      "tool_name": "read_file",
+      "args": {"file_path": "lion_code/meta_agent.py"}
+    },
+    {
+      "type": "tool_execution_end",
+      "tool_call_id": "c1",
+      "tool_name": "read_file",
+      "result": {},
+      "is_error": false
+    },
+    {"type": "cancelled"}
+  ]
+}

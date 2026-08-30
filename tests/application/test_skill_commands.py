@@ -38,7 +38,6 @@ class _FakeSession:
     available_models: tuple = ()
     tools: tuple = ()
     skills: tuple = ()
-    prompt_templates: tuple = ()
     context_token_estimate = 0
     context_window_tokens = 128_000
     thinking_level = "off"

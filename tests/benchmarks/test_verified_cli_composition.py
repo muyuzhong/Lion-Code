@@ -20,6 +20,11 @@ from benchmarks.agent_e2e.deepeval_analysis import (
     DeepEvalCase,
     DeepEvalMetricObservation,
 )
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+    make_task,
+)
 from benchmarks.agent_e2e.harbor_runner import (
     HarborExecutionOutput,
     HarborExecutionRequest,
@@ -41,7 +46,6 @@ from benchmarks.agent_e2e.models import (
     ResultValidity,
     TaskResult,
     TaskSpec,
-    TaskSplit,
     TaskVerdict,
     TrialExecutionStatus,
     VerifiedEvaluationReport,
@@ -57,24 +61,15 @@ from benchmarks.agent_e2e.verified_runner import (
     write_verified_report,
 )
 
+COMMIT_SHA = AGENT_CODE_SHA + "0" * (40 - len(AGENT_CODE_SHA))
+
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _task() -> TaskSpec:
-    return TaskSpec(
-        task_id="verified-task-1",
-        family="bugfix",
-        split=TaskSplit.REGRESSION,
-        repository="lion",
-        base_revision="abcdef0",
-        public_prompt="修复公开问题。",
-        verifier_identity="verified/v1",
-        gold_evidence_hash="a" * 64,
-        difficulty=1,
-        extensions={"swebench_instance_id": "swebench-task-1"},
-    )
+    return make_task(extensions={"swebench_instance_id": "swebench-task-1"})
 
 
 def _manifest(task: TaskSpec, *, budget_usd: float = 1.0) -> ExperimentManifest:
@@ -89,14 +84,14 @@ def _manifest(task: TaskSpec, *, budget_usd: float = 1.0) -> ExperimentManifest:
         repeats=1,
         timeout_seconds=30,
         budget_usd=budget_usd,
-        agent_code_sha="a" * 7,
+        agent_code_sha=AGENT_CODE_SHA,
         credential_env_vars=("TEST_PROVIDER_KEY",) if budget_usd else (),
     )
     catalog = Catalog(catalog_id="verified", catalog_version="v1", tasks=(task,))
     return ExperimentManifest(
         run_id="verified-run-1",
         agent_code_sha=profile.agent_code_sha,
-        evaluator_code_sha="e" * 7,
+        evaluator_code_sha=EVALUATOR_CODE_SHA,
         catalog=freeze_catalog(catalog),
         profile=profile,
         profile_fingerprint=profile.fingerprint(),
@@ -149,7 +144,7 @@ class _FakeArtifactBuilder:
         wheel_path.parent.mkdir(parents=True, exist_ok=True)
         wheel_path.write_bytes(b"wheel")
         return CommitArtifact(
-            commit_sha="a" * 40,
+            commit_sha=commit_sha,
             tree_sha="b" * 40,
             wheel_path=wheel_path,
             wheel_sha256=_digest("wheel"),
@@ -306,7 +301,7 @@ class TestVerifiedComposition(unittest.TestCase):
             execution = run_verified_evaluation(
                 VerifiedExecutionRequest(
                     repository_root=output_dir,
-                    commit_sha="a" * 40,
+                    commit_sha=COMMIT_SHA,
                     manifest=manifest,
                     task=task,
                     output_dir=output_dir / "run",
@@ -403,7 +398,7 @@ class TestVerifiedComposition(unittest.TestCase):
             execution = run_verified_evaluation(
                 VerifiedExecutionRequest(
                     repository_root=output_dir,
-                    commit_sha="a" * 40,
+                    commit_sha=COMMIT_SHA,
                     manifest=manifest,
                     task=task,
                     output_dir=output_dir / "run",
@@ -488,7 +483,7 @@ class TestVerifiedComposition(unittest.TestCase):
             output_dir = Path(directory)
             request = VerifiedExecutionRequest(
                 repository_root=output_dir,
-                commit_sha="a" * 40,
+                commit_sha=COMMIT_SHA,
                 manifest=manifest,
                 task=task,
                 output_dir=output_dir / "run",
@@ -593,7 +588,7 @@ class TestVerifiedCli(unittest.TestCase):
                         "--task-id",
                         task.task_id,
                         "--commit",
-                        "a" * 40,
+                        COMMIT_SHA,
                         "--run-id",
                         manifest.run_id,
                         "--output-dir",
@@ -607,7 +602,7 @@ class TestVerifiedCli(unittest.TestCase):
             self.assertTrue(Path(payload["report_json"]).is_file())
             self.assertTrue(Path(payload["report_markdown"]).is_file())
             self.assertEqual(len(captured), 1)
-            self.assertEqual(captured[0].commit_sha, "a" * 40)
+            self.assertEqual(captured[0].commit_sha, COMMIT_SHA)
             self.assertEqual(captured[0].deepeval_samples, 3)  # CLI 默认采样 3 次
 
     def test_digest_lookup_cli_three_exit_states(self) -> None:
@@ -623,7 +618,7 @@ class TestVerifiedCli(unittest.TestCase):
                         kind="input",
                         task_id="verified-task-1",
                         run_id="run-1",
-                        preview="公开任务",
+                        preview="任务预览",
                     )
                 ]
             )

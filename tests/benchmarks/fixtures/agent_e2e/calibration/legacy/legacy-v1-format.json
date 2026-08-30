@@ -1,0 +1,32 @@
+{
+  "schema_version": "agent-e2e/v1",
+  "trace_id": "legacy-v1-trace",
+  "fixture_id": "legacy-v1-format",
+  "events": [
+    {
+      "schema_version": "agent-e2e/v1",
+      "sequence": 1,
+      "event_type": "tool_execution_start",
+      "summary": "tool_execution_start: toolName=run_shell",
+      "payload_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "tool_name": "run_shell",
+      "argument_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "workspace_fingerprint": null,
+      "started_at": null,
+      "finished_at": null
+    },
+    {
+      "schema_version": "agent-e2e/v1",
+      "sequence": 2,
+      "event_type": "tool_execution_end",
+      "summary": "tool_execution_end: ",
+      "payload_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "tool_name": "run_shell",
+      "argument_digest": null,
+      "workspace_fingerprint": null,
+      "started_at": null,
+      "finished_at": null
+    }
+  ],
+  "loop_candidates": []
+}

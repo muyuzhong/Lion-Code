@@ -1,6 +1,3 @@
-from collections.abc import Iterator
-from json import dumps
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -13,25 +10,18 @@ from lion_code.tui.themes import (
     THEME_COLOR_FIELDS,
     TRANSCRIPT_ROLES,
     TuiThemeError,
-    available_tui_theme_names,
     get_tui_theme,
-    load_custom_tui_themes,
     parse_tui_theme_json,
-    set_custom_tui_themes,
 )
-
-
-@pytest.fixture(autouse=True)
-def _reset_custom_themes() -> Iterator[None]:
-    yield
-    set_custom_tui_themes({})
 
 
 def _theme_data(name: str = "midnight", **overrides: Any) -> dict[str, Any]:
     data: dict[str, Any] = {
         "name": name,
         "colors": {field_name: "#101010" for field_name in THEME_COLOR_FIELDS},
-        "roles": {role: {"border": "#101010", "body": "#e0e0e0"} for role in TRANSCRIPT_ROLES},
+        "roles": {
+            role: {"border": "#101010", "body": "#e0e0e0"} for role in TRANSCRIPT_ROLES
+        },
     }
     data.update(overrides)
     return data
@@ -102,7 +92,7 @@ def test_parse_theme_rejects_rich_only_colors_in_textual_fields(color: str) -> N
     data = _theme_data()
     data["colors"]["accent"] = color
 
-    with pytest.raises(TuiThemeError, match="colors.accent"):
+    with pytest.raises(TuiThemeError, match=r"colors\.accent"):
         parse_tui_theme_json(data)
 
 
@@ -113,7 +103,7 @@ def test_parse_theme_rejects_textual_only_colors_in_shared_fields(color: str) ->
     data = _theme_data()
     data["colors"]["accent"] = color
 
-    with pytest.raises(TuiThemeError, match="colors.accent"):
+    with pytest.raises(TuiThemeError, match=r"colors\.accent"):
         parse_tui_theme_json(data)
 
 
@@ -129,14 +119,16 @@ def test_parse_theme_allows_rich_only_colors_in_rich_only_fields() -> None:
     assert theme.completion_selected == "bold grey50 on #101010"
 
 
-@pytest.mark.parametrize("body", ["bright_white on #101010", "#e0e0e0 on grey11", "default"])
+@pytest.mark.parametrize(
+    "body", ["bright_white on #101010", "#e0e0e0 on grey11", "default"]
+)
 def test_parse_theme_rejects_rich_only_colors_in_role_bodies(body: str) -> None:
     # Body foreground/background colors feed Textual's styles.color and
     # styles.background, so they must parse under both libraries.
     data = _theme_data()
     data["roles"]["user"] = {"border": "#101010", "body": body}
 
-    with pytest.raises(TuiThemeError, match="roles.user.body"):
+    with pytest.raises(TuiThemeError, match=r"roles\.user\.body"):
         parse_tui_theme_json(data)
 
 
@@ -145,7 +137,7 @@ def test_parse_theme_rejects_rich_only_colors_in_role_borders() -> None:
     data = _theme_data()
     data["roles"]["user"] = {"border": "bright_red", "body": "#e0e0e0"}
 
-    with pytest.raises(TuiThemeError, match="roles.user.border"):
+    with pytest.raises(TuiThemeError, match=r"roles\.user\.border"):
         parse_tui_theme_json(data)
 
 
@@ -153,24 +145,8 @@ def test_parse_theme_rejects_rich_only_var_resolved_into_textual_field() -> None
     data = _theme_data(vars={"base": "grey50"})
     data["colors"]["screen_background"] = "base"
 
-    with pytest.raises(TuiThemeError, match="colors.screen_background"):
+    with pytest.raises(TuiThemeError, match=r"colors\.screen_background"):
         parse_tui_theme_json(data)
-
-
-def test_load_custom_themes_skips_textual_invalid_color_with_diagnostic(
-    tmp_path: Path,
-) -> None:
-    themes_dir = tmp_path / "themes"
-    crashy = _theme_data(name="crashy")
-    crashy["colors"]["accent"] = "bright_red"
-    _write_theme(themes_dir, "crashy.json", crashy)
-
-    themes, diagnostics = load_custom_tui_themes([themes_dir])
-
-    assert themes == {}
-    assert len(diagnostics) == 1
-    assert diagnostics[0].kind == "invalid-theme"
-    assert "colors.accent" in diagnostics[0].message
 
 
 def test_parse_theme_reports_all_problems_at_once() -> None:
@@ -251,99 +227,7 @@ def test_builtin_themes_are_loaded_from_packaged_json() -> None:
     assert get_tui_theme("tau-light").syntax_theme == "ansi_light"
 
 
-def test_custom_theme_registry_replaces_and_resolves() -> None:
-    theme = parse_tui_theme_json(_theme_data(name="midnight"))
-    other = parse_tui_theme_json(_theme_data(name="noon"))
-
-    set_custom_tui_themes({"midnight": theme})
-    set_custom_tui_themes({"noon": other})
-
-    assert available_tui_theme_names() == (*BUILTIN_TUI_THEME_NAMES, "noon")
-    assert get_tui_theme("noon") is other
-    with pytest.raises(KeyError):
-        get_tui_theme("midnight")
-
-
 def test_resolved_theme_falls_back_to_tau_dark_for_unknown_names() -> None:
     settings = TuiSettings(theme="missing-theme")
 
     assert settings.resolved_theme == TAU_DARK_THEME
-
-
-def test_resolved_theme_finds_registered_custom_theme() -> None:
-    theme = parse_tui_theme_json(_theme_data(name="midnight"))
-    set_custom_tui_themes({"midnight": theme})
-
-    assert TuiSettings(theme="midnight").resolved_theme is theme
-
-
-def _write_theme(directory: Path, filename: str, data: dict[str, Any]) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / filename
-    path.write_text(dumps(data), encoding="utf-8")
-    return path
-
-
-def test_load_custom_themes_discovers_json_files(tmp_path: Path) -> None:
-    _write_theme(tmp_path / "themes", "midnight.json", _theme_data(name="midnight"))
-
-    themes, diagnostics = load_custom_tui_themes([tmp_path / "themes"])
-
-    assert list(themes) == ["midnight"]
-    assert diagnostics == []
-
-
-def test_load_custom_themes_prefers_higher_precedence_dirs(tmp_path: Path) -> None:
-    user_dir = tmp_path / "user"
-    project_dir = tmp_path / "project"
-    user_theme = _theme_data(name="midnight")
-    user_theme["colors"]["accent"] = "#111111"
-    project_theme = _theme_data(name="midnight")
-    project_theme["colors"]["accent"] = "#222222"
-    _write_theme(user_dir, "midnight.json", user_theme)
-    _write_theme(project_dir, "midnight.json", project_theme)
-
-    themes, diagnostics = load_custom_tui_themes([user_dir, project_dir])
-
-    assert themes["midnight"].accent == "#222222"
-    assert any(diagnostic.kind == "collision" for diagnostic in diagnostics)
-
-
-def test_load_custom_themes_skips_invalid_files_with_diagnostics(tmp_path: Path) -> None:
-    themes_dir = tmp_path / "themes"
-    themes_dir.mkdir()
-    (themes_dir / "broken.json").write_text("{not json", encoding="utf-8")
-    incomplete = _theme_data(name="incomplete")
-    del incomplete["colors"]["accent"]
-    _write_theme(themes_dir, "incomplete.json", incomplete)
-    _write_theme(themes_dir, "midnight.json", _theme_data(name="midnight"))
-
-    themes, diagnostics = load_custom_tui_themes([themes_dir])
-
-    assert list(themes) == ["midnight"]
-    assert len(diagnostics) == 2
-
-
-def test_load_custom_themes_skips_builtin_shadowing_with_diagnostic(tmp_path: Path) -> None:
-    themes_dir = tmp_path / "themes"
-    _write_theme(themes_dir, "tau-dark.json", _theme_data(name="tau-dark"))
-
-    themes, diagnostics = load_custom_tui_themes([themes_dir])
-
-    assert themes == {}
-    assert any("tau-dark" in diagnostic.message for diagnostic in diagnostics)
-
-
-def test_load_custom_themes_ignores_missing_dirs_and_non_json(tmp_path: Path) -> None:
-    themes_dir = tmp_path / "themes"
-    themes_dir.mkdir()
-    (themes_dir / "notes.md").write_text("not a theme", encoding="utf-8")
-
-    themes, diagnostics = load_custom_tui_themes([themes_dir, tmp_path / "missing"])
-
-    assert themes == {}
-    assert diagnostics == []
-
-
-
-

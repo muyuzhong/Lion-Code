@@ -30,7 +30,6 @@ def _context(registry):
 def _tool(name, execute_fn):
     return LionTool(
         name=name,
-        label=name,
         description=name,
         parameters={"type": "object", "properties": {}},
         execute_fn=execute_fn,

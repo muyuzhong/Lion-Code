@@ -14,7 +14,6 @@ def create_agent_tool(command: ToolCommand) -> LionTool:
 
     return LionTool(
         name="agent",
-        label="Agent",
         description="Launch a sub-agent to handle a task autonomously. Sub-agents have isolated context and return their result. Types: 'explore' (read-only), 'plan' (read-only, structured planning), 'general' (full tools).",
         parameters={
             "type": "object",
@@ -49,7 +48,6 @@ def create_skill_tool(command: ToolCommand) -> LionTool:
 
     return LionTool(
         name="skill",
-        label="Skill",
         description="Invoke a registered skill by name. Skills are prompt templates loaded from .claude/skills/. Returns the skill's resolved prompt to follow.",
         parameters={
             "type": "object",
@@ -79,7 +77,6 @@ def create_enter_plan_tool(command: ToolCommand) -> LionTool:
 
     return LionTool(
         name="enter_plan_mode",
-        label="Enter plan mode",
         description="Enter plan mode to switch to a read-only planning phase. In plan mode, you can only read files and write to the plan file.",
         parameters={"type": "object", "properties": {}},
         execute_fn=execute,
@@ -97,7 +94,6 @@ def create_exit_plan_tool(command: ToolCommand) -> LionTool:
 
     return LionTool(
         name="exit_plan_mode",
-        label="Exit plan mode",
         description="Exit plan mode after you have finished writing your plan to the plan file.",
         parameters={"type": "object", "properties": {}},
         execute_fn=execute,
@@ -133,7 +129,6 @@ def create_tool_search_tool() -> LionTool:
 
     return LionTool(
         name="tool_search",
-        label="Tool search",
         description="Search for available tools by name or keyword. Returns full schema definitions for matching deferred tools so you can use them.",
         parameters={
             "type": "object",

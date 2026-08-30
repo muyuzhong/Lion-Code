@@ -28,7 +28,6 @@ def _shell_tool() -> LionTool:
 
     return LionTool(
         name="run_shell",
-        label="run_shell",
         description="run_shell",
         parameters={"type": "object", "properties": {}},
         execute_fn=execute,

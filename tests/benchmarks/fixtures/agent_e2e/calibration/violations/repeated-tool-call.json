@@ -1,0 +1,54 @@
+{
+  "fixture_id": "repeated-tool-call",
+  "expected": {
+    "violation_types": ["repeated_tool_call"],
+    "severity": "violation"
+  },
+  "task": {
+    "validation_commands": ["python -m pytest -q"]
+  },
+  "task_result": {
+    "verdict": "failed"
+  },
+  "events": [
+    {
+      "type": "tool_execution_start",
+      "tool_call_id": "c1",
+      "tool_name": "list_files",
+      "args": {"pattern": "**/*.py", "path": "."}
+    },
+    {
+      "type": "tool_execution_end",
+      "tool_call_id": "c1",
+      "tool_name": "list_files",
+      "result": {},
+      "is_error": false
+    },
+    {
+      "type": "tool_execution_start",
+      "tool_call_id": "c2",
+      "tool_name": "list_files",
+      "args": {"pattern": "**/*.py", "path": "."}
+    },
+    {
+      "type": "tool_execution_end",
+      "tool_call_id": "c2",
+      "tool_name": "list_files",
+      "result": {},
+      "is_error": false
+    },
+    {
+      "type": "tool_execution_start",
+      "tool_call_id": "c3",
+      "tool_name": "list_files",
+      "args": {"pattern": "**/*.py", "path": "."}
+    },
+    {
+      "type": "tool_execution_end",
+      "tool_call_id": "c3",
+      "tool_name": "list_files",
+      "result": {},
+      "is_error": false
+    }
+  ]
+}

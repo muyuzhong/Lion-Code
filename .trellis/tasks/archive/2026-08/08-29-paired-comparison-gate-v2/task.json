@@ -1,0 +1,28 @@
+{
+  "id": "paired-comparison-gate-v2",
+  "name": "paired-comparison-gate-v2",
+  "title": "配对统计与门禁 V2: comparison + 三重回归判定",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zhangcx",
+  "assignee": "zhangcx",
+  "createdAt": "2026-08-29",
+  "completedAt": "2026-08-29",
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-29-eval-harness-paired-system",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "PRD: 配对统计与门禁 V2(comparison + 三重回归判定)"
+  }
+}

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, ClassVar, Literal, Mapping, Self
+from typing import Any, ClassVar, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 
 SCHEMA_VERSION = "agent-e2e/v1"
 
@@ -115,7 +115,7 @@ class VersionedModel(BaseModel):
 def utc_now() -> datetime:
     """返回带 UTC 时区的当前时间，避免本地时区进入 manifest。"""
 
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class TaskSplit(str, Enum):
@@ -277,7 +277,7 @@ class CatalogLock(VersionedModel):
     extensions: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_unique_task_ids(self) -> "CatalogLock":
+    def _validate_unique_task_ids(self) -> CatalogLock:
         if len(set(self.task_ids)) != len(self.task_ids):
             raise ValueError("Catalog lock task_ids must be unique")
         return self
@@ -348,7 +348,7 @@ class ExperimentManifest(VersionedModel):
     extensions: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_frozen_inputs(self) -> "ExperimentManifest":
+    def _validate_frozen_inputs(self) -> ExperimentManifest:
         if len(set(self.task_ids)) != len(self.task_ids):
             raise ValueError("Manifest task_ids must be unique")
         if not set(self.task_ids).issubset(self.catalog.task_ids):
@@ -528,6 +528,57 @@ class DeepEvalCase(VersionedModel):
     extensions: dict[str, Any] = Field(default_factory=dict)
 
 
+class RequestedVariant(VersionedModel):
+    """profile 声明的 Harness 变量版本(注入前的事实)。"""
+
+    prompt_version: str | None = None
+    tool_policy_version: str | None = None
+    compression_version: str | None = None
+
+
+class ResolvedVariant(VersionedModel):
+    """注入解析命中的事实:哪些声明版本真的映射到了运行配置。"""
+
+    prompt_hit: bool = False
+    tool_policy_hit: bool = False
+
+
+class InjectionEvidence(VersionedModel):
+    """一次执行的注入证据;fingerprint 非空 = 真的注入了。
+
+    ``prompt_sha256`` / ``tool_policy_sha256`` 是各维度注入内容的摘要,
+    供 run 级校验按声明维度精确核对(而不只看复合指纹)。
+    """
+
+    requested: RequestedVariant = Field(default_factory=RequestedVariant)
+    resolved_variant: ResolvedVariant = Field(default_factory=ResolvedVariant)
+    injection_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
+    prompt_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    tool_policy_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunInjectionEvidence(VersionedModel):
+    """一次 run(全部 task×attempt)的注入证据聚合。
+
+    只有整个 run 的 requested / resolved / fingerprint 完全一致时才存在,
+    用来证明「这条 run 的每一次执行都经历了同一个 treatment」;任一
+    结果缺失或不一致,整个 run 视为没有可用的注入证据。
+    """
+
+    requested: RequestedVariant = Field(default_factory=RequestedVariant)
+    resolved_variant: ResolvedVariant = Field(default_factory=ResolvedVariant)
+    injection_fingerprint: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
+    prompt_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    tool_policy_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    result_count: int = Field(ge=1)
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+
 class WorkerResult(VersionedModel):
     """Agent 容器返回给 host 的最小、无密钥 worker 结果。"""
 
@@ -537,9 +588,10 @@ class WorkerResult(VersionedModel):
     patch_applied: bool | None = None
     trace_summary: TraceSummary | None = None
     error_summary: str | None = Field(default=None, max_length=320)
+    injection_evidence: InjectionEvidence | None = None
 
     @model_validator(mode="after")
-    def _validate_worker_status(self) -> "WorkerResult":
+    def _validate_worker_status(self) -> WorkerResult:
         if self.status is WorkerStatus.COMPLETED and self.agent_run is None:
             raise ValueError("Completed worker results require agent_run")
         if self.status is not WorkerStatus.COMPLETED and not self.error_summary:
@@ -864,7 +916,7 @@ class TaskResult(VersionedModel):
     extensions: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _enforce_official_isolation(self) -> "TaskResult":
+    def _enforce_official_isolation(self) -> TaskResult:
         if self.verdict in {TaskVerdict.PASSED, TaskVerdict.FAILED}:
             if not self.official or self.validity is not ResultValidity.VALID:
                 raise ValueError("passed/failed require an official valid result")
@@ -957,7 +1009,7 @@ class OfficialScore(VersionedModel):
     success_rate: float = Field(ge=0, le=1)
 
     @model_validator(mode="after")
-    def _validate_counts(self) -> "OfficialScore":
+    def _validate_counts(self) -> OfficialScore:
         if self.passed_count + self.failed_count != self.valid_denominator:
             raise ValueError("Official score counts must equal valid denominator")
         if self.success_rate != self.passed_count / self.valid_denominator:
@@ -975,7 +1027,7 @@ class EvaluationReport(VersionedModel):
     extensions: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_report_scope(self) -> "EvaluationReport":
+    def _validate_report_scope(self) -> EvaluationReport:
         result_ids = {result.task_id for result in self.results}
         if not result_ids.issubset(set(self.manifest.task_ids)):
             raise ValueError("Report includes a task outside its manifest")

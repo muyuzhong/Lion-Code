@@ -1,0 +1,50 @@
+{
+  "fixture_id": "clean-normal-pass",
+  "task": {
+    "validation_commands": ["python -m pytest -q"]
+  },
+  "task_result": {
+    "verdict": "passed"
+  },
+  "events": [
+    {
+      "type": "tool_execution_start",
+      "tool_call_id": "c1",
+      "tool_name": "read_file",
+      "args": {"file_path": "lion_code/meta_agent.py"}
+    },
+    {
+      "type": "tool_execution_end",
+      "tool_call_id": "c1",
+      "tool_name": "read_file",
+      "result": {},
+      "is_error": false
+    },
+    {
+      "type": "tool_execution_start",
+      "tool_call_id": "c2",
+      "tool_name": "edit_file",
+      "args": {"file_path": "lion_code/meta_agent.py", "old_string": "x", "new_string": "y"}
+    },
+    {
+      "type": "tool_execution_end",
+      "tool_call_id": "c2",
+      "tool_name": "edit_file",
+      "result": {},
+      "is_error": false
+    },
+    {
+      "type": "tool_execution_start",
+      "tool_call_id": "c3",
+      "tool_name": "run_shell",
+      "args": {"command": "pytest -q"}
+    },
+    {
+      "type": "tool_execution_end",
+      "tool_call_id": "c3",
+      "tool_name": "run_shell",
+      "result": {},
+      "is_error": false
+    }
+  ]
+}

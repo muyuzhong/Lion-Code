@@ -26,7 +26,6 @@ class _FakeToolSource:
         self._tools = tuple(
             LionTool(
                 name=name,
-                label=name,
                 description=name,
                 parameters={"type": "object", "properties": {}},
                 execute_fn=_execute_fake_tool,

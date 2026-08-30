@@ -209,6 +209,174 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   threshold and covers the baseline and candidate profile fingerprints. It may then be labelled
   `external_calibrated`; no calibration or a non-covering calibration cannot support a
   generalization claim.
+- `PairedExperiment.build` pairs two complete official reports on `(task_id, attempt)` — the
+  attempt is the seed dimension under the manifest-level seed/repeats contract, no per-task seed
+  mechanism. Comparability before pairing reuses the gate's invariant fields sets: distinct run
+  IDs, identical catalog locks, identical manifest/profile invariants, and the actual profile
+  variation differences must equal the declared `ChangeKind` set. A broken pair, missing task,
+  or non-official result is an `invalid` trial, never a half-built pairing. `PairedTrialOutcome`
+  is the five-cell fail→pass / pass→fail / pass→pass / fail→fail / invalid mapping; statistical
+  significance (bootstrap / McNemar) is a later layer, not part of the report.
+- `HarnessVariant` is the first-class changeable surface of a Harness configuration: prompt,
+  compression, and tool-policy versions only. Model, provider, seed, budget, and environment
+  invariants are deliberately outside its surface; `from_profile` extracts exactly the three
+  changeable fields.
+- `ProcessEvidenceProjector` runs inside `TraceRecorder.record`, before sanitization, and emits a
+  separate `evidence` array alongside `events` in `harbor-trace.json`; `TraceEvent` schema is
+  untouched. Evidence carries only facts plus digests: `tool_call_id`, `tool_phase`,
+  `tool_fingerprint` (taken from the argument-carrying start/update phase), `is_error` (from
+  `tool_execution_end`), `target_scope` (source / test / verifier / other classified before path
+  hashing), `validation_command` booleans matched against the task card's commands before
+  hashing, compaction, and termination markers. Full commands, raw paths, and tool outputs are
+  never persisted.
+- `ProcessVerifier` runs deterministically on every trace, including passed ones, and consumes
+  `ProcessEvidence`; it is a separate judging layer that never changes `TaskResult.verdict` and
+  does not call `classify_failure`. `ProcessVerification.status` aggregates to `critical_veto`
+  when any violation is critical (validation missing / test tampering), else `violation` when any
+  rule fires, else `valid`. Traces without evidence (legacy format) degrade explicitly to
+  `evidence_unavailable` instead of guessing from redacted text. Rules: `repeated_tool_call`
+  (call-level fingerprints, start/update/end lifecycle never counts as repetition),
+  `tool_error_not_recovered` (only `is_error=true` end evidence), `validation_missing` (only
+  `PASSED` results with non-empty validation commands), `test_tampering` (write tools touching
+  test/verifier scope), `premature_termination`, and `context_regression` (first tool call after
+  a compaction repeating a pre-compaction failed fingerprint). Thresholds and tool lists are
+  constructor parameters. The committed calibration fixtures
+  (`tests/benchmarks/fixtures/agent_e2e/calibration/`) pin recall (violations detected) and
+  precision (clean traces never vetoed). `ProcessReplayContext` (verdict / stop_reason /
+  public_validation_commands) and `verify_case(evidence, *, context, task_id)` enable offline
+  replay of a self-contained EvidenceRegressionCase without reconstructing a full
+  TaskSpec/TaskResult; `verify` and `verify_case` share the same rule aggregation and the same
+  context must yield the same verification. This replay only re-runs the deterministic
+  detection rules; it never executes production Harness logic.
+- `PairedExperiment` distinguishes three experiment kinds. `CONTROLLED` requires equal
+  `agent_code_sha` between baseline and candidate **and verified treatment at run
+  granularity**: each side must validate as a single consistent `RunInjectionEvidence`
+  (every `task × attempt` carries `InjectionEvidence` whose `requested` matches the
+  manifest profile and whose `resolved_variant`/fingerprint are identical across the
+  run — one missing or divergent result invalidates the whole run), and **every declared
+  `ChangeKind`** must be hit on both sides with different injected content (per-dimension
+  `prompt_sha256` / `tool_policy_sha256`). A declared `PROMPT` change is not verified by a
+  `tool_policy` hit; the evidence must prove the declared treatment, not merely that some
+  injection happened. Its paired deltas may be attributed to the declared mechanism.
+  `REGRESSION` allows different agent code and only supports "this version regressed as a
+  whole" claims. `UNSUPPORTED_TREATMENT` covers same-code pairs where the variable has no
+  runtime switch (e.g. `compression_version`), injection did not resolve (missing maps,
+  identical fingerprints, no evidence), or run-level evidence is inconsistent: the report
+  must state the delta is not attributable to that mechanism. `compression_version` remains
+  a declared field with no runtime switch and must never produce `CONTROLLED`; this
+  limitation is recorded in the profile, not hidden.
+- `VariantInjectionSpec` travels with the `ExperimentManifest` (its `extensions`
+  `variant_injection_spec` key is part of the frozen manifest) from host to the Harbor
+  installed-agent, so `worker_entrypoint` resolves and applies the same mapping table on the
+  container side. The manifest is the **single source of truth** for the spec:
+  `HarborExecutionRequest` does not carry a separate `injection_spec` (no dual source);
+  `request_variant=True` only asserts that the manifest carries one. A
+  `ToolPolicyVariantMap` must name at least one tool (`tool_names` is non-empty), so a hit
+  always means a real registry filter — empty whitelists that claim a hit without injecting
+  are rejected at construction. `harbor_agent._SOURCE_FILES` must include every module the
+  worker chain imports (`evidence.py`, `variant_injection.py`).
+- `ControlledExperimentRunner` is the formal host entry that creates a controlled
+  experiment: one shared `VariantInjectionSpec` plus a frozen template and two profiles
+  (`build_manifests`) produce the two frozen manifests, and `run_pair` executes both runs
+  by reusing the **Verified official chain** (`run_verified_evaluation`: artifact → Harbor
+  → SWE-bench Harness), looping every `task × attempt` and handing the assembled reports to
+  `PairedExperiment.build`. It does not depend on the foundation
+  `SingleTaskOrchestrator`/`ContainerBackend`; there is a single official execution chain.
+  The Verified chain forwards `WorkerResult.injection_evidence` into
+  `TaskResult.extensions["injection_evidence"]` (via `_merge_worker_result`) and sets
+  `request_variant=True` on the Harbor request whenever the manifest carries
+  `variant_injection_spec`, so real Harbor runs surface the evidence and the variant
+  declaration that `PairedExperiment` consumes. `run_pair` validates the **execution
+  context invariant** before running: `commit_sha`, `repository_root`,
+  `python_executable`, `harness_python`, and `harbor_executable` must be identical
+  between baseline and candidate (manifest comparability alone only constrains the
+  declared surface, and `agent_code_sha` is a 7-char prefix match — drifting host inputs
+  would otherwise mask fake causality behind identical code + valid evidence). `run_pair`
+  derives declared changes from the actual profile version differences, so a run that
+  does not change any gate-controlled version fails before execution.
+- `comparison.py` turns a `PairedExperimentReport` into a publishable conclusion.
+  `OutcomeComparison` consumes the four-grid: `net_improvement = fail→pass − pass→fail`,
+  `delta_success_rate = net / valid_pairs`, a McNemar **exact** two-sided p-value on the
+  discordant cells, and a deterministic-seed paired-bootstrap percentile CI for the delta.
+  The signal is **asymmetric**: regression is caught sensitively by a deterministic
+  catastrophe rule (winning discordant cell ≥ `min_discordant` and margin ≥
+  `min_discordant`, e.g. `pass→fail=6, fail→pass=1` → REGRESSED) or McNemar `p < alpha`;
+  improvement requires **statistical evidence only** — McNemar `p < alpha` with `fail→pass`
+  dominating (the bootstrap CI is reported as effect size, never a standalone IMPROVED
+  trigger, so tiny samples like `fail→pass=4, pass→fail=0` stay a positive-signal NEUTRAL
+  instead of claiming IMPROVED). `p` is never the sole gate criterion for regression
+  because small samples make it meaningless.
+  `ProcessComparison` consumes `#144`'s `ProcessVerification` supplied by the caller as
+  `(task_id, attempt)` maps (the execution chain does **not** persist it on `TaskResult`;
+  comparison does not extend the chain). Severity order VALID < VIOLATION < CRITICAL_VETO;
+  `EVIDENCE_UNAVAILABLE` or a missing pair is not comparable. It records new critical
+  vetoes / new violations / resolved violations per pair. `EfficiencyComparison` only
+  observes mean turns/tokens/cost/wall-time (`AgentRunSummary`; there is no tool-call count
+  on `TaskResult` in V1) and raises a guardrail only when outcome and process are not
+  degraded: cost ≥ +35% / wall-time ≥ +40% default to WARN, huge thresholds (default
+  +200~300%) to BLOCKED. It never claims "fewer tool calls = better".
+- `gate.py` applies the fixed `GateV2` priority to a `ComparisonResult`:
+  (1) `UNSUPPORTED_TREATMENT` → BLOCKED (not attributable); (2) any new critical process
+  veto → BLOCKED; (3) clear outcome regression → REGRESSED; (4) process-not-degraded with
+  an efficiency BLOCKED guardrail → BLOCKED (an efficiency catastrophe must not be
+  bypassed by outcome improvement); (5) outcome IMPROVED **and process fully comparable**
+  (gated, `unavailable == 0`, no regressed pair) → IMPROVED — process missing or partially
+  unavailable downgrades to NEUTRAL, because "no degradation observed" is not "not
+  tested"; (6) otherwise NEUTRAL, with efficiency WARN recorded but never changing the
+  decision. Outcome IMPROVED with process regression → NEUTRAL (fails the "process not
+  degraded" precondition). The decision is `GateDecision` ∈
+  {IMPROVED, NEUTRAL, REGRESSED, BLOCKED}, wrapped with reasons in `GateV2Result`.
+- `first_error.attribute_first_error` locates the first causally meaningful deviation on a
+  pair of trajectories (baseline/candidate `ProcessEvidence[]`). It aggregates evidence
+  into **call-level** records (fingerprint taken from the first argument-carrying
+  start/update phase), aligns by `(tool_name, fingerprint)` common prefix to find the first
+  divergence, then promotes it to a first error only when candidate-side failure evidence
+  exists. It reuses `ProcessVerifier` on the candidate evidence and picks the strongest
+  violation by a fixed priority: critical veto (test tampering) → `PROCESS_VIOLATION`,
+  unrecovered tool error → `ERROR_RECOVERY`, validation missing → `VALIDATION`, compaction
+  regression → `CONTEXT`, premature termination → `TERMINATION`, behavior divergence →
+  `TOOL_SELECTION`/`TOOL_ARGUMENT`/`UNKNOWN`. Confidence is 1.0 for a candidate-only
+  violation (0.7 if baseline has the same kind), and a bare divergence without any
+  violation only yields a low-confidence candidate (0.6) when baseline PASSES while the
+  candidate FAILS — a PASS→PASS divergence is a different implementation path, **not** a
+  first error, and returns `None` so harmless tool-selection differences never pollute the
+  regression corpus. Evidence aggregation sorts by `sequence`
+  before building calls (order-independent), and empty evidence on either side (legacy /
+  unavailable trace) returns an explicit `evidence_available=False` attribution with
+  confidence 0 instead of fabricating an insertion/deletion divergence. The output carries
+  a short redacted causal snippet (`baseline_events`/`candidate_events`; sequence + tool +
+  phase + fp-prefix + error/validation/termination markers only — no paths or command
+  text, and tool-bearing validation events keep their `validation` marker) that the next
+  `regression_probe` layer can minimize.
+- `regression_probe.probe_holds` and `regression_probe.minimize_failure_evidence` perform
+  deterministic failure-fragment minimization on `ProcessEvidence[]`: the slice loop reuses
+  `ProcessVerifier` to test whether the target `ProcessViolationType` still holds, empty
+  evidence never counts as a violation, and greedy per-event removal converges to a
+  **1-minimal** fragment — removing any single event from the result breaks the violation —
+  which is not guaranteed to be globally shortest. Violation-specific
+  sufficiency (failed call + same-fingerprint repeat for `TOOL_ERROR_NOT_RECOVERED`; failed
+  call + compaction + post-compaction same-fingerprint call for `CONTEXT_REGRESSION`; a single
+  write tool touching test/verifier scope for `TEST_TAMPERING`) lives in the verifier rules,
+  not in the trimming loop, so the minimizer is not a dumb event-count trimmer.
+- `evidence_regression_corpus` is an **Evidence Regression Corpus, not a Harness behavior
+  regression corpus**: it turns a `FirstErrorAttribution` into a self-contained
+  `EvidenceRegressionCase` only when evidence is available, confidence is exactly 1.0, and
+  the candidate evidence actually carries one of the six supported deterministic violations
+  (`TEST_TAMPERING`, `TOOL_ERROR_NOT_RECOVERED`, `VALIDATION_MISSING`, `CONTEXT_REGRESSION`,
+  `PREMATURE_TERMINATION`, `REPEATED_TOOL_CALL`). Low-confidence (`PASS→FAIL` divergence at
+  0.6), unavailable-evidence, and pure-behavior-divergence (`TOOL_SELECTION`/`TOOL_ARGUMENT`/
+  `UNKNOWN`) attributions are rejected, and a PASS→PASS divergence never yields an attribution
+  in the first place. The case stores structured `ProcessEvidence` (the 1-minimal fragment)
+  plus provenance (`source_task_id`/`source_attempt`/`source_run_id`/`first_error_kind`/
+  `source_fingerprint`) and a `ProcessReplayContext`; it never stores #149's readable snippet
+  strings. `run_evidence_regression_corpus` replays each case offline with `verify_case` and
+  emits PASS/FAIL/INVALID per case, aggregated into `EvidenceRegressionCorpusReport` —
+  deterministically, same cases in, same report out. Because replaying the same stored
+  evidence through the same verifier always yields the same result regardless of Harness
+  changes, this corpus only proves "the detection rules still recognize this bad trace"; it
+  cannot prove a modified Harness will not reproduce the error, and it must not be marketed as
+  a Harness micro-regression gate. A genuine Harness regression case would need a deterministic
+  policy entry point in production Harness, which is out of scope for this layer.
 - `classify_failure` consumes only redacted `TraceEvent` metadata and emits candidate labels plus
   event sequence offsets. Three consecutive identical tool/argument/workspace fingerprints are
   `loop`; typed context/compaction signals are `context_decay`; a disallowed tool or typed
@@ -316,6 +484,13 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 - `tests/benchmarks/test_regression_feedback.py`: pass/reject/invalid/waived decisions,
   deliberate `3/3 -> 0/3` ledger interception, self-only scope, four trace failure rules,
   infrastructure priority, signature deduplication, and reviewed holdout-to-regression retirement.
+- `tests/benchmarks/test_regression_probe.py`: probe holds on unrecovered error / context
+  regression / test tampering, empty-evidence false, long-trace trimming to a 1-minimal
+  fragment, single-event-removal minimality, initial-slice misuse, and the injected-probe loop.
+- `tests/benchmarks/test_evidence_regression_corpus.py`: admission rejections (low confidence /
+  unavailable evidence / no deterministic violation), PASS→PASS never entering the corpus,
+  full-flow minimization provenance, `REPEATED_TOOL_CALL` admission despite `UNKNOWN` kind,
+  JSON round-trip, and runner PASS/FAIL/INVALID with same-input determinism.
 - Before handoff run focused evaluation tests, `python -m pytest -q`,
   `python -m compileall -q lion_code benchmarks tests`, and `git diff --check`.
 

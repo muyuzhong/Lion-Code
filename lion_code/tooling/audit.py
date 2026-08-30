@@ -15,7 +15,7 @@ from .secret_provider import SecretStore
 from .snapshot import is_sensitive_path
 from .types import JSONValue, LionTool, ToolResult
 
-AuditResult = Literal["success", "failed", "rolled_back", "blocked"]
+AuditResult = Literal["success", "failed", "blocked"]
 
 
 @dataclass(frozen=True, slots=True)

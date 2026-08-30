@@ -30,7 +30,6 @@ class TestHookMiddleware(unittest.IsolatedAsyncioTestCase):
 
         tool = LionTool(
             name="run_shell",
-            label="run_shell",
             description="run_shell",
             parameters={"type": "object", "properties": {}},
             execute_fn=execute,

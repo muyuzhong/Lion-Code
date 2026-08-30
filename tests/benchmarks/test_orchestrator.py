@@ -14,6 +14,13 @@ from benchmarks.agent_e2e.backend import (
 )
 from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.checkpoint import InMemoryCheckpointStore
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+)
+from benchmarks.agent_e2e.fixtures import (
+    make_task as make_verified_task,
+)
 from benchmarks.agent_e2e.models import (
     AgentRunSummary,
     Catalog,
@@ -21,7 +28,6 @@ from benchmarks.agent_e2e.models import (
     ExperimentProfile,
     ResultValidity,
     TaskSpec,
-    TaskSplit,
     TaskVerdict,
     WorkerResult,
     WorkerStatus,
@@ -31,17 +37,7 @@ from benchmarks.agent_e2e.report import build_report, render_chinese_markdown
 
 
 def make_task() -> TaskSpec:
-    return TaskSpec(
-        task_id="task-1",
-        family="bugfix",
-        split=TaskSplit.REGRESSION,
-        repository="lion",
-        base_revision="abcdef0",
-        public_prompt="修复问题。",
-        verifier_identity="hidden-v1",
-        gold_evidence_hash="a" * 64,
-        difficulty=1,
-    )
+    return make_verified_task(task_id="task-1", verifier_identity="hidden-v1")
 
 
 def make_manifest(task: TaskSpec) -> ExperimentManifest:
@@ -57,12 +53,12 @@ def make_manifest(task: TaskSpec) -> ExperimentManifest:
         repeats=1,
         timeout_seconds=30,
         budget_usd=0,
-        agent_code_sha="abcdef0",
+        agent_code_sha=AGENT_CODE_SHA,
     )
     return ExperimentManifest(
         run_id="offline-run",
         agent_code_sha=profile.agent_code_sha,
-        evaluator_code_sha="1234567",
+        evaluator_code_sha=EVALUATOR_CODE_SHA,
         catalog=freeze_catalog(catalog),
         profile=profile,
         profile_fingerprint=profile.fingerprint(),
@@ -110,8 +106,12 @@ class TestSingleTaskOrchestrator(unittest.IsolatedAsyncioTestCase):
             work_root=self.temp_dir.name,
         )
 
-    async def test_fake_success_runs_worker_verifier_cleanup_but_stays_offline(self) -> None:
-        backend = FakeContainerBackend(worker_handler=lambda _request: _return(completed_worker()))
+    async def test_fake_success_runs_worker_verifier_cleanup_but_stays_offline(
+        self,
+    ) -> None:
+        backend = FakeContainerBackend(
+            worker_handler=lambda _request: _return(completed_worker())
+        )
         result = await self._orchestrator(backend).run_task(
             manifest=self.manifest,
             task=self.task,
@@ -129,7 +129,9 @@ class TestSingleTaskOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("task_resolved", report.canonical_json())
         self.assertNotIn("task_resolved", render_chinese_markdown(report))
 
-    async def test_unavailable_backend_is_blocked_without_worker_or_verifier(self) -> None:
+    async def test_unavailable_backend_is_blocked_without_worker_or_verifier(
+        self,
+    ) -> None:
         backend = UnavailableContainerBackend("Docker daemon is unavailable")
         result = await self._orchestrator(backend).run_task(
             manifest=self.manifest,
@@ -142,7 +144,9 @@ class TestSingleTaskOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(backend.cleanup_calls), 1)
         self.assertNotIn("task_resolved", result.canonical_json())
 
-    async def test_timeout_worker_exception_verifier_exception_and_cleanup_failure_are_invalid(self) -> None:
+    async def test_timeout_worker_exception_verifier_exception_and_cleanup_failure_are_invalid(
+        self,
+    ) -> None:
         timeout_backend = FakeContainerBackend(
             worker_handler=lambda _request: _return(
                 WorkerResult(status=WorkerStatus.TIMEOUT, error_summary="timed out")
@@ -199,7 +203,9 @@ class TestSingleTaskOrchestrator(unittest.IsolatedAsyncioTestCase):
 
     async def test_checkpoint_restores_without_rerunning_backend(self) -> None:
         checkpoints = InMemoryCheckpointStore()
-        backend = FakeContainerBackend(worker_handler=lambda _request: _return(completed_worker()))
+        backend = FakeContainerBackend(
+            worker_handler=lambda _request: _return(completed_worker())
+        )
         orchestrator = self._orchestrator(backend, checkpoints)
 
         first = await orchestrator.run_task(manifest=self.manifest, task=self.task)

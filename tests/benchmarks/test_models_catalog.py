@@ -11,6 +11,13 @@ from benchmarks.agent_e2e.catalog import (
     freeze_catalog,
     validate_catalog,
 )
+from benchmarks.agent_e2e.fixtures import (
+    AGENT_CODE_SHA,
+    EVALUATOR_CODE_SHA,
+)
+from benchmarks.agent_e2e.fixtures import (
+    make_task as make_verified_task,
+)
 from benchmarks.agent_e2e.models import (
     Catalog,
     EvaluationReport,
@@ -29,19 +36,16 @@ from benchmarks.agent_e2e.models import (
 )
 
 
-def make_task(*, task_id: str = "task-1", split: TaskSplit = TaskSplit.REGRESSION) -> TaskSpec:
-    return TaskSpec(
+def make_task(
+    *, task_id: str = "task-1", split: TaskSplit = TaskSplit.REGRESSION
+) -> TaskSpec:
+    return make_verified_task(
         task_id=task_id,
-        family="bugfix",
         split=split,
-        repository="lion",
-        base_revision="abcdef0",
-        public_prompt="修复公开问题。",
+        verifier_identity="hidden-v1",
+        difficulty=1,
         public_setup=("python -m pip install -e .",),
         public_validation_commands=("python -m pytest -q",),
-        verifier_identity="hidden-v1",
-        gold_evidence_hash="a" * 64,
-        difficulty=2,
         involved_files=("lion_code/meta_agent.py",),
     )
 
@@ -58,7 +62,7 @@ def make_profile() -> ExperimentProfile:
         repeats=1,
         timeout_seconds=30,
         budget_usd=0,
-        agent_code_sha="abcdef0",
+        agent_code_sha=AGENT_CODE_SHA,
     )
 
 
@@ -69,8 +73,8 @@ def make_manifest(task: TaskSpec | None = None) -> tuple[Catalog, ExperimentMani
     profile = make_profile()
     return catalog, ExperimentManifest(
         run_id="offline-run",
-        agent_code_sha="abcdef0",
-        evaluator_code_sha="1234567",
+        agent_code_sha=AGENT_CODE_SHA,
+        evaluator_code_sha=EVALUATOR_CODE_SHA,
         catalog=lock,
         profile=profile,
         profile_fingerprint=profile.fingerprint(),
@@ -96,7 +100,9 @@ class TestVersionedModels(unittest.TestCase):
         with self.assertRaises(SchemaVersionError):
             ExperimentManifest.from_dict(wrong_version)
 
-    def test_explicit_extensions_preserve_future_fields_without_opening_top_level(self) -> None:
+    def test_explicit_extensions_preserve_future_fields_without_opening_top_level(
+        self,
+    ) -> None:
         _catalog, manifest = make_manifest()
         report = EvaluationReport(
             manifest=manifest,
@@ -179,7 +185,9 @@ class TestCatalogValidation(unittest.TestCase):
     def test_catalog_lock_round_trip_and_selection(self) -> None:
         first = make_task(task_id="task-1")
         second = make_task(task_id="task-2", split=TaskSplit.HOLDOUT)
-        catalog = Catalog(catalog_id="local", catalog_version="v1", tasks=(first, second))
+        catalog = Catalog(
+            catalog_id="local", catalog_version="v1", tasks=(first, second)
+        )
         lock = freeze_catalog(catalog, task_ids=("task-2",))
 
         validation = validate_catalog(catalog, lock=lock)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from .backend import (
     AgentExecutionRequest,
@@ -88,7 +89,8 @@ class SingleTaskOrchestrator:
                 result = _blocked_result(
                     task=task,
                     attempt=attempt,
-                    reason=self.backend.unavailable_reason or "Container backend unavailable",
+                    reason=self.backend.unavailable_reason
+                    or "Container backend unavailable",
                     started_at=started_at,
                     validity=ResultValidity.BLOCKED,
                 )
@@ -217,6 +219,11 @@ class SingleTaskOrchestrator:
             if verifier.outcome is VerifierOutcome.PASSED
             else TaskVerdict.FAILED
         )
+        extensions: dict[str, Any] = {}
+        if worker.injection_evidence is not None:
+            extensions["injection_evidence"] = worker.injection_evidence.model_dump(
+                mode="json"
+            )
         return TaskResult(
             task_id=task.task_id,
             attempt=attempt,
@@ -231,6 +238,7 @@ class SingleTaskOrchestrator:
             cost_usd=worker.agent_run.cost_usd if worker.agent_run is not None else 0,
             started_at=started_at,
             finished_at=utc_now(),
+            extensions=extensions,
         )
 
     def _workspace_paths(
@@ -317,28 +325,38 @@ def _invalid_result(
         patch_sha256=(
             worker.patch_sha256
             if worker is not None
-            else prior.patch_sha256 if prior is not None else None
+            else prior.patch_sha256
+            if prior is not None
+            else None
         ),
         patch_applied=(
             worker.patch_applied
             if worker is not None
-            else prior.patch_applied if prior is not None else None
+            else prior.patch_applied
+            if prior is not None
+            else None
         ),
         agent_run=(
             worker.agent_run
             if worker is not None
-            else prior.agent_run if prior is not None else None
+            else prior.agent_run
+            if prior is not None
+            else None
         ),
         trace_summary=(
             worker.trace_summary
             if worker is not None
-            else prior.trace_summary if prior is not None else None
+            else prior.trace_summary
+            if prior is not None
+            else None
         ),
         verifier=prior.verifier if prior is not None else None,
         cost_usd=(
             worker.agent_run.cost_usd
             if worker is not None and worker.agent_run is not None
-            else prior.cost_usd if prior is not None else 0
+            else prior.cost_usd
+            if prior is not None
+            else 0
         ),
         started_at=started_at,
         finished_at=utc_now(),
