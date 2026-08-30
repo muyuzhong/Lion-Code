@@ -21,7 +21,16 @@ from ..providers.thinking import (
 )
 
 ProviderKind = Literal["anthropic", "openai-compatible"]
+ProviderReadinessBlockerCode = Literal["provider_configuration_required"]
 ProviderFactory = Callable[..., ModelProvider]
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderReadiness:
+    """当前 Provider 配置是否可发送请求的不可变快照。"""
+
+    ready: bool
+    blocker_code: ProviderReadinessBlockerCode | None
 
 
 @dataclass(slots=True)
@@ -50,14 +59,21 @@ class ProviderConfigurationProjection:
     _state: ProviderState
     _provider_ready: bool
 
-    def is_api_configured(self) -> bool:
+    def readiness(self) -> ProviderReadiness:
         state = self._state
-        return self._provider_ready or bool(
+        ready = self._provider_ready or bool(
             state.api_key
             and (
-                state.provider_kind == "anthropic" or state.openai_base_url is not None
+                state.provider_kind == "anthropic" or bool(state.openai_base_url)
             )
         )
+        return ProviderReadiness(
+            ready=ready,
+            blocker_code=None if ready else "provider_configuration_required",
+        )
+
+    def is_api_configured(self) -> bool:
+        return self.readiness().ready
 
     def child_api_kwargs(self) -> dict[str, str | None]:
         """返回子 Agent 继承当前 Provider 所需的凭证与 base projection。"""
@@ -247,14 +263,12 @@ class ProviderController:
         return provider_thinking_levels(self.provider_kind, model=self.model)
 
     @property
+    def provider_readiness(self) -> ProviderReadiness:
+        return self._configuration_projection.readiness()
+
+    @property
     def api_configured(self) -> bool:
-        state = self._state
-        return bool(
-            state.api_key
-            and (
-                state.provider_kind == "anthropic" or state.openai_base_url is not None
-            )
-        )
+        return self.provider_readiness.ready
 
     def get_api_config(self) -> dict[str, bool | str]:
         """返回兼容 API 的配置投影；凭证仍只在明确命令中暴露。"""
@@ -530,6 +544,8 @@ __all__ = [
     "ProviderController",
     "ProviderFactory",
     "ProviderKind",
+    "ProviderReadiness",
+    "ProviderReadinessBlockerCode",
     "ProviderRuntimePort",
     "ProviderState",
     "ProviderView",

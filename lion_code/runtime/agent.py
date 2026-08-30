@@ -26,6 +26,7 @@ from ..usage import BudgetPolicy, UsageLedger
 from .context import ContextRuntime
 from .conversation import ConversationRuntime
 from .execution import ExecutionControl
+from .provider import ProviderReadiness
 from .session import SessionRestoreState, SessionRuntime
 
 StopReason = Literal[
@@ -77,8 +78,7 @@ class RuntimeIdentityHost(Protocol):
 
     _terminal_output: bool
 
-    @property
-    def api_configured(self) -> bool: ...
+    def provider_readiness(self) -> ProviderReadiness: ...
 
     def _create_terminal_renderer(self) -> TerminalRenderer: ...
 
@@ -334,7 +334,8 @@ class AgentRuntime:
 
         self._execution.begin()
         self._last_stop_reason = None
-        if not self._identity.api_configured:
+        readiness = self._identity.provider_readiness()
+        if not readiness.ready:
             # 未配置凭证不再静默返回：向订阅者产出一条含说明的 error 消息，
             # 让桌面/REST 前端看到明确的失败反馈（而不只是被忽略的 notice）。
             error_message = (

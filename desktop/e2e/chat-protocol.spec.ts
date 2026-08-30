@@ -25,7 +25,7 @@ test("bootstraps REST history and streams one assistant-ui message over mocked W
       }
       const payloads: Record<string, unknown> = {
         "/api/messages": [{ id: "history-1", role: "assistant", content: "历史消息", reasoning: "先检查工作区状态。", tools: [{ id: "tool-1", toolName: "bash", args: { command: "git status --short" }, result: " M desktop/src/renderer/src/styles.css", status: "completed" }] }],
-        "/api/status": { session_id: "session-current", model: "claude-sonnet", provider_name: "anthropic", permission_mode: "default", api_configured: true, cwd: workspace, thinking_level: "medium", available_thinking_levels: ["off", "medium", "high"], input_tokens: 1200, output_tokens: 340, is_running: false },
+        "/api/status": { session_id: "session-current", model: "claude-sonnet", provider_name: "anthropic", permission_mode: "default", api_configured: true, provider_blocker_code: null, cwd: workspace, thinking_level: "medium", available_thinking_levels: ["off", "medium", "high"], input_tokens: 1200, output_tokens: 340, is_running: false },
         "/api/sessions": [{ id: "session-current", label: sessionLabel, startTime: new Date().toISOString(), messageCount: 8, cwd: workspace }],
         "/api/models": [{ provider_name: "anthropic", model: "claude-sonnet" }],
         "/api/skills": [{ name: "review", description: "检查当前改动的关键风险" }],
@@ -206,6 +206,7 @@ test("captures visual screenshots for copy buttons, thinking, and session titles
           provider_name: "deepseek",
           permission_mode: "default",
           api_configured: true,
+          provider_blocker_code: null,
           cwd: workspace,
           thinking_level: "medium",
           available_thinking_levels: ["low", "medium", "high", "max"],
@@ -297,4 +298,3 @@ test("captures visual screenshots for copy buttons, thinking, and session titles
     await application.close();
   }
 });
-

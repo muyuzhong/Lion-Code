@@ -185,12 +185,14 @@ def create_app(
     @api.get("/status", response_model=ServerStatusResponse)
     async def get_status() -> ServerStatusResponse:
         usage = session.token_usage()
+        readiness = session.provider_readiness
         return ServerStatusResponse(
             session_id=session.session_id,
             model=session.model,
             provider_name=session.provider_name,
             permission_mode=session.permission_mode,
-            api_configured=session.api_configured,
+            api_configured=readiness.ready,
+            provider_blocker_code=readiness.blocker_code,
             cwd=str(session.cwd),
             thinking_level=session.thinking_level,
             available_thinking_levels=list(session.available_thinking_levels),

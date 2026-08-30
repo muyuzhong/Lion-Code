@@ -37,7 +37,7 @@ from .events import (
     QueueUpdateEvent,
     SessionAgentEndEvent,
 )
-from .ports import CodingSessionBackend
+from .ports import CodingSessionBackend, ProviderReadinessPort
 from .prompt_templates import PromptTemplate
 from .provider_settings import ModelChoice, load_model_choices, remember_model
 from .skills import Skill
@@ -109,8 +109,12 @@ class LionCodingSession:
         return self._backend.session_id
 
     @property
+    def provider_readiness(self) -> ProviderReadinessPort:
+        return self._backend.provider_readiness
+
+    @property
     def api_configured(self) -> bool:
-        return self._backend.api_configured
+        return self.provider_readiness.ready
 
     # ─── 状态 ────────────────────────────────────────────────
 

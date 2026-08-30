@@ -29,6 +29,7 @@ export interface ServerStatus {
   provider_name: string;
   permission_mode: string;
   api_configured: boolean;
+  provider_blocker_code: "provider_configuration_required" | null;
   cwd: string;
   thinking_level: string;
   available_thinking_levels: string[];
@@ -262,6 +263,8 @@ function isServerStatus(value: unknown): value is ServerStatus {
     && typeof value.provider_name === "string"
     && typeof value.permission_mode === "string"
     && typeof value.api_configured === "boolean"
+    && ((value.api_configured && value.provider_blocker_code === null)
+      || (!value.api_configured && value.provider_blocker_code === "provider_configuration_required"))
     && typeof value.cwd === "string"
     && typeof value.thinking_level === "string"
     && Array.isArray(value.available_thinking_levels)

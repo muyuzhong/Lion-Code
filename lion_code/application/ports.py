@@ -33,6 +33,16 @@ class EgressConfigurationPort(Protocol):
     def configure_egress(self, allow_hosts: Sequence[str]) -> list[str]: ...
 
 
+class ProviderReadinessPort(Protocol):
+    """Provider readiness 的应用侧结构化只读投影。"""
+
+    @property
+    def ready(self) -> bool: ...
+
+    @property
+    def blocker_code(self) -> str | None: ...
+
+
 class ConversationPort(Protocol):
     """Canonical conversation state and run-control primitives."""
 
@@ -94,6 +104,9 @@ class SettingsPort(Protocol):
 
     @property
     def permission_mode(self) -> PermissionMode: ...
+
+    @property
+    def provider_readiness(self) -> ProviderReadinessPort: ...
 
     @property
     def api_configured(self) -> bool: ...
@@ -158,6 +171,7 @@ __all__ = [
     "EventListener",
     "NoticeCallback",
     "PlanApprovalCallback",
+    "ProviderReadinessPort",
     "QueueSnapshot",
     "SessionPort",
     "SettingsPort",

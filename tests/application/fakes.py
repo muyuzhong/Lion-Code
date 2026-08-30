@@ -12,6 +12,7 @@ from lion_code.application.ports import EventListener, QueueSnapshot
 from lion_code.core.events import AgentEvent
 from lion_code.core.messages import AgentMessage
 from lion_code.permission_state import PermissionMode
+from lion_code.runtime.provider import ProviderReadiness
 from lion_code.usage import UsageSnapshot
 
 
@@ -24,6 +25,7 @@ class FakeCodingSessionBackend:
     provider_name: str = "fake"
     permission_mode: PermissionMode = "default"
     api_configured: bool = True
+    provider_readiness: ProviderReadiness | None = None
     plan_mode: bool = False
     messages: tuple[AgentMessage, ...] = ()
     prompt_scripts: list[list[AgentEvent]] = field(default_factory=list)
@@ -61,6 +63,15 @@ class FakeCodingSessionBackend:
     thinking_operations: list[str] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
+        if self.provider_readiness is None:
+            self.provider_readiness = ProviderReadiness(
+                ready=self.api_configured,
+                blocker_code=(
+                    None
+                    if self.api_configured
+                    else "provider_configuration_required"
+                ),
+            )
         self._listeners: list[EventListener] = []
         self.cancel_event = asyncio.Event()
         self.prompt_started = asyncio.Event()

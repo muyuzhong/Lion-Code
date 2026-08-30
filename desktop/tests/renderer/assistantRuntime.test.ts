@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { BackendBootstrap, WebSocketPort } from "../../src/renderer/src/backend";
+import { LionRestClient, type BackendBootstrap, type WebSocketPort } from "../../src/renderer/src/backend";
 import { projectLionMessage } from "../../src/renderer/src/assistantRuntime";
 import { LionAssistantRuntimeAdapter } from "../../src/renderer/src/lionRuntime";
 
@@ -16,7 +16,7 @@ class FakeSocket implements WebSocketPort {
   close() { this.readyState = 3; this.onclose?.(); }
 }
 
-function harness(history: unknown[] = [], options: { apiConfigured?: boolean; blockMetadataPath?: string; providerConfiguration?: unknown } = {}) {
+function harness(history: unknown[] = [], options: { apiConfigured?: boolean; blockMetadataPath?: string; providerConfiguration?: unknown; status?: unknown } = {}) {
   const sockets: FakeSocket[] = [];
   const requests: Array<{ url: string; authorization: string | null; body: string | null }> = [];
   let reconnect: (() => void) | null = null;
@@ -29,8 +29,9 @@ function harness(history: unknown[] = [], options: { apiConfigured?: boolean; bl
       if (options.blockMetadataPath && url.endsWith(options.blockMetadataPath)) {
         return new Promise<Response>(() => {});
       }
+      const status = options.status === undefined ? { session_id: "s1", model: "model-a", provider_name: "anthropic", permission_mode: "default", api_configured: options.apiConfigured ?? true, provider_blocker_code: options.apiConfigured === false ? "provider_configuration_required" : null, cwd: "C:/work", thinking_level: "medium", available_thinking_levels: ["off", "medium"], input_tokens: 12, output_tokens: 4, is_running: false } : options.status;
       const payload = url.endsWith("/api/messages") ? history
-        : url.endsWith("/api/status") ? { session_id: "s1", model: "model-a", provider_name: "anthropic", permission_mode: "default", api_configured: options.apiConfigured ?? true, cwd: "C:/work", thinking_level: "medium", available_thinking_levels: ["off", "medium"], input_tokens: 12, output_tokens: 4, is_running: false }
+        : url.endsWith("/api/status") ? status
           : url.endsWith("/api/sessions") ? [{ id: "s1", label: null, startTime: null, messageCount: 2, cwd: "C:/work" }]
               : url.endsWith("/api/models") ? [{ provider_name: "anthropic", model: "model-a" }]
                 : url.endsWith("/api/skills") ? [{ name: "review", description: "Review changes" }]
@@ -96,6 +97,60 @@ describe("Lion assistant runtime adapter", () => {
     expect(await adapter.setThinkingLevel("medium")).toBe(true);
     expect(h.requests.find((request) => request.url.endsWith("/api/config/provider"))?.body).toBe(JSON.stringify({ provider: "anthropic", model: "model-a", api_key: "secret" }));
     expect(h.requests.find((request) => request.url.endsWith("/api/thinking"))?.body).toBe(JSON.stringify({ level: "medium" }));
+  });
+
+  it("accepts only the two consistent Provider status combinations", async () => {
+    const validStatus = {
+      session_id: "s1",
+      model: "model-a",
+      provider_name: "anthropic",
+      permission_mode: "default",
+      api_configured: true,
+      provider_blocker_code: null,
+      cwd: "C:/work",
+      thinking_level: "medium",
+      available_thinking_levels: ["off", "medium"],
+      input_tokens: 12,
+      output_tokens: 4,
+      is_running: false,
+    };
+
+    await expect(new LionRestClient(harness([], { status: validStatus }).bootstrap).fetchStatus()).resolves.toMatchObject({
+      api_configured: true,
+      provider_blocker_code: null,
+    });
+    await expect(new LionRestClient(harness([], { status: { ...validStatus, api_configured: false, provider_blocker_code: "provider_configuration_required" } }).bootstrap).fetchStatus()).resolves.toMatchObject({
+      api_configured: false,
+      provider_blocker_code: "provider_configuration_required",
+    });
+  });
+
+  it("rejects missing, unknown, or inconsistent Provider status codes", async () => {
+    const validStatus = {
+      session_id: "s1",
+      model: "model-a",
+      provider_name: "anthropic",
+      permission_mode: "default",
+      api_configured: true,
+      provider_blocker_code: null,
+      cwd: "C:/work",
+      thinking_level: "medium",
+      available_thinking_levels: ["off", "medium"],
+      input_tokens: 12,
+      output_tokens: 4,
+      is_running: false,
+    };
+    const missingCode = { ...validStatus, provider_blocker_code: undefined };
+    const malformedStatuses: unknown[] = [
+      missingCode,
+      { ...validStatus, provider_blocker_code: "unknown" },
+      { ...validStatus, provider_blocker_code: "provider_configuration_required" },
+      { ...validStatus, api_configured: false },
+    ];
+
+    for (const status of malformedStatuses) {
+      await expect(new LionRestClient(harness([], { status }).bootstrap).fetchStatus()).rejects.toThrow("状态不符合 REST 契约");
+    }
   });
 
   it("reads the canonical Provider configuration through the protected REST client", async () => {

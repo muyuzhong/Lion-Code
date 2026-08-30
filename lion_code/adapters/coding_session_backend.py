@@ -27,6 +27,7 @@ from ..composition.ports import (
 from ..meta_agent import MetaAgent
 from ..permission_state import PermissionMode
 from ..runtime.agent import AgentRunResult
+from ..runtime.provider import ProviderReadiness
 from ..session_runtime import (
     SessionRecorder,
     SessionRepository,
@@ -192,12 +193,16 @@ class CodingSessionBackendAdapter:
         return self._agent.provider_name
 
     @property
+    def provider_readiness(self) -> ProviderReadiness:
+        return self._agent.provider_readiness
+
+    @property
     def permission_mode(self) -> PermissionMode:
         return self._agent.permission_mode
 
     @property
     def api_configured(self) -> bool:
-        return self._agent.api_configured
+        return self.provider_readiness.ready
 
     def provider_config(self) -> dict[str, Any]:
         return self._agent.provider_config()

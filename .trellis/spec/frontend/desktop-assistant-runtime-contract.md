@@ -36,6 +36,10 @@ REST 使用 `GET /api/messages` 替换历史快照，切换会话使用
   notice、metrics、审批和临时消息。
 - wire 只接受后端 camelCase alias，例如 `toolCallId`、`assistantMessageEvent`、
   `followUp`、`requestId`、`willRetry`；禁止 snake_case、fallback 或宽松兼容。
+- `GET /api/status` 的 `api_configured` 必须与
+  `provider_blocker_code` 成对解码：就绪时为 `true/null`，阻塞时为
+  `false/"provider_configuration_required"`；缺失、未知或不一致的 code
+  必须在 REST metadata 边界拒绝。
 - `queue_update` 全量替换队列；user `message_start` 按文本消费，steering 优先且一次只移除一项。
 - Tool start/update/end 只按 `toolCallId` 配对，允许结束事件乱序；不得按 args 形状推断工具类型。
 - assistant-ui 仅 assistant message 可携带 `status`；user message 不投影该字段。
@@ -47,6 +51,7 @@ REST 使用 `GET /api/messages` 替换历史快照，切换会话使用
 | --- | --- |
 | capability 不符合 `[A-Za-z0-9_-]{32,128}` | 不建立 WS，进入显式 transport error |
 | REST 非 2xx 或 history schema 非法 | 不连接 WS，保留显式 error |
+| status 缺少/未知/不一致的 `provider_blocker_code` | 拒绝 metadata，暴露显式 protocol error |
 | WS JSON/schema/alias 非法 | 关闭 socket，终止流，清除 pending approval，保持 protocol error |
 | 普通断连 | 终止流并清审批，2 秒后重连；不清 queue |
 | 重连或 session switch | 先拉 canonical history，成功后才连接 WS |
