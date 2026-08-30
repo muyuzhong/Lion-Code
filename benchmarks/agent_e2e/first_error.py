@@ -49,12 +49,18 @@ class FirstErrorKind(str, Enum):
 
 
 class FirstErrorAttribution(VersionedModel):
-    """一次 first-error 定位:类型 + 置信度 + 两侧序列位置 + 因果片段。"""
+    """一次 first-error 定位:类型 + 置信度 + 两侧序列位置 + 因果片段。
+
+    ``evidence_available`` 为 False 表示任一侧过程证据不可用(空
+    evidence,如旧格式轨迹),此时其它字段不携带归因语义,只说明
+    「无法归因」——不要把「没测」误报成「没有 first error」。
+    """
 
     task_id: str = Field(min_length=1, max_length=128)
     attempt: int | None = Field(default=None, ge=1)
     kind: FirstErrorKind
     confidence: float = Field(ge=0, le=1)
+    evidence_available: bool = True
     common_prefix_calls: int = Field(ge=0)
     baseline_sequence: int | None = None
     candidate_sequence: int | None = None
@@ -122,10 +128,26 @@ def attribute_first_error(
 ) -> FirstErrorAttribution | None:
     """在成对轨迹上定位第一次有因果意义的偏离。
 
+    任一侧过程证据为空(旧格式/不可用轨迹)时显式返回
+    ``evidence_available=False`` 的 attribution,不做归因——不要把
+    「没测」误报成「candidate 插入/删除了调用」或 0.6 置信的错误。
+
     两条轨迹完全一致(调用级)且无 process violation 时返回 None。
     强证据(candidate 有 violation)confidence 1.0(baseline 也有同类则
     0.7);仅有行为分歧时低置信(0.4;pass→fail 时 0.6)。
     """
+
+    if not baseline_evidence or not candidate_evidence:
+        missing = "baseline" if not baseline_evidence else "candidate"
+        return FirstErrorAttribution(
+            task_id=task.task_id,
+            attempt=candidate_result.attempt,
+            kind=FirstErrorKind.UNKNOWN,
+            confidence=0.0,
+            evidence_available=False,
+            common_prefix_calls=0,
+            reasons=(f"{missing} 侧过程证据为空(旧格式/不可用轨迹),无法做首错归因",),
+        )
 
     baseline_calls = _call_sequence(baseline_evidence)
     candidate_calls = _call_sequence(candidate_evidence)
@@ -221,15 +243,18 @@ def attribute_first_error(
 
 
 def _call_sequence(evidence: Sequence[ProcessEvidence]) -> tuple[_Call, ...]:
-    """把 ProcessEvidence 聚成调用序列(按首次出现顺序)。
+    """把 ProcessEvidence 聚成调用序列(按 sequence 排序后的首次出现顺序)。
 
+    聚合前必须先按 sequence 排序:调用方传入顺序可能被打乱,若按传入
+    顺序聚合,同一组证据会得到不同的共同前缀与 first divergence。
     无 tool_call_id 的 evidence(validation/termination/compaction)不是
     语义动作,不参与对齐;它们仍参与 ProcessVerifier 的错误信号。
     """
 
+    ordered = tuple(sorted(evidence, key=lambda item: item.sequence))
     by_call: dict[str, list[ProcessEvidence]] = {}
     order: list[str] = []
-    for item in evidence:
+    for item in ordered:
         if item.tool_call_id is None:
             continue
         if item.tool_call_id not in by_call:
@@ -391,7 +416,11 @@ def _snippet(
 
 
 def _describe(item: ProcessEvidence) -> str:
-    """单条证据的可读摘要;不含路径或命令原文。"""
+    """单条证据的可读摘要;不含路径或命令原文。
+
+    验证命令通常同时带有工具名(如 pytest 调用),tool 分支同样要
+    保留 ``validation`` 标记,不能因提前返回而丢。
+    """
 
     if item.tool_name:
         parts = [str(item.sequence), item.tool_name]
@@ -404,6 +433,8 @@ def _describe(item: ProcessEvidence) -> str:
             ToolPhase.UPDATE,
         }:
             parts.append(f"fp={item.tool_fingerprint[:8]}")
+        if item.validation_command:
+            parts.append("validation")
         return " ".join(parts)
     if item.termination is not None:
         return f"{item.sequence} termination={item.termination.value}"

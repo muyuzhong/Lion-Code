@@ -344,3 +344,93 @@ class TestNoError:
         assert attribution is not None
         restored = FirstErrorAttribution.from_json(attribution.canonical_json())
         assert restored == attribution
+
+
+class TestEvidenceAvailability:
+    def test_empty_baseline_returns_unavailable(self) -> None:
+        candidate_result, candidate_evidence = _candidate_unrecovered()
+        attribution = attribute_first_error(
+            task=_task(),
+            candidate_result=candidate_result,
+            baseline_result=_result(passed=True),
+            baseline_evidence=(),
+            candidate_evidence=candidate_evidence,
+        )
+        # 旧格式/不可用轨迹不得被误报成「candidate 插入调用」。
+        assert attribution is not None
+        assert attribution.evidence_available is False
+        assert attribution.confidence == 0.0
+        assert attribution.kind is FirstErrorKind.UNKNOWN
+        assert "无法做首错归因" in attribution.reasons[0]
+
+    def test_empty_candidate_returns_unavailable(self) -> None:
+        baseline_result, baseline_evidence = _baseline_ok()
+        attribution = attribute_first_error(
+            task=_task(),
+            candidate_result=_result(passed=False),
+            baseline_result=baseline_result,
+            baseline_evidence=baseline_evidence,
+            candidate_evidence=(),
+        )
+        assert attribution is not None
+        assert attribution.evidence_available is False
+        assert attribution.confidence == 0.0
+
+
+class TestOrderIndependence:
+    def test_unordered_evidence_still_aligned(self) -> None:
+        baseline_result, baseline_evidence = _baseline_ok()
+        candidate_result, candidate_evidence = _candidate_unrecovered()
+        # 同一组证据按乱序传入,归因必须与有序时一致(聚合前统一按
+        # sequence 排序,不能依赖传入顺序)。
+        shuffled = tuple(reversed(candidate_evidence))
+        ordered = attribute_first_error(
+            task=_task(),
+            candidate_result=candidate_result,
+            baseline_result=baseline_result,
+            baseline_evidence=baseline_evidence,
+            candidate_evidence=candidate_evidence,
+        )
+        unordered = attribute_first_error(
+            task=_task(),
+            candidate_result=candidate_result,
+            baseline_result=baseline_result,
+            baseline_evidence=baseline_evidence,
+            candidate_evidence=shuffled,
+        )
+        assert ordered is not None and unordered is not None
+        assert ordered.kind is unordered.kind is FirstErrorKind.ERROR_RECOVERY
+        assert ordered.candidate_sequence == unordered.candidate_sequence == 6
+        assert ordered.common_prefix_calls == unordered.common_prefix_calls
+
+
+class TestCausalSnippet:
+    def test_tool_validation_event_keeps_marker(self) -> None:
+        # 验证命令通常同时带工具名:tool 分支不能丢掉 validation 标记。
+        baseline_result, baseline_evidence = _baseline_ok()
+        candidate = _result(passed=True)
+        candidate_evidence = (
+            _start(1, "c1", "read_file", _fp(1)),
+            _end(2, "c1", "read_file"),
+            _start(3, "c2", "read_file", _fp(2)),
+            _end(4, "c2", "read_file"),
+            _start(5, "c3", "edit_file", _fp(9)),
+            _end(6, "c3", "edit_file"),
+            ProcessEvidence(
+                sequence=7,
+                tool_call_id="c4",
+                tool_phase=ToolPhase.START,
+                tool_name="run_shell",
+                tool_fingerprint=_fp(7),
+                validation_command=True,
+            ),
+        )
+        attribution = attribute_first_error(
+            task=_task(),
+            candidate_result=candidate,
+            baseline_result=baseline_result,
+            baseline_evidence=baseline_evidence,
+            candidate_evidence=candidate_evidence,
+        )
+        assert attribution is not None
+        assert any("validation" in line for line in attribution.candidate_events)
