@@ -198,6 +198,121 @@ Its name is historical session terminology, not a project Memory subsystem.
 Canonical history, restore, compaction, legacy JSON read-only migration, and
 Event Stream behavior remain in scope and must keep their tests.
 
+## Provider readiness projection contract
+
+### 1. Scope / Trigger
+
+This contract applies when Runtime, Application, REST status, or the Desktop
+Renderer needs to answer whether the active Provider can be used for a request.
+The readiness answer must have one Runtime-owned formula and one stable wire
+reason; consumers must not independently recompute it from credentials or URLs.
+
+### 2. Signatures
+
+```python
+ProviderReadinessBlockerCode = Literal["provider_configuration_required"]
+
+@dataclass(frozen=True, slots=True)
+class ProviderReadiness:
+    ready: bool
+    blocker_code: ProviderReadinessBlockerCode | None
+
+class ProviderConfigurationProjection:
+    def readiness(self) -> ProviderReadiness: ...
+
+class ProviderController:
+    @property
+    def provider_readiness(self) -> ProviderReadiness: ...
+
+GET /api/status -> {
+    "api_configured": bool,
+    "provider_blocker_code": "provider_configuration_required" | null,
+}
+```
+
+`ProviderConfigurationProjection.readiness()` is the only readiness formula.
+`ProviderController.api_configured`, `RuntimeIdentityPort.api_configured`,
+`MetaAgent.api_configured`, `LionCodingSession.api_configured`, and the REST
+status value all derive from its `ready` value. Application ports expose the
+same pair structurally as `provider_readiness.ready` and
+`provider_readiness.blocker_code`.
+
+### 3. Contracts
+
+- `ready=true` always serializes with `provider_blocker_code=null`.
+- `ready=false` always serializes with
+  `provider_blocker_code="provider_configuration_required"`.
+- Anthropic requires a non-empty API key; OpenAI-compatible requires a
+  non-empty API key and a truthy base URL. An injected concrete Provider is
+  considered usable even when its configuration fields are empty.
+- A successful `ProviderController` transition synchronizes the existing
+  projection state; a failed Provider construction or replacement leaves the
+  prior state and readiness unchanged.
+- The readiness code is intentionally one coarse configuration blocker. It
+  does not classify model, network, workspace, capability, or health state.
+- The Desktop `ServerStatus` decoder accepts only the two consistent pairs and
+  rejects a missing, unknown, or inconsistent blocker code as a protocol
+  error.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Injected concrete Provider with empty credential fields | `ready=true`, blocker `null`; the Provider may run |
+| Anthropic with a non-empty API key | `ready=true`, blocker `null` |
+| OpenAI-compatible with key and non-empty base URL | `ready=true`, blocker `null` |
+| Missing key, or OpenAI-compatible missing/empty base URL | `ready=false`, blocker `provider_configuration_required` |
+| Provider factory/replace transition fails | Preserve the old Provider, state, and readiness |
+| Blocked Agent chat | Emit the existing canonical assistant error and make no Provider request |
+| REST status pair is inconsistent | Never emit it; derive both values from one readiness snapshot |
+| Desktop status field missing, unknown, or mismatched with `api_configured` | Reject at the decoder with an explicit metadata/protocol error |
+
+### 5. Good / Base / Bad Cases
+
+- Good: read one `ProviderReadiness` snapshot and project `ready` plus
+  `blocker_code` to every consumer and the `/api/status` response.
+- Base: keep the legacy `api_configured` boolean as a derived compatibility
+  property while callers migrate to the structured projection.
+- Bad: add a second `bool(api_key and base_url)` formula in Application,
+  Server, or Desktop, or expand this code into a four-state health catalog.
+
+### 6. Tests Required
+
+- `tests/test_provider_controller.py`: readiness truth table, immutable
+  snapshots, injected-provider readiness, empty OpenAI base handling, and
+  failed-transition rollback.
+- `tests/integration/test_meta_agent.py` and Runtime tests: public projection
+  shape, concrete-provider execution, and blocked-chat no-request/error
+  behavior.
+- `tests/server/test_server_api.py`: `/api/status` ready/null and
+  blocked/code pairs from the same session snapshot.
+- `desktop/tests/renderer/assistantRuntime.test.ts`: strict decoder accepts
+  only both valid pairs and rejects missing, unknown, or mismatched codes;
+  `WorkspaceShell` and E2E fixtures include the required field.
+- `python -m compileall -q lion_code tests`, Desktop typecheck, affected
+  Desktop tests/E2E, and `git diff --check` remain required after edits.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+status = {
+    "api_configured": bool(state.api_key and state.openai_base_url),
+    "provider_blocker_code": None,
+}
+```
+
+Correct:
+
+```python
+readiness = session.provider_readiness
+status = {
+    "api_configured": readiness.ready,
+    "provider_blocker_code": readiness.blocker_code,
+}
+```
+
 ## Goal-aware structured compaction
 
 ### 1. Scope / Trigger

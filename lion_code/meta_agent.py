@@ -27,7 +27,7 @@ from .permission_state import PermissionMode
 from .providers.thinking import ThinkingLevel
 from .runtime.agent import AgentRunResult, AgentRuntime
 from .runtime.conversation import ConversationRuntime
-from .runtime.provider import ProviderController, ProviderFactory
+from .runtime.provider import ProviderController, ProviderFactory, ProviderReadiness
 from .runtime.session import SessionRuntime
 from .session_runtime import SessionRepository
 from .tooling import (
@@ -179,8 +179,12 @@ class MetaAgent:
         return self._provider_controller.view.provider_kind
 
     @property
+    def provider_readiness(self) -> ProviderReadiness:
+        return self._provider_controller.provider_readiness
+
+    @property
     def api_configured(self) -> bool:
-        return self._provider_controller.api_configured
+        return self.provider_readiness.ready
 
     def provider_config(self) -> dict[str, bool | str]:
         return self._provider_controller.get_api_config()

@@ -30,7 +30,7 @@ function settingsBootstrap(options: { saveFails?: boolean } = {}): BackendBootst
         return new Response(JSON.stringify({ detail: "配置写入失败" }), { status: 400 });
       }
       const payload = url.endsWith("/api/messages") ? []
-        : url.endsWith("/api/status") ? { session_id: "s1", model: "model-a", provider_name: "anthropic", permission_mode: "default", api_configured: true, cwd: "C:/work", thinking_level: "medium", available_thinking_levels: ["off", "medium"], input_tokens: 0, output_tokens: 0, is_running: false }
+        : url.endsWith("/api/status") ? { session_id: "s1", model: "model-a", provider_name: "anthropic", permission_mode: "default", api_configured: true, provider_blocker_code: null, cwd: "C:/work", thinking_level: "medium", available_thinking_levels: ["off", "medium"], input_tokens: 0, output_tokens: 0, is_running: false }
           : url.endsWith("/api/sessions") ? []
             : url.endsWith("/api/models") ? [{ provider_name: "anthropic", model: "model-a" }]
               : url.endsWith("/api/skills") ? []

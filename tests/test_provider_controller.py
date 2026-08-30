@@ -10,6 +10,7 @@ import pytest
 from lion_code.runtime.provider import (
     ProviderConfigurationProjection,
     ProviderController,
+    ProviderReadiness,
     ProviderState,
 )
 
@@ -120,6 +121,100 @@ def test_view_is_read_only_and_state_has_no_derived_fields() -> None:
         controller.view.model = "other"
 
 
+@pytest.mark.parametrize(
+    ("provider_kind", "api_key", "openai_base_url", "provider_ready", "expected"),
+    [
+        (
+            "anthropic",
+            "key-a",
+            None,
+            False,
+            ProviderReadiness(ready=True, blocker_code=None),
+        ),
+        (
+            "openai-compatible",
+            "key-a",
+            "https://api.test/v1",
+            False,
+            ProviderReadiness(ready=True, blocker_code=None),
+        ),
+        (
+            "anthropic",
+            "",
+            None,
+            False,
+            ProviderReadiness(
+                ready=False,
+                blocker_code="provider_configuration_required",
+            ),
+        ),
+        (
+            "openai-compatible",
+            "",
+            "https://api.test/v1",
+            False,
+            ProviderReadiness(
+                ready=False,
+                blocker_code="provider_configuration_required",
+            ),
+        ),
+        (
+            "openai-compatible",
+            "key-a",
+            None,
+            False,
+            ProviderReadiness(
+                ready=False,
+                blocker_code="provider_configuration_required",
+            ),
+        ),
+        (
+            "openai-compatible",
+            "key-a",
+            "",
+            False,
+            ProviderReadiness(
+                ready=False,
+                blocker_code="provider_configuration_required",
+            ),
+        ),
+        (
+            "anthropic",
+            "",
+            None,
+            True,
+            ProviderReadiness(ready=True, blocker_code=None),
+        ),
+    ],
+)
+def test_projection_returns_one_frozen_readiness_snapshot(
+    provider_kind,
+    api_key,
+    openai_base_url,
+    provider_ready,
+    expected,
+) -> None:
+    state = ProviderState(
+        model="model-a",
+        provider_kind=provider_kind,
+        api_key=api_key,
+        openai_base_url=openai_base_url,
+        anthropic_base_url=None,
+        thinking_enabled=False,
+        thinking_level="off",
+    )
+    projection = ProviderConfigurationProjection(
+        _state=state,
+        _provider_ready=provider_ready,
+    )
+
+    snapshot = projection.readiness()
+
+    assert snapshot == expected
+    with pytest.raises(FrozenInstanceError):
+        snapshot.ready = not snapshot.ready
+
+
 def test_replacement_transaction_refreshes_derived_services_and_retires_old() -> None:
     factory_calls: list[dict] = []
 
@@ -179,11 +274,13 @@ def test_factory_failure_keeps_conversation_and_view_unchanged() -> None:
         conversation=conversation,
     )
     before = controller.view
+    before_readiness = controller.provider_readiness
 
     with pytest.raises(RuntimeError, match="bad provider"):
         controller.configure(api_key="key-b")
 
     assert controller.view == before
+    assert controller.provider_readiness == before_readiness
     assert conversation.provider is old_provider
     assert conversation.events == []
     assert context.events == []

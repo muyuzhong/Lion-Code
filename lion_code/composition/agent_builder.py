@@ -75,6 +75,7 @@ from ..runtime.provider import (
     ProviderController,
     ProviderFactory,
     ProviderKind,
+    ProviderReadiness,
     ProviderState,
     build_provider_for_state,
 )
@@ -289,7 +290,7 @@ def build_agent_composition(
 
     identity_port = _build_identity_port(
         foundation,
-        api_configured=provider_projection.is_api_configured,
+        provider_readiness=provider_projection.readiness,
     )
 
     capability_graph = _build_capability_graph(
@@ -594,11 +595,11 @@ def _build_provider_state(config: AgentConfig) -> ProviderState:
 def _build_identity_port(
     foundation: _FoundationGraph,
     *,
-    api_configured: Callable[[], bool],
+    provider_readiness: Callable[[], ProviderReadiness],
 ) -> RuntimeIdentityPort:
     return RuntimeIdentityPort(
         terminal_output=foundation.confirmation.terminal_output,
-        api_configured=api_configured,
+        provider_readiness=provider_readiness,
         terminal_renderer_factory=foundation.renderer_factory,
         notices=foundation.notices,
     )

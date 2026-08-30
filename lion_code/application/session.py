@@ -37,7 +37,7 @@ from .events import (
     QueueUpdateEvent,
     SessionAgentEndEvent,
 )
-from .ports import CodingSessionBackend
+from .ports import CodingSessionBackend, ProviderReadinessPort
 from .provider_settings import ModelChoice, load_model_choices, remember_model
 from .skills import Skill
 
@@ -109,7 +109,7 @@ class LionCodingSession:
 
     @property
     def api_configured(self) -> bool:
-        return self._backend.api_configured
+        return self._backend.provider_readiness.ready
 
     # ─── 状态 ────────────────────────────────────────────────
 
@@ -466,6 +466,10 @@ class LionCodingSession:
                 # 任务真正结束时归位 is_running,并取回异常避免 asyncio 告警。
                 task.add_done_callback(self._finalize_orphaned_run)
         yield AgentSettledEvent()
+
+    @property
+    def provider_readiness(self) -> ProviderReadinessPort:
+        return self._backend.provider_readiness
 
     def _map_event(
         self,

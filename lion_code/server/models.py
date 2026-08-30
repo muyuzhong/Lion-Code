@@ -114,12 +114,16 @@ class ProtocolErrorEvent(WireModel):
 # ─── REST 接口模型 ───────────────────────────────────────────────
 
 
+ProviderReadinessBlockerCode = Literal["provider_configuration_required"]
+
+
 class ServerStatusResponse(BaseModel):
     session_id: str
     model: str
     provider_name: str
     permission_mode: str
     api_configured: bool
+    provider_blocker_code: ProviderReadinessBlockerCode | None
     cwd: str
     thinking_level: str
     available_thinking_levels: list[str]

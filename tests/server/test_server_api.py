@@ -154,7 +154,26 @@ def test_get_status() -> None:
     assert data["model"] == "gpt-4o"
     assert data["provider_name"] == "openai"
     assert data["api_configured"] is True
+    assert data["provider_blocker_code"] is None
     assert "available_thinking_levels" in data
+
+
+def test_get_status_reports_stable_provider_blocker_code() -> None:
+    backend = FakeCodingSessionBackend(
+        cwd=Path("/workspace"),
+        api_configured=False,
+    )
+    session = LionCodingSession(backend=backend, terminal_output=False)
+    client = _build_client(session)
+
+    response = client.get("/api/status")
+
+    assert response.status_code == 200
+    assert response.json()["api_configured"] is False
+    assert (
+        response.json()["provider_blocker_code"]
+        == "provider_configuration_required"
+    )
 
 
 def test_get_provider_config_returns_explicit_snapshot_without_status_key() -> None:

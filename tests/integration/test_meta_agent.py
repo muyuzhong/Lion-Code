@@ -29,6 +29,7 @@ from lion_code.core.provider_events import (
     AssistantErrorEvent,
     AssistantMessageEvent,
 )
+from lion_code.runtime.provider import ProviderReadiness
 from lion_code.session_runtime import SessionRepository
 from lion_code.tooling.builtin import create_builtin_tools
 from lion_code.tooling.execution import LocalCommandExecutionBackend
@@ -119,6 +120,9 @@ async def test_zero_extension_zero_tool_smoke(tmp_path, monkeypatch) -> None:
         tools=[],
         session_repository=SessionRepository(tmp_path / "sessions"),
     )
+
+    assert agent.provider_readiness == ProviderReadiness(ready=True, blocker_code=None)
+    assert agent.api_configured is True
 
     result = await agent.run("hello")
 
@@ -378,6 +382,7 @@ def test_meta_agent_public_surface_is_feature_neutral() -> None:
         "provider",
         "provider_config",
         "provider_name",
+        "provider_readiness",
         "queue_snapshot",
         "restore",
         "run",

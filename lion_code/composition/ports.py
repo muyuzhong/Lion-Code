@@ -7,6 +7,7 @@ from typing import Literal
 
 from ..observers import TerminalRenderer
 from ..permission_state import PermissionController
+from ..runtime.provider import ProviderReadiness
 from ..runtime.session_identity import SessionIdentityState
 
 
@@ -138,18 +139,21 @@ class RuntimeIdentityPort:
         self,
         *,
         terminal_output: bool,
-        api_configured: Callable[[], bool],
+        provider_readiness: Callable[[], ProviderReadiness],
         terminal_renderer_factory: Callable[[], TerminalRenderer],
         notices: NoticeController,
     ) -> None:
         self._terminal_output = terminal_output
-        self._api_configured = api_configured
+        self._provider_readiness = provider_readiness
         self._terminal_renderer_factory = terminal_renderer_factory
         self._notices = notices
 
+    def provider_readiness(self) -> ProviderReadiness:
+        return self._provider_readiness()
+
     @property
     def api_configured(self) -> bool:
-        return self._api_configured()
+        return self.provider_readiness().ready
 
     def _create_terminal_renderer(self) -> TerminalRenderer:
         return self._terminal_renderer_factory()
