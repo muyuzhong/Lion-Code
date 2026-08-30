@@ -1964,3 +1964,34 @@ FastAPI lifespan 按租约 owner 顺序 exactly-once 关闭连接与 Session；V
 ### Status
 
 [OK] **Completed**
+
+## 2026-08-28 桌面客户端换图标
+
+[OK] **Completed** — 提交 `50bd7d3d`（用户侧提交，含 README logo）。
+
+- 输入：用户提供 1024×1024 RGBA PNG → `desktop/build/icon.png`。
+- 改动：`package.json`（`build.win.icon` + files 含 icon.png）、`window.ts`（BrowserWindow `icon`，路径相对 out/main，dev/asar 均解析）。
+- 验证：`electron-builder --win --x64` 成功，asar 含 build/icon.png；提取 exe 图标与 Electron 默认图标 sha256 对比确认已替换；release-verify 临时产物已清理。
+- 教训：WSL 内无法跑 Windows 侧 node_modules（rollup 原生二进制），桌面端验证一律走 `cmd.exe /c`。
+
+
+## Session 66: Provider readiness 投影与远程同步
+
+**Date**: 2026-08-31
+**Task**: Provider readiness 投影与远程同步
+**Branch**: `muyuzhong/provider-readiness-projection`
+
+### Summary
+
+完成 Provider readiness 单一投影与稳定 blocker code，补齐 REST/Desktop 严格契约及跨层测试；同步 origin/master 11 个提交并推送 topic 分支。完整 pytest 仍有既有 Windows/benchmark 基线失败，targeted 与 Desktop 门禁通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4216811d` | (see git log) |
+| `4f2f2408` | (see git log) |
+
+### Status
+
+[OK] **Completed**
