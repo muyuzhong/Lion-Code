@@ -95,6 +95,19 @@ class ProcessVerification(VersionedModel):
         return self
 
 
+class ProcessReplayContext(VersionedModel):
+    """无完整 TaskSpec/TaskResult 时,离线重放 ProcessEvidence 所需的极简上下文。
+
+    只携带 verifier 真正消费的字段(``verdict`` / ``stop_reason`` /
+    ``public_validation_commands``),让 RegressionCase 自包含、可离线
+    重放,而不必重建完整评测模型。
+    """
+
+    verdict: TaskVerdict | None = None
+    stop_reason: str | None = None
+    public_validation_commands: tuple[str, ...] = ()
+
+
 class ProcessVerifier:
     """对单条轨迹运行全部确定性证据规则的只读判定器。
 
@@ -139,21 +152,68 @@ class ProcessVerifier:
 
         events = tuple(sorted(trace_events, key=lambda event: event.sequence))
         _validate_trace_sequences(events)
+        return self._verify_shared(
+            task_id=task.task_id,
+            attempt=task_result.attempt,
+            outcome_verdict=task_result.verdict,
+            evidence=evidence,
+            context=ProcessReplayContext(
+                verdict=task_result.verdict,
+                stop_reason=(
+                    task_result.agent_run.stop_reason
+                    if task_result.agent_run is not None
+                    else None
+                ),
+                public_validation_commands=task.public_validation_commands,
+            ),
+        )
+
+    def verify_case(
+        self,
+        *,
+        evidence: Sequence[ProcessEvidence],
+        context: ProcessReplayContext | None = None,
+        task_id: str = "replay",
+    ) -> ProcessVerification:
+        """对自包含的 RegressionCase 证据重放,不重建完整评测模型。
+
+        ``context`` 只携带 verifier 消费的极简字段;与 ``verify`` 共享
+        同一套规则聚合逻辑,同一证据同一 context 必得同一判定。
+        """
+
+        active = context or ProcessReplayContext()
+        return self._verify_shared(
+            task_id=task_id,
+            attempt=None,
+            outcome_verdict=active.verdict,
+            evidence=evidence,
+            context=active,
+        )
+
+    def _verify_shared(
+        self,
+        *,
+        task_id: str,
+        attempt: int | None,
+        outcome_verdict: TaskVerdict | None,
+        evidence: Sequence[ProcessEvidence],
+        context: ProcessReplayContext,
+    ) -> ProcessVerification:
         evidence_list = tuple(sorted(evidence, key=lambda item: item.sequence))
         if not evidence_list:
             return ProcessVerification(
-                task_id=task.task_id,
-                attempt=task_result.attempt,
-                outcome_verdict=task_result.verdict,
+                task_id=task_id,
+                attempt=attempt,
+                outcome_verdict=outcome_verdict,
                 status=ProcessVerificationStatus.EVIDENCE_UNAVAILABLE,
                 extensions={"degraded_reason": "轨迹无语义化过程证据(旧格式 trace)"},
             )
         violations = [
             *self._repeated_tool_call(evidence_list),
             *self._tool_error_not_recovered(evidence_list),
-            *self._validation_missing(task, task_result, evidence_list),
+            *self._validation_missing(context, evidence_list),
             *self._test_tampering(evidence_list),
-            *self._premature_termination(task_result, evidence_list),
+            *self._premature_termination(context, evidence_list),
             *self._context_regression(evidence_list),
         ]
         if any(
@@ -166,9 +226,9 @@ class ProcessVerifier:
         else:
             status = ProcessVerificationStatus.VALID
         return ProcessVerification(
-            task_id=task.task_id,
-            attempt=task_result.attempt,
-            outcome_verdict=task_result.verdict,
+            task_id=task_id,
+            attempt=attempt,
+            outcome_verdict=outcome_verdict,
             status=status,
             violations=tuple(violations),
         )
@@ -245,15 +305,14 @@ class ProcessVerifier:
 
     def _validation_missing(
         self,
-        task: TaskSpec,
-        task_result: TaskResult,
+        context: ProcessReplayContext,
         evidence: Sequence[ProcessEvidence],
     ) -> list[ProcessViolation]:
         # 只有“声称完成”的 PASS 结果才要求验证行为;FAILED 不存在
         # “没验证就声称完成”的语义,避免把能力不足误判为过程造假。
-        if task_result.verdict is not TaskVerdict.PASSED:
+        if context.verdict is not TaskVerdict.PASSED:
             return []
-        if not task.public_validation_commands:
+        if not context.public_validation_commands:
             return []
         observed = any(item.validation_command for item in evidence)
         if observed:
@@ -291,15 +350,11 @@ class ProcessVerifier:
 
     def _premature_termination(
         self,
-        task_result: TaskResult,
+        context: ProcessReplayContext,
         evidence: Sequence[ProcessEvidence],
     ) -> list[ProcessViolation]:
         terminations = [item for item in evidence if item.termination is not None]
-        stop_reason = (
-            task_result.agent_run.stop_reason
-            if task_result.agent_run is not None
-            else ""
-        )
+        stop_reason = context.stop_reason or ""
         marker_hit = _contains_marker(stop_reason, self.premature_markers)
         if not terminations and not marker_hit:
             return []
@@ -440,6 +495,7 @@ def _contains_marker(value: str, markers: Sequence[str]) -> bool:
 
 
 __all__ = [
+    "ProcessReplayContext",
     "ProcessSeverity",
     "ProcessVerification",
     "ProcessVerificationStatus",

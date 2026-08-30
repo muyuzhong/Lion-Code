@@ -242,7 +242,11 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   a compaction repeating a pre-compaction failed fingerprint). Thresholds and tool lists are
   constructor parameters. The committed calibration fixtures
   (`tests/benchmarks/fixtures/agent_e2e/calibration/`) pin recall (violations detected) and
-  precision (clean traces never vetoed).
+  precision (clean traces never vetoed). `ProcessReplayContext` (verdict / stop_reason /
+  public_validation_commands) and `verify_case(evidence, *, context, task_id)` enable offline
+  replay of a self-contained RegressionCase without reconstructing a full TaskSpec/TaskResult;
+  `verify` and `verify_case` share the same rule aggregation and the same context must yield
+  the same verification.
 - `PairedExperiment` distinguishes three experiment kinds. `CONTROLLED` requires equal
   `agent_code_sha` between baseline and candidate **and verified treatment at run
   granularity**: each side must validate as a single consistent `RunInjectionEvidence`
@@ -343,6 +347,28 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   phase + fp-prefix + error/validation/termination markers only — no paths or command
   text, and tool-bearing validation events keep their `validation` marker) that the next
   `regression_probe` layer can minimize.
+- `regression_probe.probe_holds` and `regression_probe.minimize_failure_evidence` perform
+  deterministic failure-fragment minimization on `ProcessEvidence[]`: the slice loop reuses
+  `ProcessVerifier` to test whether the target `ProcessViolationType` still holds, empty
+  evidence never counts as a violation, and greedy per-event removal converges to a locally
+  minimal fragment where removing any single event breaks the violation. Violation-specific
+  sufficiency (failed call + same-fingerprint repeat for `TOOL_ERROR_NOT_RECOVERED`; failed
+  call + compaction + post-compaction same-fingerprint call for `CONTEXT_REGRESSION`; a single
+  write tool touching test/verifier scope for `TEST_TAMPERING`) lives in the verifier rules,
+  not in the trimming loop, so the minimizer is not a dumb event-count trimmer.
+- `regression_corpus` turns a `FirstErrorAttribution` into a self-contained `RegressionCase`
+  only when evidence is available, confidence is exactly 1.0, and the candidate evidence
+  actually carries one of the six supported deterministic violations (`TEST_TAMPERING`,
+  `TOOL_ERROR_NOT_RECOVERED`, `VALIDATION_MISSING`, `CONTEXT_REGRESSION`,
+  `PREMATURE_TERMINATION`, `REPEATED_TOOL_CALL`). Low-confidence (`PASS→FAIL` divergence at
+  0.6), unavailable-evidence, and pure-behavior-divergence (`TOOL_SELECTION`/`TOOL_ARGUMENT`/
+  `UNKNOWN`) attributions are rejected, and a PASS→PASS divergence never yields an attribution
+  in the first place. The case stores structured `ProcessEvidence` (the minimized fragment)
+  plus provenance (`source_task_id`/`source_attempt`/`source_run_id`/`first_error_kind`/
+  `source_fingerprint`) and a `ProcessReplayContext`; it never stores #149's readable snippet
+  strings. `run_regression_corpus` replays each case offline with `verify_case` and emits
+  PASS/FAIL/INVALID per case, aggregated into `RegressionCorpusReport` — deterministically,
+  same cases in, same report out.
 - `classify_failure` consumes only redacted `TraceEvent` metadata and emits candidate labels plus
   event sequence offsets. Three consecutive identical tool/argument/workspace fingerprints are
   `loop`; typed context/compaction signals are `context_decay`; a disallowed tool or typed
@@ -450,6 +476,13 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
 - `tests/benchmarks/test_regression_feedback.py`: pass/reject/invalid/waived decisions,
   deliberate `3/3 -> 0/3` ledger interception, self-only scope, four trace failure rules,
   infrastructure priority, signature deduplication, and reviewed holdout-to-regression retirement.
+- `tests/benchmarks/test_regression_probe.py`: probe holds on unrecovered error / context
+  regression / test tampering, empty-evidence false, long-trace trimming to a shorter fragment,
+  single-event-removal minimality, initial-slice misuse, and the injected-probe loop.
+- `tests/benchmarks/test_regression_corpus.py`: admission rejections (low confidence /
+  unavailable evidence / no deterministic violation), PASS→PASS never entering the corpus,
+  full-flow minimization provenance, `REPEATED_TOOL_CALL` admission despite `UNKNOWN` kind,
+  JSON round-trip, and runner PASS/FAIL/INVALID with same-input determinism.
 - Before handoff run focused evaluation tests, `python -m pytest -q`,
   `python -m compileall -q lion_code benchmarks tests`, and `git diff --check`.
 
