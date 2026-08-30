@@ -331,9 +331,11 @@ returns exit code `2` with a JSON `blocked` status until a real backend exists.
   unrecovered tool error → `ERROR_RECOVERY`, validation missing → `VALIDATION`, compaction
   regression → `CONTEXT`, premature termination → `TERMINATION`, behavior divergence →
   `TOOL_SELECTION`/`TOOL_ARGUMENT`/`UNKNOWN`. Confidence is 1.0 for a candidate-only
-  violation (0.7 if baseline has the same kind), 0.6 for a bare divergence combined with
-  baseline-pass→candidate-fail, 0.4 for a harmless divergence, and `None` when the call
-  sequences are identical with no violation. Evidence aggregation sorts by `sequence`
+  violation (0.7 if baseline has the same kind), and a bare divergence without any
+  violation only yields a low-confidence candidate (0.6) when baseline PASSES while the
+  candidate FAILS — a PASS→PASS divergence is a different implementation path, **not** a
+  first error, and returns `None` so harmless tool-selection differences never pollute the
+  regression corpus. Evidence aggregation sorts by `sequence`
   before building calls (order-independent), and empty evidence on either side (legacy /
   unavailable trace) returns an explicit `evidence_available=False` attribution with
   confidence 0 instead of fabricating an insertion/deletion divergence. The output carries

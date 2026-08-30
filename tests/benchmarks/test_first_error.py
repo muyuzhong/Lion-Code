@@ -248,9 +248,10 @@ class TestValidation:
 
 
 class TestDivergenceOnly:
-    def test_tool_argument_divergence_low_confidence(self) -> None:
+    def test_pass_to_pass_argument_divergence_returns_none(self) -> None:
+        # candidate 换参数但最终 PASS、无 violation:PASS→PASS 的不同
+        # 实现路径不是 first error,不得污染 regression 语料。
         baseline_result, baseline_evidence = _baseline_ok()
-        # candidate 换参数但最终成功、无 violation。
         candidate = _result(passed=True)
         candidate_evidence = (
             _start(1, "c1", "read_file", _fp(1)),
@@ -268,12 +269,9 @@ class TestDivergenceOnly:
             baseline_evidence=baseline_evidence,
             candidate_evidence=candidate_evidence,
         )
-        assert attribution is not None
-        assert attribution.kind is FirstErrorKind.TOOL_ARGUMENT
-        assert attribution.confidence == 0.4
-        assert attribution.candidate_sequence == 5
+        assert attribution is None
 
-    def test_tool_selection_divergence(self) -> None:
+    def test_pass_to_pass_selection_divergence_returns_none(self) -> None:
         baseline_result, baseline_evidence = _baseline_ok()
         candidate = _result(passed=True)
         candidate_evidence = (
@@ -292,11 +290,9 @@ class TestDivergenceOnly:
             baseline_evidence=baseline_evidence,
             candidate_evidence=candidate_evidence,
         )
-        assert attribution is not None
-        assert attribution.kind is FirstErrorKind.TOOL_SELECTION
-        assert attribution.confidence == 0.4
+        assert attribution is None
 
-    def test_pass_to_fail_raises_divergence_confidence(self) -> None:
+    def test_pass_to_fail_divergence_is_low_confidence_candidate(self) -> None:
         baseline_result, baseline_evidence = _baseline_ok()
         candidate = _result(passed=False)
         candidate_evidence = (
@@ -316,6 +312,7 @@ class TestDivergenceOnly:
             candidate_evidence=candidate_evidence,
         )
         assert attribution is not None
+        assert attribution.kind is FirstErrorKind.TOOL_SELECTION
         assert attribution.confidence == 0.6
 
 
@@ -407,8 +404,9 @@ class TestOrderIndependence:
 class TestCausalSnippet:
     def test_tool_validation_event_keeps_marker(self) -> None:
         # 验证命令通常同时带工具名:tool 分支不能丢掉 validation 标记。
+        # candidate FAIL(PASS→FAIL 低置信候选)以产出 attribution。
         baseline_result, baseline_evidence = _baseline_ok()
-        candidate = _result(passed=True)
+        candidate = _result(passed=False)
         candidate_evidence = (
             _start(1, "c1", "read_file", _fp(1)),
             _end(2, "c1", "read_file"),

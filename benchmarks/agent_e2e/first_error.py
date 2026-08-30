@@ -11,7 +11,8 @@ Gate V2 只回答「这个 Harness 改动整体变差没有」;本模块回答�
    证据才提升为 first error;
 3. 按固定优先级定位 first error:critical veto > 未恢复错误 >
    validation 缺失 > compaction 后重复 > premature termination >
-   普通行为 divergence。
+   普通行为 divergence(仅当 baseline PASS → candidate FAIL 时产出
+   低置信候选;PASS→PASS 的不同实现路径不是 first error,返回 None)。
 
 输出一个短因果片段(baseline_events / candidate_events,红acted 摘要
 行),供后续 regression_probe 做前缀最小化。
@@ -134,7 +135,9 @@ def attribute_first_error(
 
     两条轨迹完全一致(调用级)且无 process violation 时返回 None。
     强证据(candidate 有 violation)confidence 1.0(baseline 也有同类则
-    0.7);仅有行为分歧时低置信(0.4;pass→fail 时 0.6)。
+    0.7);无 violation 时只有 baseline PASS → candidate FAIL 才给低
+    置信候选(0.6)——PASS→PASS 的不同实现路径不是 first error,
+    返回 None。
     """
 
     if not baseline_evidence or not candidate_evidence:
@@ -209,24 +212,23 @@ def attribute_first_error(
             reasons=signal.reasons,
         )
 
-    # 无 process violation:只有行为分歧,低置信(可能只是同等有效的不同路径)。
+    # 无 process violation 的纯行为分歧:只有 baseline PASS → candidate
+    # FAIL 时才给低置信候选(0.6);PASS→PASS 的不同实现路径不是
+    # first error,返回 None——否则 harmless divergence 会污染
+    # regression_probe 的回归语料。
     if divergence is None:
         return None
-    if (
+    if not (
         baseline_result is not None
-        and candidate_result.verdict is TaskVerdict.FAILED
         and baseline_result.verdict is TaskVerdict.PASSED
+        and candidate_result.verdict is TaskVerdict.FAILED
     ):
-        confidence = 0.6
-        reason = "无 process violation,但 baseline pass→candidate fail 且存在行为分歧"
-    else:
-        confidence = 0.4
-        reason = "无 process violation,仅行为分歧(可能是同等有效的不同路径)"
+        return None
     return FirstErrorAttribution(
         task_id=task.task_id,
         attempt=candidate_result.attempt,
         kind=divergence.kind,
-        confidence=confidence,
+        confidence=0.6,
         common_prefix_calls=prefix,
         baseline_sequence=divergence.baseline_sequence,
         candidate_sequence=divergence.candidate_sequence,
@@ -238,7 +240,9 @@ def attribute_first_error(
         candidate_events=_snippet(
             candidate_evidence, divergence.candidate_sequence or 1, 6
         ),
-        reasons=(reason,),
+        reasons=(
+            "无 process violation,但 baseline PASS → candidate FAIL 且存在行为分歧",
+        ),
     )
 
 
