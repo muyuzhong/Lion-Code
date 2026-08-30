@@ -99,8 +99,8 @@ class ProcessReplayContext(VersionedModel):
     """无完整 TaskSpec/TaskResult 时,离线重放 ProcessEvidence 所需的极简上下文。
 
     只携带 verifier 真正消费的字段(``verdict`` / ``stop_reason`` /
-    ``public_validation_commands``),让 RegressionCase 自包含、可离线
-    重放,而不必重建完整评测模型。
+    ``public_validation_commands``),让 EvidenceRegressionCase 自包含、
+    可离线重放,而不必重建完整评测模型。
     """
 
     verdict: TaskVerdict | None = None
@@ -175,10 +175,11 @@ class ProcessVerifier:
         context: ProcessReplayContext | None = None,
         task_id: str = "replay",
     ) -> ProcessVerification:
-        """对自包含的 RegressionCase 证据重放,不重建完整评测模型。
+        """对自包含的 EvidenceRegressionCase 证据重放,不重建完整评测模型。
 
         ``context`` 只携带 verifier 消费的极简字段;与 ``verify`` 共享
-        同一套规则聚合逻辑,同一证据同一 context 必得同一判定。
+        同一套规则聚合逻辑,同一证据同一 context 必得同一判定。该重放只
+        验证检测规则本身,不执行任何 Harness 逻辑。
         """
 
         active = context or ProcessReplayContext()

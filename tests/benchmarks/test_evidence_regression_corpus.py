@@ -1,4 +1,4 @@
-"""Harness Regression Corpus 单元测试:入库判定 + 生成 + 离线 runner(验收 3/4/5)。"""
+"""Evidence Regression Corpus 单元测试:入库判定 + 生成 + 离线 runner(验收 3/4/5)。"""
 
 from __future__ import annotations
 
@@ -6,6 +6,15 @@ from benchmarks.agent_e2e.evidence import (
     ProcessEvidence,
     TargetScope,
     ToolPhase,
+)
+from benchmarks.agent_e2e.evidence_regression_corpus import (
+    EvidenceRegressionCase,
+    EvidenceRegressionCaseResult,
+    EvidenceRegressionCaseStatus,
+    EvidenceRegressionCorpusReport,
+    attribution_can_enter_evidence_corpus,
+    evidence_regression_case_from_attribution,
+    run_evidence_regression_corpus,
 )
 from benchmarks.agent_e2e.first_error import (
     FirstErrorAttribution,
@@ -26,15 +35,6 @@ from benchmarks.agent_e2e.process_verifier import (
     ProcessVerificationStatus,
     ProcessVerifier,
     ProcessViolationType,
-)
-from benchmarks.agent_e2e.regression_corpus import (
-    RegressionCase,
-    RegressionCaseResult,
-    RegressionCaseStatus,
-    RegressionCorpusReport,
-    attribution_can_enter_corpus,
-    regression_case_from_attribution,
-    run_regression_corpus,
 )
 
 
@@ -148,7 +148,7 @@ def _candidate_unrecovered() -> tuple[TaskResult, tuple[ProcessEvidence, ...]]:
     )
 
 
-def _build_unrecovered_case() -> RegressionCase:
+def _build_unrecovered_case() -> EvidenceRegressionCase:
     task = _task()
     baseline_result, baseline_evidence = _baseline_ok()
     candidate_result, candidate_evidence = _candidate_unrecovered()
@@ -160,7 +160,7 @@ def _build_unrecovered_case() -> RegressionCase:
         candidate_evidence=candidate_evidence,
     )
     assert attribution is not None
-    case = regression_case_from_attribution(
+    case = evidence_regression_case_from_attribution(
         task=task,
         candidate_result=candidate_result,
         candidate_evidence=candidate_evidence,
@@ -172,7 +172,7 @@ def _build_unrecovered_case() -> RegressionCase:
 
 
 class TestAdmission:
-    """验收 3:confidence < 1.0 不允许自动生成 RegressionCase。"""
+    """验收 3:confidence < 1.0 不允许自动生成 EvidenceRegressionCase。"""
 
     def test_low_confidence_attribution_rejected(self) -> None:
         task = _task()
@@ -185,7 +185,7 @@ class TestAdmission:
             confidence=0.6,
             common_prefix_calls=1,
         )
-        accepted, reason = attribution_can_enter_corpus(
+        accepted, reason = attribution_can_enter_evidence_corpus(
             attribution,
             task=task,
             candidate_result=candidate_result,
@@ -193,7 +193,7 @@ class TestAdmission:
         )
         assert accepted is False
         assert "置信" in reason
-        case = regression_case_from_attribution(
+        case = evidence_regression_case_from_attribution(
             task=task,
             candidate_result=candidate_result,
             candidate_evidence=candidate_evidence,
@@ -213,7 +213,7 @@ class TestAdmission:
             common_prefix_calls=0,
             reasons=("旧格式轨迹,无法归因",),
         )
-        accepted, reason = attribution_can_enter_corpus(
+        accepted, reason = attribution_can_enter_evidence_corpus(
             attribution,
             task=task,
             candidate_result=candidate_result,
@@ -237,7 +237,7 @@ class TestAdmission:
             confidence=1.0,
             common_prefix_calls=1,
         )
-        accepted, reason = attribution_can_enter_corpus(
+        accepted, reason = attribution_can_enter_evidence_corpus(
             attribution,
             task=task,
             candidate_result=candidate_result,
@@ -274,7 +274,7 @@ class TestPassPassDivergence:
         assert attribution is None
         # None attribution 没有可沉淀的对象,corpus 自然为空。
         assert (
-            regression_case_from_attribution(
+            evidence_regression_case_from_attribution(
                 task=task,
                 candidate_result=candidate,
                 candidate_evidence=candidate_evidence,
@@ -304,7 +304,7 @@ class TestGeneration:
             candidate_evidence=candidate_evidence,
         )
         assert attribution is not None
-        case = regression_case_from_attribution(
+        case = evidence_regression_case_from_attribution(
             task=task,
             candidate_result=candidate_result,
             candidate_evidence=candidate_evidence,
@@ -358,7 +358,7 @@ class TestGeneration:
         )
         assert attribution is not None
         assert attribution.confidence == 1.0
-        case = regression_case_from_attribution(
+        case = evidence_regression_case_from_attribution(
             task=task,
             candidate_result=candidate,
             candidate_evidence=candidate_evidence,
@@ -369,7 +369,7 @@ class TestGeneration:
 
     def test_case_round_trip(self) -> None:
         case = _build_unrecovered_case()
-        restored = RegressionCase.from_json(case.canonical_json())
+        restored = EvidenceRegressionCase.from_json(case.canonical_json())
         assert restored == case
 
 
@@ -378,15 +378,15 @@ class TestRunner:
 
     def test_runner_reports_pass(self) -> None:
         case = _build_unrecovered_case()
-        report = run_regression_corpus((case,))
-        assert isinstance(report, RegressionCorpusReport)
+        report = run_evidence_regression_corpus((case,))
+        assert isinstance(report, EvidenceRegressionCorpusReport)
         assert report.total == 1
         assert report.passed == 1
         assert report.failed == 0
         assert report.invalid == 0
         result = report.results[0]
-        assert isinstance(result, RegressionCaseResult)
-        assert result.status is RegressionCaseStatus.PASS
+        assert isinstance(result, EvidenceRegressionCaseResult)
+        assert result.status is EvidenceRegressionCaseStatus.PASS
         assert result.passed is True
         assert (
             result.expected_violation is ProcessViolationType.TOOL_ERROR_NOT_RECOVERED
@@ -397,8 +397,8 @@ class TestRunner:
 
     def test_runner_deterministic(self) -> None:
         case = _build_unrecovered_case()
-        first = run_regression_corpus((case, case))
-        second = run_regression_corpus((case, case))
+        first = run_evidence_regression_corpus((case, case))
+        second = run_evidence_regression_corpus((case, case))
         assert first == second
         assert first.canonical_json() == second.canonical_json()
         assert first.total == 2
@@ -412,10 +412,10 @@ class TestRunner:
                 "expected_violation": ProcessViolationType.TEST_TAMPERING,
             }
         )
-        report = run_regression_corpus((changed,))
+        report = run_evidence_regression_corpus((changed,))
         assert report.failed == 1
         result = report.results[0]
-        assert result.status is RegressionCaseStatus.FAIL
+        assert result.status is EvidenceRegressionCaseStatus.FAIL
         assert result.passed is False
         assert ProcessViolationType.TOOL_ERROR_NOT_RECOVERED in result.actual_violations
 
@@ -426,12 +426,12 @@ class TestRunner:
                 "expected_status": ProcessVerificationStatus.EVIDENCE_UNAVAILABLE,
             }
         )
-        report = run_regression_corpus((malformed,))
+        report = run_evidence_regression_corpus((malformed,))
         assert report.invalid == 1
-        assert report.results[0].status is RegressionCaseStatus.INVALID
+        assert report.results[0].status is EvidenceRegressionCaseStatus.INVALID
 
     def test_empty_corpus_reports_zero(self) -> None:
-        report = run_regression_corpus(())
+        report = run_evidence_regression_corpus(())
         assert report.total == 0
         assert report.passed == 0
         assert report.failed == 0

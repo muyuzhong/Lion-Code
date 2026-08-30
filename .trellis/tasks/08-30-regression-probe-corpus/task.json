@@ -1,7 +1,7 @@
 {
   "id": "regression-probe-corpus",
   "name": "regression-probe-corpus",
-  "title": "Harness Regression Probe——最小失败片段与确定性回归语料",
+  "title": "Evidence Regression Corpus——单事件不可再约简的失败片段与检测规则回归语料",
   "description": "",
   "status": "in_progress",
   "dev_type": null,

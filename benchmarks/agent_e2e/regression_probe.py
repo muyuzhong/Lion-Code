@@ -1,4 +1,5 @@
-"""失败片段最小化:把 FirstErrorAttribution 背后的证据裁成最短充分片段。
+"""失败片段最小化:把 FirstErrorAttribution 背后的证据裁成单事件不可再约简
+的充分片段(1-minimal),作为 Evidence Regression Corpus 的回归样本。
 
 V1 只做 deterministic slicing——不重跑模型、不复现 Agent 行为。裁剪
 循环本身不感知 violation 结构,差异全部由 ``probe_holds`` 承载:内部
@@ -7,6 +8,10 @@ V1 只做 deterministic slicing——不重跑模型、不复现 Agent 行为。
 failed call + 同指纹 repeat;context regression 需要 compaction 边界;
 test_tampering 只需 write tool + test/verifier scope),都由 verifier
 规则表达,而不是靠「只按事件数裁剪」的启发式。
+
+注意边界:本模块产出的片段只用于**检测规则回归**(同一 evidence 经同一
+verifier 是否仍触发同一 violation),不代表 Harness 行为回归——它不执行
+任何生产 Harness 逻辑。
 """
 
 from __future__ import annotations
@@ -63,11 +68,14 @@ def minimize_failure_evidence(
     probe: Probe | None = None,
     verifier: ProcessVerifier | None = None,
 ) -> tuple[ProcessEvidence, ...]:
-    """把证据裁成最短充分片段:任何单事件删除都会破坏目标 violation。
+    """把证据裁成单事件不可再约简的充分片段(1-minimal sufficient fragment)。
 
     greedy 逐事件裁剪:每轮从首事件开始,删除单个事件后 probe 仍成立
     则接受删除并从头重来;一整轮没有任何删除即收敛。结果与事件顺序
     无关(先按 sequence 排序),同输入必得同输出。
+
+    收敛保证的是 **1-minimal**(删除最终片段中任意一个事件,violation
+    都不再成立),不是全局最短;不为此引入组合搜索或复杂 delta debugging。
 
     初始切片不满足 probe 时抛 ``ValueError``——本函数只应对已经成立的
     violation 调用,否则「裁剪」没有意义。

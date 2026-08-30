@@ -1,9 +1,16 @@
-"""Harness Regression Corpus:从 FirstErrorAttribution 沉淀最小 RegressionCase,
+"""Evidence Regression Corpus:从 FirstErrorAttribution 沉淀证据回归样本,
 并提供确定性的离线重放 runner。
 
-corpus 保存结构化 ``ProcessEvidence``(最小失败片段)+ 溯源字段,绝不保存
-#149 的可读字符串 snippet——字符串只给人看,不能作为稳定机器回放协议。
-只有高置信(confidence == 1.0)、且 candidate 证据上有确定性
+这是 **检测规则回归语料**,不是 Harness 行为回归语料:重放同一份历史
+evidence 经过同一个 ``ProcessVerifier``,只能证明「检测系统还记得这条坏
+轨迹长什么样」,不能证明「今天修改后的 Harness 不会再产生这个错误」——
+无论 Harness 怎么改,只要 ``ProcessVerifier`` 与 evidence 不变,重放结果
+不变。真正的 Harness micro-regression 需要生产 Harness 的确定性策略入口,
+本轮不强行抽取。
+
+corpus 保存结构化 ``ProcessEvidence``(单事件不可再约简的失败片段)+ 溯源
+字段,绝不保存 #149 的可读字符串 snippet——字符串只给人看,不能作为稳定
+机器回放协议。只有高置信(confidence == 1.0)、且 candidate 证据上有确定性
 ``ProcessViolation`` 的 attribution 才允许自动沉淀;低置信(PASS→FAIL
 行为分歧 0.6)、证据不可用、纯行为分歧(TOOL_SELECTION / TOOL_ARGUMENT /
 UNKNOWN)一律不进入 corpus。V1 不做自动修改 Harness、不生成补丁、无 LLM
@@ -66,12 +73,12 @@ _VIOLATION_PRIORITY: dict[ProcessViolationType, int] = {
 }
 
 
-class RegressionCase(VersionedModel):
-    """一条最小、自包含、可离线重放的回归用例。
+class EvidenceRegressionCase(VersionedModel):
+    """一条自包含、可离线重放的检测规则回归样本。
 
-    ``evidence`` 是结构化 ``ProcessEvidence`` 最小失败片段;
-    ``replay_context`` 携带 verifier 消费的极简字段,重放不依赖原始
-    TaskSpec/TaskResult 对象。
+    ``evidence`` 是结构化 ``ProcessEvidence`` 单事件不可再约简(1-minimal)
+    的失败片段;``replay_context`` 携带 verifier 消费的极简字段,重放不
+    依赖原始 TaskSpec/TaskResult 对象。
     """
 
     case_id: str = Field(min_length=1, max_length=200)
@@ -88,7 +95,7 @@ class RegressionCase(VersionedModel):
     replay_context: ProcessReplayContext = Field(default_factory=ProcessReplayContext)
 
     @model_validator(mode="after")
-    def _validate_counts(self) -> RegressionCase:
+    def _validate_counts(self) -> EvidenceRegressionCase:
         if self.minimized_evidence_count != len(self.evidence):
             raise ValueError("minimized_evidence_count must equal evidence length")
         if self.original_evidence_count < self.minimized_evidence_count:
@@ -98,7 +105,7 @@ class RegressionCase(VersionedModel):
         return self
 
 
-class RegressionCaseStatus(str, Enum):
+class EvidenceRegressionCaseStatus(str, Enum):
     """单条 case 的离线重放判定。"""
 
     PASS = "pass"
@@ -106,11 +113,11 @@ class RegressionCaseStatus(str, Enum):
     INVALID = "invalid"
 
 
-class RegressionCaseResult(VersionedModel):
+class EvidenceRegressionCaseResult(VersionedModel):
     """单条 case 的重放结果:期望与实际 violation/status 对比。"""
 
     case_id: str = Field(min_length=1, max_length=200)
-    status: RegressionCaseStatus
+    status: EvidenceRegressionCaseStatus
     passed: bool
     expected_violation: ProcessViolationType | None
     actual_violations: tuple[ProcessViolationType, ...]
@@ -119,29 +126,29 @@ class RegressionCaseResult(VersionedModel):
     reason: str = Field(min_length=1, max_length=320)
 
     @model_validator(mode="after")
-    def _validate_passed(self) -> RegressionCaseResult:
-        if self.passed != (self.status is RegressionCaseStatus.PASS):
+    def _validate_passed(self) -> EvidenceRegressionCaseResult:
+        if self.passed != (self.status is EvidenceRegressionCaseStatus.PASS):
             raise ValueError("passed must be True only for PASS status")
         return self
 
 
-class RegressionCorpusReport(VersionedModel):
+class EvidenceRegressionCorpusReport(VersionedModel):
     """整个 corpus 的离线重放聚合报告。"""
 
     total: int = Field(ge=0)
     passed: int = Field(ge=0)
     failed: int = Field(ge=0)
     invalid: int = Field(ge=0)
-    results: tuple[RegressionCaseResult, ...] = ()
+    results: tuple[EvidenceRegressionCaseResult, ...] = ()
 
     @model_validator(mode="after")
-    def _validate_counts(self) -> RegressionCorpusReport:
+    def _validate_counts(self) -> EvidenceRegressionCorpusReport:
         if self.total != len(self.results):
             raise ValueError("total must equal results length")
         counts = {
-            RegressionCaseStatus.PASS: self.passed,
-            RegressionCaseStatus.FAIL: self.failed,
-            RegressionCaseStatus.INVALID: self.invalid,
+            EvidenceRegressionCaseStatus.PASS: self.passed,
+            EvidenceRegressionCaseStatus.FAIL: self.failed,
+            EvidenceRegressionCaseStatus.INVALID: self.invalid,
         }
         if sum(counts.values()) != self.total:
             raise ValueError("status counts must sum to total")
@@ -152,7 +159,7 @@ class RegressionCorpusReport(VersionedModel):
         return self
 
 
-def attribution_can_enter_corpus(
+def attribution_can_enter_evidence_corpus(
     attribution: FirstErrorAttribution,
     *,
     task: TaskSpec,
@@ -160,7 +167,7 @@ def attribution_can_enter_corpus(
     candidate_evidence: Sequence[ProcessEvidence],
     verifier: ProcessVerifier | None = None,
 ) -> tuple[bool, str]:
-    """attribution 是否够格自动沉淀为 RegressionCase。
+    """attribution 是否够格自动沉淀为 EvidenceRegressionCase。
 
     三条硬门槛:证据可用、confidence == 1.0、candidate 证据上存在受
     支持的确定性 violation。以实际 violation 为准而不是 kind 白名单,
@@ -187,7 +194,7 @@ def attribution_can_enter_corpus(
     return True, ""
 
 
-def regression_case_from_attribution(
+def evidence_regression_case_from_attribution(
     *,
     task: TaskSpec,
     candidate_result: TaskResult,
@@ -196,14 +203,15 @@ def regression_case_from_attribution(
     source_run_id: str | None = None,
     case_id: str | None = None,
     verifier: ProcessVerifier | None = None,
-) -> RegressionCase | None:
-    """把高置信、有确定性 violation 的 attribution 沉淀为最小 RegressionCase。
+) -> EvidenceRegressionCase | None:
+    """把高置信、有确定性 violation 的 attribution 沉淀为证据回归样本。
 
     任一入库条件不满足时返回 None;成功后对 candidate evidence 做失败
-    片段最小化,并把最小片段 + 溯源 + 重放上下文一起打包。
+    片段最小化(1-minimal),并把片段 + 溯源 + 重放上下文一起打包。该样本
+    只锁定「检测规则是否还记得这条坏轨迹」,不承担 Harness 行为回归。
     """
 
-    accepted, _reason = attribution_can_enter_corpus(
+    accepted, _reason = attribution_can_enter_evidence_corpus(
         attribution,
         task=task,
         candidate_result=candidate_result,
@@ -241,7 +249,7 @@ def regression_case_from_attribution(
     resolved_id = case_id or _default_case_id(
         task.task_id, candidate_result.attempt, attribution.fingerprint()
     )
-    return RegressionCase(
+    return EvidenceRegressionCase(
         case_id=resolved_id,
         source_task_id=task.task_id,
         source_attempt=candidate_result.attempt,
@@ -265,25 +273,30 @@ def regression_case_from_attribution(
     )
 
 
-def run_regression_corpus(
-    cases: Sequence[RegressionCase],
+def run_evidence_regression_corpus(
+    cases: Sequence[EvidenceRegressionCase],
     *,
     verifier: ProcessVerifier | None = None,
-) -> RegressionCorpusReport:
-    """对 corpus 逐条离线重放:同输入必得同报告(确定性)。
+) -> EvidenceRegressionCorpusReport:
+    """对证据回归语料逐条离线重放:同输入必得同报告(确定性)。
 
     每条 case 用自带 ``replay_context`` 跑 ``verify_case``,比较实际
-    violation/status 与 expected,输出 PASS / FAIL / INVALID。
+    violation/status 与 expected,输出 PASS / FAIL / INVALID。重放只验证
+    检测规则本身,不执行任何 Harness 逻辑。
     """
 
     active = verifier or ProcessVerifier()
     results = tuple(_replay_case(case, active) for case in cases)
-    return RegressionCorpusReport(
+    return EvidenceRegressionCorpusReport(
         total=len(results),
-        passed=sum(result.status is RegressionCaseStatus.PASS for result in results),
-        failed=sum(result.status is RegressionCaseStatus.FAIL for result in results),
+        passed=sum(
+            result.status is EvidenceRegressionCaseStatus.PASS for result in results
+        ),
+        failed=sum(
+            result.status is EvidenceRegressionCaseStatus.FAIL for result in results
+        ),
         invalid=sum(
-            result.status is RegressionCaseStatus.INVALID for result in results
+            result.status is EvidenceRegressionCaseStatus.INVALID for result in results
         ),
         results=results,
     )
@@ -314,17 +327,17 @@ def _pick_target_violation(
 
 
 def _replay_case(
-    case: RegressionCase, verifier: ProcessVerifier
-) -> RegressionCaseResult:
+    case: EvidenceRegressionCase, verifier: ProcessVerifier
+) -> EvidenceRegressionCaseResult:
     verification = verifier.verify_case(
         evidence=case.evidence,
         context=case.replay_context,
         task_id=case.source_task_id,
     )
     if case.expected_status is ProcessVerificationStatus.EVIDENCE_UNAVAILABLE:
-        return RegressionCaseResult(
+        return EvidenceRegressionCaseResult(
             case_id=case.case_id,
-            status=RegressionCaseStatus.INVALID,
+            status=EvidenceRegressionCaseStatus.INVALID,
             passed=False,
             expected_violation=case.expected_violation,
             actual_violations=(),
@@ -333,9 +346,9 @@ def _replay_case(
             reason="case 未记录可比较的 expected status,无法重放",
         )
     if verification.status is ProcessVerificationStatus.EVIDENCE_UNAVAILABLE:
-        return RegressionCaseResult(
+        return EvidenceRegressionCaseResult(
             case_id=case.case_id,
-            status=RegressionCaseStatus.INVALID,
+            status=EvidenceRegressionCaseStatus.INVALID,
             passed=False,
             expected_violation=case.expected_violation,
             actual_violations=(),
@@ -349,9 +362,9 @@ def _replay_case(
     expected_holds = case.expected_violation in actual_violations
     status_holds = verification.status is case.expected_status
     if expected_holds and status_holds:
-        return RegressionCaseResult(
+        return EvidenceRegressionCaseResult(
             case_id=case.case_id,
-            status=RegressionCaseStatus.PASS,
+            status=EvidenceRegressionCaseStatus.PASS,
             passed=True,
             expected_violation=case.expected_violation,
             actual_violations=actual_violations,
@@ -359,9 +372,9 @@ def _replay_case(
             actual_status=verification.status,
             reason="expected violation 与 expected status 均复现",
         )
-    return RegressionCaseResult(
+    return EvidenceRegressionCaseResult(
         case_id=case.case_id,
-        status=RegressionCaseStatus.FAIL,
+        status=EvidenceRegressionCaseStatus.FAIL,
         passed=False,
         expected_violation=case.expected_violation,
         actual_violations=actual_violations,
@@ -398,11 +411,11 @@ def _default_case_id(task_id: str, attempt: int, attribution_fingerprint: str) -
 
 
 __all__ = [
-    "RegressionCase",
-    "RegressionCaseResult",
-    "RegressionCaseStatus",
-    "RegressionCorpusReport",
-    "attribution_can_enter_corpus",
-    "regression_case_from_attribution",
-    "run_regression_corpus",
+    "EvidenceRegressionCase",
+    "EvidenceRegressionCaseResult",
+    "EvidenceRegressionCaseStatus",
+    "EvidenceRegressionCorpusReport",
+    "attribution_can_enter_evidence_corpus",
+    "evidence_regression_case_from_attribution",
+    "run_evidence_regression_corpus",
 ]

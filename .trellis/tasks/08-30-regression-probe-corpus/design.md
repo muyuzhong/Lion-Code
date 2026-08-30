@@ -1,4 +1,9 @@
-# Design: Harness Regression Probe——regression_probe.py + regression_corpus.py
+# Design: Evidence Regression Corpus——regression_probe.py + evidence_regression_corpus.py
+
+> 语义收口(评审后):本层是 **Evidence Regression Corpus**,不是 Harness
+> 行为回归语料。离线重放同一份历史 evidence 经过同一个 ProcessVerifier,
+> 只能验证检测规则本身没有退化;它不执行生产 Harness 逻辑,不能证明改过
+> 的 Harness 不会再产生该错误。
 
 ## 1. 数据流
 
@@ -7,13 +12,13 @@ FirstErrorAttribution(#149)
         ↓  admission gate(evidence_available / confidence / 受支持 violation)
 candidate ProcessEvidence
         ↓  minimize_failure_evidence(greedy 逐事件裁剪,probe_holds 判定)
-最小失败片段
+单事件不可再约简片段(1-minimal)
         ↓
-RegressionCase(结构化 evidence + provenance + expected_*)
+EvidenceRegressionCase(结构化 evidence + provenance + replay_context)
         ↓
-RegressionCorpus  →  run_regression_corpus(逐条 verify_case 重放)
+Evidence Regression Corpus → run_evidence_regression_corpus(逐条 verify_case 重放)
         ↓
-RegressionCorpusReport(PASS / FAIL / INVALID)
+EvidenceRegressionCorpusReport(PASS / FAIL / INVALID)
 ```
 
 ## 2. regression_probe.py(最小化)
@@ -62,14 +67,15 @@ def minimize_failure_evidence(
   作用于已成立 violation);
 - greedy:每轮从 index 0 扫描,删除单个事件后 probe 仍成立则接受删除并
   从 0 重来;一轮无任何删除 → 收敛,返回当前片段;
-- 结果满足:任何单事件删除都会破坏 violation(局部最小,确定性)。
+- 结果保证 **1-minimal**(删除最终片段中任意一个事件,violation 都不再
+  成立),不是全局最短;不引入组合搜索或复杂 delta debugging。
 
-## 3. regression_corpus.py(RegressionCase + 离线 runner)
+## 3. evidence_regression_corpus.py(EvidenceRegressionCase + 离线 runner)
 
-### RegressionCase
+### EvidenceRegressionCase
 
 ```python
-class RegressionCase(VersionedModel):
+class EvidenceRegressionCase(VersionedModel):
     case_id: str                     # 稳定标识
     source_task_id: str
     source_attempt: int
@@ -77,10 +83,11 @@ class RegressionCase(VersionedModel):
     first_error_kind: FirstErrorKind # 来源 attribution.kind
     expected_violation: ProcessViolationType
     expected_status: ProcessVerificationStatus
-    evidence: tuple[ProcessEvidence, ...]   # 最小失败片段(结构化,非字符串)
+    evidence: tuple[ProcessEvidence, ...]   # 1-minimal 失败片段(结构化,非字符串)
     source_fingerprint: str          # attribution/case 溯源指纹
     original_evidence_count: int     # 最小化前事件数
     minimized_evidence_count: int    # 最小化后事件数
+    replay_context: ProcessReplayContext  # verifier 消费的极简字段,自包含
 ```
 
 `expected_status`:minimize 后对最小片段重新 verify,由目标 violation 的
@@ -93,7 +100,7 @@ _SUPPORTED_VIOLATIONS = frozenset({TEST_TAMPERING, TOOL_ERROR_NOT_RECOVERED,
     VALIDATION_MISSING, CONTEXT_REGRESSION, PREMATURE_TERMINATION,
     REPEATED_TOOL_CALL})
 
-def attribution_can_enter_corpus(
+def attribution_can_enter_evidence_corpus(
     attribution, *, task, candidate_result, candidate_evidence, verifier=None,
 ) -> tuple[bool, str]:
     if not attribution.evidence_available: return False, "..."
@@ -103,34 +110,36 @@ def attribution_can_enter_corpus(
     if not (支持violations ∩ 实际violations): return False, "..."
     return True, ""
 
-def regression_case_from_attribution(...) -> RegressionCase | None:
-    # 1) attribution_can_enter_corpus;2) 目标 violation(优先与 kind 一致,
-    #    否则按优先级最早);3) minimize;4) 重 verify 推 expected_status;5) 建 case
+def evidence_regression_case_from_attribution(...) -> EvidenceRegressionCase | None:
+    # 1) attribution_can_enter_evidence_corpus;2) 目标 violation(优先与
+    #    kind 一致,否则按优先级最早);3) minimize;4) 重 verify 推
+    #    expected_status;5) 建 case(含 replay_context)
 ```
 
 ### 离线 runner
 
 ```python
-class RegressionCaseStatus(str, Enum): PASS / FAIL / INVALID
+class EvidenceRegressionCaseStatus(str, Enum): PASS / FAIL / INVALID
 
-class RegressionCaseResult(VersionedModel):
+class EvidenceRegressionCaseResult(VersionedModel):
     case_id; status; passed: bool
     expected_violation; actual_violations
     expected_status; actual_status
     reason
 
-class RegressionCorpusReport(VersionedModel):
+class EvidenceRegressionCorpusReport(VersionedModel):
     total; passed; failed; invalid
-    results: tuple[RegressionCaseResult, ...]
+    results: tuple[EvidenceRegressionCaseResult, ...]
 
-def run_regression_corpus(
-    cases: Sequence[RegressionCase],
+def run_evidence_regression_corpus(
+    cases: Sequence[EvidenceRegressionCase],
     *,
     verifier: ProcessVerifier | None = None,
-) -> RegressionCorpusReport:
+) -> EvidenceRegressionCorpusReport:
     # 每条:case 自带 ProcessReplayContext → verifier.verify_case(evidence)
     # 判定:expected_violation 在 actual_violations 中 且 expected_status 匹配 → PASS
-    #       否则 FAIL;evidence 空/verify_case 返回 EVIDENCE_UNAVAILABLE → INVALID
+    #       否则 FAIL;expected_status/replay 为 EVIDENCE_UNAVAILABLE → INVALID
+    # 只验证检测规则本身,不执行任何 Harness 逻辑
 ```
 
 ## 4. process_verifier.py 扩展(自包含重放)
@@ -154,16 +163,18 @@ class ProcessReplayContext(VersionedModel):
 
 - corpus 只存结构化 ProcessEvidence + 摘要类字段;路径/命令原文绝不进入
   evidence(继承 evidence.py 隐私不变式);
-- minimize 是纯函数、确定性;同输入同输出;
+- minimize 是纯函数、确定性;同输入同输出;保证 1-minimal,不承诺全局最短;
 - 不修改 `attribute_first_error`(#149)与 `ProcessVerifier.verify` 行为;
+- **重放只验证检测规则本身**:同一 evidence + 同一 verifier 恒得到同一
+  结果,与 Harness 改动无关;本层不承担、也不宣称承担 Harness 行为回归;
 - 新增符号进 `benchmarks/agent_e2e/__init__.py` 的 `__all__`;
 - spec(`.trellis/spec/backend/agent-e2e-evaluation.md`)补充 Regression
-  Probe / RegressionCase / verify_case 契约。
+  Probe / EvidenceRegressionCase / verify_case 契约与边界。
 
 ## 6. 测试要点
 
-- probe:unrecovered error 长轨迹裁短仍成立;删必要事件后不成立;
-  test_tampering 单事件即可;空 evidence False;
+- probe:unrecovered error 长轨迹裁成 1-minimal 仍成立;删必要事件后
+  不成立;test_tampering 单事件即可;空 evidence False;
 - corpus:confidence<1.0 拒绝;evidence_available=False 拒绝;
   PASS→PASS 无 attribution 无法入库;JSON round-trip;
 - runner:固定 case 两次运行结果一致(确定性);PASS/FAIL/INVALID 三态。
