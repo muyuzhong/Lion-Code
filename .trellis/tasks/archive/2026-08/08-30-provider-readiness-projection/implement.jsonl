@@ -1,0 +1,8 @@
+{"file":".trellis/tasks/08-30-provider-readiness-projection/research/provider-readiness-minimal-design.md","reason":"Sol/high planning research defining the selected minimal readiness contract, compatibility boundary, affected files, and test matrix."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"ProviderConfigurationProjection ownership, controller-free Runtime callback, and successful state-transition synchronization contract."}
+{"file":".trellis/spec/backend/four-layer-ownership.md","reason":"Single Provider write owner and one-way Runtime/Composition boundary that the implementation must preserve."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Canonical provider assistant errors, no-request behavior, and failure/cancellation semantics."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Typed Python, focused tests, strict wire models, and repository validation conventions."}
+{"file":".trellis/spec/frontend/desktop-chat-experience.md","reason":"Strict status metadata decoding and unchanged Provider first-run UI behavior."}
+{"file":".trellis/spec/frontend/desktop-assistant-runtime-contract.md","reason":"Strict Renderer protocol/metadata boundary and explicit malformed-response behavior."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Cross-layer data-flow checklist for the REST/Application/Desktop status contract."}

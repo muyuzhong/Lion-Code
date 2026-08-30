@@ -1,0 +1,8 @@
+{"file":".trellis/tasks/08-30-provider-readiness-projection/prd.md","reason":"Acceptance criteria for the single readiness source, REST blocker invariant, strict Desktop decoding, and explicit non-goals."}
+{"file":".trellis/tasks/08-30-provider-readiness-projection/design.md","reason":"Implementation boundary, data flow, compatibility, failure behavior, testing strategy, and rollback shape."}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"Check Runtime cannot reach ProviderController and projection remains the read-only owner boundary."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check existing canonical assistant error and zero-request behavior remain unchanged."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check focused regression tests, strict contracts, and validation expectations."}
+{"file":".trellis/spec/frontend/desktop-chat-experience.md","reason":"Check required status field, strict decoder behavior, and no unintended UI routing change."}
+{"file":".trellis/spec/frontend/desktop-assistant-runtime-contract.md","reason":"Check malformed metadata remains an explicit error and no permissive fallback is introduced."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check the complete ProviderState to REST status to Renderer data flow and all consumers."}
