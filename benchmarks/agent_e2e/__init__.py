@@ -73,6 +73,15 @@ from .evidence import (
     TerminationKind,
     ToolPhase,
 )
+from .evidence_regression_corpus import (
+    EvidenceRegressionCase,
+    EvidenceRegressionCaseResult,
+    EvidenceRegressionCaseStatus,
+    EvidenceRegressionCorpusReport,
+    attribution_can_enter_evidence_corpus,
+    evidence_regression_case_from_attribution,
+    run_evidence_regression_corpus,
+)
 from .experiment import (
     ExperimentKind,
     HarnessVariant,
@@ -200,6 +209,7 @@ from .opik_export import (
     retry_opik_export,
 )
 from .process_verifier import (
+    ProcessReplayContext,
     ProcessSeverity,
     ProcessVerification,
     ProcessVerificationStatus,
@@ -228,6 +238,7 @@ from .regression import (
     load_gate_ledger,
     write_gate_ledger,
 )
+from .regression_probe import minimize_failure_evidence, probe_holds
 from .swebench_verified import (
     HARBOR_RESULT_SCHEMA_VERSION,
     HarborPathBoundaryError,
@@ -325,6 +336,10 @@ __all__ = [
     "EfficiencyComparison",
     "EfficiencyMetric",
     "EfficiencyMetricComparison",
+    "EvidenceRegressionCase",
+    "EvidenceRegressionCaseResult",
+    "EvidenceRegressionCaseStatus",
+    "EvidenceRegressionCorpusReport",
     "ExperimentKind",
     "ExperimentManifest",
     "ExperimentProfile",
@@ -396,6 +411,7 @@ __all__ = [
     "ProcessEvidence",
     "ProcessEvidenceProjector",
     "ProcessPairChange",
+    "ProcessReplayContext",
     "ProcessSeverity",
     "ProcessVerification",
     "ProcessVerificationStatus",
@@ -433,6 +449,7 @@ __all__ = [
     "analyze_deepeval_case",
     "analyze_verified_report",
     "attribute_first_error",
+    "attribution_can_enter_evidence_corpus",
     "build_commit_artifact",
     "build_deepeval_metrics",
     "build_deepeval_trajectory",
@@ -451,6 +468,7 @@ __all__ = [
     "deepeval_analysis_json",
     "deepeval_case_to_test_case",
     "evaluate_regression_gate",
+    "evidence_regression_case_from_attribution",
     "freeze_catalog",
     "harbor_result_json",
     "harness_result_json",
@@ -462,16 +480,19 @@ __all__ = [
     "map_harbor_status",
     "map_harness_status",
     "map_opik_status",
+    "minimize_failure_evidence",
     "opik_export_result_json",
     "parse_deepeval_analysis",
     "parse_harbor_result",
     "parse_harness_result",
     "parse_opik_export_result",
+    "probe_holds",
     "publish_opik_trace",
     "require_comparable_external_reports",
     "resolve_injection",
     "retry_opik_export",
     "run_calibration",
+    "run_evidence_regression_corpus",
     "run_external_anchor_evaluation",
     "run_gate_v2",
     "run_gold_preflight",
