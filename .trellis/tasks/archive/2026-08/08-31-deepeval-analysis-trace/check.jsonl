@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/index.md","reason":"定位 backend authoritative specs 与 agent-e2e evaluation owner"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"按既有 unittest/typed model 模式验证并避免真实 Provider 进入常规测试"}
+{"file":".trellis/spec/backend/secret-boundary.md","reason":"审查任何 retained semantic text 的凭证与路径泄露风险"}
+{"file":".trellis/tasks/08-31-deepeval-analysis-trace/research/current-trace-gap.md","reason":"核对实现是否真的消除只有工具名/digest 的输入缺口"}
+{"file":".trellis/tasks/08-31-deepeval-analysis-trace/research/current-evaluation-contract.md","reason":"复核官方结果不可变、旧 trace 可读、analysis failure 隔离与 targeted test 要求"}
+{"file":".trellis/tasks/08-31-deepeval-analysis-trace/research/deepeval-4.2-action-metrics.md","reason":"核对没有伪造 expected_tools、空调用完美分或计划默认分"}
