@@ -339,7 +339,14 @@ def _metric_result_from_samples(
     reason = completed[0].reason
     if failures:
         note = f"{failures} 次采样失败"
-        reason = f"{reason}；{note}" if reason else note
+        # 拼接后的 reason 可能超过 DeepEvalMetricResult.reason 的
+        # max_length=320,须为注解预留空间:先截断基础 reason 再拼接,
+        # 保证注解不被裁掉、整条分析不因校验失败降级。
+        base = _safe_reason(reason) or ""
+        if base:
+            reserved = 320 - len(note) - 1
+            base, _ = redact_text(base, max_length=max(1, reserved))
+        reason = f"{base}；{note}" if base else note
     threshold = DEEPEVAL_METRIC_THRESHOLDS.get(metric_name)
     mean_score = sum(scores) / len(scores)
     return DeepEvalMetricResult(
