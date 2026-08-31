@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -715,16 +716,23 @@ def _case_trace_digest(case: DeepEvalCaseLike) -> str:
     return case.trajectory.trace_digest
 
 
+_SEQ_REF_RE = re.compile(r"\[seq=(\d+)\]")
+
+
 def _with_sequence_reference(
     case: DeepEvalCaseLike,
     reason: str | None,
 ) -> str | None:
-    """保留 Judge 的序列引用，否则明确记录其未提供定位。"""
+    """保留能回指分析轨迹的序列引用；引用无效或未提供时明确标记。"""
 
     if not isinstance(case, DeepEvalAnalysisCase):
         return reason
     if reason and "[seq=" in reason:
-        return reason
+        refs = _SEQ_REF_RE.findall(reason)
+        valid = {event.sequence for event in case.analysis_trace.events}
+        if refs and all(int(seq) in valid for seq in refs):
+            return reason
+        return "Judge sequence 定位无效"
     suffix = "（Judge 未提供 sequence 定位）"
     base = reason or "DeepEval metric completed"
     safe_base, _ = redact_text(base, max_length=max(1, 320 - len(suffix) - 1))

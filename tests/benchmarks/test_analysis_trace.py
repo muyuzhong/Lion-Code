@@ -442,6 +442,39 @@ class TestAnalysisTrace(unittest.TestCase):
                 )
             )
 
+    def test_judge_invalid_sequence_reference_is_marked_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            trace = _trace(Path(directory))
+            case = DeepEvalAnalysisCase(
+                task_id="task-1",
+                input_digest=_digest("same public task"),
+                analysis_trace=trace,
+            )
+
+            invalid = analyze_deepeval_case(
+                case,
+                judge_model="fake-judge",
+                judge=_ReasonJudge("judge linked [seq=999]"),
+                timeout_seconds=None,
+                judge_samples=1,
+            )
+            self.assertEqual(
+                [metric.reason for metric in invalid.metrics],
+                ["Judge sequence 定位无效"] * 2,
+            )
+
+            malformed = analyze_deepeval_case(
+                case,
+                judge_model="fake-judge",
+                judge=_ReasonJudge("judge linked [seq=abc]"),
+                timeout_seconds=None,
+                judge_samples=1,
+            )
+            self.assertEqual(
+                [metric.reason for metric in malformed.metrics],
+                ["Judge sequence 定位无效"] * 2,
+            )
+
     def test_sdk_judge_passes_safe_parameters_and_ordered_trace_to_both_metrics(
         self,
     ) -> None:
