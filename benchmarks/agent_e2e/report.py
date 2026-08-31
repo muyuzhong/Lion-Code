@@ -285,32 +285,11 @@ def _append_deepeval(lines: list[str], report: VerifiedEvaluationReport) -> None
             f"状态 `{metric.status.value}`；"
             f"原因：{_safe_display(metric.reason, 320)}"
         )
-    lines.append(f"  - 门禁结论：{_gate_conclusion(report)}")
     if analysis.reason:
         lines.append(
             f"  - 分析失败来源：{_safe_display(analysis.failure_source, 64)}；"
             f"原因：{_safe_display(analysis.reason, 320)}"
         )
-
-
-def _gate_conclusion(report: VerifiedEvaluationReport) -> str:
-    """确定性判定 + judge 评分门禁的合并展示；分数仅为观测。"""
-
-    verdict = report.task_result.verdict
-    deterministic = (
-        f"确定性判定 = {verdict.value}(官方 Harness)"
-        if report.task_result.official
-        else f"确定性判定 = {verdict.value}(无官方结果)"
-    )
-    gate = report.deepeval.score_gate if report.deepeval is not None else None
-    if gate is None:
-        return f"{deterministic}；judge 评分门禁：无已评分指标"
-    label = "通过" if gate.passed else "未达"
-    return (
-        f"{deterministic}；judge 评分门禁：{label}"
-        f"({gate.passed_metrics}/{gate.evaluated_metrics} 达阈值；"
-        "观测，不参与判定)"
-    )
 
 
 def _append_opik(lines: list[str], export: OpikExportResult | None) -> None:

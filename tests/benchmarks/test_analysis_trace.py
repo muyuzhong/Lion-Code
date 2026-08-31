@@ -12,6 +12,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 from benchmarks.agent_e2e.analysis_trace import (
+    AnalysisTrace,
     AnalysisTraceSchemaError,
     AnalysisTraceUnavailable,
     load_analysis_trace,
@@ -99,7 +100,12 @@ def _trace(workspace: Path, *, degraded: bool = False):
 class _DirectionalJudge:
     """只根据安全投影判断方向，避免测试依赖在线 DeepEval。"""
 
-    def evaluate_metric(self, *, metric_name: str, case: DeepEvalAnalysisCase):
+    def evaluate_metric(
+        self,
+        *,
+        metric_name: str,
+        case: DeepEvalAnalysisCase,
+    ) -> DeepEvalMetricObservation:
         calls = [
             event for event in case.analysis_trace.events if event.kind == "tool_call"
         ]
@@ -117,6 +123,21 @@ class _DirectionalJudge:
             name=metric_name,
             score=score,
             reason="directional evidence [seq=1]",
+            model="fake-judge",
+            input_digest=case.input_digest,
+            status=AdapterStatus.COMPLETED,
+        )
+
+
+class _ReasonJudge:
+    def __init__(self, reason: str | None) -> None:
+        self.reason = reason
+
+    def evaluate_metric(self, *, metric_name: str, case: DeepEvalAnalysisCase):
+        return DeepEvalMetricObservation(
+            name=metric_name,
+            score=0.8,
+            reason=self.reason,
             model="fake-judge",
             input_digest=case.input_digest,
             status=AdapterStatus.COMPLETED,
@@ -349,6 +370,77 @@ class TestAnalysisTrace(unittest.TestCase):
             self.assertEqual(good.input_digest, bad.input_digest)
             self.assertGreater(good.metrics[0].score, bad.metrics[0].score)
             self.assertGreater(good.metrics[1].score, bad.metrics[1].score)
+
+    def test_judge_sequence_reference_is_preserved_or_explicitly_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            trace = _trace(Path(directory))
+            case = DeepEvalAnalysisCase(
+                task_id="task-1",
+                input_digest=_digest("same public task"),
+                analysis_trace=trace,
+            )
+
+            supplied = analyze_deepeval_case(
+                case,
+                judge_model="fake-judge",
+                judge=_ReasonJudge("judge linked [seq=5]"),
+                timeout_seconds=None,
+                judge_samples=1,
+            )
+            self.assertEqual(
+                [metric.reason for metric in supplied.metrics],
+                ["judge linked [seq=5]"] * 2,
+            )
+
+            missing = analyze_deepeval_case(
+                case,
+                judge_model="fake-judge",
+                judge=_ReasonJudge("judge omitted location"),
+                timeout_seconds=None,
+                judge_samples=1,
+            )
+            for metric in missing.metrics:
+                self.assertIn("（Judge 未提供 sequence 定位）", metric.reason or "")
+                self.assertNotIn("[seq=", metric.reason or "")
+                self.assertLessEqual(len(metric.reason or ""), 320)
+
+            empty = analyze_deepeval_case(
+                case,
+                judge_model="fake-judge",
+                judge=_ReasonJudge(None),
+                timeout_seconds=None,
+                judge_samples=1,
+            )
+            self.assertTrue(
+                all(
+                    metric.reason
+                    == "DeepEval metric completed （Judge 未提供 sequence 定位）"
+                    for metric in empty.metrics
+                )
+            )
+
+            empty_trace_case = DeepEvalAnalysisCase(
+                task_id="task-1",
+                input_digest=case.input_digest,
+                analysis_trace=AnalysisTrace.from_events(
+                    task_id="task-1",
+                    trace_id="trace-empty",
+                    events=(),
+                ),
+            )
+            empty_trace = analyze_deepeval_case(
+                empty_trace_case,
+                judge_model="fake-judge",
+                judge=_ReasonJudge("judge omitted location"),
+                timeout_seconds=None,
+                judge_samples=1,
+            )
+            self.assertTrue(
+                all(
+                    "（Judge 未提供 sequence 定位）" in (metric.reason or "")
+                    for metric in empty_trace.metrics
+                )
+            )
 
     def test_sdk_judge_passes_safe_parameters_and_ordered_trace_to_both_metrics(
         self,

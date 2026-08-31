@@ -268,8 +268,7 @@ class TestDeepEvalAnalysis(unittest.TestCase):
         self.assertTrue(
             all(metric.input_digest == case.input_digest for metric in analysis.metrics)
         )
-        # 阈值对照与门禁:全过(0.75 >= 0.5) → threshold_met 全 True,
-        # score_gate 通过(3/3)。
+        # 阈值对照只保留在每项指标:全过(0.75 >= 0.5) → threshold_met 全 True。
         self.assertTrue(all(metric.threshold == 0.5 for metric in analysis.metrics))
         self.assertTrue(
             all(metric.threshold_met is True for metric in analysis.metrics)
@@ -282,15 +281,25 @@ class TestDeepEvalAnalysis(unittest.TestCase):
                 for metric in analysis.metrics
             )
         )
-        self.assertIsNotNone(analysis.score_gate)
-        assert analysis.score_gate is not None
-        self.assertTrue(analysis.score_gate.passed)
         self.assertEqual(
-            (analysis.score_gate.passed_metrics, analysis.score_gate.evaluated_metrics),
-            (2, 2),
+            set(analysis.model_dump()),
+            {
+                "schema_version",
+                "task_id",
+                "status",
+                "judge_model",
+                "input_digest",
+                "trajectory_digest",
+                "metrics",
+                "agent_model",
+                "judge_fingerprint",
+                "failure_source",
+                "reason",
+                "extensions",
+            },
         )
 
-    def test_score_gate_partial_threshold_failure(self) -> None:
+    def test_independent_thresholds_allow_mixed_metric_results(self) -> None:
         case = _case()
         judge = _FakeJudge(
             {
@@ -306,16 +315,8 @@ class TestDeepEvalAnalysis(unittest.TestCase):
         )
         self.assertEqual(analysis.status, DeepEvalAnalysisStatus.COMPLETED)
         self.assertEqual([m.threshold_met for m in analysis.metrics], [False, True])
-        self.assertIsNotNone(analysis.score_gate)
-        assert analysis.score_gate is not None
-        self.assertFalse(analysis.score_gate.passed)
-        self.assertEqual(
-            (analysis.score_gate.passed_metrics, analysis.score_gate.evaluated_metrics),
-            (1, 2),
-        )
-        self.assertIn("1 项达阈值", analysis.score_gate.reason)
 
-    def test_score_gate_none_when_no_completed_scores(self) -> None:
+    def test_failed_metrics_keep_independent_threshold_metadata(self) -> None:
         case = _case()
         judge = _FakeJudge(
             dict.fromkeys(DEEPEVAL_METRIC_NAMES, TimeoutError("judge timeout"))
@@ -327,7 +328,6 @@ class TestDeepEvalAnalysis(unittest.TestCase):
             timeout_seconds=None,
         )
         self.assertEqual(analysis.status, DeepEvalAnalysisStatus.TIMEOUT)
-        self.assertIsNone(analysis.score_gate)
         self.assertTrue(
             all(metric.threshold_met is False for metric in analysis.metrics)
         )
@@ -461,12 +461,6 @@ class TestDeepEvalAnalysis(unittest.TestCase):
         # 失败指标仍带阈值但不可达(score 恒 None → threshold_met False)。
         self.assertEqual(analysis.metrics[1].threshold, 0.5)
         self.assertFalse(analysis.metrics[1].threshold_met)
-        # score_gate 只评估已评分指标:失败指标不计入,其余两项 0.8/0.6 均达阈值。
-        self.assertIsNotNone(analysis.score_gate)
-        assert analysis.score_gate is not None
-        self.assertTrue(analysis.score_gate.passed)
-        self.assertEqual(analysis.score_gate.evaluated_metrics, 1)
-        self.assertEqual(analysis.score_gate.passed_metrics, 1)
 
     def test_analysis_records_agent_model_and_judge_fingerprint(self) -> None:
         case = _case()

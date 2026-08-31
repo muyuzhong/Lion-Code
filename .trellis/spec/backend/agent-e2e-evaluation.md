@@ -782,6 +782,12 @@ def publish_opik_trace(
   validated `AnalysisTrace`; the legacy digest-only `DeepEvalTrajectory`
   remains an independent input for existing process/Opik observability and is
   never reverse-projected into semantic tool arguments.
+- Analysis Trace collection is best-effort sidecar work. The projector freezes
+  itself after an exception, and construction, digest-validation, or write
+  failures may only omit `analysis-trace.json`; they must not escape the event
+  listener or worker entrypoint, alter `WorkerResult`, `trace.json`, or the
+  patch, or affect Harbor/Harness. A missing artifact follows the existing
+  typed DeepEval unavailable path.
 - The project analyzer and the optional standard pytest entry consume the same
   public task context and ordered Analysis Trace. They must not call the Agent,
   generate a new dataset, or use hidden reasoning, credentials, raw tool
@@ -789,6 +795,15 @@ def publish_opik_trace(
 - Each metric observation carries the same input digest as the case. A score
   is persisted only when it is finite and in `[0, 1]`; a single failure or
   timeout is typed and does not discard successful sibling metrics.
+- `DeepEvalAnalysis` keeps the two metric results independent: each result's
+  score, reason, status, sampling metadata, model, threshold metadata, and input
+  digest remain separately observable. It does not compute or persist an
+  aggregate pass/fail score conclusion; these metrics are advisory and cannot
+  change the official Harness result or the CLI exit code.
+- A Judge reason containing `[seq=N]` preserves that supplied reference. When
+  no sequence is supplied, the adapter appends the bounded note
+  `（Judge 未提供 sequence 定位）` and never invents a reference to the first
+  Analysis Trace event.
 - `analyze_verified_report` may update only the `deepeval` field. The existing
   `task_result` and its official Harness verdict remain unchanged.
 - Opik payloads contain a parent agent span, redacted event spans with stable
@@ -804,9 +819,10 @@ def publish_opik_trace(
 | Condition | Required result |
 |---|---|
 | Analysis Trace/report task or trace IDs, or its digest, do not match | Reject before analysis/export; preserve the original report |
+| Analysis Trace projection, construction, digest validation, or write fails | Omit only `analysis-trace.json`; preserve worker result, formal trace, patch, Harbor, and Harness, then report DeepEval unavailable |
 | Analysis Trace is missing, out of scope, or invalid | Return typed `DeepEvalAnalysisStatus.UNAVAILABLE`; never reconstruct it from a legacy digest-only trajectory |
 | DeepEval SDK is absent or its pinned API is incompatible | `DeepEvalAnalysisStatus.UNAVAILABLE`; no official verdict change |
-| One metric fails, times out, or returns an invalid score | Typed metric failure; retain other scores and mark aggregate partial/timeout/failed |
+| One metric fails, times out, or returns an invalid score | Typed metric failure; retain other scores and mark the analysis status partial/timeout/failed |
 | Metric input digest differs from the case digest | Invalid metric observation; do not persist its score |
 | Analysis Trace contains unbounded or sensitive text | Reject the semantic artifact; never publish the raw value |
 | Opik host credentials or SDK are unavailable | `OpikExportStatus.UNAVAILABLE`; no Agent/Harness rerun |

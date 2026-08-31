@@ -757,25 +757,6 @@ class DeepEvalMetricResult(VersionedModel):
         return self
 
 
-class DeepEvalScoreGate(VersionedModel):
-    """单次分析的 judge 阈值对照结论；只作观测，不改变确定性判定。"""
-
-    passed: bool
-    passed_metrics: int = Field(ge=0)
-    evaluated_metrics: int = Field(ge=0)
-    reason: str = Field(min_length=1, max_length=320)
-
-    @model_validator(mode="after")
-    def _validate_gate(self) -> DeepEvalScoreGate:
-        if self.passed_metrics > self.evaluated_metrics:
-            raise ValueError("passed metrics cannot exceed evaluated metrics")
-        if self.evaluated_metrics < 1:
-            raise ValueError("score gate requires at least one evaluated metric")
-        if self.passed != (self.passed_metrics == self.evaluated_metrics):
-            raise ValueError("score gate passed must match threshold counts")
-        return self
-
-
 class DeepEvalAnalysis(VersionedModel):
     """运行后离线分析；它没有权限覆盖 Harness/TaskResult。"""
 
@@ -787,7 +768,6 @@ class DeepEvalAnalysis(VersionedModel):
     metrics: tuple[DeepEvalMetricResult, ...] = Field(default=(), max_length=64)
     agent_model: str | None = Field(default=None, max_length=256)
     judge_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
-    score_gate: DeepEvalScoreGate | None = None
     failure_source: FailureSource | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=320)
     extensions: dict[str, Any] = Field(default_factory=dict)

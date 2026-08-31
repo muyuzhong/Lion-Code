@@ -23,7 +23,6 @@ from .models import (
     DeepEvalAnalysisStatus,
     DeepEvalCase,
     DeepEvalMetricResult,
-    DeepEvalScoreGate,
     DeepEvalTrajectory,
     DeepEvalTrajectoryEvent,
     FailureSource,
@@ -42,7 +41,7 @@ DEEPEVAL_METRIC_NAMES = (
 # 冗余（携带的是增量快照而非新事实），对脱敏 judge 无增量价值。
 NOISE_EVENT_TYPES = frozenset({"message_update"})
 # 两指标统一阈值（≥0.5 视为达阈值）：中点判定、简单可解释；运行侧策略
-# 常量，演进只改此处与文档，不引入配置系统。score_gate 仅作观测，
+# 常量，演进只改此处与文档，不引入配置系统。阈值只描述单项指标，
 # 不参与 task_result 判定与 CLI 退出码。
 DEEPEVAL_METRIC_THRESHOLDS: Mapping[str, float] = {
     "ArgumentCorrectnessMetric": 0.5,
@@ -219,7 +218,6 @@ def parse_deepeval_analysis(
         input_digest=fixture.input_digest,
         trajectory_digest=fixture.trajectory_digest,
         metrics=tuple(metrics),
-        score_gate=_score_gate(tuple(metrics)),
         failure_source=failure_source,
         reason=safe_reason,
     )
@@ -648,34 +646,8 @@ def _analysis_from_metrics(
         metrics=metrics,
         agent_model=agent_model,
         judge_fingerprint=judge_fingerprint,
-        score_gate=_score_gate(metrics),
         failure_source=failure_source,
         reason=reason,
-    )
-
-
-def _score_gate(metrics: tuple[DeepEvalMetricResult, ...]) -> DeepEvalScoreGate | None:
-    """对已评分指标做阈值对照；无已评分指标(全失败/超时/不可用)返回 None。"""
-
-    scored = tuple(
-        metric
-        for metric in metrics
-        if metric.status is AdapterStatus.COMPLETED and metric.threshold is not None
-    )
-    if not scored:
-        return None
-    passed_metrics = sum(1 for metric in scored if metric.threshold_met is True)
-    threshold = scored[0].threshold
-    assert threshold is not None  # scored 成员已保证 threshold 非 None
-    return DeepEvalScoreGate(
-        passed=passed_metrics == len(scored),
-        passed_metrics=passed_metrics,
-        evaluated_metrics=len(scored),
-        reason=(
-            f"全部 {len(scored)} 项已评分指标达阈值(阈值 {threshold:.4g})"
-            if passed_metrics == len(scored)
-            else f"{len(scored)} 项已评分指标中 {passed_metrics} 项达阈值(阈值 {threshold:.4g})"
-        ),
     )
 
 
@@ -747,18 +719,15 @@ def _with_sequence_reference(
     case: DeepEvalCaseLike,
     reason: str | None,
 ) -> str | None:
-    """让语义指标 reason 至少能回指一条受控事件序列。"""
+    """保留 Judge 的序列引用，否则明确记录其未提供定位。"""
 
     if not isinstance(case, DeepEvalAnalysisCase):
         return reason
-    if not case.analysis_trace.events:
-        return reason
     if reason and "[seq=" in reason:
         return reason
-    sequence = case.analysis_trace.events[0].sequence
-    suffix = f" [seq={sequence}]"
+    suffix = "（Judge 未提供 sequence 定位）"
     base = reason or "DeepEval metric completed"
-    safe_base, _ = redact_text(base, max_length=max(1, 320 - len(suffix)))
+    safe_base, _ = redact_text(base, max_length=max(1, 320 - len(suffix) - 1))
     return f"{safe_base.rstrip()} {suffix}"[:320]
 
 

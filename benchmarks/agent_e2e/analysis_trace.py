@@ -246,6 +246,7 @@ class AnalysisTraceProjector:
         self.max_events = max_events
         self._events: list[AnalysisTraceEvent] = []
         self._truncated = False
+        self._failed = False
 
     @property
     def events(self) -> tuple[AnalysisTraceEvent, ...]:
@@ -260,6 +261,16 @@ class AnalysisTraceProjector:
     def project(self, event: object, *, sequence: int) -> AnalysisTraceEvent | None:
         """投影一个 typed Core event；流式 update 与非工具事件被忽略。"""
 
+        if self._failed:
+            return None
+        try:
+            return self._project(event, sequence=sequence)
+        except Exception:
+            # Analysis Trace 只供 DeepEval 旁路使用；失败后冻结旁路，不影响正式事件。
+            self._failed = True
+            return None
+
+    def _project(self, event: object, *, sequence: int) -> AnalysisTraceEvent | None:
         payload = _event_payload(event)
         event_type = _event_type(payload, event)
         if event_type == "tool_execution_update":
@@ -303,6 +314,10 @@ class AnalysisTraceProjector:
     def build(self, *, task_id: str, trace_id: str) -> AnalysisTrace:
         """完成当前投影并计算 canonical digest。"""
 
+        if self._failed:
+            raise AnalysisTraceUnavailable(
+                "Analysis Trace projector failed during collection"
+            )
         return AnalysisTrace.from_events(
             task_id=task_id,
             trace_id=trace_id,

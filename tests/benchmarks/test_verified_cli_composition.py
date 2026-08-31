@@ -366,8 +366,18 @@ class TestVerifiedComposition(unittest.TestCase):
             self.assertEqual(execution.report.deepeval.judge_model, "test-model")
             self.assertEqual(execution.report.deepeval.agent_model, "test-model")
             self.assertIsNotNone(execution.report.deepeval.judge_fingerprint)
-            assert execution.report.deepeval.score_gate is not None
-            self.assertTrue(execution.report.deepeval.score_gate.passed)
+            self.assertTrue(
+                all(
+                    metric.threshold == 0.5
+                    for metric in execution.report.deepeval.metrics
+                )
+            )
+            self.assertTrue(
+                all(
+                    metric.threshold_met is True
+                    for metric in execution.report.deepeval.metrics
+                )
+            )
             self.assertEqual(execution.report.opik.status.value, "exported")
             self.assertEqual(execution.report.opik.trace_id, "trace-cloud-1")
             self.assertTrue(
@@ -394,14 +404,14 @@ class TestVerifiedComposition(unittest.TestCase):
             self.assertIn("Opik Cloud", markdown)
             self.assertIn("ArgumentCorrectnessMetric", markdown)
             self.assertIn("ToolDecisionQuality", markdown)
-            self.assertIn("[seq=1]", markdown)
-            # 评分语义化:模型身份、阈值对照与门禁结论进入报告。
+            self.assertIn("Judge 未提供 sequence 定位", markdown)
+            self.assertNotIn("[seq=1]", markdown)
+            # 评分语义化:模型身份与逐项阈值对照进入报告。
             self.assertIn("Agent 模型", markdown)
             self.assertIn("Judge 模型", markdown)
             self.assertIn("Judge 指纹", markdown)
-            self.assertIn("门禁结论", markdown)
-            self.assertIn("判定 = passed(官方 Harness)", markdown)
             self.assertIn("阈值 0.5000", markdown)
+            self.assertNotIn("门禁", markdown)
             # 采样可复现性:默认 3 次采样与均值±范围进入报告。
             self.assertIn("采样 3 次", markdown)
             self.assertIn("范围 0.8000–0.8000", markdown)

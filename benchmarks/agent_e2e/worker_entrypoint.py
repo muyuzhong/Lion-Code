@@ -86,7 +86,14 @@ def main() -> int:
     LOG_ROOT.mkdir(parents=True, exist_ok=True)
     RESULT_PATH.write_text(result.canonical_json() + "\n", encoding="utf-8")
     recorder.write_json(TRACE_PATH)
-    recorder.write_analysis_trace(ANALYSIS_TRACE_PATH, task_id=task.task_id)
+    try:
+        recorder.write_analysis_trace(ANALYSIS_TRACE_PATH, task_id=task.task_id)
+    except Exception:
+        # DeepEval 旁路写盘失败只丢弃该文件，正式结果和 legacy trace 已独立落盘。
+        try:
+            ANALYSIS_TRACE_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
     return 0
 
 
