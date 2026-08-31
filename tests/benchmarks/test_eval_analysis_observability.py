@@ -369,6 +369,46 @@ class TestDeepEvalAnalysis(unittest.TestCase):
             self.assertEqual(metric.score_max, 0.8)
             self.assertIn("1 次采样失败", metric.reason or "")
 
+    def test_sampling_partial_failure_with_long_reason_stays_bounded(self) -> None:
+        # 基础 reason 接近 max_length=320 时再拼接失败采样注解,
+        # 不得超过 DeepEvalMetricResult.reason 上限,否则整条分析降级 failed。
+        long_reason = "长" * 400
+
+        class _LongReasonJudge(_CyclingJudge):
+            def __init__(self) -> None:
+                super().__init__([0.8, RuntimeError("boom"), 0.6])
+
+            def evaluate_metric(
+                self,
+                *,
+                metric_name: str,
+                case: DeepEvalCase,
+            ) -> DeepEvalMetricObservation:
+                observation = super().evaluate_metric(
+                    metric_name=metric_name,
+                    case=case,
+                )
+                return DeepEvalMetricObservation(
+                    name=observation.name,
+                    score=observation.score,
+                    reason=long_reason,
+                    model=observation.model,
+                    input_digest=observation.input_digest,
+                )
+
+        analysis = analyze_deepeval_case(
+            _case(),
+            judge_model="fake-judge",
+            judge=_LongReasonJudge(),
+            timeout_seconds=None,
+        )
+        self.assertEqual(analysis.status, DeepEvalAnalysisStatus.COMPLETED)
+        for metric in analysis.metrics:
+            self.assertEqual(metric.samples, 3)
+            self.assertIsNotNone(metric.reason)
+            self.assertLessEqual(len(metric.reason or ""), 320)
+            self.assertIn("1 次采样失败", metric.reason or "")
+
     def test_sampling_all_failed_keeps_failure_semantics(self) -> None:
         case = _case()
         judge = _CyclingJudge([TimeoutError("slice is gone")])
