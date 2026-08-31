@@ -31,7 +31,6 @@ from benchmarks.agent_e2e.models import (
     AdapterStatus,
     DeepEvalAnalysisStatus,
     DeepEvalMetricResult,
-    DeepEvalScoreGate,
     ExperimentManifest,
     ExperimentProfile,
     FailureSource,
@@ -161,11 +160,11 @@ class TestVerifiedModels(unittest.TestCase):
                 extensions={"nested": [{"session_token": "secret"}]},
             )
 
-    def test_deepeval_metric_threshold_and_score_gate_validation(self) -> None:
+    def test_deepeval_metric_threshold_validation(self) -> None:
         # threshold 与 threshold_met 必须成对出现且一致。
         with self.assertRaises(ValidationError):
             DeepEvalMetricResult(
-                name="TaskCompletionMetric",
+                name="ArgumentCorrectnessMetric",
                 score=0.8,
                 model="fake-judge",
                 input_digest=_digest("input"),
@@ -173,7 +172,7 @@ class TestVerifiedModels(unittest.TestCase):
             )
         with self.assertRaises(ValidationError):
             DeepEvalMetricResult(
-                name="TaskCompletionMetric",
+                name="ArgumentCorrectnessMetric",
                 score=0.8,
                 model="fake-judge",
                 input_digest=_digest("input"),
@@ -181,7 +180,7 @@ class TestVerifiedModels(unittest.TestCase):
                 threshold_met=False,
             )
         below = DeepEvalMetricResult(
-            name="TaskCompletionMetric",
+            name="ArgumentCorrectnessMetric",
             score=0.4,
             model="fake-judge",
             input_digest=_digest("input"),
@@ -192,7 +191,7 @@ class TestVerifiedModels(unittest.TestCase):
         # 采样聚合:samples>1 必须带 min/max;范围必须包含均值;失败指标不能带范围。
         with self.assertRaises(ValidationError):
             DeepEvalMetricResult(
-                name="TaskCompletionMetric",
+                name="ArgumentCorrectnessMetric",
                 score=0.6,
                 model="fake-judge",
                 input_digest=_digest("input"),
@@ -200,7 +199,7 @@ class TestVerifiedModels(unittest.TestCase):
             )
         with self.assertRaises(ValidationError):
             DeepEvalMetricResult(
-                name="TaskCompletionMetric",
+                name="ArgumentCorrectnessMetric",
                 score=0.6,
                 model="fake-judge",
                 input_digest=_digest("input"),
@@ -209,7 +208,7 @@ class TestVerifiedModels(unittest.TestCase):
                 score_max=0.8,
             )
         sampled = DeepEvalMetricResult(
-            name="TaskCompletionMetric",
+            name="ArgumentCorrectnessMetric",
             score=0.6,
             model="fake-judge",
             input_digest=_digest("input"),
@@ -220,7 +219,7 @@ class TestVerifiedModels(unittest.TestCase):
         self.assertEqual(sampled.samples, 3)
         with self.assertRaises(ValidationError):
             DeepEvalMetricResult(
-                name="TaskCompletionMetric",
+                name="ArgumentCorrectnessMetric",
                 score=None,
                 status=AdapterStatus.FAILED,
                 reason="failed",
@@ -229,19 +228,6 @@ class TestVerifiedModels(unittest.TestCase):
                 score_min=0.4,
                 score_max=0.8,
             )
-        # score_gate 结论必须与计数一致,且至少评估一个指标。
-        with self.assertRaises(ValidationError):
-            DeepEvalScoreGate(
-                passed=True, passed_metrics=2, evaluated_metrics=3, reason="x"
-            )
-        with self.assertRaises(ValidationError):
-            DeepEvalScoreGate(
-                passed=False, passed_metrics=0, evaluated_metrics=0, reason="x"
-            )
-        gate = DeepEvalScoreGate(
-            passed=False, passed_metrics=2, evaluated_metrics=3, reason="x"
-        )
-        self.assertEqual(DeepEvalScoreGate.from_json(gate.canonical_json()), gate)
 
     def test_verified_report_keeps_task_result_invariant(self) -> None:
         result = TaskResult(
@@ -383,14 +369,27 @@ class TestVerifiedFixtures(unittest.TestCase):
         )
         analysis = parse_deepeval_analysis(payload, expected_task_id="verified-task-1")
         self.assertEqual(analysis.status, DeepEvalAnalysisStatus.COMPLETED)
-        self.assertEqual(len(analysis.metrics), 3)
-        # 阈值是宿主侧策略常量:解析时按指标名补齐(1.0/0.8/0.9 均 ≥ 0.5)。
+        self.assertEqual(len(analysis.metrics), 2)
+        # 阈值是宿主侧策略常量:解析时按指标名补齐(1.0/0.9 均 ≥ 0.5)。
         self.assertTrue(all(metric.threshold == 0.5 for metric in analysis.metrics))
         self.assertTrue(all(metric.threshold_met for metric in analysis.metrics))
-        self.assertIsNotNone(analysis.score_gate)
-        assert analysis.score_gate is not None
-        self.assertTrue(analysis.score_gate.passed)
-        self.assertEqual(analysis.score_gate.evaluated_metrics, 3)
+        self.assertEqual(
+            set(analysis.model_dump()),
+            {
+                "schema_version",
+                "task_id",
+                "status",
+                "judge_model",
+                "input_digest",
+                "trajectory_digest",
+                "metrics",
+                "agent_model",
+                "judge_fingerprint",
+                "failure_source",
+                "reason",
+                "extensions",
+            },
+        )
         # 采样字段:旧 fixture 无 samples → 默认 1;min/max 缺省。
         self.assertTrue(all(metric.samples == 1 for metric in analysis.metrics))
         self.assertTrue(all(metric.score_min is None for metric in analysis.metrics))
@@ -439,7 +438,7 @@ class TestVerifiedFixtures(unittest.TestCase):
                 "status": "partial",
                 "metrics": [
                     {
-                        "name": "TaskCompletionMetric",
+                        "name": "ArgumentCorrectnessMetric",
                         "score": None,
                         "status": "timeout",
                     }
@@ -451,7 +450,6 @@ class TestVerifiedFixtures(unittest.TestCase):
         # 非 completed 指标带阈值但不可达(无分数 → threshold_met False)。
         self.assertEqual(partial.metrics[0].threshold, 0.5)
         self.assertFalse(partial.metrics[0].threshold_met)
-        self.assertIsNone(partial.score_gate)
         with self.assertRaises(DeepEvalSchemaError):
             parse_deepeval_analysis(
                 {

@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/agent-e2e-evaluation.md","reason":"核对 worker、DeepEval unavailable、官方结果不可变、无 aggregate pass/fail gate 的验收边界"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"核对 targeted benchmark tests、compile、diff check 以及不扩大到全量门禁的验证范围"}
+{"file":".trellis/spec/backend/secret-boundary.md","reason":"验证投影异常和 reason 缺失说明不会泄露异常原文、凭证或路径"}
+{"file":".trellis/tasks/09-01-deepeval-analysis-trace-boundary/prd.md","reason":"按本任务三个缺陷及 acceptance criteria 复核实现和报告变更"}
+{"file":".trellis/tasks/09-01-deepeval-analysis-trace-boundary/design.md","reason":"按 failure containment、honest sequence、no aggregate gate 三条设计链路执行检查"}

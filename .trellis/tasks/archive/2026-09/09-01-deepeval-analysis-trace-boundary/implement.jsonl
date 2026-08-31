@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/agent-e2e-evaluation.md","reason":"定义 Analysis Trace 仅供 DeepEval、缺失产物 unavailable、官方 Harness 结果不可变和 worker/artifact 边界"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"遵循现有 typed Python、unittest、定向测试和 git diff --check 约定"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"失败旁路不新增日志或 stdout 协议，保留 typed event/受控 artifact ownership"}
+{"file":".trellis/tasks/archive/2026-08/08-31-deepeval-analysis-trace/design.md","reason":"复用已批准的单一 Analysis Trace 边界和不迁移 ProcessVerifier/Opik 的设计决策"}
+{"file":".trellis/tasks/archive/2026-08/08-28-eval-pr-c-score-semantics/design.md","reason":"定位当前遗留 DeepEval threshold/score_gate 的来源，确保只删除明确不需要的 aggregate gate 引用"}

@@ -10,13 +10,16 @@ from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 from .evidence import ProcessEvidence, ProcessEvidenceProjector
 from .models import TraceSummary, VersionedModel, utc_now
+
+if TYPE_CHECKING:
+    from .analysis_trace import AnalysisTrace, AnalysisTraceProjector
 
 REDACTED = "[REDACTED]"
 _SENSITIVE_KEY_PARTS = (
@@ -71,12 +74,21 @@ class TraceRecorder:
         trace_id: str | None = None,
         max_preview: int = 240,
         projector: ProcessEvidenceProjector | None = None,
+        analysis_projector: AnalysisTraceProjector | None = None,
+        analysis_workspace: str | Path | None = None,
     ) -> None:
         self.trace_id = trace_id or uuid4().hex
         self._max_preview = max_preview
         self._events: list[TraceEvent] = []
         self._evidence: list[ProcessEvidence] = []
         self._projector = projector or ProcessEvidenceProjector()
+        if analysis_projector is None:
+            from .analysis_trace import (
+                AnalysisTraceProjector as _AnalysisTraceProjector,
+            )
+
+            analysis_projector = _AnalysisTraceProjector(workspace=analysis_workspace)
+        self._analysis_projector = analysis_projector
         self._redaction_count = 0
         self._loop_candidates: list[LoopCandidate] = []
         self._last_loop_fingerprint: str | None = None
@@ -152,6 +164,7 @@ class TraceRecorder:
         evidence = self._projector.project(event, sequence=sequence)
         if evidence is not None:
             self._evidence.append(evidence)
+        self._analysis_projector.project(event, sequence=sequence)
 
     def record_tool_call(
         self,
@@ -198,6 +211,15 @@ class TraceRecorder:
             "args": dict(arguments),
             "is_error": False,
         }
+        self._analysis_projector.project(
+            {
+                "type": "tool_execution_start",
+                "tool_name": tool_name,
+                "tool_call_id": f"synthetic-{sequence}",
+                "args": dict(arguments),
+            },
+            sequence=sequence,
+        )
         evidence = self._projector.project(synthetic, sequence=sequence)
         if evidence is not None:
             self._evidence.append(evidence)
@@ -218,6 +240,19 @@ class TraceRecorder:
             ),
             trace_digest=digest,
         )
+
+    def build_analysis_trace(self, *, task_id: str) -> AnalysisTrace:
+        """生成供 DeepEval 使用的安全语义轨迹。"""
+
+        return self._analysis_projector.build(
+            task_id=task_id,
+            trace_id=self.trace_id,
+        )
+
+    def write_analysis_trace(self, path: str | Path, *, task_id: str) -> Path:
+        """写入已校验的 Analysis Trace。"""
+
+        return self.build_analysis_trace(task_id=task_id).write_json(path)
 
     def write_json(self, path: str | Path) -> None:
         """写入已脱敏事件；调用方负责把位置保持在 host 控制的结果目录。"""

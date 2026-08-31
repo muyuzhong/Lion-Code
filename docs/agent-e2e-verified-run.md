@@ -58,14 +58,26 @@ judge 模型与 agent 模型解耦：直接 CLI 可传 `--deepeval-judge-model`
 `LITELLM_API_BASE`，端点只进哈希不进报告原文）——换机或换代后可按
 指纹追溯评分基准是否一致。
 
-### 评分阈值与门禁语义
+### 评分阈值与独立指标语义
 
-三指标统一阈值 0.5（运行侧策略常量，≥0.5 视为达阈值）：
+两项诊断统一阈值 0.5（运行侧策略常量，≥0.5 视为达阈值）：
 `DeepEvalMetricResult` 记录 `threshold`/`threshold_met` 逐项对照，
-`DeepEvalAnalysis.score_gate` 给出已评分指标的阈值门禁结论。报告
-"门禁结论"行合并展示确定性判定（官方 Harness verdict，权威）与
-judge 评分门禁（观测）。judge 分数与 Harbor reward 一样不参与
-`task_result` 判定，也不影响 CLI 退出码约定。
+并保留每项指标的 score、reason、status、采样范围和模型/输入 digest。
+DeepEval 不计算或持久化跨指标的 aggregate pass/fail 结论；报告逐项展示
+这些观测字段。官方 Harness verdict 仍是唯一权威的确定性判定，judge
+分数与 Harbor reward 一样不参与 `task_result` 判定，也不影响 CLI 退出码
+约定。
+
+DeepEval 只消费 worker 产生并经 schema/digest 校验的
+`analysis-trace.json`，输出 `ArgumentCorrectnessMetric` 与
+`ToolDecisionQuality`。旧 `trajectory` 仍用于既有过程/Opik 观测；旧运行
+缺少 Analysis Trace 时，DeepEval 记为 unavailable，不从 digest 逆构造参数。
+Analysis Trace 是 DeepEval 的旁路 artifact：采集、构造、digest 校验或写盘
+失败时只省略 `analysis-trace.json`（部分写入也会清理），不改变
+`worker-result.json`、`trace.json`、patch、Harbor 或官方 Harness 结果；随后
+DeepEval 按缺失 artifact 记为 unavailable。
+Judge reason 已有 `[seq=N]` 时原样保留；未提供 sequence 时只附加
+“（Judge 未提供 sequence 定位）”，不从第一条 Analysis Trace 事件补写序列。
 
 ### Harbor 与官方结果分歧
 
@@ -84,8 +96,9 @@ Harbor 侧仅过程证据。JSON 报告保留两段原始字段，分歧可由
 标注"N 次采样失败"，全部失败仍沿用单次失败语义。采样在分析
 deadline（`--deepeval-timeout`，默认 600 秒）内逐样本计时，超时样本
 按 TIMEOUT 计入；模型延迟高时 deadline 需随采样次数放大（实测单次
-judge 调用约 28 秒，3 次采样 × 3 指标的一轮约 255 秒；TrajectoryQuality
-的 GEval 步骤更长，默认 600 秒为两轮留出余量）。多次采样不保证
+judge 调用约 28 秒，3 次采样 × 2 指标的一轮约 170 秒；
+ToolDecisionQuality 的 GEval 步骤可能更长，默认 600 秒为两轮留出余量）。
+多次采样不保证
 同一 payload 输出完全一致（LLM 无 stable seed），但给出均值±范围，
 使漂移可见、可复核。
 
@@ -129,7 +142,7 @@ DeepEval 离线分析显式关停上报：不要设置 `CONFIDENT_API_KEY`（设
 `deepeval view` / Confident AI 共享建议与 `All metrics errored ...
 Posting the run anyway ... Confident AI dashboard` 横幅均为 SDK 固定
 展示层文案（无官方开关）：横幅在 SDK 的 TestRun 未收集到 metric data
-时必然打印，即使三指标实际已 completed 且带分数——属于已知输出，
+时必然打印，即使两项诊断实际已 completed 且带分数——属于已知输出，
 不表示发生上报。
 
 ## 单题运行
@@ -150,7 +163,7 @@ python -m benchmarks.agent_e2e verified-run \
 ```
 
 结果目录包含 `verified-report.json`、`verified-report.md`，以及受控的 patch、
-trajectory、DeepEval 和 Opik payload 引用。JSON 可用
+legacy trajectory、`analysis-trace.json`、DeepEval 和 Opik payload 引用。JSON 可用
 `VerifiedEvaluationReport.model_validate_json(...)` 重新校验；Opik trace 通过
 同一个 `run_id` 定位。
 

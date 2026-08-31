@@ -39,6 +39,7 @@ class LionInstalledAgent(BaseInstalledAgent):
         "agent_worker.py",
         "backend.py",
         "evidence.py",
+        "analysis_trace.py",
         "models.py",
         "trace.py",
         "variant_injection.py",
@@ -242,6 +243,7 @@ class LionInstalledAgent(BaseInstalledAgent):
                 "worker-result.json",
             )
             await self._download_controlled(environment, "trace.json")
+            await self._download_controlled(environment, "analysis-trace.json")
             await self._download_controlled(environment, "lion.patch")
             if result is not None:
                 _populate_context(context, result)

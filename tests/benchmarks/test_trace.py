@@ -5,10 +5,17 @@ from __future__ import annotations
 import json
 import unittest
 from datetime import UTC, datetime
+from unittest.mock import patch
 
+from benchmarks.agent_e2e.analysis_trace import (
+    AnalysisTraceProjector,
+    AnalysisTraceUnavailable,
+)
+from benchmarks.agent_e2e.evidence import ProcessEvidenceProjector
 from benchmarks.agent_e2e.models import VerifierOutcome
 from benchmarks.agent_e2e.trace import TraceRecorder, redact_text, sanitize_payload
 from benchmarks.agent_e2e.verifier import normalize_verifier_result
+from lion_code.core.events import ToolExecutionEndEvent, ToolExecutionStartEvent
 
 
 class TestTraceRecorder(unittest.TestCase):
@@ -56,6 +63,41 @@ class TestTraceRecorder(unittest.TestCase):
 
         self.assertEqual(recorder.events[0].tool_name, "run_shell")
         self.assertIn("toolName=run_shell", recorder.events[0].summary)
+
+    def test_analysis_projection_failure_isolated_from_formal_trace(self) -> None:
+        analysis_projector = AnalysisTraceProjector()
+        recorder = TraceRecorder(
+            trace_id="trace-analysis-failure",
+            projector=ProcessEvidenceProjector(),
+            analysis_projector=analysis_projector,
+        )
+        event = ToolExecutionStartEvent(
+            tool_name="run_shell",
+            tool_call_id="call-1",
+            args={"command": "pytest -q"},
+        )
+
+        with patch.object(
+            analysis_projector,
+            "_project_call",
+            side_effect=RuntimeError("projection failed"),
+        ) as project_call:
+            recorder.record(event)
+            recorder.record(
+                ToolExecutionEndEvent(
+                    tool_name="run_shell",
+                    tool_call_id="call-1",
+                    result={},
+                    is_error=False,
+                )
+            )
+
+        self.assertEqual(project_call.call_count, 1)
+        self.assertEqual(len(recorder.events), 2)
+        self.assertEqual(len(recorder.evidence), 2)
+        self.assertEqual(analysis_projector.events, ())
+        with self.assertRaises(AnalysisTraceUnavailable):
+            analysis_projector.build(task_id="task", trace_id="trace-analysis-failure")
 
     def test_event_timestamps_come_from_message_or_recorded_at(self) -> None:
         recorder = TraceRecorder(trace_id="trace-time")

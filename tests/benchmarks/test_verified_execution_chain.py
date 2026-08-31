@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from benchmarks.agent_e2e.analysis_trace import project_analysis_trace
 from benchmarks.agent_e2e.artifact import CommitArtifact, CommitArtifactBuilder
 from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.fixtures import (
@@ -47,6 +48,7 @@ from benchmarks.agent_e2e.verified_runner import (
     run_verified_evaluation,
 )
 from benchmarks.agent_e2e.worker_entrypoint import export_git_patch
+from lion_code.core.events import ToolExecutionStartEvent
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -227,6 +229,19 @@ class TestVerifiedExecutionChain(unittest.TestCase):
             trial_root.mkdir(parents=True)
             patch_path = trial_root / "lion.patch"
             patch_path.write_bytes(b"diff --git a/tracked.txt b/tracked.txt\n")
+            analysis_trace = project_analysis_trace(
+                task.task_id,
+                "trace-analysis",
+                (
+                    ToolExecutionStartEvent(
+                        tool_call_id="call-1",
+                        tool_name="read_file",
+                        args={"file_path": "src/config.py"},
+                    ),
+                ),
+                workspace=job_root,
+            )
+            analysis_trace.write_json(trial_root / "analysis-trace.json")
             (trial_root / "result.json").write_text(
                 json.dumps(
                     {
@@ -248,6 +263,15 @@ class TestVerifiedExecutionChain(unittest.TestCase):
             self.assertIsNotNone(controlled_patch)
             assert controlled_patch is not None
             self.assertTrue(controlled_patch.is_file())
+            self.assertIn(
+                "artifacts/harbor-analysis-trace.json",
+                output.result.artifact_references,
+            )
+            self.assertTrue(
+                (
+                    request.output_dir / "artifacts" / "harbor-analysis-trace.json"
+                ).is_file()
+            )
             self.assertTrue(output.result.job_id.startswith("trial-"))
             self.assertNotIn("secret", output.result.canonical_json())
 

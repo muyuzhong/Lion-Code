@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/index.md","reason":"定位 backend authoritative specs 与 agent-e2e evaluation owner"}
+{"file":".trellis/spec/backend/secret-boundary.md","reason":"语义参数和错误摘要必须服从现有凭证脱敏不变量"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Analysis Trace 必须来自 typed events，禁止 stdout/session 日志解析"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"新 artifact 跨 worker、Harbor、host、DeepEval 与 report 的最小 typed contract"}
+{"file":".trellis/tasks/08-31-deepeval-analysis-trace/research/current-trace-gap.md","reason":"当前 digest-only 数据流与可复用 typed Core event 证据"}
+{"file":".trellis/tasks/08-31-deepeval-analysis-trace/research/current-evaluation-contract.md","reason":"ProcessEvidence、DeepEval/Opik 与 Verified composition 的当前权威契约摘录"}
+{"file":".trellis/tasks/08-31-deepeval-analysis-trace/research/deepeval-4.2-action-metrics.md","reason":"固定 SDK 版本的 metric 参数与阶段一取舍"}

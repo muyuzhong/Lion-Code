@@ -7,9 +7,9 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-1.md`
-- **Total Sessions**: 66
-- **Last Active**: 2026-08-31
+- **Active File**: `journal-2.md`
+- **Total Sessions**: 68
+- **Last Active**: 2026-09-01
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1997 | Active |
+| `journal-2.md` | ~49 | Active |
+| `journal-1.md` | ~1997 | Archived |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +30,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 68 | 2026-09-01 | 修复 DeepEval Analysis Trace 边界并推送 | `ba4b8fed` | `muyuzhong/deepeval-analysis-trace` |
+| 67 | 2026-08-31 | DeepEval 安全语义轨迹 | `572afc3d` | `muyuzhong/deepeval-analysis-trace` |
 | 66 | 2026-08-31 | Provider readiness 投影与远程同步 | `4216811d`, `4f2f2408` | `muyuzhong/provider-readiness-projection` |
 | 65 | 2026-08-25 | 修复桌面客户端模型输出阻塞 | `a44a6803` | `master` |
 | 64 | 2026-08-25 | 修复桌面客户端配置恢复与会话错误链路 | `e67d65c3` | `master` |

@@ -51,7 +51,7 @@ async def run_agent_worker(
     session_dir = _session_dir_for(request)
     _require_external_session_dir(session_dir, workspace)
     session_repository = SessionRepository(session_dir)
-    recorder = trace_recorder or TraceRecorder()
+    recorder = trace_recorder or TraceRecorder(analysis_workspace=workspace)
     # 凭证只从进程环境解析(容器内无本地配置),避免默认落到 anthropic 通道;
     # 未解析到凭证时不传参,保持 factory 自身默认(离线测试/占位端点)不变。
     credentials = resolve_api_credentials()
