@@ -22,6 +22,7 @@ LOG_ROOT = Path("/logs/agent")
 PATCH_PATH = LOG_ROOT / "lion.patch"
 RESULT_PATH = LOG_ROOT / "worker-result.json"
 TRACE_PATH = LOG_ROOT / "trace.json"
+ANALYSIS_TRACE_PATH = LOG_ROOT / "analysis-trace.json"
 
 
 def main() -> int:
@@ -50,7 +51,8 @@ def main() -> int:
     recorder = TraceRecorder(
         projector=ProcessEvidenceProjector(
             validation_commands=task.public_validation_commands,
-        )
+        ),
+        analysis_workspace=Path.cwd(),
     )
     injection_spec = spec_from_manifest(manifest)
     result = asyncio.run(
@@ -84,6 +86,7 @@ def main() -> int:
     LOG_ROOT.mkdir(parents=True, exist_ok=True)
     RESULT_PATH.write_text(result.canonical_json() + "\n", encoding="utf-8")
     recorder.write_json(TRACE_PATH)
+    recorder.write_analysis_trace(ANALYSIS_TRACE_PATH, task_id=task.task_id)
     return 0
 
 

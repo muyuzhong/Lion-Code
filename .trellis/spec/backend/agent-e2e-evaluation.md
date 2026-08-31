@@ -744,7 +744,7 @@ execution or scoring path.
 
 ```python
 def analyze_deepeval_case(
-    case: DeepEvalCase,
+    case: DeepEvalAnalysisCase,
     *,
     judge_model: str,
     judge: DeepEvalJudge | None = None,
@@ -755,7 +755,7 @@ def analyze_verified_report(
     report: VerifiedEvaluationReport,
     *,
     input_digest: str,
-    trajectory: DeepEvalTrajectory,
+    analysis_trace: AnalysisTrace | None = None,
     judge_model: str,
     judge: DeepEvalJudge | None = None,
     timeout_seconds: float | None = 120.0,
@@ -774,13 +774,18 @@ def publish_opik_trace(
 
 ### 3. Contracts
 
-- DeepEval always evaluates the fixed metrics `TaskCompletionMetric`,
-  `StepEfficiencyMetric`, and `TrajectoryQuality`; the SDK is optional and
-  pinned in the `benchmark-online` extra, never imported by `lion_code`.
-- The project analyzer and the optional standard pytest entry both consume the
-  same `DeepEvalCase` built from one bounded, redacted trajectory. They must
-  not call the Agent, generate a new dataset, or use hidden reasoning,
-  credentials, raw tool output, or private verifier data.
+- DeepEval evaluates exactly the fixed metrics `ArgumentCorrectnessMetric` and
+  `ToolDecisionQuality`; the SDK is optional and pinned in the
+  `benchmark-online` extra, never imported by `lion_code`.
+- The worker projects typed Core tool events into one bounded, versioned
+  `AnalysisTrace`. The DeepEval adapter consumes only a schema- and digest-
+  validated `AnalysisTrace`; the legacy digest-only `DeepEvalTrajectory`
+  remains an independent input for existing process/Opik observability and is
+  never reverse-projected into semantic tool arguments.
+- The project analyzer and the optional standard pytest entry consume the same
+  public task context and ordered Analysis Trace. They must not call the Agent,
+  generate a new dataset, or use hidden reasoning, credentials, raw tool
+  output, or private verifier data.
 - Each metric observation carries the same input digest as the case. A score
   is persisted only when it is finite and in `[0, 1]`; a single failure or
   timeout is typed and does not discard successful sibling metrics.
@@ -798,22 +803,24 @@ def publish_opik_trace(
 
 | Condition | Required result |
 |---|---|
-| Trajectory/report task IDs or analysis digest do not match | Reject before analysis/export; preserve the original report |
+| Analysis Trace/report task or trace IDs, or its digest, do not match | Reject before analysis/export; preserve the original report |
+| Analysis Trace is missing, out of scope, or invalid | Return typed `DeepEvalAnalysisStatus.UNAVAILABLE`; never reconstruct it from a legacy digest-only trajectory |
 | DeepEval SDK is absent or its pinned API is incompatible | `DeepEvalAnalysisStatus.UNAVAILABLE`; no official verdict change |
 | One metric fails, times out, or returns an invalid score | Typed metric failure; retain other scores and mark aggregate partial/timeout/failed |
 | Metric input digest differs from the case digest | Invalid metric observation; do not persist its score |
-| Trajectory contains unbounded or sensitive text | Redact and bound the projection; never publish the raw value |
+| Analysis Trace contains unbounded or sensitive text | Reject the semantic artifact; never publish the raw value |
 | Opik host credentials or SDK are unavailable | `OpikExportStatus.UNAVAILABLE`; no Agent/Harness rerun |
 | Opik flush or network export fails | Typed timeout/failed result with the same payload digest; allow retry |
 | Task result is blocked/offline/non-official | Do not emit a numeric Harness feedback score |
 
 ### 5. Good / Base / Bad Cases
 
-- Good: load one frozen Verified report and trajectory, calculate the three
-  metrics through the shared analyzer, then publish that same redacted data as
-  a post-run Opik tree.
-- Base: on Windows or without optional credentials, record typed unavailable
-  analysis/export state while retaining the deterministic official result.
+- Good: load one frozen Verified report and validated Analysis Trace, calculate
+  the two metrics through the shared analyzer, then publish the existing
+  redacted trajectory as a post-run Opik tree.
+- Base: on Windows, without optional credentials, or without Analysis Trace,
+  record typed unavailable analysis/export state while retaining the
+  deterministic official result.
 - Bad: rerun the Agent for DeepEval, let a judge decide pass/fail, or publish
   raw prompts, tool output, paths, hidden reasoning, or credentials.
 - Bad: treat an Opik upload failure as a Harness failure or retry by executing
@@ -821,15 +828,15 @@ def publish_opik_trace(
 
 ### 6. Tests Required
 
-- `tests/benchmarks/test_eval_analysis_observability.py`: fixed metrics and
+- `tests/benchmarks/test_eval_analysis_observability.py`: fixed two metrics and
   shared digest, partial failure, timeout, verdict immutability, span tree,
   timestamps, feedback, redaction, flush, and retry.
 - `tests/benchmarks/evals/test_lion_swebench_verified.py`: standard pytest
-  composition over precomputed trajectory/report; assert three metric names,
-  completed analysis, and unchanged `task_result`.
+  composition over precomputed Analysis Trace/report; assert the two metric
+  names, completed analysis, and unchanged `task_result`.
 - On a Linux host with the pinned optional dependencies and credentials, run
   one existing Verified result through DeepEval and Opik, then verify the
-  `run_id` trace, three metric feedback entries, Harness metadata, and flush
+  `run_id` trace, two metric feedback entries, Harness metadata, and flush
   state. This smoke is separate from offline CI tests.
 - Before handoff run the targeted benchmark tests, targeted lint/compile
   checks, and `git diff --check`; do not use unavailable optional services as
@@ -851,7 +858,7 @@ publish_raw_trajectory_to_opik(report)
 analyzed = analyze_verified_report(
     report,
     input_digest=input_digest,
-    trajectory=trajectory,
+    analysis_trace=analysis_trace,
     judge_model=judge_model,
 )
 payload = build_opik_trace_payload(
@@ -896,8 +903,9 @@ but, when supplied, must equal `manifest.run_id`.
   `artifact -> Harbor -> Harness -> DeepEval -> Opik`; later stages consume
   typed results or controlled artifacts from earlier stages.
 - The DeepEval input digest is the SHA-256 of the public prompt sent to the
-  worker. A Harbor `harbor-trace.json` is projected into a bounded, redacted
-  trajectory; no stage invokes the Agent a second time.
+  worker. Harbor transports `analysis-trace.json` as a bounded, validated
+  semantic input for DeepEval; the legacy `harbor-trace.json` trajectory stays
+  on the existing process/Opik path. No stage invokes the Agent a second time.
 - Harness may return the external SWE-bench instance ID; the composition maps
   it back to the selected catalog task ID before building `TaskResult`.
 - `verified-report.json` and `verified-report.md` are always written when a
@@ -911,16 +919,17 @@ but, when supplied, must equal `manifest.run_id`.
 | Task is not selected, repeats is not `1`, digest/timeout is invalid, or `--run-id` mismatches | Reject before backend execution; no official result |
 | Artifact/Harbor fails or Harbor exports no patch | Blocked/non-official report; do not invoke Harness, and never emit an official score |
 | Harness returns an unknown task ID or malformed official result | Invalid/non-official report |
-| No controlled trajectory is available | Retain the Harbor/Harness report; do not run DeepEval or Opik |
+| No controlled Analysis Trace is available | Retain the Harbor/Harness report; mark DeepEval unavailable and do not reverse the legacy digest |
+| No legacy controlled trajectory is available | Retain the report; do not publish an Opik event tree |
 | DeepEval or Opik fails after official scoring | Typed failure in that stage; preserve the official task result |
 | Trial is subject-failed, infra-failed, indeterminate, or an official task fails | Exit `1`, `2`, `3`, or `1` respectively; completed official pass exits `0` |
 
 ### 5. Good / Base / Bad Cases
 
 - Good: invoke the shared function once, pass the exact Harbor patch to
-  Harness, analyze the same redacted trajectory, and write both report forms.
-- Base: on Windows or without a trajectory/optional service, record blocked or
-  unavailable stage state without inventing a score.
+  Harness, analyze the validated Analysis Trace, and write both report forms.
+- Base: on Windows, without Analysis Trace, or without an optional service,
+  record blocked or unavailable stage state without inventing a score.
 - Bad: rerun the Agent for DeepEval, use Harbor reward as an official verdict,
   or turn an infrastructure failure into a zero score.
 

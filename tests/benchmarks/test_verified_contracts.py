@@ -165,7 +165,7 @@ class TestVerifiedModels(unittest.TestCase):
         # threshold 与 threshold_met 必须成对出现且一致。
         with self.assertRaises(ValidationError):
             DeepEvalMetricResult(
-                name="TaskCompletionMetric",
+                name="ArgumentCorrectnessMetric",
                 score=0.8,
                 model="fake-judge",
                 input_digest=_digest("input"),
@@ -173,7 +173,7 @@ class TestVerifiedModels(unittest.TestCase):
             )
         with self.assertRaises(ValidationError):
             DeepEvalMetricResult(
-                name="TaskCompletionMetric",
+                name="ArgumentCorrectnessMetric",
                 score=0.8,
                 model="fake-judge",
                 input_digest=_digest("input"),
@@ -181,7 +181,7 @@ class TestVerifiedModels(unittest.TestCase):
                 threshold_met=False,
             )
         below = DeepEvalMetricResult(
-            name="TaskCompletionMetric",
+            name="ArgumentCorrectnessMetric",
             score=0.4,
             model="fake-judge",
             input_digest=_digest("input"),
@@ -192,7 +192,7 @@ class TestVerifiedModels(unittest.TestCase):
         # 采样聚合:samples>1 必须带 min/max;范围必须包含均值;失败指标不能带范围。
         with self.assertRaises(ValidationError):
             DeepEvalMetricResult(
-                name="TaskCompletionMetric",
+                name="ArgumentCorrectnessMetric",
                 score=0.6,
                 model="fake-judge",
                 input_digest=_digest("input"),
@@ -200,7 +200,7 @@ class TestVerifiedModels(unittest.TestCase):
             )
         with self.assertRaises(ValidationError):
             DeepEvalMetricResult(
-                name="TaskCompletionMetric",
+                name="ArgumentCorrectnessMetric",
                 score=0.6,
                 model="fake-judge",
                 input_digest=_digest("input"),
@@ -209,7 +209,7 @@ class TestVerifiedModels(unittest.TestCase):
                 score_max=0.8,
             )
         sampled = DeepEvalMetricResult(
-            name="TaskCompletionMetric",
+            name="ArgumentCorrectnessMetric",
             score=0.6,
             model="fake-judge",
             input_digest=_digest("input"),
@@ -220,7 +220,7 @@ class TestVerifiedModels(unittest.TestCase):
         self.assertEqual(sampled.samples, 3)
         with self.assertRaises(ValidationError):
             DeepEvalMetricResult(
-                name="TaskCompletionMetric",
+                name="ArgumentCorrectnessMetric",
                 score=None,
                 status=AdapterStatus.FAILED,
                 reason="failed",
@@ -383,14 +383,14 @@ class TestVerifiedFixtures(unittest.TestCase):
         )
         analysis = parse_deepeval_analysis(payload, expected_task_id="verified-task-1")
         self.assertEqual(analysis.status, DeepEvalAnalysisStatus.COMPLETED)
-        self.assertEqual(len(analysis.metrics), 3)
-        # 阈值是宿主侧策略常量:解析时按指标名补齐(1.0/0.8/0.9 均 ≥ 0.5)。
+        self.assertEqual(len(analysis.metrics), 2)
+        # 阈值是宿主侧策略常量:解析时按指标名补齐(1.0/0.9 均 ≥ 0.5)。
         self.assertTrue(all(metric.threshold == 0.5 for metric in analysis.metrics))
         self.assertTrue(all(metric.threshold_met for metric in analysis.metrics))
         self.assertIsNotNone(analysis.score_gate)
         assert analysis.score_gate is not None
         self.assertTrue(analysis.score_gate.passed)
-        self.assertEqual(analysis.score_gate.evaluated_metrics, 3)
+        self.assertEqual(analysis.score_gate.evaluated_metrics, 2)
         # 采样字段:旧 fixture 无 samples → 默认 1;min/max 缺省。
         self.assertTrue(all(metric.samples == 1 for metric in analysis.metrics))
         self.assertTrue(all(metric.score_min is None for metric in analysis.metrics))
@@ -439,7 +439,7 @@ class TestVerifiedFixtures(unittest.TestCase):
                 "status": "partial",
                 "metrics": [
                     {
-                        "name": "TaskCompletionMetric",
+                        "name": "ArgumentCorrectnessMetric",
                         "score": None,
                         "status": "timeout",
                     }

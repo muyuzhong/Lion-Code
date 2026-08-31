@@ -16,6 +16,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from .analysis_trace import AnalysisTrace
 from .models import (
     AdapterStatus,
     DeepEvalAnalysis,
@@ -26,6 +27,7 @@ from .models import (
     DeepEvalTrajectory,
     DeepEvalTrajectoryEvent,
     FailureSource,
+    TaskVerdict,
     VerifiedEvaluationReport,
 )
 from .trace import TraceEvent, redact_text
@@ -33,20 +35,18 @@ from .trace import TraceEvent, redact_text
 DEEPEVAL_RESULT_SCHEMA_VERSION = "deepeval-result/v1"
 MAX_TRAJECTORY_EVENTS = 256
 DEEPEVAL_METRIC_NAMES = (
-    "TaskCompletionMetric",
-    "StepEfficiencyMetric",
-    "TrajectoryQuality",
+    "ArgumentCorrectnessMetric",
+    "ToolDecisionQuality",
 )
 # 投影前丢弃的高频流式快照：Core ``message_update`` 与 message_start/end
 # 冗余（携带的是增量快照而非新事实），对脱敏 judge 无增量价值。
 NOISE_EVENT_TYPES = frozenset({"message_update"})
-# 三指标统一阈值（≥0.5 视为达阈值）：中点判定、简单可解释；运行侧策略
+# 两指标统一阈值（≥0.5 视为达阈值）：中点判定、简单可解释；运行侧策略
 # 常量，演进只改此处与文档，不引入配置系统。score_gate 仅作观测，
 # 不参与 task_result 判定与 CLI 退出码。
 DEEPEVAL_METRIC_THRESHOLDS: Mapping[str, float] = {
-    "TaskCompletionMetric": 0.5,
-    "StepEfficiencyMetric": 0.5,
-    "TrajectoryQuality": 0.5,
+    "ArgumentCorrectnessMetric": 0.5,
+    "ToolDecisionQuality": 0.5,
 }
 _EMPTY_DIGEST = hashlib.sha256(b"").hexdigest()
 
@@ -79,6 +79,21 @@ class DeepEvalMetricObservation:
     status: AdapterStatus = AdapterStatus.COMPLETED
 
 
+@dataclass(frozen=True, slots=True)
+class DeepEvalAnalysisCase:
+    """供 DeepEval 使用的短生命周期语义 case，不作为结果模型持久化。"""
+
+    task_id: str
+    input_digest: str
+    analysis_trace: AnalysisTrace
+    expected_verdict: TaskVerdict | None = None
+    input_preview: str | None = None
+    outcome_preview: str | None = None
+
+
+DeepEvalCaseLike = DeepEvalCase | DeepEvalAnalysisCase
+
+
 class DeepEvalJudge(Protocol):
     """离线分析器使用的最小 judge 边界，便于 fake 测试。"""
 
@@ -86,7 +101,7 @@ class DeepEvalJudge(Protocol):
         self,
         *,
         metric_name: str,
-        case: DeepEvalCase,
+        case: DeepEvalCaseLike,
     ) -> DeepEvalMetricObservation:
         """基于已有 case 计算一项固定 metric。"""
 
@@ -211,7 +226,7 @@ def parse_deepeval_analysis(
 
 
 def analyze_deepeval_case(
-    case: DeepEvalCase,
+    case: DeepEvalCaseLike,
     *,
     judge_model: str,
     judge: DeepEvalJudge | None = None,
@@ -220,7 +235,7 @@ def analyze_deepeval_case(
     judge_fingerprint: str | None = None,
     judge_samples: int = 3,
 ) -> DeepEvalAnalysis:
-    """对冻结 trajectory 做三项离线分析，绝不修改正式 task verdict。
+    """对冻结语义轨迹做两项离线分析，绝不修改正式 task verdict。
 
     每个指标独立采样 ``judge_samples`` 次，score 取成功采样均值并记录
     范围；采样在分析 deadline 内逐样本计时，超时样本按既有 TIMEOUT
@@ -231,6 +246,8 @@ def analyze_deepeval_case(
         raise ValueError("timeout_seconds must be positive or None")
     if judge_samples < 1:
         raise ValueError("judge_samples must be at least 1")
+    if isinstance(case, DeepEvalAnalysisCase):
+        case.analysis_trace.validate_digest()
     safe_model = _safe_model(judge_model)
     if judge is None:
         try:
@@ -303,7 +320,7 @@ def analyze_deepeval_case(
 def _metric_result_from_samples(
     observations: Sequence[DeepEvalMetricObservation],
     *,
-    case: DeepEvalCase,
+    case: DeepEvalCaseLike,
     judge_model: str,
     metric_name: str,
 ) -> DeepEvalMetricResult:
@@ -368,7 +385,8 @@ def analyze_verified_report(
     report: VerifiedEvaluationReport,
     *,
     input_digest: str,
-    trajectory: DeepEvalTrajectory,
+    trajectory: DeepEvalTrajectory | None = None,
+    analysis_trace: AnalysisTrace | None = None,
     judge_model: str,
     judge: DeepEvalJudge | None = None,
     timeout_seconds: float | None = 120.0,
@@ -381,16 +399,35 @@ def analyze_verified_report(
     """将分析结果写回 report 的独立字段，保留原始正式结果对象。"""
 
     _ensure_telemetry_off()
-    if report.task_result.task_id != trajectory.task_id:
-        raise ValueError("DeepEval trajectory task_id does not match the report")
-    case = DeepEvalCase(
-        task_id=trajectory.task_id,
-        input_digest=input_digest,
-        trajectory=trajectory,
-        expected_verdict=report.task_result.verdict,
-        input_preview=input_preview,
-        outcome_preview=outcome_preview,
-    )
+    if analysis_trace is not None:
+        analysis_trace.validate_digest()
+        if report.task_result.task_id != analysis_trace.task_id:
+            raise ValueError(
+                "DeepEval Analysis Trace task_id does not match the report"
+            )
+        case: DeepEvalCaseLike = DeepEvalAnalysisCase(
+            task_id=analysis_trace.task_id,
+            input_digest=input_digest,
+            analysis_trace=analysis_trace,
+            expected_verdict=report.task_result.verdict,
+            input_preview=input_preview,
+            outcome_preview=outcome_preview,
+        )
+    elif trajectory is not None:
+        if report.task_result.task_id != trajectory.task_id:
+            raise ValueError("DeepEval trajectory task_id does not match the report")
+        # 旧的直接调用接口仅用于既有 Opik/离线 fixture 测试；Verified
+        # 生产路径必须传入已校验的 Analysis Trace。
+        case = DeepEvalCase(
+            task_id=trajectory.task_id,
+            input_digest=input_digest,
+            trajectory=trajectory,
+            expected_verdict=report.task_result.verdict,
+            input_preview=input_preview,
+            outcome_preview=outcome_preview,
+        )
+    else:
+        raise ValueError("DeepEval requires an Analysis Trace")
     analysis = analyze_deepeval_case(
         case,
         judge_model=judge_model,
@@ -432,7 +469,7 @@ def _ensure_telemetry_off() -> None:
 
 def _evaluate_direct(
     judge: DeepEvalJudge,
-    case: DeepEvalCase,
+    case: DeepEvalCaseLike,
     metric_name: str,
 ) -> DeepEvalMetricObservation:
     try:
@@ -462,7 +499,7 @@ def _evaluate_direct(
 
 def _evaluate_with_timeout(
     judge: DeepEvalJudge,
-    case: DeepEvalCase,
+    case: DeepEvalCaseLike,
     metric_name: str,
     timeout_seconds: float,
 ) -> DeepEvalMetricObservation:
@@ -506,7 +543,7 @@ def _evaluate_with_timeout(
 def _metric_result_from_observation(
     observation: DeepEvalMetricObservation,
     *,
-    case: DeepEvalCase,
+    case: DeepEvalCaseLike,
     judge_model: str,
     metric_name: str,
 ) -> DeepEvalMetricResult:
@@ -539,6 +576,7 @@ def _metric_result_from_observation(
     if status is not AdapterStatus.COMPLETED:
         score = None
         reason = reason or f"DeepEval metric status: {status.value}"
+    reason = _with_sequence_reference(case, reason)
     threshold = DEEPEVAL_METRIC_THRESHOLDS.get(metric_name)
     threshold_met = (
         None
@@ -560,7 +598,7 @@ def _metric_result_from_observation(
 
 
 def _analysis_from_metrics(
-    case: DeepEvalCase,
+    case: DeepEvalCaseLike,
     *,
     judge_model: str,
     metrics: tuple[DeepEvalMetricResult, ...],
@@ -606,7 +644,7 @@ def _analysis_from_metrics(
         status=status,
         judge_model=judge_model,
         input_digest=case.input_digest,
-        trajectory_digest=case.trajectory.trace_digest,
+        trajectory_digest=_case_trace_digest(case),
         metrics=metrics,
         agent_model=agent_model,
         judge_fingerprint=judge_fingerprint,
@@ -642,7 +680,7 @@ def _score_gate(metrics: tuple[DeepEvalMetricResult, ...]) -> DeepEvalScoreGate 
 
 
 def _unavailable_analysis(
-    case: DeepEvalCase,
+    case: DeepEvalCaseLike,
     *,
     judge_model: str,
     reason: str,
@@ -665,7 +703,7 @@ def _unavailable_analysis(
         status=DeepEvalAnalysisStatus.UNAVAILABLE,
         judge_model=judge_model,
         input_digest=case.input_digest,
-        trajectory_digest=case.trajectory.trace_digest,
+        trajectory_digest=_case_trace_digest(case),
         metrics=metrics,
         agent_model=agent_model,
         judge_fingerprint=judge_fingerprint,
@@ -697,6 +735,31 @@ def _safe_reason(value: Any) -> str | None:
         return None
     reason, _ = redact_text(str(value), max_length=320)
     return reason.strip() or None
+
+
+def _case_trace_digest(case: DeepEvalCaseLike) -> str:
+    if isinstance(case, DeepEvalAnalysisCase):
+        return case.analysis_trace.trace_digest
+    return case.trajectory.trace_digest
+
+
+def _with_sequence_reference(
+    case: DeepEvalCaseLike,
+    reason: str | None,
+) -> str | None:
+    """让语义指标 reason 至少能回指一条受控事件序列。"""
+
+    if not isinstance(case, DeepEvalAnalysisCase):
+        return reason
+    if not case.analysis_trace.events:
+        return reason
+    if reason and "[seq=" in reason:
+        return reason
+    sequence = case.analysis_trace.events[0].sequence
+    suffix = f" [seq={sequence}]"
+    base = reason or "DeepEval metric completed"
+    safe_base, _ = redact_text(base, max_length=max(1, 320 - len(suffix)))
+    return f"{safe_base.rstrip()} {suffix}"[:320]
 
 
 def map_deepeval_status(
@@ -840,6 +903,7 @@ __all__: Sequence[str] = (
     "DEEPEVAL_METRIC_THRESHOLDS",
     "DEEPEVAL_RESULT_SCHEMA_VERSION",
     "NOISE_EVENT_TYPES",
+    "DeepEvalAnalysisCase",
     "DeepEvalJudge",
     "DeepEvalMetricFixture",
     "DeepEvalMetricObservation",

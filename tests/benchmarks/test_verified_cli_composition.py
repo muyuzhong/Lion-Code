@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+from benchmarks.agent_e2e.analysis_trace import AnalysisTrace, project_analysis_trace
 from benchmarks.agent_e2e.artifact import CommitArtifact
 from benchmarks.agent_e2e.catalog import freeze_catalog
 from benchmarks.agent_e2e.cli import main
@@ -60,6 +61,7 @@ from benchmarks.agent_e2e.verified_runner import (
     verified_exit_code,
     write_verified_report,
 )
+from lion_code.core.events import ToolExecutionStartEvent
 
 COMMIT_SHA = AGENT_CODE_SHA + "0" * (40 - len(AGENT_CODE_SHA))
 
@@ -131,6 +133,21 @@ def _trajectory(task_id: str) -> DeepEvalTrajectory:
         trace_id="trace-1",
         trace_digest=_digest("trace"),
         events=events,
+    )
+
+
+def _analysis_trace(task_id: str) -> AnalysisTrace:
+    return project_analysis_trace(
+        task_id,
+        "trace-1",
+        (
+            ToolExecutionStartEvent(
+                tool_call_id="call-1",
+                tool_name="read_file",
+                args={"file_path": "src/config.py"},
+            ),
+        ),
+        workspace=Path.cwd(),
     )
 
 
@@ -308,6 +325,7 @@ class TestVerifiedComposition(unittest.TestCase):
                     python_executable="python",
                     harness_python="python",
                     trajectory=_trajectory(task.task_id),
+                    analysis_trace=_analysis_trace(task.task_id),
                     deepeval_judge=judge,
                     opik_client=opik_client,
                     opik_workspace="workspace-1",
@@ -374,6 +392,9 @@ class TestVerifiedComposition(unittest.TestCase):
             self.assertIn("官方 Harness", markdown)
             self.assertIn("DeepEval", markdown)
             self.assertIn("Opik Cloud", markdown)
+            self.assertIn("ArgumentCorrectnessMetric", markdown)
+            self.assertIn("ToolDecisionQuality", markdown)
+            self.assertIn("[seq=1]", markdown)
             # 评分语义化:模型身份、阈值对照与门禁结论进入报告。
             self.assertIn("Agent 模型", markdown)
             self.assertIn("Judge 模型", markdown)
@@ -405,6 +426,7 @@ class TestVerifiedComposition(unittest.TestCase):
                     python_executable="python",
                     harness_python="python",
                     trajectory=_trajectory(task.task_id),
+                    analysis_trace=_analysis_trace(task.task_id),
                     deepeval_judge=judge,
                     deepeval_samples=1,
                 ),
@@ -490,6 +512,7 @@ class TestVerifiedComposition(unittest.TestCase):
                 python_executable="python",
                 harness_python="python",
                 trajectory=trajectory,
+                analysis_trace=_analysis_trace(task.task_id),
             )
             with (
                 patch(
@@ -520,6 +543,46 @@ class TestVerifiedComposition(unittest.TestCase):
             self.assertNotIn("secret-value", serialized)
             self.assertEqual(harbor_runner.calls, 1)
             self.assertEqual(harness_runner.calls, 1)
+
+    def test_missing_analysis_trace_is_unavailable_without_digest_fallback(
+        self,
+    ) -> None:
+        task = _task()
+        manifest = _manifest(task)
+        order: list[str] = []
+        harbor_runner = _FakeHarborRunner(order)
+        harness_runner = _FakeHarnessRunner(order, harbor_runner.patch_sha256)
+        judge = _FakeJudge(order)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            execution = run_verified_evaluation(
+                VerifiedExecutionRequest(
+                    repository_root=output_dir,
+                    commit_sha=COMMIT_SHA,
+                    manifest=manifest,
+                    task=task,
+                    output_dir=output_dir / "run",
+                    python_executable="python",
+                    harness_python="python",
+                    # 旧 digest-only 输入只能继续服务 Opik，不能成为 DeepEval 输入。
+                    trajectory=_trajectory(task.task_id),
+                    deepeval_judge=judge,
+                ),
+                artifact_builder=_FakeArtifactBuilder(order),
+                harbor_runner=harbor_runner,
+                harness_runner=harness_runner,
+            )
+
+        self.assertTrue(execution.report.task_result.official)
+        self.assertEqual(execution.report.task_result.verdict, TaskVerdict.PASSED)
+        self.assertIsNotNone(execution.report.deepeval)
+        assert execution.report.deepeval is not None
+        self.assertEqual(execution.report.deepeval.status.value, "unavailable")
+        self.assertEqual(
+            execution.report.deepeval.metrics[0].name, DEEPEVAL_METRIC_NAMES[0]
+        )
+        self.assertEqual(judge.calls, [])
 
 
 class TestVerifiedCli(unittest.TestCase):

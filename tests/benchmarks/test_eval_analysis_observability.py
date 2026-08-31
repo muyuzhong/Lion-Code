@@ -287,7 +287,7 @@ class TestDeepEvalAnalysis(unittest.TestCase):
         self.assertTrue(analysis.score_gate.passed)
         self.assertEqual(
             (analysis.score_gate.passed_metrics, analysis.score_gate.evaluated_metrics),
-            (3, 3),
+            (2, 2),
         )
 
     def test_score_gate_partial_threshold_failure(self) -> None:
@@ -296,7 +296,6 @@ class TestDeepEvalAnalysis(unittest.TestCase):
             {
                 DEEPEVAL_METRIC_NAMES[0]: 0.4,
                 DEEPEVAL_METRIC_NAMES[1]: 0.75,
-                DEEPEVAL_METRIC_NAMES[2]: 0.6,
             }
         )
         analysis = analyze_deepeval_case(
@@ -306,17 +305,15 @@ class TestDeepEvalAnalysis(unittest.TestCase):
             timeout_seconds=None,
         )
         self.assertEqual(analysis.status, DeepEvalAnalysisStatus.COMPLETED)
-        self.assertEqual(
-            [m.threshold_met for m in analysis.metrics], [False, True, True]
-        )
+        self.assertEqual([m.threshold_met for m in analysis.metrics], [False, True])
         self.assertIsNotNone(analysis.score_gate)
         assert analysis.score_gate is not None
         self.assertFalse(analysis.score_gate.passed)
         self.assertEqual(
             (analysis.score_gate.passed_metrics, analysis.score_gate.evaluated_metrics),
-            (2, 3),
+            (1, 2),
         )
-        self.assertIn("2 项达阈值", analysis.score_gate.reason)
+        self.assertIn("1 项达阈值", analysis.score_gate.reason)
 
     def test_score_gate_none_when_no_completed_scores(self) -> None:
         case = _case()
@@ -448,7 +445,6 @@ class TestDeepEvalAnalysis(unittest.TestCase):
             {
                 DEEPEVAL_METRIC_NAMES[0]: 0.8,
                 DEEPEVAL_METRIC_NAMES[1]: RuntimeError("api_key=sk-not-persisted"),
-                DEEPEVAL_METRIC_NAMES[2]: 0.6,
             }
         )
         analysis = analyze_deepeval_case(
@@ -469,8 +465,8 @@ class TestDeepEvalAnalysis(unittest.TestCase):
         self.assertIsNotNone(analysis.score_gate)
         assert analysis.score_gate is not None
         self.assertTrue(analysis.score_gate.passed)
-        self.assertEqual(analysis.score_gate.evaluated_metrics, 2)
-        self.assertEqual(analysis.score_gate.passed_metrics, 2)
+        self.assertEqual(analysis.score_gate.evaluated_metrics, 1)
+        self.assertEqual(analysis.score_gate.passed_metrics, 1)
 
     def test_analysis_records_agent_model_and_judge_fingerprint(self) -> None:
         case = _case()

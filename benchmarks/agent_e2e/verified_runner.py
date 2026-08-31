@@ -13,6 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .analysis_trace import (
+    AnalysisTrace,
+    AnalysisTraceError,
+    AnalysisTraceUnavailable,
+    load_analysis_trace,
+)
 from .artifact import (
     ARTIFACT_BUILDER_VERSION,
     ArtifactBuildError,
@@ -20,6 +26,7 @@ from .artifact import (
     CommitArtifactBuilder,
 )
 from .deepeval_analysis import (
+    DEEPEVAL_METRIC_NAMES,
     DeepEvalJudge,
     analyze_verified_report,
     build_deepeval_trajectory,
@@ -42,6 +49,7 @@ from .models import (
     AdapterStatus,
     DeepEvalAnalysis,
     DeepEvalAnalysisStatus,
+    DeepEvalMetricResult,
     DeepEvalTrajectory,
     ExperimentManifest,
     FailureSource,
@@ -88,6 +96,7 @@ class VerifiedExecutionRequest:
     harness_python: str | Path
     harbor_executable: str = "harbor"
     trajectory: DeepEvalTrajectory | None = None
+    analysis_trace: AnalysisTrace | None = None
     input_digest: str | None = None
     deepeval_judge_model: str | None = None
     deepeval_judge: DeepEvalJudge | None = None
@@ -110,6 +119,7 @@ class VerifiedExecutionOutput:
     harbor: HarborExecutionOutput | None = None
     harness: HarnessRecheckResult | None = None
     trajectory: DeepEvalTrajectory | None = None
+    analysis_trace: AnalysisTrace | None = None
     opik_payload: OpikTracePayload | None = None
 
 
@@ -248,7 +258,7 @@ def run_verified_evaluation(
         harbor=harbor_output.result,
         harness=harness_result,
     )
-    report, trajectory, opik_payload = _run_post_processing(
+    report, trajectory, analysis_trace, opik_payload = _run_post_processing(
         report,
         request=request,
         output_dir=output_dir,
@@ -275,6 +285,7 @@ def run_verified_evaluation(
         harbor=harbor_output,
         harness=harness_result,
         trajectory=trajectory,
+        analysis_trace=analysis_trace,
         opik_payload=opik_payload,
     )
 
@@ -480,18 +491,89 @@ def _run_post_processing(
 ) -> tuple[
     VerifiedEvaluationReport,
     DeepEvalTrajectory | None,
+    AnalysisTrace | None,
     OpikTracePayload | None,
 ]:
     """在确定性复核之后运行分析和发布；失败只落在各自字段。"""
 
-    trajectory = _load_trajectory(
+    source_trajectory = _load_trajectory(
         request,
         output_dir=output_dir,
         harbor_output=harbor_output,
         task_result=report.task_result,
     )
+    analysis_trace, analysis_trace_error = _load_analysis_trace(
+        request,
+        output_dir=output_dir,
+        harbor_output=harbor_output,
+        task_result=report.task_result,
+    )
+    # Opik 和过程指标继续使用原有 harbor-trace 投影；Analysis Trace 只进入
+    # DeepEval，不能反向合成或替换既有观测树。
+    trajectory = source_trajectory
+    input_digest = request.input_digest or _verified_input_digest(request.task)
+    judge_model = request.deepeval_judge_model or request.manifest.profile.model
+    agent_model = request.manifest.profile.model
+    judge_fingerprint = _judge_fingerprint(judge_model)
+    if analysis_trace is None:
+        analysis = _unavailable_analysis(
+            task_id=request.task.task_id,
+            input_digest=input_digest,
+            trace_digest=_trace_digest_from_result(report.task_result),
+            judge_model=judge_model,
+            reason=(
+                analysis_trace_error or "DeepEval requires a controlled Analysis Trace"
+            ),
+            agent_model=agent_model,
+            judge_fingerprint=judge_fingerprint,
+        )
+    else:
+        try:
+            analysis_kwargs: dict[str, Any] = {
+                "input_digest": input_digest,
+                "trajectory": None,
+                "analysis_trace": analysis_trace,
+                "judge_model": judge_model,
+                "judge": request.deepeval_judge,
+                "timeout_seconds": request.deepeval_timeout_seconds,
+                "agent_model": agent_model,
+                "judge_fingerprint": judge_fingerprint,
+                "judge_samples": request.deepeval_samples,
+                "input_preview": _judge_task_preview(request.task),
+                "outcome_preview": _judge_outcome_preview(
+                    report.task_result, patch_path=harbor_output.patch_path
+                ),
+            }
+            analyzed = analyze_verified_report(report, **analysis_kwargs)
+            analyzed_analysis = analyzed.deepeval
+            if analyzed_analysis is None:
+                raise ValueError("DeepEval analysis is missing from the report")
+            analysis = analyzed_analysis
+            expected_trace_digest = analysis_trace.trace_digest
+            if (
+                analyzed.task_result != report.task_result
+                or analysis.task_id != report.task_result.task_id
+                or analysis.input_digest != input_digest
+                or analysis.trajectory_digest != expected_trace_digest
+            ):
+                raise ValueError("DeepEval analysis changed or mismatched the report")
+        except Exception as error:
+            analysis = _analysis_failure(
+                task_id=analysis_trace.task_id,
+                trace_digest=analysis_trace.trace_digest,
+                input_digest=input_digest,
+                judge_model=judge_model,
+                agent_model=agent_model,
+                judge_fingerprint=judge_fingerprint,
+                error=error,
+            )
     if trajectory is None:
-        return report, None, None
+        return (
+            report.model_copy(update={"deepeval": analysis}),
+            None,
+            analysis_trace,
+            None,
+        )
     report = report.model_copy(
         update={
             "extensions": {
@@ -500,51 +582,23 @@ def _run_post_processing(
             }
         }
     )
-    input_digest = request.input_digest or _verified_input_digest(request.task)
-    judge_model = request.deepeval_judge_model or request.manifest.profile.model
-    agent_model = request.manifest.profile.model
-    judge_fingerprint = _judge_fingerprint(judge_model)
     if request.digest_ledger_path is not None:
         _write_digest_ledger(request, trajectory, input_digest)
-    try:
-        analyzed = analyze_verified_report(
-            report,
-            input_digest=input_digest,
-            trajectory=trajectory,
-            judge_model=judge_model,
-            judge=request.deepeval_judge,
-            timeout_seconds=request.deepeval_timeout_seconds,
-            agent_model=agent_model,
-            judge_fingerprint=judge_fingerprint,
-            judge_samples=request.deepeval_samples,
-            input_preview=_judge_task_preview(request.task),
-            outcome_preview=_judge_outcome_preview(
-                report.task_result, patch_path=harbor_output.patch_path
-            ),
-        )
-        analysis = analyzed.deepeval
-        if (
-            analyzed.task_result != report.task_result
-            or analysis is None
-            or analysis.task_id != report.task_result.task_id
-            or analysis.input_digest != input_digest
-            or analysis.trajectory_digest != trajectory.trace_digest
-        ):
-            raise ValueError("DeepEval analysis changed or mismatched the report")
-    except Exception as error:
-        analysis = _analysis_failure(
-            trajectory,
-            input_digest=input_digest,
-            judge_model=judge_model,
-            agent_model=agent_model,
-            judge_fingerprint=judge_fingerprint,
-            error=error,
-        )
     report = report.model_copy(update={"deepeval": analysis})
 
     execution_status = (
         report.trial.status.value if report.trial is not None else "completed"
     )
+    opik_analysis = analysis
+    if (
+        opik_analysis is not None
+        and opik_analysis.trajectory_digest != trajectory.trace_digest
+    ):
+        # 旧 Opik payload 契约要求 analysis 与 harbor-trace digest 相同；只在
+        # 发布边界复制该关联字段，报告中的 DeepEval digest 仍指向 Analysis Trace。
+        opik_analysis = opik_analysis.model_copy(
+            update={"trajectory_digest": trajectory.trace_digest}
+        )
     try:
         payload = build_opik_trace_payload(
             run_id=request.manifest.run_id,
@@ -553,7 +607,7 @@ def _run_post_processing(
             commit_sha=request.manifest.agent_code_sha,
             profile_fingerprint=request.manifest.profile_fingerprint,
             trajectory=trajectory,
-            analysis=analysis,
+            analysis=opik_analysis,
             task_result=report.task_result,
             patch_sha256=report.task_result.patch_sha256,
             execution_status=execution_status,
@@ -594,7 +648,7 @@ def _run_post_processing(
                 error=error,
             )
     report = report.model_copy(update={"deepeval": analysis, "opik": export})
-    return report, trajectory, payload
+    return report, trajectory, analysis_trace, payload
 
 
 def _trial_from_harbor(
@@ -716,9 +770,116 @@ def _load_trajectory(
     return trajectory.model_copy(update={"deterministic_verdict": task_result.verdict})
 
 
-def _analysis_failure(
-    trajectory: DeepEvalTrajectory,
+def _load_analysis_trace(
+    request: VerifiedExecutionRequest,
     *,
+    output_dir: Path,
+    harbor_output: HarborExecutionOutput,
+    task_result: TaskResult,
+) -> tuple[AnalysisTrace | None, str | None]:
+    """读取唯一的安全语义产物；缺失/非法均不回退到 digest-only trace。"""
+
+    if request.analysis_trace is not None:
+        try:
+            return (
+                load_analysis_trace(
+                    request.analysis_trace,
+                    expected_task_id=request.task.task_id,
+                    expected_trace_id=(
+                        task_result.trace_summary.trace_id
+                        if task_result.trace_summary is not None
+                        else None
+                    ),
+                ),
+                None,
+            )
+        except AnalysisTraceUnavailable:
+            return None, "Analysis Trace artifact is unavailable"
+        except AnalysisTraceError:
+            return None, "Analysis Trace artifact is invalid"
+
+    root = output_dir.resolve()
+    reference_path: Path | None = None
+    for reference in harbor_output.result.artifact_references:
+        relative = Path(reference)
+        if relative.name != "harbor-analysis-trace.json":
+            continue
+        candidate = (root / relative).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None, "Analysis Trace artifact path is outside output root"
+        reference_path = candidate
+        break
+    if reference_path is None:
+        return None, None
+    if not reference_path.is_file():
+        return None, "Analysis Trace artifact is missing"
+    try:
+        return (
+            load_analysis_trace(
+                reference_path,
+                expected_task_id=request.task.task_id,
+                expected_trace_id=(
+                    task_result.trace_summary.trace_id
+                    if task_result.trace_summary is not None
+                    else None
+                ),
+            ),
+            None,
+        )
+    except AnalysisTraceUnavailable:
+        return None, "Analysis Trace artifact is unavailable"
+    except AnalysisTraceError:
+        return None, "Analysis Trace artifact is invalid"
+
+
+def _trace_digest_from_result(task_result: TaskResult) -> str:
+    if task_result.trace_summary is not None:
+        return task_result.trace_summary.trace_digest
+    return hashlib.sha256(b"").hexdigest()
+
+
+def _unavailable_analysis(
+    *,
+    task_id: str,
+    input_digest: str,
+    trace_digest: str,
+    judge_model: str,
+    reason: str,
+    agent_model: str | None,
+    judge_fingerprint: str | None,
+) -> DeepEvalAnalysis:
+    safe_reason, _ = redact_text(reason, max_length=320)
+    metrics = tuple(
+        DeepEvalMetricResult(
+            name=name,
+            score=None,
+            reason=safe_reason or "DeepEval Analysis Trace is unavailable",
+            model=judge_model or "unknown",
+            input_digest=input_digest,
+            status=AdapterStatus.UNAVAILABLE,
+        )
+        for name in DEEPEVAL_METRIC_NAMES
+    )
+    return DeepEvalAnalysis(
+        task_id=task_id,
+        status=DeepEvalAnalysisStatus.UNAVAILABLE,
+        judge_model=judge_model or "unknown",
+        input_digest=input_digest,
+        trajectory_digest=trace_digest,
+        metrics=metrics,
+        agent_model=agent_model,
+        judge_fingerprint=judge_fingerprint,
+        failure_source=FailureSource.DEEPEVAL,
+        reason=safe_reason or "DeepEval Analysis Trace is unavailable",
+    )
+
+
+def _analysis_failure(
+    *,
+    task_id: str,
+    trace_digest: str,
     input_digest: str,
     judge_model: str,
     agent_model: str | None,
@@ -736,11 +897,11 @@ def _analysis_failure(
     )
     model, _ = redact_text(judge_model, max_length=256)
     return DeepEvalAnalysis(
-        task_id=trajectory.task_id,
+        task_id=task_id,
         status=status,
         judge_model=model or "unknown",
         input_digest=input_digest,
-        trajectory_digest=trajectory.trace_digest,
+        trajectory_digest=trace_digest,
         agent_model=agent_model,
         judge_fingerprint=judge_fingerprint,
         failure_source=failure_source,
@@ -867,6 +1028,9 @@ def _write_digest_ledger(
 ) -> None:
     """把本次运行的 digest → 脱敏摘要写入寻迹账本；失败仅警告不阻断。"""
 
+    ledger_path = request.digest_ledger_path
+    if ledger_path is None:
+        return
     entries: list[DigestLedgerEntry] = [
         DigestLedgerEntry(
             digest=input_digest,
@@ -910,7 +1074,7 @@ def _write_digest_ledger(
                 )
             )
     try:
-        DigestLedger(request.digest_ledger_path).append(entries)
+        DigestLedger(ledger_path).append(entries)
     except (OSError, ValueError) as error:
         print(
             f"警告:digest 寻迹账本写入失败(不阻断评测):{error}",

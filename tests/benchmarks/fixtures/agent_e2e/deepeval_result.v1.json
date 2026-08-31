@@ -3,9 +3,8 @@
   "input_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
   "judge_model": "fake-judge",
   "metrics": [
-    {"name": "TaskCompletionMetric", "reason": "目标推进", "score": 1.0, "status": "completed"},
-    {"name": "StepEfficiencyMetric", "reason": "无重复步骤", "score": 0.8, "status": "completed"},
-    {"name": "TrajectoryQuality", "reason": "轨迹完整", "score": 0.9, "status": "completed"}
+    {"name": "ArgumentCorrectnessMetric", "reason": "参数与上下文匹配 [seq=1]", "score": 1.0, "status": "completed"},
+    {"name": "ToolDecisionQuality", "reason": "顺序合理 [seq=1]", "score": 0.9, "status": "completed"}
   ],
   "schema_version": "deepeval-result/v1",
   "status": "completed",

@@ -119,6 +119,8 @@ class HarborSingleTaskRunner:
             "--agent-include-logs",
             "trace.json",
             "--agent-include-logs",
+            "analysis-trace.json",
+            "--agent-include-logs",
             "lion.patch",
             "--delete",
         ]
@@ -335,6 +337,7 @@ def _read_trial_output(
     patch_source = _find_named_file(trial_root, "lion.patch")
     worker_source = _find_named_file(trial_root, "worker-result.json")
     trace_source = _find_named_file(trial_root, "trace.json")
+    analysis_trace_source = _find_named_file(trial_root, "analysis-trace.json")
     controlled_root = request.output_dir.resolve() / "artifacts"
     controlled_root.mkdir(parents=True, exist_ok=True)
     patch_path = _copy_controlled(patch_source, controlled_root / "harbor-patch.diff")
@@ -343,6 +346,10 @@ def _read_trial_output(
         controlled_root / "harbor-worker-result.json",
     )
     trace_path = _copy_controlled(trace_source, controlled_root / "harbor-trace.json")
+    analysis_trace_path = _copy_controlled(
+        analysis_trace_source,
+        controlled_root / "harbor-analysis-trace.json",
+    )
     worker_result = None
     if worker_path is not None:
         worker_result = WorkerResult.from_json(worker_path.read_text(encoding="utf-8"))
@@ -358,7 +365,7 @@ def _read_trial_output(
     reason = _raw_reason(status, exception)
     artifact_paths = tuple(
         path.relative_to(request.output_dir.resolve()).as_posix()
-        for path in (worker_path, trace_path)
+        for path in (worker_path, trace_path, analysis_trace_path)
         if path is not None
     )
     fixture: dict[str, Any] = {
