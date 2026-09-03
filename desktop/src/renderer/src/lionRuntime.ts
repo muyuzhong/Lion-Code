@@ -13,6 +13,8 @@ import {
   type BackendBootstrap,
   type EgressConfiguration,
   type EgressConfigurationResponse,
+  type GitReviewDiff,
+  type GitReviewSnapshot,
   type ModelChoice,
   type ProviderConfiguration,
   type ProviderConfigurationResponse,
@@ -176,6 +178,24 @@ export class LionAssistantRuntimeAdapter {
   async fetchEgressConfiguration(): Promise<EgressConfigurationResponse | null> {
     try {
       return await this.rest.fetchEgressConfiguration();
+    } catch (error) {
+      this.setMetadataError(errorMessage(error));
+      return null;
+    }
+  }
+
+  async fetchGitReview(): Promise<GitReviewSnapshot | null> {
+    try {
+      return await this.rest.fetchGitReview();
+    } catch (error) {
+      this.setMetadataError(errorMessage(error));
+      return null;
+    }
+  }
+
+  async fetchGitReviewDiff(path: string): Promise<GitReviewDiff | null> {
+    try {
+      return await this.rest.fetchGitReviewDiff(path);
     } catch (error) {
       this.setMetadataError(errorMessage(error));
       return null;

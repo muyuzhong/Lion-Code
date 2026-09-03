@@ -21,6 +21,11 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketState
 
+from lion_code.application.git_review import (
+    GitReviewError,
+    read_git_file_diff,
+    read_git_review,
+)
 from lion_code.application.session import LionCodingSession
 from lion_code.config import save_api_config
 from lion_code.core.messages import AssistantMessage, ToolResultMessage, UserMessage
@@ -30,6 +35,9 @@ from .models import (
     ChatMessageDTO,
     EgressConfigRequest,
     EgressConfigResponse,
+    GitReviewDiffResponse,
+    GitReviewFileItem,
+    GitReviewResponse,
     ModelChoiceItem,
     ProviderConfigRequest,
     ProviderConfigResponse,
@@ -440,6 +448,47 @@ def create_app(
         return [
             SkillItem(name=s.name, description=s.description) for s in session.skills
         ]
+
+    @api.get("/git/review", response_model=GitReviewResponse)
+    def get_git_review() -> GitReviewResponse:
+        """只读 Git 变更快照；同步端点由 FastAPI 线程池执行，不阻塞 WS/Provider。"""
+        snapshot = read_git_review(session.cwd)
+        return GitReviewResponse(
+            state=snapshot.state,
+            branch=snapshot.branch,
+            revision=snapshot.revision,
+            clean=snapshot.clean,
+            truncated=snapshot.truncated,
+            files=[
+                GitReviewFileItem(
+                    path=file.path,
+                    status=file.status,
+                    additions=file.additions,
+                    deletions=file.deletions,
+                    binary=file.binary,
+                )
+                for file in snapshot.files
+            ],
+            additions_total=snapshot.additions_total,
+            deletions_total=snapshot.deletions_total,
+        )
+
+    @api.get("/git/review/diff", response_model=GitReviewDiffResponse)
+    def get_git_review_diff(path: str) -> GitReviewDiffResponse:
+        """单个当前变更文件的有界 diff；越界/非变更路径返回 422。"""
+        try:
+            diff = read_git_file_diff(session.cwd, path)
+        except GitReviewError as exc:
+            raise HTTPException(status_code=503, detail="Git 读取失败") from exc
+        if diff is None:
+            raise HTTPException(status_code=422, detail="路径不在当前 Git 变更中")
+        return GitReviewDiffResponse(
+            path=diff.path,
+            diff=diff.diff,
+            binary=diff.binary,
+            truncated=diff.truncated,
+            untracked=diff.untracked,
+        )
 
     @api.post("/thinking")
     async def set_thinking(body: ThinkingLevelRequest) -> dict[str, str]:

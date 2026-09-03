@@ -205,6 +205,35 @@ class ToolCallDTO(BaseModel):
     result: str | None = None
 
 
+class GitReviewFileItem(BaseModel):
+    path: str
+    status: Literal["modified", "added", "deleted", "renamed", "untracked"]
+    additions: int | None = None
+    deletions: int | None = None
+    binary: bool = False
+
+
+class GitReviewResponse(BaseModel):
+    """WorkPanel Git 视图的只读变更快照。"""
+
+    state: Literal["ok", "non_git", "unborn", "git_failed"]
+    branch: str
+    revision: str
+    clean: bool
+    truncated: bool
+    files: list[GitReviewFileItem]
+    additions_total: int
+    deletions_total: int
+
+
+class GitReviewDiffResponse(BaseModel):
+    path: str
+    diff: str
+    binary: bool
+    truncated: bool
+    untracked: bool = False
+
+
 class ChatMessageDTO(BaseModel):
     id: str
     role: Literal["user", "assistant"]
