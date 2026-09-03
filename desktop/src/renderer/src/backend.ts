@@ -70,6 +70,33 @@ export interface EgressConfigurationResponse {
   allow_hosts: string[];
 }
 
+export interface GitReviewFile {
+  path: string;
+  status: "modified" | "added" | "deleted" | "renamed" | "untracked";
+  additions: number | null;
+  deletions: number | null;
+  binary: boolean;
+}
+
+export interface GitReviewSnapshot {
+  state: "ok" | "non_git" | "unborn" | "git_failed";
+  branch: string;
+  revision: string;
+  clean: boolean;
+  truncated: boolean;
+  files: GitReviewFile[];
+  additions_total: number;
+  deletions_total: number;
+}
+
+export interface GitReviewDiff {
+  path: string;
+  diff: string;
+  binary: boolean;
+  truncated: boolean;
+  untracked: boolean;
+}
+
 export function browserBackendBootstrap(endpoint: BackendEndpoint): BackendBootstrap {
   return {
     endpoint,
@@ -124,6 +151,14 @@ export class LionRestClient {
 
   async fetchEgressConfiguration(): Promise<EgressConfigurationResponse> {
     return this.readJson("/api/config/egress", isEgressConfiguration, "Egress 配置不符合 REST 契约");
+  }
+
+  async fetchGitReview(): Promise<GitReviewSnapshot> {
+    return this.readJson("/api/git/review", isGitReviewSnapshot, "Git 审查快照不符合 REST 契约");
+  }
+
+  async fetchGitReviewDiff(path: string): Promise<GitReviewDiff> {
+    return this.readJson(`/api/git/review/diff?path=${encodeURIComponent(path)}`, isGitReviewDiff, "Git diff 不符合 REST 契约");
   }
 
   async newSession(): Promise<void> {
@@ -303,6 +338,36 @@ function isEgressConfiguration(value: unknown): value is EgressConfigurationResp
   return isRecord(value)
     && Array.isArray(value.allow_hosts)
     && value.allow_hosts.every((item) => typeof item === "string");
+}
+
+function isGitReviewFile(value: unknown): value is GitReviewFile {
+  return isRecord(value)
+    && typeof value.path === "string"
+    && (value.status === "modified" || value.status === "added" || value.status === "deleted" || value.status === "renamed" || value.status === "untracked")
+    && (value.additions === null || typeof value.additions === "number")
+    && (value.deletions === null || typeof value.deletions === "number")
+    && typeof value.binary === "boolean";
+}
+
+function isGitReviewSnapshot(value: unknown): value is GitReviewSnapshot {
+  return isRecord(value)
+    && (value.state === "ok" || value.state === "non_git" || value.state === "unborn" || value.state === "git_failed")
+    && typeof value.branch === "string"
+    && typeof value.revision === "string"
+    && typeof value.clean === "boolean"
+    && typeof value.truncated === "boolean"
+    && Array.isArray(value.files) && value.files.every(isGitReviewFile)
+    && typeof value.additions_total === "number"
+    && typeof value.deletions_total === "number";
+}
+
+function isGitReviewDiff(value: unknown): value is GitReviewDiff {
+  return isRecord(value)
+    && typeof value.path === "string"
+    && typeof value.diff === "string"
+    && typeof value.binary === "boolean"
+    && typeof value.truncated === "boolean"
+    && typeof value.untracked === "boolean";
 }
 
 async function responseDetail(response: Response, fallback: string): Promise<string> {
