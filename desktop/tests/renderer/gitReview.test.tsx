@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { GitReviewDiff, GitReviewSnapshot } from "../../src/renderer/src/backend";
+import { LionRestClient, type BackendBootstrap, type GitReviewDiff, type GitReviewSnapshot } from "../../src/renderer/src/backend";
 
 const runtime = vi.hoisted(() => ({
   adapter: {
@@ -53,7 +53,7 @@ function buttonWithText(container: HTMLElement, text: string): HTMLButtonElement
   return button;
 }
 
-async function mountPanel(): Promise<{ container: HTMLDivElement; root: Root }> {
+async function mountPanel(expectedText = "a.py"): Promise<{ container: HTMLDivElement; root: Root }> {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -70,7 +70,7 @@ async function mountPanel(): Promise<{ container: HTMLDivElement; root: Root }> 
     buttonWithText(container, "Git").click();
   });
   await vi.waitFor(() => expect(runtime.adapter.fetchGitReview).toHaveBeenCalledTimes(1));
-  await vi.waitFor(() => expect(container.textContent).toContain("a.py"));
+  await vi.waitFor(() => expect(container.textContent).toContain(expectedText));
   return { container, root };
 }
 
@@ -139,5 +139,44 @@ describe("WorkPanel Git review", () => {
 
     expect(runtime.adapter.fetchGitReviewDiff).toHaveBeenCalledTimes(2);
     await act(async () => mounted.root.unmount());
+  });
+
+  it("keeps an explicit refresh action for a clean snapshot", async () => {
+    runtime.adapter.fetchGitReview.mockResolvedValue({
+      ...dirtySnapshot,
+      clean: true,
+      files: [],
+      additions_total: 0,
+      deletions_total: 0,
+    });
+    const mounted = await mountPanel("工作区干净");
+
+    const refresh = mounted.container.querySelector<HTMLButtonElement>(
+      "button[aria-label='刷新 Git 状态']",
+    );
+    expect(refresh).not.toBeNull();
+    await act(async () => refresh?.click());
+    await vi.waitFor(() => expect(runtime.adapter.fetchGitReview).toHaveBeenCalledTimes(2));
+    await act(async () => mounted.root.unmount());
+  });
+});
+
+describe("Git review REST schema", () => {
+  it("rejects malformed snapshots before exposing them to the adapter", async () => {
+    const malformed = {
+      ...dirtySnapshot,
+      files: [{ ...dirtySnapshot.files[0], binary: "false" }],
+    };
+    const bootstrap: BackendBootstrap = {
+      endpoint: { baseUrl: "http://127.0.0.1:4567", capability: "a".repeat(32) },
+      fetch: async () => new Response(JSON.stringify(malformed), { status: 200 }),
+      createWebSocket: () => { throw new Error("not used"); },
+      scheduleReconnect: () => 0,
+      cancelReconnect: () => {},
+    };
+
+    await expect(new LionRestClient(bootstrap).fetchGitReview()).rejects.toThrow(
+      "Git 审查快照不符合 REST 契约",
+    );
   });
 });

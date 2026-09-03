@@ -2,7 +2,6 @@ import {
   actionForInput,
   initialChatProtocolState,
   reduceChatProtocol,
-  type ChatMessage,
   type ChatProtocolState,
   type ClientAction,
   type PlanApprovalChoice,

@@ -87,6 +87,17 @@ function GitReviewTab() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  const renderState = (message: string, isError = false) => (
+    <div className="git-review">
+      <div className={`git-review-state${isError ? " git-review-error" : ""}`}>
+        <span>{message}</span>
+        <button type="button" className="git-review-refresh" aria-label="刷新 Git 状态" onClick={refresh}>
+          <RefreshCw aria-hidden="true" size={14} />
+        </button>
+      </div>
+    </div>
+  );
+
   const loadDiff = useCallback((file: GitReviewFile) => {
     if (expanded === file.path) {
       setExpanded(null);
@@ -121,22 +132,22 @@ function GitReviewTab() {
     return <div className="git-review"><div className="git-review-state">正在读取 Git 状态…</div></div>;
   }
   if (error) {
-    return <div className="git-review"><div className="git-review-state git-review-error">Git 读取失败：{error}</div></div>;
+    return renderState(`Git 读取失败：${error}`, true);
   }
   if (!snapshot) {
-    return <div className="git-review"><div className="git-review-state">暂无变更</div></div>;
+    return renderState("暂无变更");
   }
   if (snapshot.state === "non_git") {
-    return <div className="git-review"><div className="git-review-state">当前工作区不是 Git 仓库</div></div>;
+    return renderState("当前工作区不是 Git 仓库");
   }
   if (snapshot.state === "unborn") {
-    return <div className="git-review"><div className="git-review-state">仓库还没有提交（unborn）</div></div>;
+    return renderState("仓库还没有提交（unborn）");
   }
   if (snapshot.state === "git_failed") {
-    return <div className="git-review"><div className="git-review-state git-review-error">无法读取 Git 状态（命令失败）</div></div>;
+    return renderState("无法读取 Git 状态（命令失败）", true);
   }
   if (snapshot.clean) {
-    return <div className="git-review"><div className="git-review-state">工作区干净</div></div>;
+    return renderState("工作区干净");
   }
   const diff = expanded ? diffs[expanded] : undefined;
   const expandedDiffError = expanded ? diffErrors[expanded] : undefined;
