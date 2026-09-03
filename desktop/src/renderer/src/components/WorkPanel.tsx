@@ -58,12 +58,18 @@ function GitReviewTab() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [diffs, setDiffs] = useState<Record<string, GitReviewDiff>>({});
+  const [diffErrors, setDiffErrors] = useState<Record<string, string>>({});
+  const [diffLoading, setDiffLoading] = useState<Record<string, boolean>>({});
   const requestRef = useRef(0);
 
   const refresh = useCallback(() => {
     const request = ++requestRef.current;
     setLoading(true);
     setError(null);
+    setExpanded(null);
+    setDiffs({});
+    setDiffErrors({});
+    setDiffLoading({});
     void adapter.fetchGitReview().then((result) => {
       if (request !== requestRef.current) return; // 丢弃陈旧返回
       setLoading(false);
@@ -72,8 +78,10 @@ function GitReviewTab() {
         return;
       }
       setSnapshot(result);
-      setExpanded(null);
-      setDiffs({});
+    }).catch(() => {
+      if (request !== requestRef.current) return;
+      setLoading(false);
+      setError("无法读取 Git 状态");
     });
   }, [adapter]);
 
@@ -85,9 +93,27 @@ function GitReviewTab() {
       return;
     }
     setExpanded(file.path);
+    if (file.binary || file.status === "untracked") return;
     if (diffs[file.path]) return;
+    const snapshotRequest = requestRef.current;
+    setDiffErrors((current) => {
+      const next = { ...current };
+      delete next[file.path];
+      return next;
+    });
+    setDiffLoading((current) => ({ ...current, [file.path]: true }));
     void adapter.fetchGitReviewDiff(file.path).then((result) => {
-      if (result) setDiffs((current) => ({ ...current, [file.path]: result }));
+      if (snapshotRequest !== requestRef.current) return;
+      setDiffLoading((current) => ({ ...current, [file.path]: false }));
+      if (result) {
+        setDiffs((current) => ({ ...current, [file.path]: result }));
+        return;
+      }
+      setDiffErrors((current) => ({ ...current, [file.path]: "无法读取该文件 diff" }));
+    }).catch(() => {
+      if (snapshotRequest !== requestRef.current) return;
+      setDiffLoading((current) => ({ ...current, [file.path]: false }));
+      setDiffErrors((current) => ({ ...current, [file.path]: "无法读取该文件 diff" }));
     });
   }, [adapter, expanded, diffs]);
 
@@ -113,6 +139,8 @@ function GitReviewTab() {
     return <div className="git-review"><div className="git-review-state">工作区干净</div></div>;
   }
   const diff = expanded ? diffs[expanded] : undefined;
+  const expandedDiffError = expanded ? diffErrors[expanded] : undefined;
+  const expandedDiffLoading = expanded ? diffLoading[expanded] === true : false;
   return (
     <div className="git-review">
       <div className="git-review-header">
@@ -128,9 +156,11 @@ function GitReviewTab() {
               <span className={`git-review-status ${file.status}`}>{STATUS_LABELS[file.status]}</span>
               <span className="git-review-path">{file.path}</span>
               {file.binary ? <span className="git-review-binary">二进制</span>
-                : <span className="git-review-stats">+{file.additions ?? 0}/-{file.deletions ?? 0}</span>}
+                : file.additions === null || file.deletions === null
+                  ? <span className="git-review-stats">—</span>
+                  : <span className="git-review-stats">+{file.additions}/-{file.deletions}</span>}
             </button>
-            {expanded === file.path ? <GitReviewDiffView diff={diff} file={file} /> : null}
+            {expanded === file.path ? <GitReviewDiffView diff={diff} error={expandedDiffError} loading={expandedDiffLoading} file={file} /> : null}
           </li>
         ))}
       </ul>
@@ -138,16 +168,22 @@ function GitReviewTab() {
   );
 }
 
-function GitReviewDiffView({ diff, file }: { diff: GitReviewDiff | undefined; file: GitReviewFile }) {
+function GitReviewDiffView({ diff, error, loading, file }: { diff: GitReviewDiff | undefined; error: string | undefined; loading: boolean; file: GitReviewFile }) {
   if (file.binary || (diff && diff.binary)) {
     return <div className="git-review-diff"><pre className="git-review-diff-note">二进制文件，不显示文本 diff</pre></div>;
   }
   if (file.status === "untracked") {
     return <div className="git-review-diff"><pre className="git-review-diff-note">未跟踪文件，无 diff</pre></div>;
   }
-  const text = diff?.diff ?? "";
-  if (!text) {
+  if (error) {
+    return <div className="git-review-diff"><pre className="git-review-diff-note git-review-error">Git diff 读取失败：{error}</pre></div>;
+  }
+  if (loading || !diff) {
     return <div className="git-review-diff"><pre className="git-review-diff-note">正在加载 diff…</pre></div>;
+  }
+  const text = diff.diff;
+  if (!text) {
+    return <div className="git-review-diff"><pre className="git-review-diff-note">没有可显示的文本 diff</pre></div>;
   }
   return (
     <div className="git-review-diff">

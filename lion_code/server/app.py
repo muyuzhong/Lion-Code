@@ -21,7 +21,11 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketState
 
-from lion_code.application.git_review import read_git_file_diff, read_git_review
+from lion_code.application.git_review import (
+    GitReviewError,
+    read_git_file_diff,
+    read_git_review,
+)
 from lion_code.application.session import LionCodingSession
 from lion_code.config import save_api_config
 from lion_code.core.messages import AssistantMessage, ToolResultMessage, UserMessage
@@ -472,11 +476,12 @@ def create_app(
     @api.get("/git/review/diff", response_model=GitReviewDiffResponse)
     def get_git_review_diff(path: str) -> GitReviewDiffResponse:
         """单个当前变更文件的有界 diff；越界/非变更路径返回 422。"""
-        diff = read_git_file_diff(session.cwd, path)
+        try:
+            diff = read_git_file_diff(session.cwd, path)
+        except GitReviewError as exc:
+            raise HTTPException(status_code=503, detail="Git 读取失败") from exc
         if diff is None:
-            raise HTTPException(
-                status_code=422, detail="路径不在当前 Git 变更中"
-            )
+            raise HTTPException(status_code=422, detail="路径不在当前 Git 变更中")
         return GitReviewDiffResponse(
             path=diff.path,
             diff=diff.diff,

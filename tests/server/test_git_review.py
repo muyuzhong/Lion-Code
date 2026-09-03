@@ -13,13 +13,13 @@ from fastapi.testclient import TestClient
 from lion_code.application import git_review
 from lion_code.application.git_review import (
     MAX_FILES,
+    GitReviewError,
     read_git_file_diff,
     read_git_review,
 )
-from lion_code.server.app import create_app
-
-from tests.application.fakes import FakeCodingSessionBackend
 from lion_code.application.session import LionCodingSession
+from lion_code.server.app import create_app
+from tests.application.fakes import FakeCodingSessionBackend
 
 _CAPABILITY = "A" * 43
 _APP_ORIGIN = "http://127.0.0.1:8000"
@@ -112,7 +112,7 @@ def test_dirty_repo_classifies_and_counts_all_statuses() -> None:
         assert by_path["untracked.md"].status == "untracked"
         assert by_path["untracked.md"].additions is None
         # untracked 不计入总增删
-        assert snapshot.additions_total == 1
+        assert snapshot.additions_total == 2
         assert snapshot.deletions_total == 1
         assert snapshot.revision
 
@@ -161,11 +161,97 @@ def test_git_failure_is_not_clean() -> None:
         _git(root, "commit", "-qm", "base")
         (root / "a.py").write_text("x = 2\n", encoding="utf-8")
 
-        with mock.patch.object(git_review, "_run_git", side_effect=OSError("git missing")):
+        with mock.patch.object(
+            git_review, "_run_git", side_effect=OSError("git missing")
+        ):
             snapshot = read_git_review(root)
 
         assert snapshot.state == "git_failed"
         assert snapshot.files == ()
+
+
+def test_nonzero_status_return_is_git_failed() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        _git_repository(root)
+
+        with mock.patch.object(
+            git_review,
+            "_run_git",
+            side_effect=[(0, "true\n"), (1, "")],
+        ):
+            snapshot = read_git_review(root)
+
+        assert snapshot.state == "git_failed"
+        assert snapshot.clean is False
+
+
+def test_revision_changes_when_worktree_content_changes() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        _git_repository(root)
+        tracked = root / "tracked.txt"
+        tracked.write_text("before\n", encoding="utf-8")
+        _git(root, "add", ".")
+        _git(root, "commit", "-qm", "base")
+
+        tracked.write_text("after one\n", encoding="utf-8")
+        first = read_git_review(root)
+        tracked.write_text("after two\n", encoding="utf-8")
+        second = read_git_review(root)
+
+        assert first.files[0].path == "tracked.txt"
+        assert first.revision != second.revision
+
+
+def test_machine_readable_paths_and_rename_stats() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        _git_repository(root)
+        old_path = root / "old name.txt"
+        old_path.write_text("before\n", encoding="utf-8")
+        _git(root, "add", ".")
+        _git(root, "commit", "-qm", "base")
+
+        new_name = "中文 'new name.txt"
+        _git(root, "mv", "old name.txt", new_name)
+        (root / new_name).write_text("before\nafter\n", encoding="utf-8")
+
+        snapshot = read_git_review(root)
+        renamed = next(file for file in snapshot.files if file.status == "renamed")
+
+        assert renamed.path == new_name
+        assert renamed.additions == 1
+        assert renamed.deletions == 0
+        result = read_git_file_diff(root, new_name)
+        assert result is not None
+        assert result.path == new_name
+        assert "+after" in result.diff
+
+        parsed = git_review._parse_status("M  中文 'line\nname.txt\0")
+        assert parsed[0].path == "中文 'line\nname.txt"
+
+
+def test_diff_nonzero_return_is_explicit_failure() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        _git_repository(root)
+        tracked = root / "tracked.txt"
+        tracked.write_text("before\n", encoding="utf-8")
+        _git(root, "add", ".")
+        _git(root, "commit", "-qm", "base")
+        tracked.write_text("after\n", encoding="utf-8")
+
+        original = git_review._run_git
+
+        def fail_diff(cwd: Path, *args: str) -> tuple[int, str]:
+            if args and args[0] == "diff":
+                return 1, ""
+            return original(cwd, *args)
+
+        with mock.patch.object(git_review, "_run_git", side_effect=fail_diff):
+            with pytest.raises(GitReviewError):
+                read_git_file_diff(root, "tracked.txt")
 
 
 def test_ancestor_repository_is_not_discovered() -> None:
@@ -263,7 +349,6 @@ def test_diff_rejects_path_not_in_changeset() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         _make_dirty_repo(root)
-        (root / "unrelated.txt").write_text("nope\n", encoding="utf-8")
         assert read_git_file_diff(root, "unrelated.txt") is None
 
 
@@ -315,7 +400,7 @@ def test_git_review_endpoint_returns_snapshot() -> None:
         paths = {item["path"] for item in data["files"]}
         assert "a.py" in paths
         assert "untracked.md" in paths
-        assert data["additions_total"] == 1
+        assert data["additions_total"] == 2
         assert data["deletions_total"] == 1
 
 
@@ -331,6 +416,22 @@ def test_git_review_diff_endpoint_and_invalid_path() -> None:
 
         invalid = client.get("/api/git/review/diff", params={"path": "../secret"})
         assert invalid.status_code == 422
+
+
+def test_git_review_diff_endpoint_reports_git_failure() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        _make_dirty_repo(root)
+        client = _client(root)
+
+        with mock.patch(
+            "lion_code.server.app.read_git_file_diff",
+            side_effect=GitReviewError("git failed"),
+        ):
+            response = client.get("/api/git/review/diff", params={"path": "a.py"})
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Git 读取失败"
 
 
 def _session(root: Path) -> LionCodingSession:
