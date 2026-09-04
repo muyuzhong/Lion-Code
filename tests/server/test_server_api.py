@@ -435,20 +435,18 @@ def test_get_messages_and_open_resource_project_safe_tool_result(
 def test_open_resource_is_a_sync_threadpool_endpoint() -> None:
     session, _ = _build_test_session()
     app = create_app(session, capability=_CAPABILITY)
-    route = next(
-        (
-            route
-            for route in app.routes
-            if getattr(route, "path", None) == "/api/resources/open"
-        ),
-        None,
-    )
+    pending_routes = list(app.routes)
+    route = None
+    while pending_routes:
+        candidate = pending_routes.pop()
+        if getattr(candidate, "path", None) == "/api/resources/open":
+            route = candidate
+            break
+        nested_router = getattr(candidate, "original_router", None)
+        if nested_router is not None:
+            pending_routes.extend(nested_router.routes)
 
-    assert route is not None, {
-        "routes": [getattr(item, "path", None) for item in app.routes],
-        "app_type": f"{type(app).__module__}.{type(app).__qualname__}",
-        "create_app_file": inspect.getsourcefile(create_app),
-    }
+    assert route is not None
     assert not inspect.iscoroutinefunction(route.endpoint)
 
 
