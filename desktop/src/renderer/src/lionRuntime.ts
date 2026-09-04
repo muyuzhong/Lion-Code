@@ -257,7 +257,6 @@ export class LionAssistantRuntimeAdapter {
     if (!opened || opened.loading) return;
     await this.openResource({ path: opened.ref.path });
   }
-
   async setThinkingLevel(level: string): Promise<boolean> {
     try {
       await this.rest.setThinkingLevel(level);

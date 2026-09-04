@@ -19,11 +19,7 @@ from lion_code.application.git_review import (
 )
 from lion_code.application.session import LionCodingSession
 from lion_code.server.app import create_app
-
-try:
-    from application.fakes import FakeCodingSessionBackend
-except ModuleNotFoundError:
-    from tests.application.fakes import FakeCodingSessionBackend
+from tests.application.fakes import FakeCodingSessionBackend
 
 _CAPABILITY = "A" * 43
 _APP_ORIGIN = "http://127.0.0.1:8000"

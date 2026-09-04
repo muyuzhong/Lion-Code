@@ -148,9 +148,8 @@
 
 /* Git 审查视图 */
 .git-review { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
-.git-review-state { display: flex; min-height: 0; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--ds-text-muted); font-size: 13px; text-align: center; }
+.git-review-state { display: flex; min-height: 0; flex: 1; align-items: center; justify-content: center; padding: 24px; color: var(--ds-text-muted); font-size: 13px; text-align: center; }
 .git-review-error { color: var(--ds-error); }
-.git-review-state .git-review-refresh { margin-top: 2px; }
 .git-review-header { display: flex; min-height: 34px; flex: 0 0 34px; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--ds-border-subtle); }
 .git-review-branch { min-width: 0; overflow: hidden; color: var(--ds-text-primary); font-size: 12.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .git-review-counts { margin-left: auto; color: var(--ds-text-muted); font: 11px var(--font-mono); }

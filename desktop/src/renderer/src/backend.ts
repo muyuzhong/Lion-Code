@@ -109,7 +109,6 @@ export interface OpenableResourceResponse {
   content: string | null;
   message: string | null;
 }
-
 export function browserBackendBootstrap(endpoint: BackendEndpoint): BackendBootstrap {
   return {
     endpoint,
@@ -180,7 +179,6 @@ export class LionRestClient {
     if (expectedMtimeNs) params.set("expected_mtime_ns", expectedMtimeNs);
     return this.readJson(`/api/resources/open?${params.toString()}`, isOpenableResourceResponse, "文件资源不符合 REST 契约");
   }
-
   async newSession(): Promise<void> {
     await this.postJson("/api/sessions/new", {});
   }

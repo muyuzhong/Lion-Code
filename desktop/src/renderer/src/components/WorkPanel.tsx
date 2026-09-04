@@ -115,7 +115,6 @@ function formatResourceTime(modifiedAtNs: string | null): string {
   if (!Number.isFinite(milliseconds)) return "修改时间未知";
   return new Date(milliseconds).toLocaleString();
 }
-
 type GitStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
 
 const STATUS_LABELS: Record<GitStatus, string> = {
@@ -162,17 +161,6 @@ function GitReviewTab() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const renderState = (message: string, isError = false) => (
-    <div className="git-review">
-      <div className={`git-review-state${isError ? " git-review-error" : ""}`}>
-        <span>{message}</span>
-        <button type="button" className="git-review-refresh" aria-label="刷新 Git 状态" onClick={refresh}>
-          <RefreshCw aria-hidden="true" size={14} />
-        </button>
-      </div>
-    </div>
-  );
-
   const loadDiff = useCallback((file: GitReviewFile) => {
     if (expanded === file.path) {
       setExpanded(null);
@@ -207,22 +195,22 @@ function GitReviewTab() {
     return <div className="git-review"><div className="git-review-state">正在读取 Git 状态…</div></div>;
   }
   if (error) {
-    return renderState(`Git 读取失败：${error}`, true);
+    return <div className="git-review"><div className="git-review-state git-review-error">Git 读取失败：{error}</div></div>;
   }
   if (!snapshot) {
-    return renderState("暂无变更");
+    return <div className="git-review"><div className="git-review-state">暂无变更</div></div>;
   }
   if (snapshot.state === "non_git") {
-    return renderState("当前工作区不是 Git 仓库");
+    return <div className="git-review"><div className="git-review-state">当前工作区不是 Git 仓库</div></div>;
   }
   if (snapshot.state === "unborn") {
-    return renderState("仓库还没有提交（unborn）");
+    return <div className="git-review"><div className="git-review-state">仓库还没有提交（unborn）</div></div>;
   }
   if (snapshot.state === "git_failed") {
-    return renderState("无法读取 Git 状态（命令失败）", true);
+    return <div className="git-review"><div className="git-review-state git-review-error">无法读取 Git 状态（命令失败）</div></div>;
   }
   if (snapshot.clean) {
-    return renderState("工作区干净");
+    return <div className="git-review"><div className="git-review-state">工作区干净</div></div>;
   }
   const diff = expanded ? diffs[expanded] : undefined;
   const expandedDiffError = expanded ? diffErrors[expanded] : undefined;
