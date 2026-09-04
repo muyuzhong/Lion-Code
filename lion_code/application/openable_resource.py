@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -91,14 +92,8 @@ def read_openable_resource(
     竞态中的半份文件伪装成稳定快照。路径越界、二进制和解码失败均只返回
     结构化状态。
     """
-    candidate = Path(raw_path)
-    try:
-        workspace_root = cwd.resolve(strict=False)
-        result_root = OPENABLE_RESULT_ROOT.resolve(strict=False)
-        resolved = (candidate if candidate.is_absolute() else cwd / candidate).resolve(
-            strict=False
-        )
-    except (OSError, ValueError):
+    roots = _resolve_resource_paths(cwd, raw_path)
+    if roots is None:
         return _resource(
             "outside_workspace",
             raw_path,
@@ -107,6 +102,7 @@ def read_openable_resource(
             modified_at_ns=None,
             message="无法验证资源路径",
         )
+    workspace_root, result_root, resolved = roots
 
     if not _is_within(resolved, workspace_root) and not _is_within(
         resolved, result_root
@@ -120,8 +116,94 @@ def read_openable_resource(
             message="资源不在当前工作区或工具结果目录内",
         )
 
+    return _read_resource(
+        resolved,
+        workspace_root,
+        result_root,
+        raw_path,
+        expected_size=expected_size,
+        expected_mtime_ns=expected_mtime_ns,
+    )
+
+
+def _resolve_resource_paths(cwd: Path, raw_path: str) -> tuple[Path, Path, Path] | None:
+    try:
+        candidate = Path(raw_path)
+        workspace_root = cwd.resolve(strict=False)
+        result_root = OPENABLE_RESULT_ROOT.resolve(strict=False)
+        resolved = (candidate if candidate.is_absolute() else cwd / candidate).resolve(
+            strict=False
+        )
+    except (OSError, ValueError):
+        return None
+    return workspace_root, result_root, resolved
+
+
+def _read_resource(
+    resolved: Path,
+    workspace_root: Path,
+    result_root: Path,
+    raw_path: str,
+    *,
+    expected_size: int | None,
+    expected_mtime_ns: int | None,
+) -> OpenableResource:
     name = resolved.name or _resource_name(raw_path)
     resource_format = _format_for_path(resolved)
+    before = _stat_resource(resolved, name, resource_format)
+    if isinstance(before, OpenableResource):
+        return before
+
+    verified = _verify_resource_path(
+        resolved,
+        workspace_root,
+        result_root,
+        name,
+        resource_format,
+        before,
+    )
+    if isinstance(verified, OpenableResource):
+        return verified
+    resolved = verified
+    name = resolved.name or name
+    resource_format = _format_for_path(resolved)
+
+    if _changed(before.st_size, before.st_mtime_ns, expected_size, expected_mtime_ns):
+        return _resource(
+            "changed",
+            str(resolved),
+            name,
+            size=before.st_size,
+            modified_at_ns=before.st_mtime_ns,
+            format=resource_format,
+            message="资源在上次读取后发生变化",
+        )
+    if before.st_size > OPENABLE_RESOURCE_MAX_BYTES:
+        return _resource(
+            "too_large",
+            str(resolved),
+            name,
+            size=before.st_size,
+            modified_at_ns=before.st_mtime_ns,
+            format=resource_format,
+            message=f"资源超过 {OPENABLE_RESOURCE_MAX_BYTES // 1024} KiB 读取上限",
+        )
+
+    return _read_resource_data(
+        resolved,
+        workspace_root,
+        result_root,
+        name,
+        resource_format,
+        before,
+    )
+
+
+def _stat_resource(
+    resolved: Path,
+    name: str,
+    resource_format: OpenableResourceFormat,
+) -> os.stat_result | OpenableResource:
     try:
         before = resolved.stat()
     except FileNotFoundError:
@@ -155,7 +237,17 @@ def read_openable_resource(
             format=resource_format,
             message="资源不是普通文件",
         )
+    return before
 
+
+def _verify_resource_path(
+    resolved: Path,
+    workspace_root: Path,
+    result_root: Path,
+    name: str,
+    resource_format: OpenableResourceFormat,
+    before: os.stat_result,
+) -> Path | OpenableResource:
     try:
         verified = resolved.resolve(strict=True)
     except (FileNotFoundError, OSError, ValueError):
@@ -180,80 +272,32 @@ def read_openable_resource(
             format=resource_format,
             message="资源符号链接指向不允许的路径",
         )
-    resolved = verified
-    name = resolved.name or name
-    resource_format = _format_for_path(resolved)
+    return verified
 
-    if _changed(before.st_size, before.st_mtime_ns, expected_size, expected_mtime_ns):
-        return _resource(
-            "changed",
-            str(resolved),
-            name,
-            size=before.st_size,
-            modified_at_ns=before.st_mtime_ns,
-            format=resource_format,
-            message="资源在上次读取后发生变化",
-        )
-    if before.st_size > OPENABLE_RESOURCE_MAX_BYTES:
-        return _resource(
-            "too_large",
-            str(resolved),
-            name,
-            size=before.st_size,
-            modified_at_ns=before.st_mtime_ns,
-            format=resource_format,
-            message=f"资源超过 {OPENABLE_RESOURCE_MAX_BYTES // 1024} KiB 读取上限",
-        )
 
-    try:
-        with resolved.open("rb") as handle:
-            data = handle.read(OPENABLE_RESOURCE_MAX_BYTES + 1)
-        after = resolved.stat()
-    except FileNotFoundError:
-        return _resource(
-            "missing",
-            str(resolved),
-            name,
-            size=None,
-            modified_at_ns=None,
-            format=resource_format,
-            message="资源在读取前被删除",
-        )
-    except (OSError, ValueError):
-        return _resource(
-            "unreadable",
-            str(resolved),
-            name,
-            size=before.st_size,
-            modified_at_ns=before.st_mtime_ns,
-            format=resource_format,
-            message="资源读取失败",
-        )
+def _read_resource_data(
+    resolved: Path,
+    workspace_root: Path,
+    result_root: Path,
+    name: str,
+    resource_format: OpenableResourceFormat,
+    before: os.stat_result,
+) -> OpenableResource:
+    snapshot = _read_resource_bytes(resolved, name, resource_format, before)
+    if isinstance(snapshot, OpenableResource):
+        return snapshot
+    data, after = snapshot
 
-    try:
-        after_resolved = resolved.resolve(strict=True)
-    except (FileNotFoundError, OSError, ValueError):
-        return _resource(
-            "missing",
-            str(resolved),
-            name,
-            size=None,
-            modified_at_ns=None,
-            format=resource_format,
-            message="资源在读取后被删除",
-        )
-    if not _is_within(after_resolved, workspace_root) and not _is_within(
-        after_resolved, result_root
-    ):
-        return _resource(
-            "outside_workspace",
-            str(resolved),
-            name,
-            size=after.st_size,
-            modified_at_ns=after.st_mtime_ns,
-            format=resource_format,
-            message="资源读取后指向不允许的路径",
-        )
+    after_resolved = _verify_after_read(
+        resolved,
+        workspace_root,
+        result_root,
+        name,
+        resource_format,
+        after,
+    )
+    if isinstance(after_resolved, OpenableResource):
+        return after_resolved
     if (
         not stat.S_ISREG(after.st_mode)
         or after_resolved != resolved
@@ -289,6 +333,84 @@ def read_openable_resource(
             format=resource_format,
             message="二进制资源不在文件视图中内联展示",
         )
+    return _decode_resource(data, resolved, name, resource_format, after)
+
+
+def _read_resource_bytes(
+    resolved: Path,
+    name: str,
+    resource_format: OpenableResourceFormat,
+    before: os.stat_result,
+) -> tuple[bytes, os.stat_result] | OpenableResource:
+    try:
+        with resolved.open("rb") as handle:
+            data = handle.read(OPENABLE_RESOURCE_MAX_BYTES + 1)
+        after = resolved.stat()
+    except FileNotFoundError:
+        return _resource(
+            "missing",
+            str(resolved),
+            name,
+            size=None,
+            modified_at_ns=None,
+            format=resource_format,
+            message="资源在读取前被删除",
+        )
+    except (OSError, ValueError):
+        return _resource(
+            "unreadable",
+            str(resolved),
+            name,
+            size=before.st_size,
+            modified_at_ns=before.st_mtime_ns,
+            format=resource_format,
+            message="资源读取失败",
+        )
+    return data, after
+
+
+def _verify_after_read(
+    resolved: Path,
+    workspace_root: Path,
+    result_root: Path,
+    name: str,
+    resource_format: OpenableResourceFormat,
+    after: os.stat_result,
+) -> Path | OpenableResource:
+    try:
+        after_resolved = resolved.resolve(strict=True)
+    except (FileNotFoundError, OSError, ValueError):
+        return _resource(
+            "missing",
+            str(resolved),
+            name,
+            size=None,
+            modified_at_ns=None,
+            format=resource_format,
+            message="资源在读取后被删除",
+        )
+    if not _is_within(after_resolved, workspace_root) and not _is_within(
+        after_resolved, result_root
+    ):
+        return _resource(
+            "outside_workspace",
+            str(resolved),
+            name,
+            size=after.st_size,
+            modified_at_ns=after.st_mtime_ns,
+            format=resource_format,
+            message="资源读取后指向不允许的路径",
+        )
+    return after_resolved
+
+
+def _decode_resource(
+    data: bytes,
+    resolved: Path,
+    name: str,
+    resource_format: OpenableResourceFormat,
+    after: os.stat_result,
+) -> OpenableResource:
     try:
         content = data.decode("utf-8")
     except UnicodeDecodeError:

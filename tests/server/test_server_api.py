@@ -176,10 +176,7 @@ def test_get_status_reports_stable_provider_blocker_code() -> None:
 
     assert response.status_code == 200
     assert response.json()["api_configured"] is False
-    assert (
-        response.json()["provider_blocker_code"]
-        == "provider_configuration_required"
-    )
+    assert response.json()["provider_blocker_code"] == "provider_configuration_required"
 
 
 def test_get_provider_config_returns_explicit_snapshot_without_status_key() -> None:
@@ -411,7 +408,7 @@ def test_get_messages_and_open_resource_project_safe_tool_result(
             content="preview",
             details={
                 "persisted_path": str(persisted),
-                "original_bytes": len("full result\n".encode("utf-8")),
+                "original_bytes": len(b"full result\n"),
             },
         ),
     )
@@ -423,12 +420,12 @@ def test_get_messages_and_open_resource_project_safe_tool_result(
     tool = history.json()[0]["tools"][0]
     assert tool["openable"] == {
         "path": str(persisted),
-        "expectedSize": len("full result\n".encode("utf-8")),
+        "expectedSize": len(b"full result\n"),
     }
 
     opened = client.get(
         "/api/resources/open",
-        params={"path": str(persisted), "expected_size": len("full result\n".encode("utf-8"))},
+        params={"path": str(persisted), "expected_size": len(b"full result\n")},
     )
     assert opened.status_code == 200
     assert opened.json()["status"] == "ready"
@@ -438,7 +435,11 @@ def test_get_messages_and_open_resource_project_safe_tool_result(
 def test_open_resource_is_a_sync_threadpool_endpoint() -> None:
     session, _ = _build_test_session()
     app = create_app(session, capability=_CAPABILITY)
-    route = next(route for route in app.routes if getattr(route, "path", None) == "/api/resources/open")
+    route = next(
+        route
+        for route in app.routes
+        if getattr(route, "path", None) == "/api/resources/open"
+    )
 
     assert not inspect.iscoroutinefunction(route.endpoint)
 

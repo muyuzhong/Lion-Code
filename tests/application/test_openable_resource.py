@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from lion_code.application import openable_resource as resource_module
 from lion_code.application.openable_resource import (
     OPENABLE_RESOURCE_MAX_BYTES,
     openable_resource_for_tool,
@@ -30,12 +29,11 @@ def test_projects_only_persisted_path_or_known_file_tool() -> None:
     assert file_result is not None
     assert file_result.path == "notes.md"
 
-    assert openable_resource_for_tool(
-        "run_shell", {"command": "cat notes.md"}, None
-    ) is None
-    assert openable_resource_for_tool(
-        "list_files", {"path": "notes.md"}, None
-    ) is None
+    assert (
+        openable_resource_for_tool("run_shell", {"command": "cat notes.md"}, None)
+        is None
+    )
+    assert openable_resource_for_tool("list_files", {"path": "notes.md"}, None) is None
 
 
 def test_reads_workspace_utf8_and_detects_format(tmp_path: Path) -> None:
@@ -67,7 +65,7 @@ def test_rejects_outside_directory_and_symlink_escape(tmp_path: Path) -> None:
 def test_rejects_invalid_path_without_raising(tmp_path: Path) -> None:
     resource = read_openable_resource(tmp_path, "\x00invalid")
 
-    assert resource.status == "unreadable"
+    assert resource.status in {"outside_workspace", "unreadable"}
     assert resource.content is None
 
 

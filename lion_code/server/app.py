@@ -28,6 +28,8 @@ from lion_code.application.git_review import (
 )
 from lion_code.application.openable_resource import (
     OpenableResourceRef as ApplicationOpenableResourceRef,
+)
+from lion_code.application.openable_resource import (
     openable_resource_for_tool,
     read_openable_resource,
 )
