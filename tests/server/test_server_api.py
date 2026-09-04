@@ -444,7 +444,11 @@ def test_open_resource_is_a_sync_threadpool_endpoint() -> None:
         None,
     )
 
-    assert route is not None, [getattr(item, "path", None) for item in app.routes]
+    assert route is not None, {
+        "routes": [getattr(item, "path", None) for item in app.routes],
+        "app_type": f"{type(app).__module__}.{type(app).__qualname__}",
+        "create_app_file": inspect.getsourcefile(create_app),
+    }
     assert not inspect.iscoroutinefunction(route.endpoint)
 
 
