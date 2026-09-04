@@ -255,7 +255,7 @@ export class LionAssistantRuntimeAdapter {
   async reloadOpenedResource(): Promise<void> {
     const opened = this.snapshot.openedResource;
     if (!opened || opened.loading) return;
-    await this.openResource(opened.ref);
+    await this.openResource({ path: opened.ref.path });
   }
 
   async setThinkingLevel(level: string): Promise<boolean> {

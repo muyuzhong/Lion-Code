@@ -122,6 +122,36 @@ describe("Lion assistant runtime adapter", () => {
     expect(adapter.getSnapshot().openedResource?.ref.path).toBe("new.txt");
   });
 
+  it("reloads a changed resource using the latest observed size", async () => {
+    const h = harness([]);
+    const adapter = new LionAssistantRuntimeAdapter(h.bootstrap);
+    await adapter.start();
+    const resourceUrls: string[] = [];
+    let resourceCalls = 0;
+    const originalFetch = h.bootstrap.fetch;
+    h.bootstrap.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes("/api/resources/open")) {
+        resourceUrls.push(url);
+        resourceCalls += 1;
+        const resource = resourceCalls === 1
+          ? { status: "changed", path: "C:/work/result.txt", name: "result.txt", format: "text", size: 6, modifiedAtNs: "2", content: null, message: "changed" }
+          : { status: "ready", path: "C:/work/result.txt", name: "result.txt", format: "text", size: 6, modifiedAtNs: "2", content: "stable", message: null };
+        return new Response(JSON.stringify(resource), { status: 200 });
+      }
+      return originalFetch(input, init);
+    };
+
+    await adapter.openResource({ path: "result.txt", expectedSize: 4 });
+    expect(adapter.getSnapshot().openedResource?.response?.status).toBe("changed");
+
+    await adapter.reloadOpenedResource();
+
+    expect(adapter.getSnapshot().openedResource?.response?.content).toBe("stable");
+    expect(resourceUrls[0]).toContain("expected_size=4");
+    expect(resourceUrls[1]).toContain("expected_size=6");
+  });
+
   it("clears the opened resource when switching the Python-owned session", async () => {
     const h = harness([], { resourceResponse: { status: "ready", path: "C:/work/file.txt", name: "file.txt", format: "text", size: 4, modifiedAtNs: "1", content: "data", message: null } });
     const adapter = new LionAssistantRuntimeAdapter(h.bootstrap);

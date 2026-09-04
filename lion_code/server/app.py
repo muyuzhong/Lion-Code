@@ -276,11 +276,12 @@ def create_app(
         return result
 
     @api.get("/resources/open", response_model=OpenableResourceResponse)
-    async def open_resource(
+    def open_resource(
         path: str,
         expected_size: int | None = None,
         expected_mtime_ns: str | None = None,
     ) -> OpenableResourceResponse:
+        """同步读取端点由 FastAPI 线程池执行，不阻塞 WS/Provider。"""
         expected_mtime = _parse_expected_mtime(expected_mtime_ns)
         resource = read_openable_resource(
             session.cwd,

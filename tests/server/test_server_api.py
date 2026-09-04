@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 from pathlib import Path
@@ -432,6 +433,14 @@ def test_get_messages_and_open_resource_project_safe_tool_result(
     assert opened.status_code == 200
     assert opened.json()["status"] == "ready"
     assert opened.json()["content"] == "full result\n"
+
+
+def test_open_resource_is_a_sync_threadpool_endpoint() -> None:
+    session, _ = _build_test_session()
+    app = create_app(session, capability=_CAPABILITY)
+    route = next(route for route in app.routes if getattr(route, "path", None) == "/api/resources/open")
+
+    assert not inspect.iscoroutinefunction(route.endpoint)
 
 
 def test_set_thinking_level() -> None:
