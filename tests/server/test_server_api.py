@@ -436,11 +436,15 @@ def test_open_resource_is_a_sync_threadpool_endpoint() -> None:
     session, _ = _build_test_session()
     app = create_app(session, capability=_CAPABILITY)
     route = next(
-        route
-        for route in app.routes
-        if getattr(route, "path", None) == "/api/resources/open"
+        (
+            route
+            for route in app.routes
+            if getattr(route, "path", None) == "/api/resources/open"
+        ),
+        None,
     )
 
+    assert route is not None, [getattr(item, "path", None) for item in app.routes]
     assert not inspect.iscoroutinefunction(route.endpoint)
 
 
