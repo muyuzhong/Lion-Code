@@ -13,7 +13,7 @@ const runtime = vi.hoisted(() => ({
 }));
 
 vi.mock("../../src/renderer/src/assistantRuntime", () => ({
-  useLionRuntime: () => ({ adapter: runtime.adapter }),
+  useLionRuntime: () => ({ adapter: runtime.adapter, snapshot: { openedResource: null } }),
 }));
 
 import { WorkPanel } from "../../src/renderer/src/components/WorkPanel";

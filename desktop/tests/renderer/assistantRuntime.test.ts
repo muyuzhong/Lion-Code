@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { LionRestClient, type BackendBootstrap, type WebSocketPort } from "../../src/renderer/src/backend";
+import { isOpenableResourceResponse, LionRestClient, type BackendBootstrap, type WebSocketPort } from "../../src/renderer/src/backend";
 import { projectLionMessage } from "../../src/renderer/src/assistantRuntime";
 import { LionAssistantRuntimeAdapter } from "../../src/renderer/src/lionRuntime";
 
@@ -16,7 +16,7 @@ class FakeSocket implements WebSocketPort {
   close() { this.readyState = 3; this.onclose?.(); }
 }
 
-function harness(history: unknown[] = [], options: { apiConfigured?: boolean; blockMetadataPath?: string; providerConfiguration?: unknown; status?: unknown } = {}) {
+function harness(history: unknown[] = [], options: { apiConfigured?: boolean; blockMetadataPath?: string; providerConfiguration?: unknown; status?: unknown; resourceResponse?: unknown } = {}) {
   const sockets: FakeSocket[] = [];
   const requests: Array<{ url: string; authorization: string | null; body: string | null }> = [];
   let reconnect: (() => void) | null = null;
@@ -30,7 +30,8 @@ function harness(history: unknown[] = [], options: { apiConfigured?: boolean; bl
         return new Promise<Response>(() => {});
       }
       const status = options.status === undefined ? { session_id: "s1", model: "model-a", provider_name: "anthropic", permission_mode: "default", api_configured: options.apiConfigured ?? true, provider_blocker_code: options.apiConfigured === false ? "provider_configuration_required" : null, cwd: "C:/work", thinking_level: "medium", available_thinking_levels: ["off", "medium"], input_tokens: 12, output_tokens: 4, is_running: false } : options.status;
-      const payload = url.endsWith("/api/messages") ? history
+      const payload = url.includes("/api/resources/open") ? options.resourceResponse ?? { status: "ready", path: "C:/work/file.txt", name: "file.txt", format: "text", size: 4, modifiedAtNs: "1", content: "data", message: null }
+        : url.endsWith("/api/messages") ? history
         : url.endsWith("/api/status") ? status
           : url.endsWith("/api/sessions") ? [{ id: "s1", label: null, startTime: null, messageCount: 2, cwd: "C:/work" }]
               : url.endsWith("/api/models") ? [{ provider_name: "anthropic", model: "model-a" }]
@@ -56,6 +57,93 @@ describe("Lion assistant runtime adapter", () => {
       expect.objectContaining({ type: "tool-call", toolCallId: "t1", toolName: "read", isError: true, result: "bad" }),
     ]);
     expect(projected.status).toMatchObject({ type: "incomplete", reason: "error" });
+  });
+
+  it("projects an openable tool artifact for assistant-ui", () => {
+    const projected = projectLionMessage({
+      id: "a1",
+      role: "assistant",
+      content: "answer",
+      tools: [{ id: "t1", toolName: "read_file", args: { file_path: "notes.md" }, status: "completed", result: "content", openable: { path: "notes.md" } }],
+    });
+    expect(projected.content).toEqual([
+      expect.objectContaining({ type: "text", text: "answer" }),
+      expect.objectContaining({ type: "tool-call", artifact: { path: "notes.md" } }),
+    ]);
+  });
+
+  it("reads an openable resource through the protected REST client", async () => {
+    const resource = { status: "ready", path: "C:/work/notes.md", name: "notes.md", format: "markdown", size: 9, modifiedAtNs: "1710000000000000000", content: "# Notes\n", message: null };
+    const h = harness([], { resourceResponse: resource });
+    const client = new LionRestClient(h.bootstrap);
+
+    await expect(client.openResource({ path: "notes.md", expectedSize: 9 }, "1710000000000000000")).resolves.toEqual(resource);
+    const request = h.requests.find((item) => item.url.includes("/api/resources/open"));
+    expect(request?.url).toContain("path=notes.md");
+    expect(request?.url).toContain("expected_size=9");
+    expect(request?.url).toContain("expected_mtime_ns=1710000000000000000");
+    expect(request?.authorization).toBe(`Bearer ${"a".repeat(32)}`);
+  });
+
+  it("fails closed for malformed resource response semantics", () => {
+    const base = { path: "C:/work/file.txt", name: "file.txt", format: "text", size: 4, modifiedAtNs: "1", message: null };
+    expect(isOpenableResourceResponse({ ...base, status: "ready", content: "data" })).toBe(true);
+    expect(isOpenableResourceResponse({ ...base, status: "ready", content: null })).toBe(false);
+    expect(isOpenableResourceResponse({ ...base, status: "binary", content: "secret" })).toBe(false);
+    expect(isOpenableResourceResponse({ ...base, status: "ready", content: "data", modifiedAtNs: "not-a-timestamp" })).toBe(false);
+    expect(isOpenableResourceResponse({ ...base, status: "ready", content: "data", extra: true })).toBe(false);
+  });
+
+  it("drops a stale resource response after a newer open request", async () => {
+    const h = harness([]);
+    const adapter = new LionAssistantRuntimeAdapter(h.bootstrap);
+    await adapter.start();
+    const originalFetch = h.bootstrap.fetch;
+    let resourceCalls = 0;
+    let resolveFirst!: (response: Response) => void;
+    const firstResponse = new Promise<Response>((resolve) => { resolveFirst = resolve; });
+    const secondResource = { status: "ready", path: "C:/work/new.txt", name: "new.txt", format: "text", size: 3, modifiedAtNs: "2", content: "new", message: null };
+    h.bootstrap.fetch = async (input, init) => {
+      if (String(input).includes("/api/resources/open")) {
+        resourceCalls += 1;
+        return resourceCalls === 1 ? firstResponse : new Response(JSON.stringify(secondResource), { status: 200 });
+      }
+      return originalFetch(input, init);
+    };
+
+    const oldOpen = adapter.openResource({ path: "old.txt" });
+    await vi.waitFor(() => expect(adapter.getSnapshot().openedResource?.loading).toBe(true));
+    const newOpen = adapter.openResource({ path: "new.txt" });
+    await newOpen;
+    resolveFirst(new Response(JSON.stringify({ status: "ready", path: "C:/work/old.txt", name: "old.txt", format: "text", size: 3, modifiedAtNs: "1", content: "old", message: null }), { status: 200 }));
+    await oldOpen;
+
+    expect(adapter.getSnapshot().openedResource?.response?.content).toBe("new");
+    expect(adapter.getSnapshot().openedResource?.ref.path).toBe("new.txt");
+  });
+
+  it("clears the opened resource when switching the Python-owned session", async () => {
+    const h = harness([], { resourceResponse: { status: "ready", path: "C:/work/file.txt", name: "file.txt", format: "text", size: 4, modifiedAtNs: "1", content: "data", message: null } });
+    const adapter = new LionAssistantRuntimeAdapter(h.bootstrap);
+    await adapter.start();
+    await adapter.openResource({ path: "file.txt" });
+    expect(adapter.getSnapshot().openedResource?.response?.status).toBe("ready");
+
+    await adapter.switchSession("session-2");
+    await vi.waitFor(() => expect(adapter.getSnapshot().openedResource).toBeNull());
+  });
+
+  it("clears the opened resource when reconnect replaces canonical history", async () => {
+    const h = harness([], { resourceResponse: { status: "ready", path: "C:/work/file.txt", name: "file.txt", format: "text", size: 4, modifiedAtNs: "1", content: "data", message: null } });
+    const adapter = new LionAssistantRuntimeAdapter(h.bootstrap);
+    await adapter.start();
+    await adapter.openResource({ path: "file.txt" });
+    expect(adapter.getSnapshot().openedResource).not.toBeNull();
+
+    h.sockets[0].close();
+    await h.runReconnect?.();
+
+    await vi.waitFor(() => expect(adapter.getSnapshot().openedResource).toBeNull());
   });
 
   it("loads REST history before opening WS and maps every client action", async () => {

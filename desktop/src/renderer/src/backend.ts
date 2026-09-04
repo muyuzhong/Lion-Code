@@ -1,5 +1,5 @@
 import type { BackendEndpoint } from "../../shared/types";
-import { decodeServerEvent, type ChatMessage, type ClientAction, type ServerEvent } from "../../shared/chat";
+import { decodeServerEvent, isOpenableResourceRef, type ChatMessage, type ClientAction, type OpenableResourceRef, type ServerEvent } from "../../shared/chat";
 
 const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 const WEBSOCKET_PROTOCOL = "lion-code";
@@ -97,6 +97,19 @@ export interface GitReviewDiff {
   untracked: boolean;
 }
 
+export type OpenableResourceStatus = "ready" | "missing" | "outside_workspace" | "not_file" | "too_large" | "binary" | "encoding_error" | "changed" | "unreadable";
+export type OpenableResourceFormat = "text" | "markdown" | "diff";
+export interface OpenableResourceResponse {
+  status: OpenableResourceStatus;
+  path: string;
+  name: string;
+  format: OpenableResourceFormat;
+  size: number | null;
+  modifiedAtNs: string | null;
+  content: string | null;
+  message: string | null;
+}
+
 export function browserBackendBootstrap(endpoint: BackendEndpoint): BackendBootstrap {
   return {
     endpoint,
@@ -159,6 +172,13 @@ export class LionRestClient {
 
   async fetchGitReviewDiff(path: string): Promise<GitReviewDiff> {
     return this.readJson(`/api/git/review/diff?path=${encodeURIComponent(path)}`, isGitReviewDiff, "Git diff 不符合 REST 契约");
+  }
+
+  async openResource(ref: OpenableResourceRef, expectedMtimeNs: string | null = null): Promise<OpenableResourceResponse> {
+    const params = new URLSearchParams({ path: ref.path });
+    if (ref.expectedSize !== undefined && ref.expectedSize !== null) params.set("expected_size", String(ref.expectedSize));
+    if (expectedMtimeNs) params.set("expected_mtime_ns", expectedMtimeNs);
+    return this.readJson(`/api/resources/open?${params.toString()}`, isOpenableResourceResponse, "文件资源不符合 REST 契约");
   }
 
   async newSession(): Promise<void> {
@@ -288,7 +308,23 @@ function isChatMessage(value: unknown): value is ChatMessage {
 }
 
 function isToolCall(value: unknown): boolean {
-  return isRecord(value) && typeof value.id === "string" && typeof value.toolName === "string" && (value.status === "running" || value.status === "completed" || value.status === "error") && (value.args === undefined || typeof value.args === "string" || isRecord(value.args)) && (value.result === undefined || value.result === null || typeof value.result === "string");
+  return isRecord(value) && typeof value.id === "string" && typeof value.toolName === "string" && (value.status === "running" || value.status === "completed" || value.status === "error") && (value.args === undefined || typeof value.args === "string" || isRecord(value.args)) && (value.result === undefined || value.result === null || typeof value.result === "string") && (value.openable === undefined || value.openable === null || isOpenableResourceRef(value.openable));
+}
+
+export function isOpenableResourceResponse(value: unknown): value is OpenableResourceResponse {
+  if (!isRecord(value)) return false;
+  if (!Object.keys(value).every((key) => key === "status" || key === "path" || key === "name" || key === "format" || key === "size" || key === "modifiedAtNs" || key === "content" || key === "message")) return false;
+  if ((value.status !== "ready" && value.status !== "missing" && value.status !== "outside_workspace" && value.status !== "not_file" && value.status !== "too_large" && value.status !== "binary" && value.status !== "encoding_error" && value.status !== "changed" && value.status !== "unreadable")
+    || typeof value.path !== "string"
+    || typeof value.name !== "string"
+    || (value.format !== "text" && value.format !== "markdown" && value.format !== "diff")
+    || !(value.size === null || (typeof value.size === "number" && Number.isSafeInteger(value.size) && value.size >= 0))
+    || !(value.modifiedAtNs === null || typeof value.modifiedAtNs === "string")
+    || !(value.content === null || typeof value.content === "string")
+    || !(value.message === null || typeof value.message === "string")) return false;
+  if (value.path.trim().length === 0 || value.name.trim().length === 0) return false;
+  if (value.modifiedAtNs !== null && !/^[0-9]+$/.test(value.modifiedAtNs)) return false;
+  return value.status === "ready" ? typeof value.content === "string" : value.content === null;
 }
 
 function isServerStatus(value: unknown): value is ServerStatus {

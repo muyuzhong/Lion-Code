@@ -102,6 +102,19 @@
 .work-panel-empty-tools button { display: flex; height: 30px; align-items: center; gap: 8px; padding: 0 8px; border-radius: var(--radius-sm); color: var(--ds-text-primary); font-size: 13px; }
 .work-panel-empty-tools button:hover, .work-panel-empty-tools button.active { background: var(--ds-bg-hover); }
 .work-panel-empty-tools svg { color: var(--ds-text-muted); }
+.file-resource { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
+.file-resource-header { display: flex; min-height: 42px; flex: 0 0 42px; align-items: center; gap: 8px; padding: 5px 10px 4px; border-bottom: 1px solid var(--ds-border-subtle); }
+.file-resource-title { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.file-resource-title strong { overflow: hidden; color: var(--ds-text-primary); font-size: 12.5px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.file-resource-title span { overflow: hidden; color: var(--ds-text-muted); font: 10.5px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.file-resource-meta { display: flex; min-height: 26px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--ds-border-subtle); color: var(--ds-text-muted); font-size: 10.5px; }
+.file-resource-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-resource-body { min-height: 0; flex: 1; overflow: auto; padding: 10px; }
+.file-resource-state { display: flex; min-height: 100%; align-items: center; justify-content: center; color: var(--ds-text-muted); font-size: 12.5px; text-align: center; }
+.file-resource-error { color: var(--ds-error); }
+.file-resource-text, .file-resource-diff { min-height: 100%; margin: 0; padding: 10px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); background: var(--ds-bg-inset); font: 11px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-resource-diff span { display: block; margin: 0 -10px; padding: 0 10px; white-space: pre-wrap; }
+.file-resource-markdown { color: var(--ds-text-secondary); font-size: 12.5px; line-height: 1.55; }
 .work-panel-return { display: flex; width: 34px; flex: 0 0 34px; align-items: center; justify-content: center; border-left: 1px solid var(--ds-border-subtle); color: var(--ds-text-muted); }
 .work-panel-return:hover { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
 .work-panel-return span { writing-mode: vertical-rl; font-size: 11px; }
