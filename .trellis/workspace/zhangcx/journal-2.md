@@ -115,3 +115,45 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 69: Git 审查工作台收尾
+
+**Date**: 2026-09-04
+**Task**: Git 审查工作台收尾
+**Branch**: `muyuzhong/git-review-workbench`
+
+### Summary
+
+完成 note 中最高优先级 P0 Git 审查工作台的收尾：补充 clean 等状态的显式刷新入口，修复 Python 测试在 Windows 同名 tests 包下的收集边界，移除 Renderer 未使用导入并补充 REST schema/刷新回归测试。定向与跨层回归通过；非 benchmark 完整 Python 测试 941 passed、1 skipped。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `da97d857` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 70: 实现可打开产物工作台
+
+**Date**: 2026-09-04
+**Task**: 实现可打开产物工作台
+**Branch**: `muyuzhong/git-review-workbench`
+
+### Summary
+
+完成 ResultStore 已持久化结果和受限工作区文件的只读打开链路，接入 WorkPanel；通过 targeted 与非 benchmark Python 回归、desktop test、typecheck、build，记录 Windows benchmark 收集错误为既有基线阻断。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `325075f9` | (see git log) |
+
+### Status
+
+[OK] **Completed**

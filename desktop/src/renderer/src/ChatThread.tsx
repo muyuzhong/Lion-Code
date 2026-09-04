@@ -3,12 +3,13 @@ import {
   MessagePrimitive,
   ThreadPrimitive,
   unstable_useComposerInput,
+  type ToolCallMessagePartProps,
   type TextMessagePartComponent,
 } from "@assistant-ui/react";
 import { Copy } from "lucide-react";
 import { Streamdown } from "streamdown";
-import { useEffect, useState } from "react";
-import { formatRunDuration } from "../../shared/chat";
+import { useEffect, useMemo, useState } from "react";
+import { formatRunDuration, isOpenableResourceRef } from "../../shared/chat";
 import { useLionRuntime } from "./assistantRuntime";
 import { ConfirmationSurface, PlanApprovalSurface } from "./components/ApprovalSurface";
 import { ComposerChrome } from "./components/ComposerChrome";
@@ -25,12 +26,6 @@ const AssistantMarkdownText: TextMessagePartComponent = ({ text }) => (
 );
 
 const userPartComponents = { Text: UserMarkdownText };
-const assistantPartComponents = {
-  Text: AssistantMarkdownText,
-  Reasoning: ReasoningActivity,
-  tools: { Fallback: ToolActivity },
-};
-
 function UserMessage() {
   return (
     <MessagePrimitive.Root className="message user-message">
@@ -43,6 +38,21 @@ function UserMessage() {
 }
 
 function AssistantMessage() {
+  const { adapter } = useLionRuntime();
+  const assistantPartComponents = useMemo(() => ({
+    Text: AssistantMarkdownText,
+    Reasoning: ReasoningActivity,
+    tools: {
+      Fallback: (props: ToolCallMessagePartProps) => (
+        <ToolActivity
+          {...props}
+          onOpenResource={() => {
+            if (isOpenableResourceRef(props.artifact)) void adapter.openResource(props.artifact);
+          }}
+        />
+      ),
+    },
+  }), [adapter]);
   return (
     <MessagePrimitive.Root className="message assistant-message">
       <div className="message-body">

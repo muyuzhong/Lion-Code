@@ -73,6 +73,7 @@ export function projectLionMessage(message: ChatMessage): ThreadMessageLike {
       argsText: typeof tool.args === "string" ? tool.args : JSON.stringify(tool.args ?? {}),
       result: tool.result,
       isError: tool.status === "error",
+      ...(tool.openable ? { artifact: tool.openable } : {}),
     });
   }
   return {

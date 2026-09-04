@@ -26,6 +26,13 @@ from lion_code.application.git_review import (
     read_git_file_diff,
     read_git_review,
 )
+from lion_code.application.openable_resource import (
+    OpenableResourceRef as ApplicationOpenableResourceRef,
+)
+from lion_code.application.openable_resource import (
+    openable_resource_for_tool,
+    read_openable_resource,
+)
 from lion_code.application.session import LionCodingSession
 from lion_code.config import save_api_config
 from lion_code.core.messages import AssistantMessage, ToolResultMessage, UserMessage
@@ -39,6 +46,8 @@ from .models import (
     GitReviewFileItem,
     GitReviewResponse,
     ModelChoiceItem,
+    OpenableResourceRef,
+    OpenableResourceResponse,
     ProviderConfigRequest,
     ProviderConfigResponse,
     RenameSessionRequest,
@@ -214,10 +223,10 @@ def create_app(
         raw_messages = session.messages
         result: list[ChatMessageDTO] = []
 
-        tool_results: dict[str, tuple[str, bool]] = {}
+        tool_results: dict[str, tuple[str, bool, object]] = {}
         for m in raw_messages:
             if isinstance(m, ToolResultMessage):
-                tool_results[m.tool_call_id] = (m.text, m.is_error)
+                tool_results[m.tool_call_id] = (m.text, m.is_error, m.details)
 
         for i, m in enumerate(raw_messages):
             if isinstance(m, UserMessage):
@@ -236,6 +245,15 @@ def create_app(
                     status: Literal["completed", "error"] = (
                         "error" if res_tuple and res_tuple[1] else "completed"
                     )
+                    openable = (
+                        _openable_resource_dto(
+                            tc.name,
+                            tc.arguments,
+                            res_tuple[2],
+                        )
+                        if res_tuple and not res_tuple[1]
+                        else None
+                    )
                     tools_dto.append(
                         ToolCallDTO(
                             id=tc.id,
@@ -243,6 +261,7 @@ def create_app(
                             args=tc.arguments,
                             status=status,
                             result=res_tuple[0] if res_tuple else None,
+                            openable=openable,
                         )
                     )
                 result.append(
@@ -257,6 +276,35 @@ def create_app(
                     )
                 )
         return result
+
+    @api.get("/resources/open", response_model=OpenableResourceResponse)
+    def open_resource(
+        path: str,
+        expected_size: int | None = None,
+        expected_mtime_ns: str | None = None,
+    ) -> OpenableResourceResponse:
+        """同步读取端点由 FastAPI 线程池执行，不阻塞 WS/Provider。"""
+        expected_mtime = _parse_expected_mtime(expected_mtime_ns)
+        resource = read_openable_resource(
+            session.cwd,
+            path,
+            expected_size=expected_size,
+            expected_mtime_ns=expected_mtime,
+        )
+        return OpenableResourceResponse(
+            status=resource.status,
+            path=resource.path,
+            name=resource.name,
+            format=resource.format,
+            size=resource.size,
+            modifiedAtNs=(
+                str(resource.modified_at_ns)
+                if resource.modified_at_ns is not None
+                else None
+            ),
+            content=resource.content,
+            message=resource.message,
+        )
 
     def _is_same_workspace(meta_cwd: str | None) -> bool:
         """list 与 resume 共用的当前 cwd eligibility 判断。
@@ -537,3 +585,30 @@ def create_app(
                 await websocket.close()
 
     return app
+
+
+def _openable_resource_dto(
+    tool_name: str,
+    args: object,
+    details: object,
+) -> OpenableResourceRef | None:
+    ref: ApplicationOpenableResourceRef | None = openable_resource_for_tool(
+        tool_name,
+        args,
+        details,
+    )
+    if ref is None:
+        return None
+    return OpenableResourceRef(path=ref.path, expectedSize=ref.expected_size)
+
+
+def _parse_expected_mtime(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="expected_mtime_ns 非法") from exc
+    if parsed < 0:
+        raise HTTPException(status_code=422, detail="expected_mtime_ns 非法")
+    return parsed

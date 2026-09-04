@@ -197,12 +197,47 @@ class RenameSessionRequest(BaseModel):
     label: str = Field(min_length=1, max_length=80)
 
 
+class OpenableResourceRef(BaseModel):
+    """桌面资源读取所需的最小路径引用。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    path: str
+    expectedSize: int | None = None
+
+
+class OpenableResourceResponse(BaseModel):
+    """一次有界资源读取的结构化结果。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    status: Literal[
+        "ready",
+        "missing",
+        "outside_workspace",
+        "not_file",
+        "too_large",
+        "binary",
+        "encoding_error",
+        "changed",
+        "unreadable",
+    ]
+    path: str
+    name: str
+    format: Literal["text", "markdown", "diff"]
+    size: int | None
+    modifiedAtNs: str | None
+    content: str | None
+    message: str | None = None
+
+
 class ToolCallDTO(BaseModel):
     id: str
     toolName: str
     args: Any = None
     status: Literal["running", "completed", "error"] = "completed"
     result: str | None = None
+    openable: OpenableResourceRef | None = None
 
 
 class GitReviewFileItem(BaseModel):

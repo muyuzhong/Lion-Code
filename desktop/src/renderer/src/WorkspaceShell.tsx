@@ -47,6 +47,9 @@ function Workspace({ workspacePath }: { workspacePath: string }) {
       setSettingsOpen(true);
     }
   }, [snapshot.status?.api_configured]);
+  useEffect(() => {
+    if (snapshot.openedResource) setWorkPanelOpen(true);
+  }, [snapshot.openedResource]);
 
   const createSession = () => void adapter.createSession();
   const startPaneResize = (pane: "sidebar" | "work-panel", event: ReactPointerEvent<HTMLDivElement>) => {

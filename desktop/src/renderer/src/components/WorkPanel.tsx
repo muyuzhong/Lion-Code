@@ -1,12 +1,15 @@
 import { BookOpen, Check, ChevronDown, File, GitBranch, Globe2, PanelRightClose, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Streamdown } from "streamdown";
 import { useLionRuntime } from "../assistantRuntime";
-import type { GitReviewDiff, GitReviewFile, GitReviewSnapshot } from "../backend";
+import type { GitReviewDiff, GitReviewFile, GitReviewSnapshot, OpenableResourceResponse, OpenableResourceStatus } from "../backend";
 
 type WorkView = "工作面板" | "浏览器" | "文件" | "Git";
 
 export function WorkPanel({ onClose, onResizeStart, onResizeBy }: { onClose: () => void; onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void; onResizeBy: (delta: number) => void }) {
+  const { snapshot } = useLionRuntime();
   const [view, setView] = useState<WorkView>("工作面板");
+  const openedResourcePath = snapshot.openedResource?.ref.path ?? null;
   const emptyCopy = view === "浏览器"
     ? { title: "还没有打开的浏览器", body: "从对话中的链接打开页面，浏览内容会显示在这里。" }
     : view === "文件"
@@ -18,6 +21,9 @@ export function WorkPanel({ onClose, onResizeStart, onResizeBy }: { onClose: () 
     setView(nextView);
     target.closest("details")?.removeAttribute("open");
   };
+  useEffect(() => {
+    if (openedResourcePath) setView("文件");
+  }, [openedResourcePath]);
   const viewIcon = (option: WorkView) => option === "浏览器" ? <Globe2 aria-hidden="true" size={15} /> : option === "文件" ? <File aria-hidden="true" size={15} /> : option === "Git" ? <GitBranch aria-hidden="true" size={15} /> : <BookOpen aria-hidden="true" size={15} />;
   return (
     <aside className="work-panel" aria-label="工作面板">
@@ -27,7 +33,7 @@ export function WorkPanel({ onClose, onResizeStart, onResizeBy }: { onClose: () 
         <button type="button" className="work-panel-collapse" aria-label="关闭工作面板" onClick={onClose}><PanelRightClose aria-hidden="true" size={16} /></button>
       </header>
       <div className="work-panel-body">
-        {view === "Git" ? <GitReviewTab /> : <div className="work-tab-empty">
+        {view === "Git" ? <GitReviewTab /> : view === "文件" && snapshot.openedResource ? <FileResourceTab /> : <div className="work-tab-empty">
           <span className="work-tab-empty-icon"><BookOpen aria-hidden="true" size={20} /></span>
           <h2>{emptyCopy.title}</h2>
           <p>{emptyCopy.body}</p>
@@ -41,6 +47,74 @@ export function WorkPanel({ onClose, onResizeStart, onResizeBy }: { onClose: () 
   );
 }
 
+const RESOURCE_STATUS_LABELS: Record<OpenableResourceStatus, string> = {
+  ready: "已加载",
+  missing: "文件不存在",
+  outside_workspace: "路径不在允许范围内",
+  not_file: "不是普通文件",
+  too_large: "文件过大",
+  binary: "二进制文件",
+  encoding_error: "编码不受支持",
+  changed: "文件已变化",
+  unreadable: "文件无法读取",
+};
+
+function FileResourceTab() {
+  const { adapter, snapshot } = useLionRuntime();
+  const opened = snapshot.openedResource;
+  if (!opened) return null;
+  const response = opened.response;
+  const path = response?.path ?? opened.ref.path;
+  const name = response?.name ?? resourceName(opened.ref.path);
+  return (
+    <div className="file-resource">
+      <header className="file-resource-header">
+        <div className="file-resource-title">
+          <strong>{name}</strong>
+          <span title={path}>{path}</span>
+        </div>
+        <button type="button" className="git-review-refresh" aria-label="重新加载文件" disabled={opened.loading} onClick={() => void adapter.reloadOpenedResource()}>
+          <RefreshCw aria-hidden="true" size={14} />
+        </button>
+      </header>
+      {response ? <div className="file-resource-meta"><span>{RESOURCE_STATUS_LABELS[response.status]} · {formatResourceSize(response.size)}</span><span>{formatResourceTime(response.modifiedAtNs)}</span></div> : null}
+      <div className="file-resource-body">
+        {opened.loading ? <div className="file-resource-state">正在读取文件…</div>
+          : opened.error ? <div className="file-resource-state file-resource-error" role="alert">文件读取失败：{opened.error}</div>
+            : response?.status !== "ready" ? <div className="file-resource-state file-resource-error" role="alert">{response ? RESOURCE_STATUS_LABELS[response.status] : "文件不可用"}：{response?.message ?? "未返回可显示内容"}</div>
+              : <FileResourceContent response={response} />}
+      </div>
+    </div>
+  );
+}
+
+function FileResourceContent({ response }: { response: OpenableResourceResponse }) {
+  const content = response.content ?? "";
+  if (response.format === "markdown") return <div className="file-resource-markdown"><Streamdown>{content}</Streamdown></div>;
+  if (response.format === "diff") return <pre className="file-resource-diff">{renderDiffLines(content)}</pre>;
+  return <pre className="file-resource-text">{content}</pre>;
+}
+
+function renderDiffLines(text: string) {
+  return text.split("\n").map((line, index) => <span className={line.startsWith("+") ? "diff-add" : line.startsWith("-") ? "diff-remove" : line.startsWith("@@") ? "diff-hunk" : ""} key={index}>{line}{"\n"}</span>);
+}
+
+function resourceName(path: string): string {
+  return path.split(/[\\/]/).at(-1) || "文件";
+}
+
+function formatResourceSize(size: number | null): string {
+  if (size === null) return "大小未知";
+  if (size < 1024) return `${size} B`;
+  return `${(size / 1024).toFixed(1)} KiB`;
+}
+
+function formatResourceTime(modifiedAtNs: string | null): string {
+  if (!modifiedAtNs) return "修改时间未知";
+  const milliseconds = Number(modifiedAtNs) / 1_000_000;
+  if (!Number.isFinite(milliseconds)) return "修改时间未知";
+  return new Date(milliseconds).toLocaleString();
+}
 type GitStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
 
 const STATUS_LABELS: Record<GitStatus, string> = {

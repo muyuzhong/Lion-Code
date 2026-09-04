@@ -1,0 +1,10 @@
+{"file":".trellis/tasks/09-04-openable-artifact-workbench/prd.md","reason":"按验收条件逐项审查实现是否保持只读、受限和最小范围。"}
+{"file":".trellis/tasks/09-04-openable-artifact-workbench/design.md","reason":"按数据流、路径边界、错误状态和请求代数检查跨层实现。"}
+{"file":".trellis/tasks/09-04-openable-artifact-workbench/implement.md","reason":"按执行清单和预期修改面检查遗漏与无关改动。"}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"检查没有引入 Runtime 反向依赖、第二执行路径或新的重复状态所有者。"}
+{"file":".trellis/spec/backend/desktop-sidecar.md","reason":"检查 Renderer/sidecar 的文件访问与 capability 边界。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查所有预期资源失败均为结构化状态且没有掩盖程序错误。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查类型、测试范围、注释和 diff hygiene。"}
+{"file":".trellis/spec/frontend/toolview-display-contract.md","reason":"检查工具结果格式判断和现有展示契约没有回归。"}
+{"file":".trellis/spec/frontend/desktop-assistant-runtime-contract.md","reason":"检查 REST/WS 严格解码、重连、历史替换和状态归属。"}
+{"file":".trellis/spec/frontend/desktop-chat-experience.md","reason":"检查 WorkPanel IA、只读展示、可达性和错误文案。"}
