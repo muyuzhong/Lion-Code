@@ -9,7 +9,9 @@
 #
 # 环境覆写点同 run_smoke.sh:SMOKE_RESULT_ROOT / SMOKE_ENV_FILE /
 #   PYTHON_BIN / HARBOR_BIN / SMOKE_CHECK_ONLY;新增 SMOKE_BATCH_DIR
-#   (批量工作目录,默认 results/smoke-batch-<日期>)。
+#   (批量工作目录,默认 results/smoke-batch-<日期>)与 SMOKE_DATASET_JSON
+#   (本地数据集行 JSON,传 build_catalog.py --dataset-json,评测机网络不稳
+#   时跳过 HF 加载;缺省仍走 HF)。
 set -uo pipefail
 SMOKE_TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SMOKE_TOOL_DIR/../../.." && pwd)"
@@ -64,7 +66,7 @@ for var in OPENAI_API_KEY LION_MODEL OPIK_WORKSPACE DEEPEVAL_JUDGE_MODEL; do
 done
 
 export HOME="$WORK_DIR/harbor-home"
-export HF_HOME="$WORK_DIR/hf-home"
+export HF_HOME="${SMOKE_HF_HOME:-$WORK_DIR/hf-home}"
 export XDG_CACHE_HOME="$WORK_DIR/xdg-cache"
 export LITELLM_API_BASE="${LITELLM_API_BASE:-${OPENAI_BASE_URL:-}}"
 mkdir -p "$WORK_DIR/harbor-home" "$WORK_DIR/hf-home" "$WORK_DIR/xdg-cache"
@@ -75,8 +77,13 @@ if [ "${SMOKE_CHECK_ONLY:-0}" = "1" ]; then
 fi
 
 # 1) 一次生成多任务 catalog
+CATALOG_ARGS=()
+if [ -n "${SMOKE_DATASET_JSON:-}" ]; then
+  CATALOG_ARGS+=(--dataset-json "$SMOKE_DATASET_JSON")
+fi
 "$PY" "$SMOKE_TOOL_DIR/build_catalog.py" \
   --output-dir "$WORK_DIR" \
+  "${CATALOG_ARGS[@]}" \
   --instances "$(IFS=,; echo "${INSTANCES[*]}")" || exit 3
 
 # 2) 逐题闭环串行;每题独立 run-id / manifest / 输出目录
@@ -89,6 +96,10 @@ for INSTANCE in "${INSTANCES[@]}"; do
   IMAGE="$("$PY" -c 'import json, sys; c=json.load(open(sys.argv[1])); print(next(t for t in c["tasks"] if t["task_id"] == sys.argv[2])["extensions"]["swebench_image"])' "$WORK_DIR/catalog.json" "$TASK_ID")" || { echo "错误:[$INSTANCE] 读取镜像名失败" >&2; FAILED=1; continue; }
   echo "[$INSTANCE] 预拉取镜像 $IMAGE"
   docker pull -q "$IMAGE" >/dev/null 2>&1 || { echo "错误:[$INSTANCE] 镜像拉取失败" >&2; FAILED=1; continue; }
+  # 修补 Harbor 任务缓存 Dockerfile(uv 安装源从 github.com 换清华 PyPI,
+  # 评测机出网对 github.com 不稳;幂等,无 uv 行时零改动)
+  "$PY" "$SMOKE_TOOL_DIR/patch_harbor_dockerfile.py" \
+    "$HOME/.cache/harbor" >/dev/null 2>&1 || true
   # 环境可判定性预检:gold patch 也判不过的实例剔除分母(默认开启,
   # SMOKE_SKIP_GOLD_PREFLIGHT=1 关闭)。避免把环境漂移误算成 agent 失败。
   if [ "${SMOKE_SKIP_GOLD_PREFLIGHT:-0}" != "1" ]; then
@@ -105,6 +116,7 @@ for INSTANCE in "${INSTANCES[@]}"; do
   if ! "$PY" "$SMOKE_TOOL_DIR/build_manifest.py" \
     --env OPENAI_API_KEY,OPENAI_BASE_URL --output-dir "$WORK_DIR" \
     --model "$LION_MODEL" --run-id "$RUN_ID" \
+    --timeout "${SMOKE_TIMEOUT:-2400}" \
     --task-id "$TASK_ID"; then
     echo "错误:[$INSTANCE] manifest 生成失败" >&2
     FAILED=1
@@ -112,22 +124,42 @@ for INSTANCE in "${INSTANCES[@]}"; do
   fi
   MANIFEST="$WORK_DIR/manifest.$RUN_ID.json"
   OUTPUT_DIR="$WORK_DIR/run-$RUN_ID"
-  "$PY" -m benchmarks.agent_e2e verified-run \
-    --catalog "$WORK_DIR/catalog.json" \
-    --manifest "$MANIFEST" \
-    --task-id "$TASK_ID" \
-    --commit "$(git rev-parse HEAD)" \
-    --repository-root "$ROOT" \
-    --output-dir "$OUTPUT_DIR" \
-    --python "$PY" \
-    --harness-python "$PY" \
-    --harbor "$HARBOR_BIN" \
-    --deepeval-judge-model "$DEEPEVAL_JUDGE_MODEL" \
-    --deepeval-samples "${DEEPEVAL_SAMPLES:-3}" \
-    --digest-ledger "$LEDGER_FILE" \
-    --opik-project lion-agent-e2e \
-    --opik-workspace "$OPIK_WORKSPACE"
-  EXIT_CODE=$?
+  # 每题内层最多重试 3 次:评测机对 github.com 出网抖动,Harbor 每次运行
+  # 都要 git clone 数据集定义(无内部重试),首次运行还会下载任务缓存;
+  # 若任务缓存 environment Dockerfile 未修补(uv 安装源),环境构建会失败。
+  # 每次失败后修补 Harbor 任务缓存再重跑,不把可修复的环境问题误算成
+  # subject 失败。
+  # 注意:只对 infra 退出码(2=基础设施阻塞 / 3=输入或结果无效)重试;
+  # 退出码 1 是真实 subject 失败(agent 已跑完未解决),重试会污染单次结果,
+  # 必须原样保留。
+  run_verified() {
+    "$PY" -m benchmarks.agent_e2e verified-run \
+      --catalog "$WORK_DIR/catalog.json" \
+      --manifest "$MANIFEST" \
+      --task-id "$TASK_ID" \
+      --commit "$(git rev-parse HEAD)" \
+      --repository-root "$ROOT" \
+      --output-dir "$OUTPUT_DIR" \
+      --python "$PY" \
+      --harness-python "$PY" \
+      --harbor "$HARBOR_BIN" \
+      --deepeval-judge-model "$DEEPEVAL_JUDGE_MODEL" \
+      --deepeval-samples "${DEEPEVAL_SAMPLES:-3}" \
+      --digest-ledger "$LEDGER_FILE" \
+      --opik-project lion-agent-e2e \
+      --opik-workspace "$OPIK_WORKSPACE"
+  }
+  EXIT_CODE=0
+  run_verified || EXIT_CODE=$?
+  ATTEMPT=1
+  while [ "$EXIT_CODE" -ge 2 ] && [ "$ATTEMPT" -lt 3 ]; do
+    echo "[$INSTANCE] verified-run 第 $ATTEMPT 次失败(退出码=$EXIT_CODE),修补 Harbor 任务缓存后重试"
+    "$PY" "$SMOKE_TOOL_DIR/patch_harbor_dockerfile.py" \
+      "$HOME/.cache/harbor" >/dev/null 2>&1 || true
+    EXIT_CODE=0
+    run_verified || EXIT_CODE=$?
+    ATTEMPT=$((ATTEMPT + 1))
+  done
   echo "[$INSTANCE] verified-run 退出码=$EXIT_CODE(run-id=$RUN_ID)"
   if [ "$EXIT_CODE" -ne 0 ]; then FAILED=1; fi
 done
