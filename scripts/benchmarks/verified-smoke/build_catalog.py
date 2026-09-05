@@ -6,9 +6,13 @@ public_prompt 为真实 issue 文本(Agent 唯一指令)。不包含 gold patch�
 
 用法:
   python build_catalog.py [--output-dir <dir>] [--instances <id1,id2>]
+  python build_catalog.py --dataset-json <rows.json> [--output-dir <dir>] ...
 --instances 缺省为 pallets__flask-5014(冒烟单题);可传逗号分隔的多个
 SWE-bench 实例 id 生成多任务 catalog。--output-dir 缺省为脚本自身目录,
 输出 catalog.json 与 catalog.lock.json。
+--dataset-json 提供本地数据集行 JSON(instance_id 到行 dict,行须含
+repo/base_commit/patch/problem_statement/difficulty/image)时,跳过 HF
+网络加载(评测机网络不稳时的可靠路径);缺省仍从 HF 数据集加载。
 """
 
 from __future__ import annotations
@@ -79,19 +83,40 @@ def main() -> None:
         default=",".join(DEFAULT_INSTANCES),
         help="逗号分隔的 SWE-bench_Verified 实例 id",
     )
+    parser.add_argument(
+        "--dataset-json",
+        default=None,
+        help="本地数据集行 JSON(instance_id 到行);提供时跳过 HF 加载",
+    )
     args = parser.parse_args()
     output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     instance_ids = tuple(
         item.strip() for item in args.instances.split(",") if item.strip()
     )
     if not instance_ids:
         raise SystemExit("--instances 为空:至少需要一个实例 id")
 
-    ds = load_dataset("SWE-bench/SWE-bench_Verified", split="test")
-    rows = {row["instance_id"]: row for row in ds}
-    missing = [iid for iid in instance_ids if iid not in rows]
-    if missing:
-        raise SystemExit(f"数据集缺少实例: {missing!r}")
+    if args.dataset_json:
+        with Path(args.dataset_json).open(encoding="utf-8") as handle:
+            rows = json.load(handle)
+        missing = [iid for iid in instance_ids if iid not in rows]
+        if missing:
+            raise SystemExit(f"本地数据集缺少实例: {missing!r}")
+        missing_keys = {
+            key
+            for iid in instance_ids
+            for key in ("repo", "base_commit", "patch", "problem_statement", "image")
+            if key not in rows[iid]
+        }
+        if missing_keys:
+            raise SystemExit(f"本地数据集行缺少字段: {sorted(missing_keys)!r}")
+    else:
+        ds = load_dataset("SWE-bench/SWE-bench_Verified", split="test")
+        rows = {row["instance_id"]: row for row in ds}
+        missing = [iid for iid in instance_ids if iid not in rows]
+        if missing:
+            raise SystemExit(f"数据集缺少实例: {missing!r}")
 
     tasks: list[TaskSpec] = []
     for iid in instance_ids:
