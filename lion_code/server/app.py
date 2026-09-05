@@ -21,6 +21,18 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketState
 
+from lion_code.application.git_review import (
+    GitReviewError,
+    read_git_file_diff,
+    read_git_review,
+)
+from lion_code.application.openable_resource import (
+    OpenableResourceRef as ApplicationOpenableResourceRef,
+)
+from lion_code.application.openable_resource import (
+    openable_resource_for_tool,
+    read_openable_resource,
+)
 from lion_code.application.session import LionCodingSession
 from lion_code.config import save_api_config
 from lion_code.core.messages import AssistantMessage, ToolResultMessage, UserMessage
@@ -30,7 +42,12 @@ from .models import (
     ChatMessageDTO,
     EgressConfigRequest,
     EgressConfigResponse,
+    GitReviewDiffResponse,
+    GitReviewFileItem,
+    GitReviewResponse,
     ModelChoiceItem,
+    OpenableResourceRef,
+    OpenableResourceResponse,
     ProviderConfigRequest,
     ProviderConfigResponse,
     RenameSessionRequest,
@@ -206,10 +223,10 @@ def create_app(
         raw_messages = session.messages
         result: list[ChatMessageDTO] = []
 
-        tool_results: dict[str, tuple[str, bool]] = {}
+        tool_results: dict[str, tuple[str, bool, object]] = {}
         for m in raw_messages:
             if isinstance(m, ToolResultMessage):
-                tool_results[m.tool_call_id] = (m.text, m.is_error)
+                tool_results[m.tool_call_id] = (m.text, m.is_error, m.details)
 
         for i, m in enumerate(raw_messages):
             if isinstance(m, UserMessage):
@@ -228,6 +245,15 @@ def create_app(
                     status: Literal["completed", "error"] = (
                         "error" if res_tuple and res_tuple[1] else "completed"
                     )
+                    openable = (
+                        _openable_resource_dto(
+                            tc.name,
+                            tc.arguments,
+                            res_tuple[2],
+                        )
+                        if res_tuple and not res_tuple[1]
+                        else None
+                    )
                     tools_dto.append(
                         ToolCallDTO(
                             id=tc.id,
@@ -235,6 +261,7 @@ def create_app(
                             args=tc.arguments,
                             status=status,
                             result=res_tuple[0] if res_tuple else None,
+                            openable=openable,
                         )
                     )
                 result.append(
@@ -249,6 +276,35 @@ def create_app(
                     )
                 )
         return result
+
+    @api.get("/resources/open", response_model=OpenableResourceResponse)
+    def open_resource(
+        path: str,
+        expected_size: int | None = None,
+        expected_mtime_ns: str | None = None,
+    ) -> OpenableResourceResponse:
+        """同步读取端点由 FastAPI 线程池执行，不阻塞 WS/Provider。"""
+        expected_mtime = _parse_expected_mtime(expected_mtime_ns)
+        resource = read_openable_resource(
+            session.cwd,
+            path,
+            expected_size=expected_size,
+            expected_mtime_ns=expected_mtime,
+        )
+        return OpenableResourceResponse(
+            status=resource.status,
+            path=resource.path,
+            name=resource.name,
+            format=resource.format,
+            size=resource.size,
+            modifiedAtNs=(
+                str(resource.modified_at_ns)
+                if resource.modified_at_ns is not None
+                else None
+            ),
+            content=resource.content,
+            message=resource.message,
+        )
 
     def _is_same_workspace(meta_cwd: str | None) -> bool:
         """list 与 resume 共用的当前 cwd eligibility 判断。
@@ -441,6 +497,47 @@ def create_app(
             SkillItem(name=s.name, description=s.description) for s in session.skills
         ]
 
+    @api.get("/git/review", response_model=GitReviewResponse)
+    def get_git_review() -> GitReviewResponse:
+        """只读 Git 变更快照；同步端点由 FastAPI 线程池执行，不阻塞 WS/Provider。"""
+        snapshot = read_git_review(session.cwd)
+        return GitReviewResponse(
+            state=snapshot.state,
+            branch=snapshot.branch,
+            revision=snapshot.revision,
+            clean=snapshot.clean,
+            truncated=snapshot.truncated,
+            files=[
+                GitReviewFileItem(
+                    path=file.path,
+                    status=file.status,
+                    additions=file.additions,
+                    deletions=file.deletions,
+                    binary=file.binary,
+                )
+                for file in snapshot.files
+            ],
+            additions_total=snapshot.additions_total,
+            deletions_total=snapshot.deletions_total,
+        )
+
+    @api.get("/git/review/diff", response_model=GitReviewDiffResponse)
+    def get_git_review_diff(path: str) -> GitReviewDiffResponse:
+        """单个当前变更文件的有界 diff；越界/非变更路径返回 422。"""
+        try:
+            diff = read_git_file_diff(session.cwd, path)
+        except GitReviewError as exc:
+            raise HTTPException(status_code=503, detail="Git 读取失败") from exc
+        if diff is None:
+            raise HTTPException(status_code=422, detail="路径不在当前 Git 变更中")
+        return GitReviewDiffResponse(
+            path=diff.path,
+            diff=diff.diff,
+            binary=diff.binary,
+            truncated=diff.truncated,
+            untracked=diff.untracked,
+        )
+
     @api.post("/thinking")
     async def set_thinking(body: ThinkingLevelRequest) -> dict[str, str]:
         if session.is_running:
@@ -488,3 +585,30 @@ def create_app(
                 await websocket.close()
 
     return app
+
+
+def _openable_resource_dto(
+    tool_name: str,
+    args: object,
+    details: object,
+) -> OpenableResourceRef | None:
+    ref: ApplicationOpenableResourceRef | None = openable_resource_for_tool(
+        tool_name,
+        args,
+        details,
+    )
+    if ref is None:
+        return None
+    return OpenableResourceRef(path=ref.path, expectedSize=ref.expected_size)
+
+
+def _parse_expected_mtime(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="expected_mtime_ns 非法") from exc
+    if parsed < 0:
+        raise HTTPException(status_code=422, detail="expected_mtime_ns 非法")
+    return parsed

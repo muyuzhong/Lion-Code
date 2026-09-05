@@ -1,7 +1,8 @@
-import type { ReasoningMessagePartComponent, ToolCallMessagePartComponent } from "@assistant-ui/react";
-import { Check, ChevronRight, Copy, Sparkles, TerminalSquare } from "lucide-react";
+import type { ReasoningMessagePartComponent, ToolCallMessagePartProps } from "@assistant-ui/react";
+import { Check, ChevronRight, Copy, PanelRightOpen, Sparkles, TerminalSquare } from "lucide-react";
 import { useState } from "react";
 import { Streamdown } from "streamdown";
+import { isOpenableResourceRef } from "../../../shared/chat";
 import { parseAnsiToSpans, pickResultFormat } from "../toolPresentation";
 
 export const ReasoningActivity: ReasoningMessagePartComponent = ({ text }) => (
@@ -11,7 +12,7 @@ export const ReasoningActivity: ReasoningMessagePartComponent = ({ text }) => (
   </details>
 );
 
-export const ToolActivity: ToolCallMessagePartComponent = ({ toolCallId, toolName, args, result, isError }) => {
+export function ToolActivity({ toolCallId, toolName, args, result, isError, artifact, onOpenResource }: ToolCallMessagePartProps & { onOpenResource?: () => void }) {
   const [copied, setCopied] = useState(false);
   const text = result === undefined ? null : typeof result === "string" ? result : JSON.stringify(result, null, 2);
   const agentType = toolName === "agent" && args && typeof args === "object" && typeof Reflect.get(args, "type") === "string" ? String(Reflect.get(args, "type")) : "";
@@ -19,6 +20,7 @@ export const ToolActivity: ToolCallMessagePartComponent = ({ toolCallId, toolNam
     ? String(Reflect.get(args, "description"))
     : summarizeArgs(args);
   const state = result === undefined ? "running" : isError ? "error" : "done";
+  const canOpen = !isError && text !== null && isOpenableResourceRef(artifact) && onOpenResource !== undefined;
   const copyPayload = [JSON.stringify(args, null, 2), text].filter(Boolean).join("\n\n");
   const copy = async () => {
     try {
@@ -40,13 +42,14 @@ export const ToolActivity: ToolCallMessagePartComponent = ({ toolCallId, toolNam
         <ChevronRight className="disclosure" aria-hidden="true" size={14} />
       </summary>
       <div className="tool-row-body">
+        {canOpen ? <button className="tool-open" type="button" onClick={(event) => { event.stopPropagation(); onOpenResource?.(); }}><PanelRightOpen aria-hidden="true" size={13} />在工作面板打开</button> : null}
         <button className={`tool-copy ${copied ? "copied" : ""}`} type="button" aria-label={copied ? "已复制工具详情" : "复制工具详情"} onClick={() => void copy()}>{copied ? <Check aria-hidden="true" size={13} /> : <Copy aria-hidden="true" size={13} />}</button>
         <section><span className="tool-section-label">输入</span><pre className="tool-arguments">{JSON.stringify(args, null, 2)}</pre></section>
         {text === null ? null : <section><span className="tool-section-label">结果</span><ToolResult toolName={toolName} text={text} isError={isError ?? false} /></section>}
       </div>
     </details>
   );
-};
+}
 
 function summarizeArgs(args: unknown): string {
   if (!args || typeof args !== "object") return "";

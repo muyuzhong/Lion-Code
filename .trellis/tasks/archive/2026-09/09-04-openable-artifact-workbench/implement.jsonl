@@ -1,0 +1,12 @@
+{"file":".trellis/tasks/09-04-openable-artifact-workbench/prd.md","reason":"已收敛目标、范围、验收条件和首版不做项。"}
+{"file":".trellis/tasks/09-04-openable-artifact-workbench/research/proposal-and-code-baseline.md","reason":"记录提案证据、当前 ResultStore/REST/WS/桌面基线和边界判断。"}
+{"file":".trellis/spec/backend/runtime-boundaries.md","reason":"资源读取必须留在应用/API 边界，不能反向改 Runtime 或增加第二条执行路径。"}
+{"file":".trellis/spec/backend/desktop-sidecar.md","reason":"确认 Renderer 不得直接访问 fs/Node/raw IPC，沿用 typed capability bridge 边界。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"资源缺失、越界、编码和读取竞态需要结构化状态，不得吞异常或伪装成功。"}
+{"file":".trellis/spec/backend/secret-boundary.md","reason":"确认不改变 ResultStore 前的脱敏顺序，也不新增结果泄密通道。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"遵循 typed DTO、最小测试、中文注释和 targeted validation 约定。"}
+{"file":".trellis/spec/frontend/toolview-display-contract.md","reason":"复用现有 Tool 展示格式、Markdown/diff 分类和组件职责边界。"}
+{"file":".trellis/spec/frontend/desktop-assistant-runtime-contract.md","reason":"所有 REST/WS 输入经单一 runtime adapter，并覆盖重连与 fail-closed 语义。"}
+{"file":".trellis/spec/frontend/desktop-chat-experience.md","reason":"WorkPanel 属于 WorkspaceShell 展示状态，消息/资源状态仍由 runtime 投影拥有。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"跨 Python REST、WebSocket、runtime 和 React 的变更需要逐层核对合同。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"优先复用现有 ResultStore、REST client、WorkPanel 和展示能力，禁止重复抽象。"}

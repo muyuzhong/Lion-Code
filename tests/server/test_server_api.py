@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 from pathlib import Path
@@ -21,7 +22,12 @@ from lion_code.core.events import (
     MessageStartEvent,
     MessageUpdateEvent,
 )
-from lion_code.core.messages import AssistantMessage, TextContent
+from lion_code.core.messages import (
+    AssistantMessage,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+)
 from lion_code.core.provider_events import TextDeltaEvent
 from lion_code.server import app as server_app_module
 from lion_code.server.app import create_app
@@ -170,10 +176,7 @@ def test_get_status_reports_stable_provider_blocker_code() -> None:
 
     assert response.status_code == 200
     assert response.json()["api_configured"] is False
-    assert (
-        response.json()["provider_blocker_code"]
-        == "provider_configuration_required"
-    )
+    assert response.json()["provider_blocker_code"] == "provider_configuration_required"
 
 
 def test_get_provider_config_returns_explicit_snapshot_without_status_key() -> None:
@@ -381,6 +384,70 @@ def test_get_messages() -> None:
     assert len(msgs) == 1
     assert msgs[0]["role"] == "assistant"
     assert msgs[0]["content"] == "Hello!"
+
+
+def test_get_messages_and_open_resource_project_safe_tool_result(
+    tmp_path: Path,
+) -> None:
+    backend = FakeCodingSessionBackend(cwd=tmp_path)
+    persisted = tmp_path / "tool-result.txt"
+    persisted.write_bytes(b"full result\n")
+    backend.messages = (
+        AssistantMessage(
+            content=[
+                ToolCall(
+                    id="tool-1",
+                    name="read_file",
+                    arguments={"file_path": "tool-result.txt"},
+                )
+            ]
+        ),
+        ToolResultMessage(
+            tool_call_id="tool-1",
+            tool_name="read_file",
+            content="preview",
+            details={
+                "persisted_path": str(persisted),
+                "original_bytes": len(b"full result\n"),
+            },
+        ),
+    )
+    session = LionCodingSession(backend=backend, terminal_output=False)
+    client = _build_client(session)
+
+    history = client.get("/api/messages")
+    assert history.status_code == 200
+    tool = history.json()[0]["tools"][0]
+    assert tool["openable"] == {
+        "path": str(persisted),
+        "expectedSize": len(b"full result\n"),
+    }
+
+    opened = client.get(
+        "/api/resources/open",
+        params={"path": str(persisted), "expected_size": len(b"full result\n")},
+    )
+    assert opened.status_code == 200
+    assert opened.json()["status"] == "ready"
+    assert opened.json()["content"] == "full result\n"
+
+
+def test_open_resource_is_a_sync_threadpool_endpoint() -> None:
+    session, _ = _build_test_session()
+    app = create_app(session, capability=_CAPABILITY)
+    pending_routes = list(app.routes)
+    route = None
+    while pending_routes:
+        candidate = pending_routes.pop()
+        if getattr(candidate, "path", None) == "/api/resources/open":
+            route = candidate
+            break
+        nested_router = getattr(candidate, "original_router", None)
+        if nested_router is not None:
+            pending_routes.extend(nested_router.routes)
+
+    assert route is not None
+    assert not inspect.iscoroutinefunction(route.endpoint)
 
 
 def test_set_thinking_level() -> None:

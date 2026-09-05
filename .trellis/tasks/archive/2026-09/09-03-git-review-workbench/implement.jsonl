@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/desktop-sidecar.md", "reason": "Git 子进程 workspace-local/DEVNULL/timeout 约束与 REST 安全边界"}
+{"file": ".trellis/spec/backend/runtime-boundaries.md", "reason": "server/application 层 import 边界，决定新读取模块落点"}
+{"file": ".trellis/spec/backend/four-layer-ownership.md", "reason": "Capability 不依赖 Application/TUI，GitStatusLayer 保持 ContextLayer"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Python 测试与注释规范"}
+{"file": ".trellis/spec/frontend/desktop-assistant-runtime-contract.md", "reason": "Renderer REST client 严格 schema 与 adapter 职责"}
+{"file": "agents/notes/2026-08-30-maka-git-review-workbench.md", "reason": "本任务来源：P0 命题、最小边界、成功信号"}
+{"file": "agents/notes/2026-08-30-maka-to-lion-functional-decision-pack-v2.md", "reason": "优先级 A 决策与退出条件"}

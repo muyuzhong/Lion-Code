@@ -56,6 +56,8 @@
 .tool-row-body:hover .tool-copy, .tool-copy:focus-visible, .tool-copy.copied { opacity: 1; }
 .tool-copy:hover { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
 .tool-copy.copied { color: var(--ds-success); }
+.tool-open { display: inline-flex; height: 26px; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-xs); color: var(--ds-text-secondary); font-size: 11px; }
+.tool-open:hover { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
 .tool-row pre { margin: 0; padding: 9px 10px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); white-space: pre-wrap; }
 .tool-markdown { padding: 9px 10px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); background: var(--ds-bg-inset); }
 .tool-markdown > :first-child { margin-top: 0; }

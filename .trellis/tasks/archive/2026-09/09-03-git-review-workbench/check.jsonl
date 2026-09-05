@@ -1,0 +1,8 @@
+{"file": "tests/server/test_server_api.py", "reason": "REST 端点 capability 校验与测试模式参照"}
+{"file": "tests/context/test_context_layer.py", "reason": "GitStatusLayer 既有约束测试参照"}
+{"file": "tests/tooling/test_workspace_snapshot.py", "reason": "git init fixture 模式参照"}
+{"file": "desktop/tests/renderer/assistantRuntime.test.ts", "reason": "REST client mock fetch 测试模式参照"}
+{"file": "desktop/tests/renderer/WorkspaceShell.test.tsx", "reason": "React 组件渲染测试与 jsdom 环境参照"}
+{"file": "lion_code/capabilities/git_status/capability.py", "reason": "复用的子进程约束实现参照"}
+{"file": "lion_code/server/app.py", "reason": "REST 端点注册位置与同步线程池执行方式"}
+{"file": "desktop/src/renderer/src/components/WorkPanel.tsx", "reason": "WorkPanel 现有视图结构与空壳状态"}

@@ -102,6 +102,19 @@
 .work-panel-empty-tools button { display: flex; height: 30px; align-items: center; gap: 8px; padding: 0 8px; border-radius: var(--radius-sm); color: var(--ds-text-primary); font-size: 13px; }
 .work-panel-empty-tools button:hover, .work-panel-empty-tools button.active { background: var(--ds-bg-hover); }
 .work-panel-empty-tools svg { color: var(--ds-text-muted); }
+.file-resource { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
+.file-resource-header { display: flex; min-height: 42px; flex: 0 0 42px; align-items: center; gap: 8px; padding: 5px 10px 4px; border-bottom: 1px solid var(--ds-border-subtle); }
+.file-resource-title { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.file-resource-title strong { overflow: hidden; color: var(--ds-text-primary); font-size: 12.5px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.file-resource-title span { overflow: hidden; color: var(--ds-text-muted); font: 10.5px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.file-resource-meta { display: flex; min-height: 26px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--ds-border-subtle); color: var(--ds-text-muted); font-size: 10.5px; }
+.file-resource-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-resource-body { min-height: 0; flex: 1; overflow: auto; padding: 10px; }
+.file-resource-state { display: flex; min-height: 100%; align-items: center; justify-content: center; color: var(--ds-text-muted); font-size: 12.5px; text-align: center; }
+.file-resource-error { color: var(--ds-error); }
+.file-resource-text, .file-resource-diff { min-height: 100%; margin: 0; padding: 10px; border: 1px solid var(--ds-border-default); border-radius: var(--radius-sm); background: var(--ds-bg-inset); font: 11px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-resource-diff span { display: block; margin: 0 -10px; padding: 0 10px; white-space: pre-wrap; }
+.file-resource-markdown { color: var(--ds-text-secondary); font-size: 12.5px; line-height: 1.55; }
 .work-panel-return { display: flex; width: 34px; flex: 0 0 34px; align-items: center; justify-content: center; border-left: 1px solid var(--ds-border-subtle); color: var(--ds-text-muted); }
 .work-panel-return:hover { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
 .work-panel-return span { writing-mode: vertical-rl; font-size: 11px; }
@@ -132,3 +145,31 @@
 .boot-actions button.button-quiet, .settings-panel footer button.button-quiet, .approval-actions button.button-quiet { color: var(--ds-text-secondary); background: var(--ds-bg-secondary); }
 .boot-content pre { width: 100%; max-height: 160px; overflow: auto; margin-top: 16px; padding: 10px; border-radius: var(--radius-sm); color: var(--ds-error); background: var(--ds-bg-inset); font: 11px/1.45 var(--font-mono); text-align: left; white-space: pre-wrap; }
 @media (max-width: 980px) { .work-panel { display: none; } .chat-shell { min-width: 0; } }
+
+/* Git 审查视图 */
+.git-review { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
+.git-review-state { display: flex; min-height: 0; flex: 1; align-items: center; justify-content: center; padding: 24px; color: var(--ds-text-muted); font-size: 13px; text-align: center; }
+.git-review-error { color: var(--ds-error); }
+.git-review-header { display: flex; min-height: 34px; flex: 0 0 34px; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--ds-border-subtle); }
+.git-review-branch { min-width: 0; overflow: hidden; color: var(--ds-text-primary); font-size: 12.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.git-review-counts { margin-left: auto; color: var(--ds-text-muted); font: 11px var(--font-mono); }
+.git-review-refresh { display: inline-flex; width: 26px; height: 26px; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--ds-text-muted); }
+.git-review-refresh:hover { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
+.git-review-truncated { padding: 6px 10px; color: var(--ds-text-muted); font-size: 11.5px; background: color-mix(in oklab, var(--ds-warning, #c19c00) 8%, transparent); }
+.git-review-files { min-height: 0; flex: 1; overflow-y: auto; padding: 6px; margin: 0; list-style: none; }
+.git-review-file { border-radius: var(--radius-sm); }
+.git-review-file > button { display: flex; width: 100%; min-height: 28px; align-items: center; gap: 7px; padding: 3px 6px; border-radius: var(--radius-sm); color: var(--ds-text-secondary); text-align: left; }
+.git-review-file > button:hover, .git-review-file > button.active { color: var(--ds-text-primary); background: var(--ds-bg-hover); }
+.git-review-status { display: inline-flex; width: 17px; flex: 0 0 17px; justify-content: center; font: 11px/1 var(--font-mono); font-weight: 600; }
+.git-review-status.modified { color: var(--ds-warning, #c19c00); }
+.git-review-status.added { color: var(--ds-success); }
+.git-review-status.deleted { color: var(--ds-error); }
+.git-review-status.renamed { color: #3a96dd; }
+.git-review-status.untracked { color: var(--ds-text-muted); }
+.git-review-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.git-review-stats { margin-left: auto; flex: 0 0 auto; color: var(--ds-text-muted); font: 10.5px var(--font-mono); }
+.git-review-binary { margin-left: auto; flex: 0 0 auto; color: var(--ds-text-muted); font-size: 11px; }
+.git-review-diff { border-top: 1px solid var(--ds-border-subtle); padding: 8px 6px; }
+.git-review-diff pre { max-height: 260px; overflow: auto; margin: 0; padding: 8px; border-radius: var(--radius-sm); background: var(--ds-bg-inset); font: 11px/1.5 var(--font-mono); }
+.git-review-diff .diff-result span { display: block; margin: 0; padding: 0 6px; white-space: pre-wrap; }
+.git-review-diff-note { color: var(--ds-text-muted); }

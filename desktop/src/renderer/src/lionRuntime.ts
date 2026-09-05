@@ -2,9 +2,9 @@ import {
   actionForInput,
   initialChatProtocolState,
   reduceChatProtocol,
-  type ChatMessage,
   type ChatProtocolState,
   type ClientAction,
+  type OpenableResourceRef,
   type PlanApprovalChoice,
 } from "../../shared/chat";
 import {
@@ -13,7 +13,10 @@ import {
   type BackendBootstrap,
   type EgressConfiguration,
   type EgressConfigurationResponse,
+  type GitReviewDiff,
+  type GitReviewSnapshot,
   type ModelChoice,
+  type OpenableResourceResponse,
   type ProviderConfiguration,
   type ProviderConfigurationResponse,
   type ServerStatus,
@@ -33,6 +36,14 @@ export interface LionRuntimeSnapshot {
   models: ModelChoice[];
   skills: SkillSummary[];
   metadataError: string | null;
+  openedResource: OpenedResourceState | null;
+}
+
+export interface OpenedResourceState {
+  ref: OpenableResourceRef;
+  response: OpenableResourceResponse | null;
+  loading: boolean;
+  error: string | null;
 }
 
 type Listener = () => void;
@@ -51,6 +62,7 @@ export class LionAssistantRuntimeAdapter {
     models: [],
     skills: [],
     metadataError: null,
+    openedResource: null,
   };
   private readonly listeners = new Set<Listener>();
   private readonly rest: LionRestClient;
@@ -58,6 +70,7 @@ export class LionAssistantRuntimeAdapter {
   private reconnectId: number | null = null;
   private active = false;
   private historyRequest = 0;
+  private resourceRequest = 0;
   private connectionGeneration = 0;
   private controlledDisconnect = false;
 
@@ -89,6 +102,7 @@ export class LionAssistantRuntimeAdapter {
     this.historyRequest += 1;
     if (this.reconnectId !== null) this.bootstrap.cancelReconnect(this.reconnectId);
     this.reconnectId = null;
+    this.clearOpenedResource();
     this.controlledDisconnect = true;
     if (!this.transport.close()) this.controlledDisconnect = false;
     this.dispatch({ type: "disconnected" });
@@ -100,6 +114,7 @@ export class LionAssistantRuntimeAdapter {
     this.historyRequest += 1;
     if (this.reconnectId !== null) this.bootstrap.cancelReconnect(this.reconnectId);
     this.reconnectId = null;
+    this.clearOpenedResource();
     this.controlledDisconnect = true;
     if (!this.transport.close()) this.controlledDisconnect = false;
     this.dispatch({ type: "replace_history", messages: [] });
@@ -117,6 +132,7 @@ export class LionAssistantRuntimeAdapter {
   async createSession(): Promise<void> {
     if (this.snapshot.protocol.isStreaming) return;
     const generation = ++this.connectionGeneration;
+    this.clearOpenedResource();
     this.controlledDisconnect = true;
     if (!this.transport.close()) this.controlledDisconnect = false;
     this.setTransport("loading", null);
@@ -182,6 +198,65 @@ export class LionAssistantRuntimeAdapter {
     }
   }
 
+  async fetchGitReview(): Promise<GitReviewSnapshot | null> {
+    try {
+      return await this.rest.fetchGitReview();
+    } catch (error) {
+      this.setMetadataError(errorMessage(error));
+      return null;
+    }
+  }
+
+  async fetchGitReviewDiff(path: string): Promise<GitReviewDiff | null> {
+    try {
+      return await this.rest.fetchGitReviewDiff(path);
+    } catch (error) {
+      this.setMetadataError(errorMessage(error));
+      return null;
+    }
+  }
+
+  async openResource(ref: OpenableResourceRef): Promise<void> {
+    if (!this.active) return;
+    const request = ++this.resourceRequest;
+    const generation = this.connectionGeneration;
+    const previous = this.snapshot.openedResource;
+    const sameResource = previous?.ref.path === ref.path;
+    const expectedSize = ref.expectedSize ?? (sameResource ? previous?.response?.size ?? null : null);
+    const requestRef = expectedSize === ref.expectedSize || expectedSize === null
+      ? ref
+      : { ...ref, expectedSize };
+    const expectedMtimeNs = sameResource && previous?.response?.status === "ready"
+      ? previous.response.modifiedAtNs
+      : null;
+    this.snapshot = {
+      ...this.snapshot,
+      openedResource: { ref: requestRef, response: null, loading: true, error: null },
+    };
+    this.emit();
+    try {
+      const response = await this.rest.openResource(requestRef, expectedMtimeNs);
+      if (!this.active || request !== this.resourceRequest || generation !== this.connectionGeneration) return;
+      this.snapshot = {
+        ...this.snapshot,
+        openedResource: { ref: requestRef, response, loading: false, error: null },
+      };
+      this.emit();
+    } catch (error) {
+      if (!this.active || request !== this.resourceRequest || generation !== this.connectionGeneration) return;
+      this.snapshot = {
+        ...this.snapshot,
+        openedResource: { ref: requestRef, response: null, loading: false, error: errorMessage(error) },
+      };
+      this.emit();
+    }
+  }
+
+  async reloadOpenedResource(): Promise<void> {
+    const opened = this.snapshot.openedResource;
+    if (!opened || opened.loading) return;
+    await this.openResource({ path: opened.ref.path });
+  }
   async setThinkingLevel(level: string): Promise<boolean> {
     try {
       await this.rest.setThinkingLevel(level);
@@ -247,6 +322,7 @@ export class LionAssistantRuntimeAdapter {
     try {
       const messages = await this.rest.fetchMessages();
       if (!this.active || request !== this.historyRequest) return false;
+      this.clearOpenedResource();
       this.dispatch({ type: "replace_history", messages });
       return true;
     } catch (error) {
@@ -288,6 +364,7 @@ export class LionAssistantRuntimeAdapter {
         this.controlledDisconnect = true;
         if (!this.transport.close()) this.controlledDisconnect = false;
         this.dispatch({ type: "disconnected" });
+        this.clearOpenedResource();
         this.setTransport("error", event.message);
         return;
       case "transport_error":
@@ -323,6 +400,13 @@ export class LionAssistantRuntimeAdapter {
 
   private dispatch(action: Parameters<typeof reduceChatProtocol>[1]): void {
     this.snapshot = { ...this.snapshot, protocol: reduceChatProtocol(this.snapshot.protocol, action) };
+    this.emit();
+  }
+
+  private clearOpenedResource(): void {
+    this.resourceRequest += 1;
+    if (this.snapshot.openedResource === null) return;
+    this.snapshot = { ...this.snapshot, openedResource: null };
     this.emit();
   }
 

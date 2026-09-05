@@ -4,6 +4,7 @@ import {
   decodeServerEvent,
   formatRunDuration,
   initialChatProtocolState,
+  openableResourceForTool,
   reduceChatProtocol,
   type ChatProtocolState,
   type ServerEvent,
@@ -20,6 +21,17 @@ describe("Lion chat protocol", () => {
     expect(decodeServerEvent({ type: "confirm_request", request_id: "r1", message: "ok?" })).toBeNull();
     expect(decodeServerEvent({ type: "queue_update", steering: [], follow_up: [] })).toBeNull();
     expect(decodeServerEvent({ type: "message_update", message: assistant })).toBeNull();
+  });
+
+  it("projects persisted results without weakening the optional wire contract", () => {
+    expect(openableResourceForTool("run_shell", { command: "cat" }, { persisted_path: "C:/results/out.txt", original_bytes: 12 })).toEqual({ path: "C:/results/out.txt", expectedSize: 12 });
+    expect(openableResourceForTool("run_shell", { command: "cat" }, undefined)).toBeUndefined();
+    expect(decodeServerEvent({ type: "tool_execution_end", toolCallId: "t1", toolName: "read_file", result: { content: [], isError: false }, isError: false })).not.toBeNull();
+    expect(decodeServerEvent({ type: "tool_execution_end", toolCallId: "t1", toolName: "read_file", result: { content: [], details: 1n, isError: false }, isError: false })).toBeNull();
+
+    let state = apply(initialChatProtocolState, { type: "tool_execution_start", toolCallId: "t1", toolName: "read_file", args: { file_path: "notes.md" } });
+    state = apply(state, { type: "tool_execution_end", toolCallId: "t1", toolName: "read_file", result: { content: [{ type: "text", text: "full" }], details: { persisted_path: "C:/results/out.txt", original_bytes: 4 }, isError: false }, isError: false });
+    expect(state.messages[0].tools?.[0].openable).toEqual({ path: "C:/results/out.txt", expectedSize: 4 });
   });
 
   it("replaces queue snapshots and consumes matching user echoes steering-first", () => {

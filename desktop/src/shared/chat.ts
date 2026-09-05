@@ -20,12 +20,18 @@ export type ClientAction =
       feedback?: string;
     };
 
+export interface OpenableResourceRef {
+  path: string;
+  expectedSize?: number | null;
+}
+
 export interface ToolCallItem {
   id: string;
   toolName: string;
   args?: Record<string, unknown> | string;
   status: "running" | "completed" | "error";
   result?: string;
+  openable?: OpenableResourceRef | null;
 }
 
 export interface ChatMessage {
@@ -65,7 +71,8 @@ type WireMessage =
       isError: boolean;
     }
   | { role: "custom"; customType: string; content: string | Array<TextContent | ImageContent> };
-type AgentToolResult = { content: Array<TextContent | ImageContent>; isError: boolean };
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+type AgentToolResult = { content: Array<TextContent | ImageContent>; details?: JsonValue; isError: boolean };
 type AssistantMessageEvent =
   | { type: "start"; partial: AssistantMessage }
   | { type: "text_start" | "thinking_start" | "toolcall_start"; contentIndex: number; partial: AssistantMessage }
@@ -128,6 +135,33 @@ function isVisibleContent(value: unknown): boolean {
   return typeof value === "string" || (Array.isArray(value) && value.every((block) => isTextContent(block) || isImageContent(block)));
 }
 
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") return true;
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return isRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+export function isOpenableResourceRef(value: unknown): value is OpenableResourceRef {
+  return isRecord(value)
+    && Object.keys(value).every((key) => key === "path" || key === "expectedSize")
+    && typeof value.path === "string"
+    && value.path.trim().length > 0
+    && (value.expectedSize === undefined || value.expectedSize === null || (typeof value.expectedSize === "number" && Number.isSafeInteger(value.expectedSize) && value.expectedSize >= 0));
+}
+
+const OPENABLE_FILE_TOOLS = new Set(["read_file", "write_file", "edit_file"]);
+
+export function openableResourceForTool(toolName: string, args: unknown, details: unknown): OpenableResourceRef | undefined {
+  if (isRecord(details) && typeof details.persisted_path === "string" && details.persisted_path.trim()) {
+    const expectedSize = typeof details.original_bytes === "number" && Number.isSafeInteger(details.original_bytes) && details.original_bytes >= 0
+      ? details.original_bytes
+      : undefined;
+    return { path: details.persisted_path, ...(expectedSize === undefined ? {} : { expectedSize }) };
+  }
+  if (!OPENABLE_FILE_TOOLS.has(toolName) || !isRecord(args) || typeof args.file_path !== "string" || !args.file_path.trim()) return undefined;
+  return { path: args.file_path };
+}
+
 function isWireMessage(value: unknown): value is WireMessage {
   if (!isRecord(value) || typeof value.role !== "string") return false;
   if (value.role === "assistant") return isAssistantMessage(value);
@@ -139,7 +173,11 @@ function isWireMessage(value: unknown): value is WireMessage {
 }
 
 function isToolResult(value: unknown): value is AgentToolResult {
-  return isRecord(value) && Array.isArray(value.content) && value.content.every((block) => isTextContent(block) || isImageContent(block)) && typeof value.isError === "boolean";
+  return isRecord(value)
+    && Array.isArray(value.content)
+    && value.content.every((block) => isTextContent(block) || isImageContent(block))
+    && (value.details === undefined || isJsonValue(value.details))
+    && typeof value.isError === "boolean";
 }
 
 function isAssistantEvent(value: unknown): value is AssistantMessageEvent {
@@ -257,9 +295,9 @@ function reduceServerEvent(state: ChatProtocolState, event: ServerEvent): ChatPr
     }
     case "message_end": return event.message.role === "assistant" ? finalizeAssistant(trackLlmEnd(state), event.message) : state;
     case "turn_failed": return event.message.role === "assistant" ? applyAssistantError(state, event.message) : failStreaming(state, "Agent turn failed.");
-    case "tool_execution_start": return updateTool(trackToolStart(state, event.toolCallId), event.toolCallId, () => ({ id: event.toolCallId, toolName: event.toolName, args: event.args, status: "running" }));
-    case "tool_execution_update": return updateTool(state, event.toolCallId, (tool) => ({ ...tool, id: event.toolCallId, toolName: event.toolName, args: event.args, status: "running", result: toolResultText(event.partialResult) }));
-    case "tool_execution_end": return updateTool(trackToolEnd(state, event.toolCallId), event.toolCallId, (tool) => ({ ...tool, id: event.toolCallId, toolName: event.toolName, status: event.isError ? "error" : "completed", result: toolResultText(event.result) }));
+    case "tool_execution_start": return updateTool(trackToolStart(state, event.toolCallId), event.toolCallId, () => ({ id: event.toolCallId, toolName: event.toolName, args: event.args, status: "running", openable: openableResourceForTool(event.toolName, event.args, undefined) }));
+    case "tool_execution_update": return updateTool(state, event.toolCallId, (tool) => ({ ...tool, id: event.toolCallId, toolName: event.toolName, args: event.args, status: "running", result: toolResultText(event.partialResult), openable: openableResourceForTool(event.toolName, event.args, event.partialResult.details) ?? tool.openable }));
+    case "tool_execution_end": return updateTool(trackToolEnd(state, event.toolCallId), event.toolCallId, (tool) => ({ ...tool, id: event.toolCallId, toolName: event.toolName, status: event.isError ? "error" : "completed", result: toolResultText(event.result), openable: openableResourceForTool(event.toolName, tool.args, event.result.details) ?? tool.openable }));
     case "confirm_request": return { ...state, confirmRequest: { requestId: event.requestId, message: event.message } };
     case "plan_approval_request": return { ...state, planApprovalRequest: { requestId: event.requestId, plan: event.plan } };
     case "queue_update": return { ...state, queue: { steering: event.steering, followUp: event.followUp } };
