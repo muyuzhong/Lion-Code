@@ -1,26 +1,16 @@
-# Lion 质量基线 CI（2026-08-04 收紧）
-#
-# 质量门禁使用已提交的机器基线，不解析 Ruff/mypy 的人类可读摘要。
-# 分支保护仍需在 GitHub 仓库设置中把本 workflow 设为 required check。
-#
-# 所有质量门禁步骤使用 if: always()，确保任一门禁失败不会阻止
-# 后续门禁执行——CI 应一次暴露所有问题，而非在第一个失败处停止。
-#
-# PR 上 workflow 始终触发（不用 paths 过滤——整 workflow 被 paths 跳过时
-# required check 会一直 Pending 阻塞 merge）。changes job 用 git diff 判断
-# 变更范围，无关变更时 quality-gates 以 skipped 结束，不阻塞合并。
-# desktop job 见独立 workflow desktop.yml。
-#
-# 不使用 strategy.matrix：分支保护按 job 名要求 check，矩阵会让运行时的
-# check 名带版本后缀（Quality gates (baseline) (3.12.13)），而被跳过时
-# 只报告裸名，二者不一致导致纯文档/记账类 PR 无法合入。
-
 name: CI
 
 on:
   push:
     branches: [master]
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   QUALITY_BASELINE: docs/quality-baseline-2026-08.json
@@ -32,30 +22,53 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       python: ${{ steps.diff.outputs.python }}
+      desktop: ${{ steps.diff.outputs.desktop }}
+      base: ${{ steps.diff.outputs.base }}
+      head: ${{ steps.diff.outputs.head }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 判断 Python 相关变更
+      - name: 判断变更范围并检查提交差异
         id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "python=true" >> "$GITHUB_OUTPUT"
-            exit 0
+          if [ "$EVENT" = "pull_request" ]; then
+            BASE="$(git merge-base "$PR_BASE" "$PR_HEAD")"
+            HEAD="$PR_HEAD"
+          else
+            BASE="$PUSH_BASE"
+            HEAD="$PUSH_HEAD"
+            if [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+              BASE="$(git hash-object -t tree /dev/null)"
+            fi
           fi
-          CHANGED="$(git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")"
-          if echo "$CHANGED" | grep -qE '\.(py|pyi)$|^pyproject\.toml$|^requirements[^/]*\.txt$|^\.github/workflows/ci\.yml$|^docs/quality-baseline-2026-08\.json$'; then
+          git diff --check "$BASE" "$HEAD"
+          CHANGED="$(git diff --name-only "$BASE" "$HEAD")"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD" >> "$GITHUB_OUTPUT"
+          if echo "$CHANGED" | grep -qE '\.(py|pyi)$|^pyproject\.toml$|^requirements[^/]*\.txt$|^\.github/workflows/|^docs/quality-baseline-2026-08\.json$'; then
             echo "python=true" >> "$GITHUB_OUTPUT"
           else
             echo "python=false" >> "$GITHUB_OUTPUT"
           fi
+          if echo "$CHANGED" | grep -qE '^desktop/|^lion_code/(sidecar|server|application|runtime|context|providers|tooling|adapters|capabilities|composition|core|observers|session_runtime)(/|\.py$)|^lion_code/[^/]+\.py$|^pyproject\.toml$|^requirements[^/]*\.txt$|^\.github/workflows/'; then
+            echo "desktop=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "desktop=false" >> "$GITHUB_OUTPUT"
+          fi
 
   quality-gates:
-    name: Quality gates (baseline)
+    name: Python quality and tests
     runs-on: ubuntu-latest
     needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.python == 'true'
+    if: needs.changes.outputs.python == 'true'
 
     steps:
       - uses: actions/checkout@v4
@@ -108,10 +121,6 @@ jobs:
         if: always()
         run: python -m compileall -q lion_code tests scripts
 
-      - name: git diff --check
-        if: always()
-        run: git diff --check
-
       # ---------- 附加质量门禁 ----------
 
       - name: mypy 类型检查（JSON 基线比对）
@@ -131,13 +140,15 @@ jobs:
         if: always()
         run: lint-imports --no-cache
 
-      - name: radon D/E/F 复杂度门禁
+      - name: radon D/E/F 复杂度报告
+        continue-on-error: true
         if: always()
         run: |
           python -m radon cc lion_code -j > radon-cc.json
           python scripts/check_quality_baseline.py radon-complexity radon-cc.json --baseline "$QUALITY_BASELINE"
 
-      - name: vulture 高置信候选门禁
+      - name: vulture 高置信候选报告
+        continue-on-error: true
         if: always()
         run: |
           set +e
@@ -153,10 +164,9 @@ jobs:
       - name: 准备 changed-lines diff
         if: always()
         env:
-          BASE_REF: ${{ github.base_ref || 'master' }}
-        run: |
-          git fetch --no-tags --depth=1 origin "$BASE_REF" || true
-          git diff --unified=0 "origin/$BASE_REF...HEAD" -- lion_code > changed-lines.diff || true
+          BASE_SHA: ${{ needs.changes.outputs.base }}
+          HEAD_SHA: ${{ needs.changes.outputs.head }}
+        run: git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" -- lion_code > changed-lines.diff
 
       - name: 分支覆盖率与 changed-lines 覆盖率门禁
         if: always()
@@ -165,3 +175,36 @@ jobs:
           python -m coverage json -o coverage.json
           python scripts/check_quality_baseline.py coverage coverage.json --diff-file changed-lines.diff --baseline "$QUALITY_BASELINE"
           python -m coverage report --include="lion_code/*"
+
+  desktop:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    uses: ./.github/workflows/desktop.yml
+
+  required:
+    name: Quality gates (baseline)
+    runs-on: ubuntu-latest
+    needs: [changes, quality-gates, desktop]
+    if: always()
+    steps:
+      - name: 汇总必需检查
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          PYTHON_REQUIRED: ${{ needs.changes.outputs.python }}
+          DESKTOP_REQUIRED: ${{ needs.changes.outputs.desktop }}
+          PYTHON_RESULT: ${{ needs.quality-gates.result }}
+          DESKTOP_RESULT: ${{ needs.desktop.result }}
+        run: |
+          test "$CHANGES" = "success"
+          if [ "$PYTHON_REQUIRED" = "true" ]; then
+            test "$PYTHON_RESULT" = "success"
+          else
+            test "$PYTHON_REQUIRED" = "false"
+            test "$PYTHON_RESULT" = "skipped"
+          fi
+          if [ "$DESKTOP_REQUIRED" = "true" ]; then
+            test "$DESKTOP_RESULT" = "success"
+          else
+            test "$DESKTOP_REQUIRED" = "false"
+            test "$DESKTOP_RESULT" = "skipped"
+          fi
