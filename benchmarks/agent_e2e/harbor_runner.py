@@ -312,7 +312,10 @@ def _run_harbor(
             encoding="utf-8",
             errors="replace",
             stdin=subprocess.DEVNULL,
-            timeout=max(1, math.ceil(request.manifest.timeout_seconds)) + 180,
+            # agent 预算满后 Harbor 仍需跑完 verifier 与结果回收;固定 180s
+            # 缓冲对慢测试(repo 级测试套件,如 matplotlib)不足,900s 仍会
+            # 在 agent 跑满预算 + 慢 verifier 时误杀,给到 1800s。
+            timeout=max(1, math.ceil(request.manifest.timeout_seconds)) + 1800,
             env=environment,
         )
     except subprocess.TimeoutExpired:

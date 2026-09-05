@@ -29,6 +29,9 @@ class LionInstalledAgent(BaseInstalledAgent):
     _REMOTE_REQUEST = "/installed-agent/request.json"
     _REMOTE_PYTHON312 = "/opt/lion-py"
     _LOG_ROOT = "/logs/agent"
+    # 容器内 pip 解析 Lion wheel 依赖时默认走 pypi.org,评测机对其出网不通
+    # 会卡到 setup 超时;固定走清华镜像。
+    _PYPI_INDEX = "https://pypi.tuna.tsinghua.edu.cn/simple"
     # swebench 任务镜像内置 Python 3.11,而 Lion 要求 >=3.12(PEP 695 语法)。
     # 固定 python-build-standalone 发布资产(URL 不可变),免编译、免改镜像。
     _PYTHON312_URL = (
@@ -135,7 +138,7 @@ class LionInstalledAgent(BaseInstalledAgent):
             environment,
             command=(
                 f"{self._REMOTE_PYTHON312}/bin/python3 -m pip install --no-cache-dir "
-                f"/installed-agent/{self._wheel_path.name}"
+                f"-i {self._PYPI_INDEX} /installed-agent/{self._wheel_path.name}"
             ),
         )
 
