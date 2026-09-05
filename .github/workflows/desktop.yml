@@ -1,50 +1,16 @@
-# Lion 桌面端 CI
-#
-# PR 上 workflow 始终触发（不用 paths 过滤——整 workflow 被 paths 跳过时
-# required check 会一直 Pending 阻塞 merge）。changes job 用 git diff
-# 判断是否涉及 desktop / sidecar 依赖，无关变更时 desktop-windows 以
-# skipped 结束，不阻塞合并。
-#
-# NSIS 打包、安装态烟测、上传安装包仅在 push（master）时执行，PR 只做
-# 单测、typecheck、build 与 E2E。
-
+# 由 CI 按变更范围调用；主分支相关变更才打包。
 name: Desktop CI
 
 on:
-  push:
-    branches: [master]
-  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
-  changes:
-    name: 变更范围判断
-    runs-on: ubuntu-latest
-    outputs:
-      desktop: ${{ steps.diff.outputs.desktop }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 判断 desktop 相关变更
-        id: diff
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "desktop=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          CHANGED="$(git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")"
-          if echo "$CHANGED" | grep -qE '^desktop/|^pyproject\.toml$|^requirements[^/]*\.txt$|^\.github/workflows/desktop\.yml$'; then
-            echo "desktop=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "desktop=false" >> "$GITHUB_OUTPUT"
-          fi
-
   desktop-windows:
     name: Desktop Windows x64
     runs-on: windows-latest
-    needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.desktop == 'true'
     env:
       PYTHONUTF8: "1"
 
