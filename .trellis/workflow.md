@@ -2,17 +2,31 @@
 
 ---
 
+## Applicability and authorization
+
+Trellis is opt-in in Lion. Enter these phases only when the user explicitly invokes a Trellis skill, requests a Trellis task, or accepts a proposal to use Trellis for the current work. Existing task files or task complexity alone do not activate this workflow. Otherwise follow AGENTS.md and relevant specs directly.
+
+These phases apply to work that has entered Trellis. Clearly scoped small edits and read-only requests may be completed directly without task artifacts or sub-agent dispatch. Preserve the configured model routing and execution mode for formal Trellis tasks.
+
+Follow the project AGENTS.md for authorization, validation scope, and completion. A workflow step does not authorize edits during a read-only review, unrelated repairs, commits, pushes, PR mutations, deployment, release, messages, credential handling, or important data deletion. Continue already authorized work without asking the same question again; ask only for material missing information or a scope/authorization change.
+
 ## Core Principles
 
 1. **Plan before code** — figure out what to do before you start
 2. **Specs injected, not remembered** — guidelines are injected via hook/skill, not recalled from memory
-3. **Persist everything** — research, decisions, and lessons all go to files; conversations get compacted, files don't
+3. **Persist useful task context** — record relevant research and decisions in formal task artifacts; do not create unrelated records or persist sensitive data merely to satisfy the workflow
 4. **Incremental development** — one task at a time
 5. **Capture learnings** — after each task, review and write new knowledge back to spec
 
 ---
 
 ## Trellis System
+
+### Local integration
+
+Codex `.codex/hooks.json` retains only Trellis-specific `SubagentStart` context injection. Automatic SessionStart, UserPromptSubmit, and edit-time Trellis hooks are not registered. Explicit skill invocation still works; model routing and agent definitions remain available.
+
+`.trellis/config.yaml` sets `session_auto_commit: false`. Authorized bookkeeping may use `task.py archive <name> --no-commit` and `add_session.py --no-commit`; recordkeeping does not imply permission to commit. Do not run `trellis update` merely to activate these local changes: regeneration may restore hooks or overwrite local skills. After any requested update, review these integration points before using the regenerated workflow.
 
 ### Developer Identity
 
@@ -151,9 +165,9 @@ Phase 3: Finish  → verify, update spec, commit, and wrap up
 
 ### Request Triage
 
-- Simple conversation or small task: ask only whether this turn should create a Trellis task. If the user says no, skip Trellis for this session.
-- Complex task: ask whether you may create a Trellis task and enter planning. If the user says no, do not do broad inline implementation; explain, clarify scope, or suggest a smaller split.
-- User approval to create a task is not approval to start implementation. Planning still happens first.
+- Simple conversation or clearly scoped small task: complete directly without asking about task creation unless a persistent task would materially help or the user requests one.
+- Complex task: explain why persistent planning would help and obtain consent before creating a task. If declined, continue authorized work with a proportionate plan in the conversation; ask only if a material scope or authorization question remains. Do not repeat a declined task-creation question in the same session.
+- Task-creation consent alone does not authorize implementation. Existing explicit implementation authorization remains valid: prepare and review the required artifacts, then proceed without another approval unless the plan changes scope or the user requested a review gate.
 
 ### Planning Artifacts
 
@@ -175,8 +189,8 @@ Create new children with `task.py create "<title>" --slug <name> --parent <paren
 
 [workflow-state:no_task]
 No active task. First classify the current turn and ask for task-creation consent before creating any Trellis task.
-Simple conversation / small task: ask only whether this turn should create a Trellis task. If the user says no, skip Trellis for this session.
-Complex task: ask the user if you can create a Trellis task and enter the planning phase. If the user says no, explain, clarify scope, or suggest a smaller split.
+Simple conversation / clearly scoped small task: complete directly without task creation or a task-creation question. If the user already declined Trellis, do not ask again in this session.
+Complex task: propose persistent planning when useful; obtain consent before creating a task. If declined, continue already authorized work with a proportionate plan. Ask only about material missing information or authorization.
 [/workflow-state:no_task]
 
 ### Phase 1: Plan
@@ -190,8 +204,8 @@ Complex task: ask the user if you can create a Trellis task and enter the planni
 <!-- Per-turn breadcrumb: shown throughout Phase 1 (status='planning') -->
 
 [workflow-state:planning]
-Load `trellis-brainstorm`; stay in planning.
-Lightweight: `prd.md` can be enough. Complex: finish `prd.md`, `design.md`, and `implement.md`; ask for review before `task.py start`.
+Load `trellis-brainstorm`; complete planning readiness before implementation.
+Lightweight: `prd.md` can be enough. Complex: finish `prd.md`, `design.md`, and `implement.md`; review artifacts before `task.py start`; ask the user only when implementation authorization is missing, scope changes, or the user requested approval.
 Multi-deliverable scope: consider a parent task plus independently verifiable child tasks; dependencies must be written in child artifacts, not implied by tree position.
 Sub-agent mode: curate `implement.jsonl` and `check.jsonl` as spec/research manifests before start.
 [/workflow-state:planning]
@@ -203,8 +217,8 @@ Sub-agent mode: curate `implement.jsonl` and `check.jsonl` as spec/research mani
      into a sub-agent. -->
 
 [workflow-state:planning-inline]
-Load `trellis-brainstorm`; stay in planning.
-Lightweight: `prd.md` can be enough. Complex: finish `prd.md`, `design.md`, and `implement.md`; ask for review before `task.py start`.
+Load `trellis-brainstorm`; complete planning readiness before implementation.
+Lightweight: `prd.md` can be enough. Complex: finish `prd.md`, `design.md`, and `implement.md`; review artifacts before `task.py start`; ask the user only when implementation authorization is missing, scope changes, or the user requested approval.
 Multi-deliverable scope: consider a parent task plus independently verifiable child tasks; dependencies must be written in child artifacts, not implied by tree position.
 Inline mode: skip jsonl curation; Phase 2 reads artifacts/specs via `trellis-before-dev`.
 [/workflow-state:planning-inline]
@@ -224,7 +238,7 @@ Sub-agent dispatch protocol applies to all platforms and all sub-agents, includi
 
 [workflow-state:in_progress]
 Tools: `trellis-implement` / `trellis-research` are sub-agent types only (Task/Agent tool, NOT Skill; there is no skill by these names). `trellis-update-spec` is a skill. `trellis-check` exists as both; prefer the Agent form when verifying after code changes.
-Flow: `trellis-implement` -> `trellis-check` -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
+Flow: `trellis-implement` -> `trellis-check` -> `trellis-update-spec` -> commit if authorized (Phase 3.4) -> `/trellis:finish-work` if bookkeeping is authorized.
 Main-session default: dispatch implement/check sub-agents. Sub-agent self-exemption: if already running as `trellis-implement`, do NOT spawn another `trellis-implement` or `trellis-check`; if already running as `trellis-check`, do NOT spawn another `trellis-check` or `trellis-implement`. Dispatch is main session only.
 Dispatch prompt starts with `Active task: <task path from task.py current>`. Read context: jsonl entries -> `prd.md` -> `design.md if present` -> `implement.md if present`.
 [/workflow-state:in_progress]
@@ -235,7 +249,7 @@ Dispatch prompt starts with `Active task: <task path from task.py current>`. Rea
      instead of dispatching sub-agents. -->
 
 [workflow-state:in_progress-inline]
-Flow: `trellis-before-dev` -> edit -> `trellis-check` -> validation -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
+Flow: `trellis-before-dev` -> edit -> `trellis-check` -> validation -> `trellis-update-spec` -> commit if authorized (Phase 3.4) -> `/trellis:finish-work` if bookkeeping is authorized.
 Do not dispatch implement/check sub-agents in inline mode.
 Read context: `prd.md` -> `design.md if present` -> `implement.md if present`, plus relevant spec/research loaded by skills.
 [/workflow-state:in_progress-inline]
@@ -243,7 +257,7 @@ Read context: `prd.md` -> `design.md if present` -> `implement.md if present`, p
 ### Phase 3: Finish
 - 3.2 Debug retrospective `[on demand]`
 - 3.3 Spec update `[required · once]`
-- 3.4 Commit changes `[required · once]`
+- 3.4 Check commit authorization `[required · once]`
 - 3.5 Wrap-up reminder
 
 > Note: step 3.1 was folded into 2.2 (last-iteration full-scope check) and 3.4 (commit preamble). Numbering kept stable to avoid breaking external references.
@@ -257,7 +271,7 @@ Read context: `prd.md` -> `design.md if present` -> `implement.md if present`, p
      channel as the live blocks. -->
 
 [workflow-state:completed]
-Code committed. Run `/trellis:finish-work`; if dirty, return to Phase 3.4 first.
+Deliver the completed result. Run `/trellis:finish-work` only if bookkeeping and its commit side effects are authorized; preserve unrelated dirty work.
 [/workflow-state:completed]
 
 ### Rules
@@ -290,7 +304,7 @@ When a user request matches one of these intents inside an active task, route fi
 
 ### Guardrails
 
-- Task creation approval is not implementation approval; implementation waits for `task.py start` after artifact review.
+- For formal tasks, implementation waits for `task.py start` after artifact review. Task creation alone is not implementation approval; honor implementation authorization already given and any explicit user review gate.
 - PRD-only is valid for lightweight tasks; complex tasks need `design.md` + `implement.md`.
 - Planning must be persisted to task artifacts; checks must run before reporting completion.
 
@@ -452,7 +466,7 @@ If `task.py start` errors with a session-identity message (no context key from h
 | Condition | Required |
 |------|:---:|
 | `prd.md` exists | ✅ |
-| User confirms task should enter implementation | ✅ |
+| Implementation is authorized (existing explicit authorization counts) | ✅ |
 | `task.py start` has been run (status = in_progress) | ✅ |
 | `research/` has artifacts (complex tasks) | recommended |
 | `design.md` exists (complex tasks) | ✅ |
@@ -477,7 +491,7 @@ Goal: turn reviewed planning artifacts into code that passes quality checks.
 Spawn the implement sub-agent:
 
 - **Agent type**: `trellis-implement`
-- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish by running project lint and type-check
+- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish with affected checks required by project AGENTS.md
 - **Dispatch prompt guard**: The prompt MUST start with `Active task: <task path>`, then tell the spawned agent it is already the `trellis-implement` sub-agent and must implement directly, not spawn another `trellis-implement` / `trellis-check`.
 
 The platform hook/plugin auto-handles:
@@ -492,7 +506,7 @@ The platform hook/plugin auto-handles:
 Spawn the implement sub-agent:
 
 - **Agent type**: `trellis-implement`
-- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish by running project lint and type-check
+- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish with affected checks required by project AGENTS.md
 - **Dispatch prompt guard**: The prompt MUST start with `Active task: <task path>`, then explicitly say the spawned agent is already `trellis-implement` and must implement directly without spawning another `trellis-implement` / `trellis-check`.
 
 The pull-based sub-agent definition auto-handles the context load requirement:
@@ -506,7 +520,7 @@ The pull-based sub-agent definition auto-handles the context load requirement:
 Spawn the implement sub-agent:
 
 - **Agent type**: `trellis-implement`
-- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish by running project lint and type-check
+- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish with affected checks required by project AGENTS.md
 - **Dispatch prompt guard**: Tell the spawned agent it is already the `trellis-implement` sub-agent and must implement directly, not spawn another `trellis-implement` / `trellis-check`.
 
 The platform prelude auto-handles the context load requirement:
@@ -521,7 +535,7 @@ The platform prelude auto-handles the context load requirement:
 2. Read `{TASK_DIR}/prd.md`, then `design.md` if present, then `implement.md` if present
 3. Consult materials under `{TASK_DIR}/research/`
 4. Implement the code per reviewed artifacts
-5. Run project lint and type-check
+5. Run affected checks required by project AGENTS.md
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
@@ -532,14 +546,14 @@ The platform prelude auto-handles the context load requirement:
 Spawn the check sub-agent:
 
 - **Agent type**: `trellis-check`
-- **Task description**: Review all code changes against specs and task artifacts; fix any findings directly; ensure lint and type-check pass
+- **Task description**: Review all code changes against specs and task artifacts; fix only authorized in-scope findings; run affected checks per project AGENTS.md
 - **Dispatch prompt guard**: The prompt MUST start with `Active task: <task path>`, then tell the spawned agent it is already the `trellis-check` sub-agent and must review/fix directly, not spawn another `trellis-check` / `trellis-implement`.
 
 The check agent's job:
 - Review code changes against specs
 - Review code changes against `prd.md`, `design.md` if present, and `implement.md` if present
-- Auto-fix issues it finds
-- Run lint and typecheck to verify
+- Fix only findings within the authorized implementation scope; read-only reviews report findings without edits
+- Run affected checks per project AGENTS.md; report unrelated baseline failures without repairing them
 
 [/Claude Code, Cursor, OpenCode, codex-sub-agent, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi, Oh My Pi, ZCode, Snow, Reasonix, Trae, Grok, Kimi Code]
 
@@ -550,11 +564,11 @@ Load the `trellis-check` skill and verify the code per its guidance:
 - lint / type-check / tests
 - Cross-layer consistency (when changes span layers)
 
-If issues are found → fix → re-check, until green.
+For implementation checks, fix in-scope issues and rerun affected checks. For read-only reviews, report findings. Unrelated baseline failures do not authorize repairs; report their effect on validation.
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
-**Final pass (before Phase 3.4 commit)**: the last 2.2 of a task must run full-scope, not just on the latest implement chunk. List all affected packages with `python ./.trellis/scripts/get_context.py --mode packages`, then load each package's spec index Quality Check section. This catches cross-layer / multi-package issues a mid-iteration local 2.2 cannot.
+**Final pass (before Phase 3.4 commit)**: the last 2.2 of a task must cover all task changes, not just the latest implement chunk. Full-scope means the affected scope; repository-wide gates run only under the triggers in project AGENTS.md. List all affected packages with `python ./.trellis/scripts/get_context.py --mode packages`, then load each package's spec index Quality Check section. This catches cross-layer / multi-package issues a mid-iteration local 2.2 cannot.
 
 #### 2.3 Rollback `[on demand]`
 
@@ -586,11 +600,11 @@ Load the `trellis-update-spec` skill and review whether this task produced new k
 
 Update the docs under `.trellis/spec/` accordingly. Even if the conclusion is "nothing to update", walk through the judgment.
 
-#### 3.4 Commit changes `[required · once]`
+#### 3.4 Check commit authorization `[required · once]`
 
 **Spec-sync preamble**: before drafting commits, ask: did this task fix a bug or surface non-obvious knowledge that should land in `.trellis/spec/` so future-you (or future-AI) doesn't repeat the mistake? If yes, return to Phase 3.3 first — spec writes belong in the same task's commit batch, not as a forgotten follow-up.
 
-The AI drives a batched commit of this task's code changes so `/finish-work` can run cleanly afterwards. Goal: produce work commits FIRST, then bookkeeping (archive + journal) commits land after — never interleaved.
+First check whether commits are authorized. If not, deliver the validated working-tree changes and skip commit execution; do not ask for a commit merely to finish the task. If authorized, use coherent task-owned commits. Archive and journal commands may also auto-commit: their side effects need corresponding authorization before execution.
 
 **Step-by-step**:
 
@@ -612,7 +626,7 @@ The AI drives a batched commit of this task's code changes so `/finish-work` can
 
 4. **Draft a commit plan**. Group AI-edited files into logical commits (1 commit per coherent change unit, not 1 commit per file). Each entry: `<commit message>` + file list. List unrecognized files separately at the bottom.
 
-5. **Present the plan once, ask for one-shot confirmation**. Format:
+5. **Present the concrete plan**. Execute under existing commit authorization if scope is clear. Ask once only if authorization or file ownership remains unresolved. Example when confirmation is needed:
    ```
    Proposed commits (in order):
      1. <message>
@@ -628,19 +642,19 @@ The AI drives a batched commit of this task's code changes so `/finish-work` can
    Reply 'ok' / '行' to execute. Reply with edits, or '我自己来' / 'manual' to abort.
    ```
 
-6. **On confirmation**: run `git add <files>` + `git commit -m "<msg>"` for each batch in order. Do not amend. Do not push.
+6. **With commit authorization**: run `git add <files>` + `git commit -m "<msg>"` for each batch in order. Do not amend. Do not push.
 
-7. **On rejection** (user replies "不行" / "我自己来" / "manual" / any pushback on the plan): stop. Do not attempt a second plan. The user will commit by hand; you skip ahead to 3.5 once they confirm.
+7. **On rejection**: if the user elects to commit manually, skip commit execution and deliver the result without waiting. If they request changes to the grouping or wording, apply the correction and continue within their authorization; do not treat every correction as cancellation.
 
 **Rules**:
 - No `git commit --amend` anywhere — three-stage three-commit flow (work commits → archive commit → journal commit).
 - Never push to remote in this step.
-- If the user wants different message wording but accepts the file grouping, edit the message and re-confirm once — but if they reject the grouping, exit to manual mode.
+- Apply requested wording or grouping corrections without reconfirming settled choices; ask only if the correction leaves scope or authorization unclear.
 - The batched plan is one prompt; do not prompt per commit.
 
 #### 3.5 Wrap-up reminder
 
-After the above, remind the user they can run `/finish-work` to wrap up (archive the task, record the session).
+Deliver the result, validation, and remaining blockers. For formal tasks, mention `/finish-work` when archive/journal bookkeeping is useful; it is not a prerequisite for delivering uncommitted work.
 
 ---
 
