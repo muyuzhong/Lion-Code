@@ -74,9 +74,7 @@ def _layer_select(
             if not pool:
                 del by_repo[repo]
     if len(selected) < quota:
-        raise SystemExit(
-            f"层内可抽实例不足:需求 {quota},实际 {len(selected)}"
-        )
+        raise SystemExit(f"层内可抽实例不足:需求 {quota},实际 {len(selected)}")
     return selected
 
 
@@ -127,7 +125,7 @@ def main() -> None:
         "# SWE-bench Verified 首次正式测评抽样(30 题)",
         "",
         f"- 抽样 seed:{SEED}",
-        f"- 配额:10 easy / 15 medium / 5 hard",
+        "- 配额:10 easy / 15 medium / 5 hard",
         f"- 排除已跑过实例:{', '.join(EXCLUDED)}",
         "",
         "| 实例 id | 仓库 | 难度桶 |",

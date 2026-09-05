@@ -184,7 +184,11 @@ def main() -> int:
     deep_eval_low: Counter[str] = Counter()
     unattributed: list[str] = []
     for row in failed_rows:
-        labels = [ATTRIBUTION_LABELS[a] for a in row["attributions"] if a in ATTRIBUTION_LABELS]
+        labels = [
+            ATTRIBUTION_LABELS[a]
+            for a in row["attributions"]
+            if a in ATTRIBUTION_LABELS
+        ]
         if labels:
             attribution_counts.update(set(labels))
             row["attribution"] = "、".join(sorted(set(labels)))
@@ -197,7 +201,9 @@ def main() -> int:
         ]
         if low_metrics:
             deep_eval_low.update(set(low_metrics))
-            row["attribution"] = f"DeepEval 低分信号({', '.join(sorted(set(low_metrics)))})"
+            row["attribution"] = (
+                f"DeepEval 低分信号({', '.join(sorted(set(low_metrics)))})"
+            )
             continue
         unattributed.append(row["instance_id"] or row["run_dir"])
         row["attribution"] = "当前无法可靠归因"
@@ -255,19 +261,23 @@ def main() -> int:
         lines.append("| 实例 | 归因 | 过程违规 | DeepEval 低分 | 停止原因 |")
         lines.append("|---|---|---|---|---|")
         for row in failed_rows:
-            proc = "、".join(
-                ATTRIBUTION_LABELS.get(a, a) for a in row["attributions"]
-            ) or "—"
-            deep = "、".join(
-                sorted(
-                    {
-                        m["name"]
-                        for m in row["deepeval"]
-                        if isinstance(m.get("score"), (int, float))
-                        and m["score"] < DEEPEVAL_THRESHOLD
-                    }
+            proc = (
+                "、".join(ATTRIBUTION_LABELS.get(a, a) for a in row["attributions"])
+                or "—"
+            )
+            deep = (
+                "、".join(
+                    sorted(
+                        {
+                            m["name"]
+                            for m in row["deepeval"]
+                            if isinstance(m.get("score"), (int, float))
+                            and m["score"] < DEEPEVAL_THRESHOLD
+                        }
+                    )
                 )
-            ) or "—"
+                or "—"
+            )
             lines.append(
                 f"| {row['instance_id'] or row['run_dir']} | {row['attribution']} "
                 f"| {proc} | {deep} | {row['stop_reason'] or '—'} |"
@@ -280,9 +290,7 @@ def main() -> int:
         lines.append("|---|---|---|---|")
         for name, info in summary["deepeval_distribution"].items():
             cases = "、".join(info["low_score_cases"][:5]) or "—"
-            lines.append(
-                f"| {name} | {info['n']} | {info['mean']} | {cases} |"
-            )
+            lines.append(f"| {name} | {info['n']} | {info['mean']} | {cases} |")
     (run_root / "run-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(json.dumps({"total": len(rows), "counts": dict(counts)}, ensure_ascii=False))
     return 0

@@ -56,8 +56,10 @@ def main() -> int:
         print(f"{status}: {dockerfile}")
         if is_changed:
             changed.append(dockerfile)
-    print(f"共处理 {len(list(tasks_root.rglob('environment/Dockerfile')))} 个,"
-          f"修改 {len(changed)} 个")
+    print(
+        f"共处理 {len(list(tasks_root.rglob('environment/Dockerfile')))} 个,"
+        f"修改 {len(changed)} 个"
+    )
     return 0 if changed or True else 1
 
 
